@@ -1,0 +1,171 @@
+@import './tokens.css';
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  background: #0a0a0f;
+  color: #e8e8ef;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+code,
+pre,
+kbd,
+samp,
+.font-mono {
+  font-family: var(--font-mono);
+}
+
+/* Session progress dot pulse */
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.pulse-dot {
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+/* CRITICAL alert pulse */
+@keyframes pulse-critical {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 59, 92, 0.4); }
+  50% { box-shadow: 0 0 0 4px rgba(255, 59, 92, 0); }
+}
+
+.animate-pulse-critical {
+  animation: pulse-critical 2s ease-in-out infinite;
+}
+
+/* Price flash animations */
+@keyframes flash-green {
+  0% { background-color: transparent; }
+  30% { background-color: rgba(0, 214, 143, 0.2); }
+  100% { background-color: transparent; }
+}
+
+@keyframes flash-red {
+  0% { background-color: transparent; }
+  30% { background-color: rgba(255, 59, 92, 0.2); }
+  100% { background-color: transparent; }
+}
+
+.flash-green {
+  animation: flash-green 600ms ease-in-out;
+}
+
+.flash-red {
+  animation: flash-red 600ms ease-in-out;
+}
+
+/* Fade in */
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fade-in 200ms ease-in-out;
+}
+
+/* Scrollbars */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #252540;
+  border-radius: 2px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #333355;
+}
+
+/* Focus ring */
+:focus-visible {
+  outline: 2px solid #a78bfa;
+  outline-offset: 2px;
+}
+
+/* Remove default button styles */
+button {
+  cursor: pointer;
+  font-family: inherit;
+}
+
+/* ─── Dark form elements (global override of browser defaults) ─────────────── */
+input,
+select,
+textarea {
+  background: #12121a;
+  border: 1px solid #252540;
+  color: #e8e8ef;
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 150ms ease;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: #a78bfa;
+  box-shadow: 0 0 0 2px rgba(167, 139, 250, 0.15);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: #3a3a50;
+}
+
+input[type="date"],
+input[type="datetime-local"] {
+  color-scheme: dark;
+  cursor: pointer;
+}
+
+select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%238888a0' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 28px;
+  cursor: pointer;
+}
+
+select option {
+  background: #1a1a26;
+  color: #e8e8ef;
+}
+
+/* Spin animation for loading state */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
