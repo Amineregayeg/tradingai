@@ -1,0 +1,52 @@
+name: tradingai
+# Self-contained VPS deployment. Docker builds each app service straight from the
+# GitHub repo (git build-context), so nothing but this file is needed on the host.
+# Only the web service is published (host :8095). DB + Redis stay on the internal
+# network. Does not touch any other project/port on the VPS.
+services:
+  db:
+    image: timescale/timescaledb:latest-pg16
+    environment:
+      POSTGRES_DB: tradingai
+      POSTGRES_USER: tradingai
+      POSTGRES_PASSWORD: tradingai
+    volumes:
+      - tradingai_db:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tradingai -d tradingai"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+
+  api:
+    build:
+      context: "https://github.com/Amineregayeg/tradingai.git#main:backend"
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://tradingai:tradingai@db:5432/tradingai"
+      REDIS_URL: "redis://redis:6379/0"
+      DATA_DIR: "/tmp/tradingai-data"
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build:
+      context: "https://github.com/Amineregayeg/tradingai.git#main:frontend"
+    environment:
+      VITE_API_TARGET: "http://api:8000"
+    command: sh -c "pnpm dev --host 0.0.0.0 --port 5173"
+    ports:
+      - "8095:5173"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  tradingai_db:
