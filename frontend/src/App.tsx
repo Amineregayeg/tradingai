@@ -12,6 +12,7 @@ const PropFirmPage = lazy(() => import('@/pages/PropFirmPage'))
 const ChecklistPage = lazy(() => import('@/pages/ChecklistPage'))
 const WeeklyReviewPage = lazy(() => import('@/pages/WeeklyReviewPage'))
 const MorningBriefingPage = lazy(() => import('@/pages/MorningBriefingPage'))
+const ReportPage = lazy(() => import('@/pages/ReportPage'))
 
 const Fallback = () => (
   <div style={{
@@ -40,6 +41,7 @@ export default function App() {
         <Route element={<SharedLayout />}>
           <Route path="/" element={<DashboardPage />} />
           <Route path="/journal" element={<JournalPage />} />
+          <Route path="/report" element={<ReportPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/prop-firm" element={<PropFirmPage />} />
           <Route path="/checklist" element={<ChecklistPage />} />
