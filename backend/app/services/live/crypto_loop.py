@@ -75,11 +75,49 @@ class LiveCryptoLoop:
             pass
 
     async def status(self) -> dict:
-        """Engine status + metrics for the monitoring panel."""
+        """Engine status + metrics for the monitoring panel.
+
+        SINGLE SOURCE OF TRUTH: realized figures (trade count, wins/losses,
+        balance) are read from the DB `trades` table — the same source the Trade
+        Journal uses — so every view agrees and the numbers survive an app
+        restart. Open positions / unrealized P&L come from the live broker. Falls
+        back to in-memory only if the DB is unreachable, so the panel never 500s.
+        """
         acct = await self.paper.get_account()
-        closed = list(self.paper._closed)
-        wins = sum(1 for c in closed if c["pnl"] > 0)
-        losses = sum(1 for c in closed if c["pnl"] <= 0)
+        closed_n = wins = losses = 0
+        try:
+            from sqlalchemy import select
+
+            from app.db.enums import OutcomeType, TradeStatus
+            from app.db.session import async_session_maker
+            from app.models.trade import Trade
+
+            async with async_session_maker() as db:
+                rows = (
+                    await db.execute(
+                        select(Trade.outcome, Trade.pnl_dollars).where(
+                            Trade.broker == "paper", Trade.status == TradeStatus.CLOSED
+                        )
+                    )
+                ).all()
+            closed_n = len(rows)
+            realized = 0.0
+            for outcome, pnl in rows:
+                realized += float(pnl or 0)
+                if outcome == OutcomeType.WIN:
+                    wins += 1
+                else:
+                    losses += 1
+        except Exception as exc:  # noqa: BLE001 - never let the panel 500
+            logger.warning("status: DB read failed, using in-memory", error=str(exc))
+            closed = list(self.paper._closed)
+            closed_n = len(closed)
+            wins = sum(1 for c in closed if c["pnl"] > 0)
+            losses = sum(1 for c in closed if c["pnl"] <= 0)
+            realized = self.paper.balance - self.starting_balance
+
+        balance = round(self.starting_balance + realized, 2)
+        equity = round(balance + acct.unrealized_pl, 2)
         return {
             "running": self._running,
             "paused": self.paused,
@@ -89,16 +127,16 @@ class LiveCryptoLoop:
             "risk_pct": self.risk_pct,
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "starting_balance": self.starting_balance,
-            "balance": acct.balance,
-            "equity": acct.equity,
+            "balance": balance,
+            "equity": equity,
             "unrealized_pl": acct.unrealized_pl,
             "open_positions": acct.open_trade_count,
-            "closed_trades": len(closed),
+            "closed_trades": closed_n,
             "wins": wins,
             "losses": losses,
-            "win_rate": round(100 * wins / len(closed), 1) if closed else 0.0,
-            "total_pnl": round(acct.equity - self.starting_balance, 2),
-            "total_pnl_pct": round(100 * (acct.equity / self.starting_balance - 1), 2),
+            "win_rate": round(100 * wins / closed_n, 1) if closed_n else 0.0,
+            "total_pnl": round(equity - self.starting_balance, 2),
+            "total_pnl_pct": round(100 * (equity / self.starting_balance - 1), 2),
             "activity": list(self.activity)[:40],
         }
 
