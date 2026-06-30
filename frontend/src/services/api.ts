@@ -103,11 +103,11 @@ export const api = {
   trades: {
     list: (params?: {
       pair?: string
-      from?: string
-      to?: string
+      from_dt?: string
+      to_dt?: string
       outcome?: Outcome
       page?: number
-      per_page?: number
+      page_size?: number
     }) =>
       request<Trade[]>(
         'GET',

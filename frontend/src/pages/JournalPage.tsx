@@ -48,9 +48,9 @@ export default function JournalPage() {
     api.trades.list({
       pair: filters.pair || undefined,
       outcome: (filters.outcome as Outcome) || undefined,
-      from: filters.from || undefined,
-      to: filters.to || undefined,
-      per_page: 100,
+      from_dt: filters.from || undefined,
+      to_dt: filters.to || undefined,
+      page_size: 500,
     })
       .then((result) => setTrades(Array.isArray(result) ? result : []))
       .catch(() => setTrades([]))
