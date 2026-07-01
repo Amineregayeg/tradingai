@@ -132,6 +132,13 @@ export default function ReportPage() {
       </div>
 
       <div style={{ padding: '20px 28px', maxWidth: 1100 }}>
+        {/* Honesty banner — these figures are a backtest replay, not live trading */}
+        <div style={{ background: 'rgba(245,158,11,0.10)', border: '1px solid #5c3d00', borderRadius: 10, padding: '11px 14px', marginBottom: 14, display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+          <span style={{ fontSize: 15, lineHeight: 1.2 }}>⚠️</span>
+          <div style={{ fontSize: 12, color: '#e3b341', lineHeight: 1.5 }}>
+            <b>These figures are a 2-year BACKTEST REPLAY</b>, injected for demonstration — <b>not live trading results</b>, and not a guarantee. Live paper trading has produced <b>0 completed trades</b> so far, and the strategy's edge has <b>not</b> passed out-of-sample robustness testing.
+          </div>
+        </div>
         {/* Headline metrics */}
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
           <Metric big label="Equity" value={money(s.equity)} sub={`from ${money(s.starting_balance)} starting`} />
