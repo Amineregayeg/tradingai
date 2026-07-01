@@ -190,7 +190,7 @@ class LiveCryptoLoop:
                 r_multiple=Decimal(str(round(t.r_multiple, 2))),
                 outcome=OutcomeType.WIN if t.r_multiple > 0 else OutcomeType.LOSS,
                 status=TradeStatus.CLOSED, pnl_dollars=Decimal(str(pnl)),
-                setup_tag="ICT Magic Alignment",
+                setup_tag="Backtest replay",   # honest: these are injected backtest trades, not live
             ))
         try:
             async with async_session_maker() as db:
