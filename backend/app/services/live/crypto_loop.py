@@ -196,7 +196,10 @@ class LiveCryptoLoop:
             async with async_session_maker() as db:
                 # clear any prior warmup rows so re-running doesn't duplicate
                 from sqlalchemy import delete
-                await db.execute(delete(Trade).where(Trade.broker == "paper"))
+                # F3: only wipe replay rows on re-warmup — never the durable live trades
+                await db.execute(
+                    delete(Trade).where(Trade.broker == "paper", Trade.setup_tag == "Backtest replay")
+                )
                 db.add_all(rows)
                 await db.commit()
         except Exception as exc:  # noqa: BLE001
@@ -233,6 +236,37 @@ class LiveCryptoLoop:
                   "unrealized_pl": acct.unrealized_pl, "open_trade_count": acct.open_trade_count},
         )
 
+    async def _persist_live_close(self, ev: dict) -> None:
+        """F3: persist a LIVE paper close to the DB so live trades are durable
+        across restarts and separable from the warm-up replay (source tag
+        'ICT (live)' vs 'Backtest replay'). The close-event carries no sl/tp/r,
+        which are nullable columns, so this is a clean closed-trade insert."""
+        try:
+            from decimal import Decimal
+
+            from app.db.enums import DirectionType, OutcomeType, TradeStatus
+            from app.db.session import async_session_maker
+            from app.models.trade import Trade
+
+            pnl = float(ev.get("pnl", 0) or 0)
+            is_long = str(ev.get("direction")) == "LONG"
+            row = Trade(
+                user_id="system", broker_id="paper", broker="paper", pair=str(ev.get("pair")),
+                direction=DirectionType.LONG if is_long else DirectionType.SHORT,
+                entry_price=Decimal(str(round(float(ev.get("entry", 0) or 0), 6))),
+                exit_price=Decimal(str(round(float(ev.get("exit", 0) or 0), 6))),
+                lot_size=Decimal(str(round(float(ev.get("units", 0) or 0), 6))),
+                entry_time=ev.get("open_time"), exit_time=ev.get("close_time"),
+                outcome=OutcomeType.WIN if pnl > 0 else OutcomeType.LOSS,
+                status=TradeStatus.CLOSED, pnl_dollars=Decimal(str(round(pnl, 2))),
+                setup_tag="ICT (live)",
+            )
+            async with async_session_maker() as db:
+                db.add(row)
+                await db.commit()
+        except Exception as exc:  # noqa: BLE001 - never let persistence kill the loop
+            logger.warning("persist live close failed", error=str(exc))
+
     async def _tick_symbol(self, pair: str, bsym: str) -> None:
         price = await asyncio.to_thread(_ticker_price, bsym)
         if price is None:
@@ -242,6 +276,7 @@ class LiveCryptoLoop:
         for ev in self.paper.on_tick(pair, price):
             await ws_manager.push_position_close(ev)
             await self._act("exit", f"Closed {pair} {ev.get('reason')} {ev.get('pnl', 0):+.0f} USDT")
+            await self._persist_live_close(ev)   # F3: durable live-trade record
         await ws_manager.push_tick(pair, price, price, 0.0)
 
         # new closed entry-TF bar? -> evaluate strategy
