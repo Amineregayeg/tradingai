@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import urllib.request
 from collections import deque
 from datetime import datetime, timedelta, timezone
@@ -21,6 +22,10 @@ from app.services.market_data.sources.binance import BinanceSource
 from app.services.ws.manager import ws_manager
 
 _DEFAULT_SYMBOLS = {"BTC/USD": "BTCUSDT", "ETH/USD": "ETHUSDT"}
+
+# Bumped whenever the decision code path changes materially — part of every
+# DecisionRecord's code_path_hash so decisions are reproducible/auditable.
+ENGINE_CODE_VERSION = "ict-v2-lookahead-fixed"
 
 
 def _ticker_price(binance_symbol: str) -> float | None:
@@ -43,6 +48,7 @@ class LiveCryptoLoop:
         risk_pct: float = 0.01,   # pre-registered FIXED at 1% (not a tunable knob)
         max_concurrent: int = 3,
         poll_interval: float = 10.0,
+        broker_mode: str | None = None,
     ) -> None:
         self.symbols = symbols or dict(_DEFAULT_SYMBOLS)
         self.entry_tf = entry_tf
@@ -50,15 +56,34 @@ class LiveCryptoLoop:
         self.risk_pct = risk_pct
         self.max_concurrent = max_concurrent
         self.poll_interval = poll_interval
-        self.paper = PaperBroker(starting_balance=starting_balance, price_fn=self._mark)
+        # Broker: "paper" = plain simulation; "sim" = SimPropFirmBroker, which
+        # enforces the prop-firm challenge rules (daily loss / drawdown / target)
+        # — the mode Agent B assigns a strategy to and tests against. Both are
+        # is_simulation=True; no real order is ever possible from this loop.
+        self.broker_mode = (broker_mode or os.getenv("ENGINE_BROKER", "paper")).lower()
+        self._marks: dict[str, float] = {}
+        if self.broker_mode == "sim":
+            from app.services.broker.cft_sim import PropFirmRules, SimPropFirmBroker
+
+            async def _price_source(pair: str) -> float:
+                return self._marks.get(pair, 0.0)
+
+            self.paper = SimPropFirmBroker(
+                PropFirmRules(starting_balance=starting_balance), _price_source
+            )
+            self.mode = "PROP_FIRM_SIM"
+        else:
+            self.paper = PaperBroker(starting_balance=starting_balance, price_fn=self._mark)
+            self.mode = "PAPER"
         self.execution = ExecutionService(self.paper, ExecMode.PAPER)
         self.source = BinanceSource()
-        self._marks: dict[str, float] = {}
         self._last_eval: dict[str, datetime] = {}
+        # pair -> id of the DecisionRecord opened for the currently-open position,
+        # so a close can be resolved back to the decision that caused it.
+        self._open_decision: dict[str, str] = {}
         self._running = False
         self.paused = False
         self.started_at: datetime | None = None
-        self.mode = "PAPER"
         self.starting_balance = starting_balance
         self.activity: deque[dict] = deque(maxlen=80)
 
@@ -140,10 +165,22 @@ class LiveCryptoLoop:
             "activity": list(self.activity)[:40],
         }
 
+    def sim_state(self) -> dict | None:
+        """Prop-firm rule state (balance, day pnl, drawdown, target, halted,
+        pass/fail) when running the SimPropFirmBroker; None in plain paper mode.
+        This is what the UI shows so Agent B sees the challenge status live."""
+        rs = getattr(self.paper, "rule_state", None)
+        return rs() if callable(rs) else None
+
     async def warmup(self, days: int = 14) -> dict:
         """Backfill the paper account with the strategy's REAL trades over the
         last `days` of Binance data, so the metrics panel shows genuine recent
         gains/losses (real strategy decisions on real prices)."""
+        # Never inject replay trades into a prop-firm challenge account — that
+        # would corrupt the very pass/fail signal Agent B is measuring.
+        if self.broker_mode == "sim":
+            await self._act("engine", "Warm start skipped — prop-firm sim account stays clean")
+            return await self.status()
         from app.services.backtest.engine import Params, run_backtest
 
         cutoff = datetime.now(tz=timezone.utc) - timedelta(days=days)
@@ -255,6 +292,99 @@ class LiveCryptoLoop:
                   "unrealized_pl": acct.unrealized_pl, "open_trade_count": acct.open_trade_count},
         )
 
+    def _code_path_hash(self) -> str:
+        """Fingerprint the decision code path + params so identical inputs under
+        identical code are reproducible/auditable (the feedback loop's basis)."""
+        import hashlib
+        payload = f"{ENGINE_CODE_VERSION}|entry_tf={self.entry_tf}|bias_tf={self.bias_tf}|risk_pct={self.risk_pct}"
+        return hashlib.sha1(payload.encode()).hexdigest()[:16]
+
+    @staticmethod
+    def _inputs_hash(entry_df) -> str:
+        """Fingerprint the bars the decision saw (last ~10 closed bars)."""
+        import hashlib
+        try:
+            tail = entry_df.tail(10)
+            raw = "|".join(
+                f"{ts.isoformat()}:{row.open:.2f}:{row.high:.2f}:{row.low:.2f}:{row.close:.2f}"
+                for ts, row in tail.iterrows()
+            )
+        except Exception:  # noqa: BLE001
+            raw = str(len(entry_df))
+        return hashlib.sha1(raw.encode()).hexdigest()[:16]
+
+    async def _record_signal_decision(self, pair: str, entry_df, sig, sized_units: float) -> None:
+        """Persist a DecisionRecord for a taken signal (outcome OPEN), and remember
+        its id so the eventual close can fill realized_r / gap_r / outcome."""
+        try:
+            from decimal import Decimal
+
+            from app.db.session import async_session_maker
+            from app.models.decision_record import (
+                COHORT_PAPER, OUTCOME_OPEN, DecisionRecord,
+            )
+            entry = float(sig.entry); sl = float(sig.sl)
+            tp = float(sig.tp) if sig.tp is not None else None
+            expected_r = abs(tp - entry) / abs(entry - sl) if (tp is not None and entry != sl) else None
+            rec = DecisionRecord(
+                symbol=pair, timeframe=self.entry_tf,
+                inputs_hash=self._inputs_hash(entry_df), code_path_hash=self._code_path_hash(),
+                score=None, abstained=False, reasons=None,
+                signal_dir=sig.direction.value,
+                signal_entry=Decimal(str(round(entry, 6))),
+                signal_sl=Decimal(str(round(sl, 6))),
+                signal_tp=Decimal(str(round(tp, 6))) if tp is not None else None,
+                sized_units=Decimal(str(round(float(sized_units), 6))),
+                expected_r=Decimal(str(round(expected_r, 4))) if expected_r is not None else None,
+                outcome=OUTCOME_OPEN, cohort=COHORT_PAPER,
+            )
+            async with async_session_maker() as db:
+                db.add(rec)
+                await db.commit()
+                self._open_decision[pair] = str(rec.id)
+        except Exception as exc:  # noqa: BLE001 - never let bookkeeping kill the loop
+            logger.warning("record decision failed", pair=pair, error=str(exc))
+
+    async def _resolve_decision(self, ev: dict) -> None:
+        """On close, fill the matching OPEN decision's realized_r / gap_r / outcome.
+
+        realized_r is computed from the decision's own stored geometry — pnl over
+        the dollar risk it was sized to (|entry-sl| * units) — so it is comparable
+        to expected_r on the same basis (the feedback loop's core measurement)."""
+        pair = str(ev.get("pair"))
+        dec_id = self._open_decision.pop(pair, None)
+        if not dec_id:
+            return
+        try:
+            from decimal import Decimal
+
+            from sqlalchemy import select
+            from app.db.session import async_session_maker
+            from app.models.decision_record import (
+                OUTCOME_BREAKEVEN, OUTCOME_LOSS, OUTCOME_WIN, DecisionRecord,
+            )
+            pnl = float(ev.get("pnl", 0) or 0)
+            async with async_session_maker() as db:
+                rec = (await db.execute(
+                    select(DecisionRecord).where(DecisionRecord.id == dec_id))).scalar_one_or_none()
+                if rec is None:
+                    return
+                entry = float(rec.signal_entry or 0); sl = float(rec.signal_sl or 0)
+                units = float(rec.sized_units or 0)
+                risk_dollars = abs(entry - sl) * units
+                realized_r = (pnl / risk_dollars) if risk_dollars > 0 else None
+                if realized_r is not None:
+                    rec.realized_r = Decimal(str(round(realized_r, 4)))
+                    if rec.expected_r is not None:
+                        rec.gap_r = Decimal(str(round(realized_r - float(rec.expected_r), 4)))
+                rec.outcome = (
+                    OUTCOME_WIN if pnl > 1e-9 else OUTCOME_LOSS if pnl < -1e-9 else OUTCOME_BREAKEVEN
+                )
+                db.add(rec)
+                await db.commit()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("resolve decision failed", pair=pair, error=str(exc))
+
     async def _persist_live_close(self, ev: dict) -> None:
         """F3: persist a LIVE paper close to the DB so live trades are durable
         across restarts and separable from the warm-up replay (source tag
@@ -296,6 +426,7 @@ class LiveCryptoLoop:
             await ws_manager.push_position_close(ev)
             await self._act("exit", f"Closed {pair} {ev.get('reason')} {ev.get('pnl', 0):+.0f} USDT")
             await self._persist_live_close(ev)   # F3: durable live-trade record
+            await self._resolve_decision(ev)     # feedback loop: fill realized_r/gap_r/outcome
         await ws_manager.push_tick(pair, price, price, 0.0)
 
         # new closed entry-TF bar? -> evaluate strategy
@@ -326,6 +457,7 @@ class LiveCryptoLoop:
         res = await self.execution.execute(sig)
         if res.get("status") == "FILLED":
             logger.info("Live paper entry", pair=pair, dir=sig.direction.value, fill=res.get("fill"))
+            await self._record_signal_decision(pair, entry, sig, res.get("sized_units", 0))
             await ws_manager.push_position_open(res)
             await self._act(
                 "entry",
