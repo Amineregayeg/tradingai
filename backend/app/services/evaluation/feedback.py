@@ -15,7 +15,7 @@ Design rules baked in (see the CONTRACT):
 * It MUST NEVER propose tuning ``risk_pct``. ``risk_pct`` is pre-registered FIXED at
   ``0.01``. Because ``ROI_simple = risk_pct * n * avgR`` is an *exact algebraic
   identity* (the engine computes ``pnl_pct = r_multiple * risk_pct``,
-  ``engine.py:381``), ``risk_pct`` carries **zero independent information** about the
+  ``engine.py:387``), ``risk_pct`` carries **zero independent information** about the
   strategy's edge — tuning it would just re-scale the account curve while emitting a
   confident-sounding rationale for a change that teaches the model nothing. Any caller
   that explicitly asks to tune ``risk_pct`` is refused with a reason
@@ -29,7 +29,7 @@ Design rules baked in (see the CONTRACT):
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 

@@ -247,6 +247,43 @@ async def test_pretrade_refuses_order_that_could_breach_daily_loss():
 
 
 # ---------------------------------------------------------------------------
+# Day boundary: the daily-loss guard must measure THIS day's realized pnl
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_new_day_resets_daily_loss_guard():
+    """A fresh calendar day must not be judged against yesterday's realized loss.
+
+    Regression for the ordering bug where the daily-loss pre-trade guard read
+    _day_pnl BEFORE _roll_day ran, so on a new day it evaluated against the
+    previous day's accumulated loss and wrongly refused valid orders.
+    """
+    from datetime import date, timedelta
+
+    price = _MutablePrice(100.0)
+    rules = PropFirmRules(
+        starting_balance=50_000.0,
+        daily_loss_limit_pct=5.0,  # = $2,500
+        max_drawdown_pct=50.0,
+        profit_target_pct=10.0,
+        min_trading_days=0,
+    )
+    sim = SimPropFirmBroker(rules, price)
+
+    # Simulate YESTERDAY having accumulated a near-limit loss.
+    sim._current_day = date.today() - timedelta(days=1)
+    sim._day_pnl = -2_400.0  # just under the $2,500 daily limit, yesterday
+
+    # A modest order TODAY (worst case $1,000) must FILL: the day rolls and
+    # _day_pnl resets to 0 before the guard runs. With the old ordering the guard
+    # saw (-2,400 - 1,000) = -3,400 <= -2,500 and wrongly rejected.
+    resp = await sim.place_order(_long(units=1000.0, sl=99.0))
+    assert resp["status"] == "FILLED"
+    assert sim._day_pnl == 0.0  # rolled over to the new day
+
+
+# ---------------------------------------------------------------------------
 # Structural real-order impossibility: no network client imports
 # ---------------------------------------------------------------------------
 

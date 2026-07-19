@@ -337,6 +337,12 @@ class SimPropFirmBroker(BrokerAdapter):
         if request.lot_size <= 0:
             raise ValueError("lot_size must be > 0")
 
+        # Roll the day FIRST, so every rule below reads THIS day's realized pnl.
+        # (Previously _roll_day ran after the daily-loss guard, so on a new
+        # calendar day the guard was evaluated against the PREVIOUS day's loss.)
+        now = datetime.now(timezone.utc)
+        self._roll_day(now)
+
         # Halted account (breached or passed) refuses every new order.
         if self._halted:
             return self._reject(request, self._halt_reason())
@@ -356,8 +362,6 @@ class SimPropFirmBroker(BrokerAdapter):
         if (equity_now - worst) <= self._drawdown_floor():
             return self._reject(request, "would_breach_max_drawdown")
 
-        now = datetime.now(timezone.utc)
-        self._roll_day(now)
         self._trading_days.add(self._current_day)
         pos = SimPosition(
             pair=request.pair, direction=request.direction, entry=fill,
