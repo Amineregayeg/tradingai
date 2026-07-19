@@ -5,7 +5,9 @@ import { formatPrice } from '@/utils/format'
 
 const NAV_ITEMS = [
   { key: 'D', label: 'Dashboard', path: '/' },
+  { key: 'E', label: 'Engine', path: '/engine' },
   { key: 'J', label: 'Trade Journal', path: '/journal' },
+  { key: 'R', label: 'Performance Report', path: '/report' },
   { key: 'P', label: 'Prop Firm Status', path: '/prop-firm' },
   { key: 'S', label: 'Settings', path: '/settings' },
 ]

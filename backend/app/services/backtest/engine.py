@@ -103,6 +103,51 @@ def _daily_bias_events(bias_df: pd.DataFrame, swing_length: int) -> list[tuple[p
     return events
 
 
+def _causal_daily_bias_events(
+    bias_df: pd.DataFrame, swing_length: int, window: int = 250
+) -> list[tuple[pd.Timestamp, str]]:
+    """Causal daily bias timeline — the ONLY correct input for a walk-forward
+    backtest.
+
+    ``_daily_bias_events`` runs smc BOS/CHoCH over the WHOLE series, whose
+    ``broken_index`` is non-causal: whether a break at bar k is confirmed (and
+    when) depends on bars AFTER k, so the full-series bias on a given day can
+    reflect future price action (a stress test found real direction flips). The
+    live ``strategy_step`` path never has that problem because it only ever sees
+    a trailing window.
+
+    This reconstructs the bias the live engine WOULD have held on each day by
+    recomputing the events from a TRAILING WINDOW ending at that day (the same
+    shape of input the live path gets), and emitting a change-point whenever the
+    as-of bias flips. ``_bias_at`` reads it exactly as before. The trailing
+    window both guarantees causality and bounds cost to O(days * window); it
+    also matches the live engine's own trailing-window computation, so the
+    backtest and live bias agree on identical data.
+    """
+    n = len(bias_df)
+    min_bars = max(2 * swing_length + 2, 5)
+    timeline: list[tuple[pd.Timestamp, str]] = []
+    last: str | None = None
+    for j in range(min_bars, n):
+        lo = max(0, j + 1 - window)
+        sub = bias_df.iloc[lo : j + 1]  # includes day j's COMPLETE candle
+        evs = _daily_bias_events(sub, swing_length)
+        cur = evs[-1][1] if evs else None
+        if cur is not None and cur != last:
+            # INTRADAY CAUSALITY: this flip may have needed day j's completed
+            # OHLC to appear, but daily bars are OPEN-time indexed (00:00) and the
+            # 1H entry loop consumes the bias via `et <= t`. Stamping at index[j]
+            # would apply the flip to day-j intraday entries BEFORE day j closed —
+            # a same-day leak. Stamp at the NEXT day's open, when day j's candle is
+            # actually complete/known. (The final day has no next open; its flip
+            # would never be actionable anyway, so it is dropped.)
+            stamp = j + 1
+            if stamp < n:
+                timeline.append((bias_df.index[stamp], cur))
+            last = cur
+    return timeline
+
+
 def _bias_at(events: list[tuple[pd.Timestamp, str]], t: pd.Timestamp) -> str | None:
     bias = None
     for et, d in events:
@@ -166,9 +211,16 @@ def run_backtest(
     fvg_by_idx: dict[int, list[dict]] = {}
     for f in fvgs:
         fvg_by_idx.setdefault(int(f["candle_index"]), []).append(f)
-    # last LTF BOS direction as-of each bar index. NO-LOOKAHEAD: a break is only
-    # known at its smc BrokenIndex (15-35 bars after formation); discard breaks
-    # that never confirmed (broken_index is None).
+    # last LTF BOS direction as-of each bar index, stamped at smc BrokenIndex+1.
+    # KNOWN MINOR RESIDUAL (documented, bounded): smc's broken_index is derived
+    # from full-series swing detection, so like the daily bias it can be mildly
+    # non-causal (measured impact: SL base / LTF-BOS gate differ from a causal
+    # recompute on ~3% of entry-eligible bars). The MAJOR direction-level
+    # lookahead — the daily HTF bias — is fixed via _causal_daily_bias_events.
+    # A fully-causal intraday BOS is strategy logic (Agent B's tuning domain) and
+    # a per-bar recompute is O(bars*window)-infeasible intraday; this gate is a
+    # FILTER (require_ltf_bos), not a direction source, so the residual is small.
+    # See the handoff note for Agent B.
     bos_dir_upto: list[str | None] = [None] * len(entry_df)
     bos_events = sorted(
         (int(b["broken_index"]), "LONG" if str(b["direction"]).endswith("BULL") else "SHORT")
@@ -183,7 +235,8 @@ def run_backtest(
             bptr += 1
         bos_dir_upto[i] = cur
 
-    bias_events = _daily_bias_events(bias_df, p.swing_length)
+    # CAUSAL bias only — never the full-series (lookahead) events.
+    bias_events = _causal_daily_bias_events(bias_df, p.swing_length)
 
     times = entry_df.index
     highs = entry_df["high"].to_numpy()
@@ -259,7 +312,13 @@ def run_backtest(
             for c in active:
                 if c["triggered"] or c["dir"] != bias:
                     continue
-                if (i - c["born"]) < 1:   # FVG only usable after it has fully formed
+                # LOOKAHEAD GUARD: the smc FVG near-edge (c["ph"]/c["pl"]) is
+                # low/high.shift(-1) — the bar AFTER `born`. At i == born+1 the
+                # edge IS this bar's own low/high, so `lo <= ph` is vacuously
+                # true and we fill at the bar's exact extreme (a lookahead
+                # tautology). Entry is only admissible from born+2 onward, when
+                # the edge is a strictly earlier bar and the retrace is real.
+                if (i - c["born"]) < 2:
                     continue
                 if p.require_ltf_bos and bos_dir_upto[i] != bias:
                     continue

@@ -15,6 +15,7 @@ from slowapi.util import get_remote_address
 from app.api.routers import (
     alerts_router,
     analysis_router,
+    auth_router,
     audit_log_router,
     brokers_router,
     calendar_router,
@@ -56,6 +57,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         version=app.version,
         environment=settings.oanda_environment,
     )
+
+    # SAFETY GATE: refuse to start in an unauthenticated (open) state. Raises if
+    # no API token is configured and auth is not explicitly disabled.
+    from app.api.deps import assert_auth_configured
+    assert_auth_configured()
 
     # Ensure data directories exist
     data_dir = settings.data_dir
@@ -210,7 +216,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from app.services.live.crypto_loop import LiveCryptoLoop
 
     live_loop = LiveCryptoLoop()
-    broker_manager._adapters["paper"] = live_loop.paper
+    broker_manager.register_adapter("paper", live_loop.paper)
     app.state.live_loop = live_loop
     app.state.live_task = _asyncio.create_task(live_loop.run())
     logger.info("Live crypto paper-trading loop started", symbols=list(live_loop.symbols))
@@ -422,6 +428,7 @@ def create_app() -> FastAPI:
     app.include_router(system_router, prefix=api_prefix)
     app.include_router(prop_firm_router, prefix=api_prefix)
     app.include_router(calendar_router, prefix=api_prefix)
+    app.include_router(auth_router, prefix=api_prefix)
     app.include_router(ws_router)  # WebSocket has no /api prefix
 
     return app

@@ -49,9 +49,9 @@ export default function WeeklyReviewPage() {
   useEffect(() => {
     setIsLoading(true)
     api.trades.list({
-      from: from.toISOString().split('T')[0],
-      to: to.toISOString().split('T')[0],
-      per_page: 200,
+      from_dt: from.toISOString().split('T')[0],
+      to_dt: to.toISOString().split('T')[0],
+      page_size: 200,
     })
       .then((r) => setTrades(Array.isArray(r) ? r : []))
       .catch(() => setTrades([]))

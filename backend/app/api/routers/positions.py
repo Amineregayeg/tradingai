@@ -96,22 +96,36 @@ async def close_position(
             detail=f"Position '{position_id}' not found in any connected broker",
         )
 
-    # Try each adapter until one succeeds
+    # Try each adapter, but treat the RESULT as authoritative — a broker that
+    # returns {"status": "not_found"} WITHOUT raising (e.g. PaperBroker) did NOT
+    # close the position, so we must not report success. Only a genuine close
+    # counts; otherwise we keep trying and finally 502.
+    _FAIL_STATUSES = {"not_found", "error", "rejected", "failed"}
     closed = False
     for adapter in broker_manager._adapters.values():
         try:
-            await adapter.close_position(position_id)
-            closed = True
-            logger.info("Position closed via API", position_id=position_id)
-            break
+            result = await adapter.close_position(position_id)
         except BrokerError as exc:
             logger.warning(
-                "Adapter could not close position",
+                "Adapter raised closing position",
                 position_id=position_id,
                 broker=adapter.broker_name,
                 error=str(exc),
             )
             continue
+        status = str((result or {}).get("status", "")).lower()
+        if status in _FAIL_STATUSES:
+            logger.info(
+                "Adapter did not hold position",
+                position_id=position_id,
+                broker=adapter.broker_name,
+                status=status,
+            )
+            continue
+        closed = True
+        logger.info("Position closed via API", position_id=position_id,
+                    broker=adapter.broker_name, status=status or "closed")
+        break
 
     if not closed:
         raise HTTPException(

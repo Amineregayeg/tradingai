@@ -26,7 +26,7 @@ export default function DashboardPage() {
       } catch { /* fall through */ }
 
       // Fallback: synthesise positions from OPEN trades (demo / observe-only mode).
-      const trades = await api.trades.list({ per_page: 200 }).catch(() => [])
+      const trades = await api.trades.list({ page_size: 200 }).catch(() => [])
       const opens = (Array.isArray(trades) ? trades : []).filter(
         (t: any) => t.status === 'OPEN' || t.outcome === 'OPEN'
       )

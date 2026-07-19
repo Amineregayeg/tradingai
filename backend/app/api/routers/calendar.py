@@ -3,13 +3,14 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
+from app.api.deps import CurrentUser
 from app.config import settings as app_settings
 
 router = APIRouter(prefix="/calendar", tags=["calendar"])
 
 
 @router.get("/today")
-async def get_today_calendar() -> list[dict]:
+async def get_today_calendar(user_id: CurrentUser) -> list[dict]:
     """Return today's economic calendar events.
 
     Requires FINNHUB_API_KEY in the environment. Returns 503 if unconfigured.

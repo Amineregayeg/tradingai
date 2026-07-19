@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { SharedLayout } from '@/components/layout/SharedLayout'
+import { LoginGate } from '@/components/auth/LoginGate'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useWebSocket } from '@/hooks/useWebSocket'
 import { api } from '@/services/api'
@@ -12,6 +13,8 @@ const PropFirmPage = lazy(() => import('@/pages/PropFirmPage'))
 const ChecklistPage = lazy(() => import('@/pages/ChecklistPage'))
 const WeeklyReviewPage = lazy(() => import('@/pages/WeeklyReviewPage'))
 const MorningBriefingPage = lazy(() => import('@/pages/MorningBriefingPage'))
+const ReportPage = lazy(() => import('@/pages/ReportPage'))
+const EnginePage = lazy(() => import('@/pages/EnginePage'))
 
 const Fallback = () => (
   <div style={{
@@ -35,19 +38,23 @@ export default function App() {
   }, [setSettings])
 
   return (
-    <Suspense fallback={<Fallback />}>
-      <Routes>
-        <Route element={<SharedLayout />}>
-          <Route path="/" element={<DashboardPage />} />
-          <Route path="/journal" element={<JournalPage />} />
-          <Route path="/settings" element={<SettingsPage />} />
-          <Route path="/prop-firm" element={<PropFirmPage />} />
-          <Route path="/checklist" element={<ChecklistPage />} />
-          <Route path="/weekly" element={<WeeklyReviewPage />} />
-          <Route path="/briefing" element={<MorningBriefingPage />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Route>
-      </Routes>
-    </Suspense>
+    <LoginGate>
+      <Suspense fallback={<Fallback />}>
+        <Routes>
+          <Route element={<SharedLayout />}>
+            <Route path="/" element={<DashboardPage />} />
+            <Route path="/engine" element={<EnginePage />} />
+            <Route path="/journal" element={<JournalPage />} />
+            <Route path="/report" element={<ReportPage />} />
+            <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/prop-firm" element={<PropFirmPage />} />
+            <Route path="/checklist" element={<ChecklistPage />} />
+            <Route path="/weekly" element={<WeeklyReviewPage />} />
+            <Route path="/briefing" element={<MorningBriefingPage />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Route>
+        </Routes>
+      </Suspense>
+    </LoginGate>
   )
 }

@@ -105,7 +105,7 @@ class DecisionEngine:
         setup_direction = self._infer_setup_direction(ict_detections, candle)
 
         # 7. Compute score ---------------------------------------------------
-        score = compute_score(
+        score_result = compute_score(
             ict_detections=ict_detections,
             indicators=indicators,
             scoring_profile=scoring_profile_dict,
@@ -113,18 +113,33 @@ class DecisionEngine:
             setup_direction=setup_direction,
         )
 
-        logger.debug(
-            "Score computed",
-            user_id=user_id,
-            pair=pair,
-            timeframe=timeframe,
-            score=round(score, 2),
-            setup_direction=setup_direction,
-        )
+        # The scorer ABSTAINS (score=None) when a required input is corrupt.
+        # Abstention is NOT a low score — it means "insufficient information",
+        # so we suppress the entry signal entirely and record why.
+        if score_result.abstained:
+            logger.info(
+                "Score abstained — no entry signal",
+                user_id=user_id,
+                pair=pair,
+                timeframe=timeframe,
+                reasons=list(score_result.reasons),
+            )
+            score = None
+        else:
+            score = score_result.score
+            logger.debug(
+                "Score computed",
+                user_id=user_id,
+                pair=pair,
+                timeframe=timeframe,
+                score=round(score, 2),
+                reasons=list(score_result.reasons),
+                setup_direction=setup_direction,
+            )
 
         # 8. Entry signal ----------------------------------------------------
         halted = candle.get("compliance_halted", False)
-        if not halted:
+        if not halted and score is not None:
             context = {
                 "pair": pair,
                 "timeframe": timeframe,

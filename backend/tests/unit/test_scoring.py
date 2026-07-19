@@ -2,14 +2,27 @@
 
 No I/O, no mocking — scoring.py is a pure function and these tests
 exercise its spec invariants directly.
+
+compute_score now returns a ScoreResult (score | None + abstained + reasons).
+These tests cover the non-abstaining path; NaN/abstain behaviour lives in
+test_scoring_abstain.py.
 """
 import pytest
-from app.services.decision.scoring import compute_score, score_to_priority
+from app.services.decision.scoring import ScoreResult, compute_score, score_to_priority
 
 
 # ---------------------------------------------------------------------------
 # Test data helpers
 # ---------------------------------------------------------------------------
+
+
+def sval(*args, **kwargs) -> float:
+    """Call compute_score and return the numeric score, asserting no abstain."""
+    r = compute_score(*args, **kwargs)
+    assert isinstance(r, ScoreResult)
+    assert not r.abstained, f"unexpected abstain: {r.reasons}"
+    assert r.score is not None
+    return r.score
 
 
 def make_detection(confidence: float = 0.8, strength: float = 0.7, direction: str = "BULL") -> dict:
@@ -57,21 +70,35 @@ def make_indicators(
 
 
 class TestComputeScore:
-    def test_returns_float_in_range(self) -> None:
-        score = compute_score(
+    def test_returns_scoreresult_in_range(self) -> None:
+        r = compute_score(
             ict_detections=[make_detection()],
             indicators=make_indicators(),
             scoring_profile=balanced_profile(),
             htf_direction="BULL",
             setup_direction="LONG",
         )
-        assert isinstance(score, float)
-        assert 0.0 <= score <= 100.0
+        assert isinstance(r, ScoreResult)
+        assert not r.abstained
+        assert 0.0 <= r.score <= 100.0
+        # price_action is never fabricated — its absence is disclosed
+        assert "price_action:not_implemented" in r.reasons
+
+    def test_no_signal_scores_near_zero_without_pa_floor(self) -> None:
+        # No ICT detections and fully-neutral TA. Under the OLD engine a
+        # fabricated price_action=0.5 stub put a +12.5 floor here; now the score
+        # must reflect ONLY the real (zero) signal.
+        score = sval(
+            ict_detections=[],
+            indicators=make_indicators(rsi=50, ema_stack="mixed", macd_histogram=0.0),
+            scoring_profile=balanced_profile(),
+            htf_direction=None,
+            setup_direction="LONG",
+        )
+        assert score == pytest.approx(0.0, abs=1e-9)
 
     def test_no_detections_returns_low_score(self) -> None:
-        # With no ICT detections the ict_signal_score is 0, so the composite
-        # is driven only by TA and price-action stubs.  Should be well below 50.
-        score = compute_score(
+        score = sval(
             ict_detections=[],
             indicators=make_indicators(),
             scoring_profile=balanced_profile(),
@@ -81,14 +108,14 @@ class TestComputeScore:
         assert score < 50
 
     def test_high_confidence_detection_increases_score(self) -> None:
-        low = compute_score(
+        low = sval(
             ict_detections=[make_detection(confidence=0.3, strength=0.3)],
             indicators=make_indicators(),
             scoring_profile=balanced_profile(),
             htf_direction=None,
             setup_direction="LONG",
         )
-        high = compute_score(
+        high = sval(
             ict_detections=[make_detection(confidence=0.9, strength=0.9)],
             indicators=make_indicators(),
             scoring_profile=balanced_profile(),
@@ -98,15 +125,14 @@ class TestComputeScore:
         assert high > low
 
     def test_mtf_aligned_adds_bonus(self) -> None:
-        """Score WITH aligned HTF direction must exceed score WITHOUT it."""
-        without_mtf = compute_score(
+        without_mtf = sval(
             ict_detections=[make_detection()],
             indicators=make_indicators(),
             scoring_profile=balanced_profile(),
             htf_direction=None,
             setup_direction="LONG",
         )
-        with_mtf = compute_score(
+        with_mtf = sval(
             ict_detections=[make_detection()],
             indicators=make_indicators(),
             scoring_profile=balanced_profile(),
@@ -116,15 +142,14 @@ class TestComputeScore:
         assert with_mtf > without_mtf
 
     def test_mtf_misaligned_no_bonus(self) -> None:
-        """BEAR HTF on a LONG setup must NOT award the bonus."""
-        bull_long = compute_score(
+        bull_long = sval(
             ict_detections=[make_detection()],
             indicators=make_indicators(),
             scoring_profile=balanced_profile(),
             htf_direction="BULL",
             setup_direction="LONG",
         )
-        bear_long = compute_score(
+        bear_long = sval(
             ict_detections=[make_detection()],
             indicators=make_indicators(),
             scoring_profile=balanced_profile(),
@@ -134,8 +159,7 @@ class TestComputeScore:
         assert bull_long > bear_long
 
     def test_score_clamped_max_100(self) -> None:
-        """Perfect conditions must never exceed 100."""
-        score = compute_score(
+        score = sval(
             ict_detections=[
                 make_detection(confidence=1.0, strength=1.0),
                 make_detection(confidence=1.0, strength=1.0),
@@ -148,8 +172,7 @@ class TestComputeScore:
         assert score <= 100.0
 
     def test_score_clamped_min_0(self) -> None:
-        """Worst conditions must never go below 0."""
-        score = compute_score(
+        score = sval(
             ict_detections=[],
             indicators=make_indicators(rsi=80, ema_stack="bearish", macd_histogram=-0.01),
             scoring_profile=balanced_profile(),
@@ -159,7 +182,6 @@ class TestComputeScore:
         assert score >= 0.0
 
     def test_same_inputs_same_output(self) -> None:
-        """Score must be deterministic — identical inputs produce identical output."""
         args = (
             [make_detection()],
             make_indicators(),
@@ -170,34 +192,31 @@ class TestComputeScore:
         assert compute_score(*args) == compute_score(*args)
 
     def test_short_setup_inverts_macd_and_ema(self) -> None:
-        """For a SHORT setup, bearish indicators should score better than bullish."""
-        bearish = compute_score(
+        bearish = sval(
             ict_detections=[make_detection(direction="BEAR")],
             indicators=make_indicators(ema_stack="bearish", macd_histogram=-0.005),
             scoring_profile=balanced_profile(),
             htf_direction="BEAR",
             setup_direction="SHORT",
         )
-        bullish = compute_score(
+        bullish = sval(
             ict_detections=[make_detection(direction="BEAR")],
             indicators=make_indicators(ema_stack="bullish", macd_histogram=0.005),
             scoring_profile=balanced_profile(),
             htf_direction="BULL",
             setup_direction="SHORT",
         )
-        # bearish indicators + BEAR HTF alignment give a higher SHORT score
         assert bearish > bullish
 
     def test_bear_htf_with_short_gives_bonus(self) -> None:
-        """BEAR HTF + SHORT setup should be aligned and grant the MTF bonus."""
-        without = compute_score(
+        without = sval(
             ict_detections=[make_detection()],
             indicators=make_indicators(ema_stack="bearish", macd_histogram=-0.001),
             scoring_profile=balanced_profile(),
             htf_direction=None,
             setup_direction="SHORT",
         )
-        with_bear = compute_score(
+        with_bear = sval(
             ict_detections=[make_detection()],
             indicators=make_indicators(ema_stack="bearish", macd_histogram=-0.001),
             scoring_profile=balanced_profile(),
@@ -207,7 +226,6 @@ class TestComputeScore:
         assert with_bear > without
 
     def test_weights_respected(self) -> None:
-        """Higher ict_weight should make ICT detection have greater impact on score."""
         ict_heavy = {
             "ict_weight": 0.80,
             "ta_weight": 0.10,
@@ -220,15 +238,14 @@ class TestComputeScore:
             "price_action_weight": 0.10,
             "mtf_bonus": 0.0,
         }
-        # High-confidence detection + poor TA should score better with ict_heavy weights
-        high_det_poor_ta = compute_score(
+        high_det_poor_ta = sval(
             ict_detections=[make_detection(0.9, 0.9)],
             indicators=make_indicators(rsi=50, ema_stack="mixed", macd_histogram=0.0),
             scoring_profile=ict_heavy,
             htf_direction=None,
             setup_direction="LONG",
         )
-        high_det_poor_ta_ta_weight = compute_score(
+        high_det_poor_ta_ta_weight = sval(
             ict_detections=[make_detection(0.9, 0.9)],
             indicators=make_indicators(rsi=50, ema_stack="mixed", macd_histogram=0.0),
             scoring_profile=ta_heavy,

@@ -48,6 +48,21 @@ class BrokerAdapter(ABC):
     default_pairs: list[str] = []
 
     # ------------------------------------------------------------------
+    # Simulation contract (SAFETY)
+    # ------------------------------------------------------------------
+    # Every adapter MUST declare whether it is a simulation. There is NO default:
+    # a subclass that forgets to implement this cannot be instantiated (abstract),
+    # so a new real-money adapter can never silently pass as safe. Safety-critical
+    # chokepoints (ExecutionService, the kill switch, position-close routing) read
+    # this and refuse to send writes to a non-simulation broker unless a real,
+    # explicit live path is chosen.
+    @property
+    @abstractmethod
+    def is_simulation(self) -> bool:
+        """True iff this adapter can never place a real-money order."""
+        ...
+
+    # ------------------------------------------------------------------
     # Connection lifecycle
     # ------------------------------------------------------------------
 

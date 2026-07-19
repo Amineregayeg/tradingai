@@ -205,145 +205,75 @@ async def test_get_positions_skips_empty_positions():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_place_order_market_long_units_signed_positive():
-    a = _adapter()
-    captured: dict = {}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path.endswith("/orders"):
-            captured["body"] = json.loads(request.content)
-            return httpx.Response(200, json={"orderCreateTransaction": {"id": "tx-1"}})
-        return httpx.Response(200, json={})
-
-    _install(a, handler)
-    req = OrderRequest(
-        pair="EUR/USD",
-        direction=DirectionType.LONG,
-        order_type=OrderType.MARKET,
-        lot_size=0.1,
-        sl=1.08000,
-        tp=1.09500,
-    )
-    await a.place_order(req)
-    body = captured["body"]["order"]
-    assert body["instrument"] == "EUR_USD"
-    assert body["type"] == "MARKET"
-    # 0.1 lot * 100_000 = 10_000 units, positive for LONG
-    assert body["units"] == "10000"
-    assert body["stopLossOnFill"]["price"] == "1.08"
-    assert body["takeProfitOnFill"]["price"] == "1.095"
-
-
-@pytest.mark.asyncio
-async def test_place_order_market_short_units_signed_negative():
-    a = _adapter()
-    captured: dict = {}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path.endswith("/orders"):
-            captured["body"] = json.loads(request.content)
-            return httpx.Response(200, json={"orderCreateTransaction": {"id": "tx-2"}})
-        return httpx.Response(200, json={})
-
-    _install(a, handler)
-    req = OrderRequest(
-        pair="USD/JPY",
-        direction=DirectionType.SHORT,
-        order_type=OrderType.MARKET,
-        lot_size=0.5,
-    )
-    await a.place_order(req)
-    body = captured["body"]["order"]
-    assert body["instrument"] == "USD_JPY"
-    # 0.5 * 100_000 * -1 = -50_000
-    assert body["units"] == "-50000"
-
-
-@pytest.mark.asyncio
-async def test_place_order_limit_includes_price():
-    a = _adapter()
-    captured: dict = {}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path.endswith("/orders"):
-            captured["body"] = json.loads(request.content)
-            return httpx.Response(200, json={"orderCreateTransaction": {"id": "tx-3"}})
-        return httpx.Response(200, json={})
-
-    _install(a, handler)
-    req = OrderRequest(
-        pair="EUR/USD",
-        direction=DirectionType.LONG,
-        order_type=OrderType.LIMIT,
-        lot_size=0.1,
-        price=1.07500,
-    )
-    await a.place_order(req)
-    body = captured["body"]["order"]
-    assert body["type"] == "LIMIT"
-    assert body["price"] == "1.075"
-
-
-@pytest.mark.asyncio
-async def test_place_order_with_client_id_attaches_extension():
-    a = _adapter()
-    captured: dict = {}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path.endswith("/orders"):
-            captured["body"] = json.loads(request.content)
-            return httpx.Response(200, json={})
-        return httpx.Response(200, json={})
-
-    _install(a, handler)
-    req = OrderRequest(
-        pair="EUR/USD",
-        direction=DirectionType.LONG,
-        order_type=OrderType.MARKET,
-        lot_size=0.1,
-        client_order_id="approval-abc",
-    )
-    await a.place_order(req)
-    assert captured["body"]["order"]["clientExtensions"] == {"id": "approval-abc"}
-
-
 # ---------------------------------------------------------------------------
-# close_position
+# Real-money write path is DISABLED. OANDA is retained only for practice/data;
+# place_order / close_position / close_all_positions must REFUSE before any
+# network call. These tests pin that safety property (they replace the former
+# payload-construction tests, which exercised the now-unreachable code).
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_close_position_all_uses_close_endpoint():
+async def test_place_order_refuses_real_money():
     a = _adapter()
     captured: dict = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
-        if "/positions/" in str(request.url) and request.url.path.endswith("/close"):
-            captured["body"] = json.loads(request.content)
-            return httpx.Response(200, json={"longOrderFillTransaction": {"id": "fill-1"}})
+        captured["hit"] = True  # must never be reached
         return httpx.Response(200, json={})
 
     _install(a, handler)
-    await a.close_position("EUR_USD")
-    assert captured["body"] == {"longUnits": "ALL", "shortUnits": "ALL"}
+    req = OrderRequest(
+        pair="EUR/USD",
+        direction=DirectionType.LONG,
+        order_type=OrderType.MARKET,
+        lot_size=0.1,
+    )
+    with pytest.raises(BrokerError):
+        await a.place_order(req)
+    assert "hit" not in captured  # refused before any HTTP call
 
 
 @pytest.mark.asyncio
-async def test_close_position_partial_sends_units():
+async def test_close_position_refuses_real_money():
     a = _adapter()
     captured: dict = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
-        if "/positions/" in str(request.url) and request.url.path.endswith("/close"):
-            captured["body"] = json.loads(request.content)
-            return httpx.Response(200, json={"longOrderFillTransaction": {"id": "fill-2"}})
+        captured["hit"] = True
         return httpx.Response(200, json={})
 
     _install(a, handler)
-    # Partial close 0.05 lots = 5_000 units
-    await a.close_position("EUR_USD", lot_size=0.05)
-    assert captured["body"] == {"longUnits": "5000"}
+    with pytest.raises(BrokerError):
+        await a.close_position("EUR_USD")
+    assert "hit" not in captured
+
+
+@pytest.mark.asyncio
+async def test_close_all_positions_refuses_real_money():
+    a = _adapter()
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["hit"] = True
+        return httpx.Response(200, json={})
+
+    _install(a, handler)
+    with pytest.raises(BrokerError):
+        await a.close_all_positions()
+    assert "hit" not in captured
+
+
+@pytest.mark.asyncio
+async def test_oanda_is_not_simulation():
+    a = _adapter()
+    assert a.is_simulation is False
+
+
+def test_oanda_live_host_not_constructible():
+    from app.services.broker.oanda import OANDAAdapter
+    with pytest.raises(ValueError):
+        OANDAAdapter(api_key="k", account_id="a", environment="live")
 
 
 # ---------------------------------------------------------------------------

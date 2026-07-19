@@ -2,15 +2,42 @@
 
 No I/O — fully testable in isolation.  All inputs are plain Python dicts /
 lists / scalars; no SQLAlchemy models are imported here.
+
+Honesty contract (see ``ScoreResult``): the scorer NEVER fabricates a value it
+does not have and NEVER launders a NaN into a confident number.  A corrupt
+(NaN) required input makes it *abstain* (``score=None``) rather than silently
+returning ``0.0``; the unimplemented price-action component is excluded and its
+weight redistributed, not stubbed to ``0.5``.
 """
 from __future__ import annotations
 
-from decimal import Decimal
+import math
+from dataclasses import dataclass, field
 
 
-# ---------------------------------------------------------------------------
-# Main scoring function
-# ---------------------------------------------------------------------------
+def _is_nan(x: object) -> bool:
+    """True only for a genuine float NaN (never raises on non-floats)."""
+    return isinstance(x, float) and math.isnan(x)
+
+
+@dataclass(frozen=True)
+class ScoreResult:
+    """Outcome of scoring one setup.
+
+    ``score``      composite quality in [0, 100], or ``None`` when abstained.
+    ``abstained``  True when the scorer refused to produce a number (corrupt
+                   input) — the caller MUST NOT treat this as a low score.
+    ``reasons``    machine-readable notes, e.g. ``"nan:rsi_14"`` or
+                   ``"price_action:not_implemented"`` — surfaced in the UI so a
+                   human can see exactly why the engine did what it did.
+    ``components`` the sub-scores actually computed (for transparency / the
+                   feedback loop); only present components appear.
+    """
+
+    score: float | None
+    abstained: bool
+    reasons: tuple[str, ...] = ()
+    components: dict[str, float] = field(default_factory=dict)
 
 
 def compute_score(
@@ -19,7 +46,7 @@ def compute_score(
     scoring_profile: dict,
     htf_direction: str | None,
     setup_direction: str,
-) -> float:
+) -> ScoreResult:
     """Compute a composite trade-quality score in the range [0, 100].
 
     Formula::
@@ -76,24 +103,43 @@ def compute_score(
     Returns:
         Float score in the range [0.0, 100.0].
     """
+    reasons: list[str] = []
+
     # ---- Weights -----------------------------------------------------------
     ict_weight = float(scoring_profile.get("ict_weight", 0.4))
     ta_weight = float(scoring_profile.get("ta_weight", 0.35))
-    pa_weight = float(scoring_profile.get("price_action_weight", 0.25))
     mtf_bonus = float(scoring_profile.get("mtf_bonus", 0.1))
+    # price_action is NOT implemented. We do NOT stub it to 0.5 (a fabricated
+    # +12.5-point floor that made the engine unable to abstain). It is excluded
+    # and its weight redistributed across the components we can actually compute.
+    reasons.append("price_action:not_implemented")
 
     # ---- ICT signal score --------------------------------------------------
+    # A NaN confidence/strength is a CORRUPT detection — drop it rather than let
+    # it poison max(); a genuinely empty list yields 0.0 (no ICT confirmation,
+    # an honest low score, not corruption).
     ict_signal_score = 0.0
-    if ict_detections:
-        best = max(
-            float(d.get("confidence", 0.0)) * float(d.get("strength", 0.0))
-            for d in ict_detections
-        )
-        ict_signal_score = min(max(best, 0.0), 1.0)
+    valid_products = [
+        float(d.get("confidence", 0.0)) * float(d.get("strength", 0.0))
+        for d in ict_detections
+        if not (_is_nan(d.get("confidence")) or _is_nan(d.get("strength")))
+    ]
+    if len(valid_products) < len([d for d in ict_detections]):
+        reasons.append("ict:dropped_nan_detections")
+    if valid_products:
+        ict_signal_score = min(max(max(valid_products), 0.0), 1.0)
 
     # ---- TA signal score ---------------------------------------------------
-    rsi = float(indicators.get("rsi_14", 50.0))
-    macd_hist = float(indicators.get("macd_histogram", 0.0))
+    # ABSENT keys fall back to a NEUTRAL value (no signal); a PRESENT-but-NaN
+    # value is corrupt data → abstain (never launder it to a number).
+    raw_rsi = indicators.get("rsi_14", 50.0)
+    raw_macd = indicators.get("macd_histogram", 0.0)
+    if _is_nan(raw_rsi):
+        return ScoreResult(None, True, ("nan:rsi_14", *reasons), {})
+    if _is_nan(raw_macd):
+        return ScoreResult(None, True, ("nan:macd_histogram", *reasons), {})
+    rsi = float(raw_rsi)
+    macd_hist = float(raw_macd)
     ema_stack = str(indicators.get("ema_stack", "")).lower()
 
     # RSI deviation — how far from neutral 50
@@ -113,15 +159,13 @@ def compute_score(
 
     ta_signal_score = (rsi_score + macd_score + ema_score) / 3.0
 
-    # ---- Price action score ------------------------------------------------
-    # Phase 2 stub
-    price_action_score = 0.5
-
-    # ---- Composite ---------------------------------------------------------
+    # ---- Composite over PRESENT components (weights renormalized) -----------
+    present_weight = ict_weight + ta_weight
+    if present_weight <= 0:
+        return ScoreResult(None, True, ("no_component_weight", *reasons), {})
     raw = (
-        ict_signal_score * ict_weight
-        + ta_signal_score * ta_weight
-        + price_action_score * pa_weight
+        ict_signal_score * (ict_weight / present_weight)
+        + ta_signal_score * (ta_weight / present_weight)
     ) * 100.0
 
     # ---- Multi-timeframe bonus ---------------------------------------------
@@ -133,7 +177,16 @@ def compute_score(
     if mtf_aligned:
         raw += mtf_bonus * 100.0
 
-    return max(0.0, min(raw, 100.0))
+    # Defensive: if anything upstream still produced a NaN, ABSTAIN — never
+    # collapse it to a confident 0.0 via bare min/max.
+    if _is_nan(raw):
+        return ScoreResult(None, True, ("nan:composite", *reasons), {})
+
+    score = max(0.0, min(raw, 100.0))
+    components = {"ict": ict_signal_score, "ta": ta_signal_score}
+    if mtf_aligned:
+        components["mtf_bonus"] = mtf_bonus
+    return ScoreResult(score, False, tuple(reasons), components)
 
 
 # ---------------------------------------------------------------------------

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import uuid
 from datetime import datetime, timezone
 from typing import Callable
@@ -17,7 +18,6 @@ from app.models.broker_connection import BrokerConnection
 from app.schemas.broker import BrokerConnectRequest, BrokerConnectionRead, Position
 from app.services.broker.base import BrokerAdapter
 from app.services.broker.cryptofundtrader import CryptoFundTraderAdapter
-from app.services.broker.oanda import OANDAAdapter
 
 _CFT_ALIASES = {"cryptofundtrader", "cft", "match-trader", "matchtrader"}
 
@@ -28,22 +28,34 @@ def _make_adapter(
     account_id: str,
     environment: str,
 ) -> BrokerAdapter:
-    """Factory: return the correct adapter for *broker*."""
+    """Factory: return the correct adapter for *broker*.
+
+    The OANDA branch was removed: this app is crypto-only and OANDA was the only
+    unguarded real-money path. Only CryptoFundTrader (crypto prop firm) is
+    constructible here, and it is created observe-only unless live trading is
+    explicitly enabled server-side.
+    """
     key = broker.lower()
-    if key == "oanda":
-        return OANDAAdapter(
-            api_key=creds.get("api_key", ""),
-            account_id=account_id,
-            environment=environment,
-        )
     if key in _CFT_ALIASES:
+        # Centralised live-trading guard: a stored observe_only=False is honoured
+        # ONLY when ALLOW_LIVE_TRADING is set server-side. This runs on EVERY
+        # construction path (connect, load_from_db, reconnect), so a persisted
+        # live-write connection cannot be silently reconstructed.
+        allow_live = os.getenv("ALLOW_LIVE_TRADING", "false").strip().lower() == "true"
+        observe_only = creds.get("observe_only", True)
+        if observe_only is False and not allow_live:
+            logger.warning(
+                "Forcing observe_only=True for stored connection — live trading disabled",
+                broker=broker,
+            )
+            observe_only = True
         return CryptoFundTraderAdapter(
             email=creds.get("email", ""),
             password=creds.get("password", ""),
             base_url=creds.get("base_url", creds.get("server", "")),
             account_id=account_id,
             environment=environment,
-            observe_only=creds.get("observe_only", True),
+            observe_only=observe_only,
         )
     raise ValueError(f"Unsupported broker: {broker!r}")
 
@@ -127,8 +139,21 @@ class BrokerManager:
             creds_dict["password"] = request.password
         if request.server:
             creds_dict["base_url"] = request.server
-        if request.observe_only is not None:
-            creds_dict["observe_only"] = request.observe_only
+        # SAFETY: an explicit observe_only=False from the API would enable
+        # real-money trading. Honour it ONLY when live trading is explicitly
+        # enabled server-side (env ALLOW_LIVE_TRADING=true, default OFF), which
+        # the public API cannot set. Otherwise force observe-only.
+        requested_observe = request.observe_only
+        allow_live = os.getenv("ALLOW_LIVE_TRADING", "false").strip().lower() == "true"
+        if requested_observe is False and not allow_live:
+            logger.warning(
+                "Ignoring observe_only=False — live trading is disabled server-side "
+                "(set ALLOW_LIVE_TRADING=true to enable). Forcing observe-only.",
+                broker=request.broker,
+            )
+            creds_dict["observe_only"] = True
+        elif requested_observe is not None:
+            creds_dict["observe_only"] = requested_observe
         creds_json = json.dumps(creds_dict)
         encrypted = encrypt_credentials(creds_json)
 
@@ -339,6 +364,19 @@ class BrokerManager:
     def get_adapter_by_connection_id(self, connection_id: str) -> BrokerAdapter | None:
         """Return adapter by connection_id string."""
         return self._adapters.get(connection_id)
+
+    def register_adapter(self, key: str, adapter: BrokerAdapter) -> None:
+        """Register an externally-owned adapter (e.g. the live loop's in-process
+        simulation broker) under a stable string key.
+
+        This replaces the previous private-dict reach-in (``_adapters['paper'] =
+        ...``). It is idempotent: registering the same key rebinds it. Used so the
+        aggregate position view, the close-routing, and the kill switch all see
+        the simulation broker without constructing a second instance.
+        """
+        self._adapters[key] = adapter
+        logger.info("Adapter registered", key=key, broker=adapter.broker_name,
+                    is_simulation=adapter.is_simulation)
 
     # ------------------------------------------------------------------
     # Price streaming

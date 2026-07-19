@@ -26,15 +26,81 @@ import type {
 
 const BASE = '/api'
 
+// ─── Auth token (single-user bearer) ──────────────────────────────────────────
+// The API requires `Authorization: Bearer <token>` on every /api route. The
+// token is entered once via the login gate and kept in localStorage. On a 401
+// we clear it and reload so the gate reappears.
+
+const TOKEN_KEY = 'tradingai_api_token'
+
+export function getToken(): string {
+  try {
+    return localStorage.getItem(TOKEN_KEY) || ''
+  } catch {
+    return ''
+  }
+}
+
+export function setToken(token: string): void {
+  try {
+    localStorage.setItem(TOKEN_KEY, token.trim())
+  } catch {
+    /* ignore */
+  }
+}
+
+export function clearToken(): void {
+  try {
+    localStorage.removeItem(TOKEN_KEY)
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Headers every request/raw-fetch should send. Exported for pages that fetch directly. */
+export function authHeaders(): Record<string, string> {
+  const t = getToken()
+  return t ? { Authorization: `Bearer ${t}` } : {}
+}
+
+/**
+ * Mint a short-lived, single-use WebSocket ticket. The /ws handshake takes this
+ * ticket (NOT the master token) in its query string, so the long-lived
+ * credential never lands in a URL / access log / browser history.
+ */
+export async function getWsTicket(): Promise<string> {
+  const res = await fetch(BASE + '/auth/ws-ticket', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+  })
+  if (!res.ok) {
+    if (res.status === 401) onUnauthorized()
+    throw new Error(`ws-ticket failed: ${res.status}`)
+  }
+  const d = await res.json()
+  return String(d.ticket || '')
+}
+
+function onUnauthorized(): void {
+  clearToken()
+  // Reload so the login gate re-mounts (avoids a stale, permanently-401 app).
+  try {
+    if (typeof window !== 'undefined') window.location.reload()
+  } catch {
+    /* ignore */
+  }
+}
+
 // ─── Core request helper ─────────────────────────────────────────────────────
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(BASE + path, {
     method,
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   })
   if (!res.ok) {
+    if (res.status === 401) onUnauthorized()
     const err = await res.json().catch(() => ({
       type: 'about:blank',
       title: 'Request Failed',
@@ -93,6 +159,18 @@ export const api = {
     list: () => request<Position[]>('GET', '/positions'),
   },
 
+  // ── Engine (live loop status, decision log, feedback loop, sim challenge) ──
+  engine: {
+    status: () => request<Record<string, unknown>>('GET', '/engine/status'),
+    sim: () => request<Record<string, unknown>>('GET', '/engine/sim'),
+    decisions: (limit = 50) =>
+      request<Record<string, unknown>[]>('GET', `/engine/decisions${buildQuery({ limit })}`),
+    feedback: (minEvidence = 30) =>
+      request<Record<string, unknown>>('GET', `/engine/feedback${buildQuery({ min_evidence: minEvidence })}`),
+    pause: () => request<Record<string, unknown>>('POST', '/engine/pause'),
+    resume: () => request<Record<string, unknown>>('POST', '/engine/resume'),
+  },
+
   // ── Candles (internal, not in OpenAPI — backed by TimescaleDB) ────────────
   candles: {
     list: (params: { pair: string; timeframe: string; limit?: number }) =>
@@ -103,11 +181,11 @@ export const api = {
   trades: {
     list: (params?: {
       pair?: string
-      from?: string
-      to?: string
+      from_dt?: string
+      to_dt?: string
       outcome?: Outcome
       page?: number
-      per_page?: number
+      page_size?: number
     }) =>
       request<Trade[]>(
         'GET',

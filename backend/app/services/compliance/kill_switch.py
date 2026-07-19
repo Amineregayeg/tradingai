@@ -34,6 +34,10 @@ class KillSwitch:
     def is_armed(self) -> bool:
         return self._armed
 
+    @property
+    def reason(self) -> str | None:
+        return self._reason
+
     async def trigger(
         self,
         db: AsyncSession,

@@ -11,6 +11,12 @@ from unittest.mock import AsyncMock, MagicMock
 # for the test suite.
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 
+# Tests run with API auth disabled (local-dev bypass) so endpoint fixtures can
+# hit protected routes without a bearer token. The auth GATE itself is covered
+# directly in tests/unit/test_auth.py, which drives current_user with real
+# settings. Never set AUTH_DISABLED in a real deployment.
+os.environ.setdefault("AUTH_DISABLED", "true")
+
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
