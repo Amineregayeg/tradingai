@@ -101,6 +101,16 @@ class CryptoFundTraderAdapter(BrokerAdapter):
     broker_name: str = "cryptofundtrader"
     default_pairs: list[str] = ["BTC/USD", "ETH/USD", "SOL/USD", "XRP/USD", "BNB/USD"]
 
+    # CryptoFundTrader has exactly ONE real host and no demo/sandbox host. We
+    # keep `environment` (the manager and Settings UI read it) but there is no
+    # simulation environment to route to — selecting one raises rather than
+    # silently pretending. Simulated CFT testing is done via SimPropFirmBroker.
+    CFT_BASE_URLS: dict[str, str] = {"live": DEFAULT_HOST}
+
+    @property
+    def is_simulation(self) -> bool:
+        return False
+
     def __init__(
         self,
         email: str,
@@ -110,11 +120,17 @@ class CryptoFundTraderAdapter(BrokerAdapter):
         environment: str = "live",
         observe_only: bool = True,
     ) -> None:
+        env = environment.lower()
+        if env not in self.CFT_BASE_URLS:
+            raise ValueError(
+                f"CryptoFundTrader has no {environment!r} environment — only "
+                f"'live' exists. Use SimPropFirmBroker for simulation."
+            )
         self._email = email
         self._password = password
-        self._host = (base_url or DEFAULT_HOST).rstrip("/")
+        self._host = (base_url or self.CFT_BASE_URLS[env]).rstrip("/")
         self._account_id = str(account_id or "")  # tradingAccountId selector
-        self._environment = environment.lower()
+        self._environment = env
         self.observe_only = observe_only
 
         self.connected: bool = False

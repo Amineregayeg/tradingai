@@ -85,7 +85,11 @@ def evaluate_latest_bar(
 
     for f in fvgs:
         born = int(f["candle_index"])
-        if not (1 <= i - born <= p.fvg_lookback):
+        # LOOKAHEAD GUARD (mirrors backtest engine): the FVG near-edge is the
+        # bar after `born`, so entry is only admissible from born+2 onward —
+        # at born+1 the edge IS this bar's own extreme and the retrace test is
+        # vacuously true (fills at the bar's exact low/high).
+        if not (2 <= i - born <= p.fvg_lookback):
             continue
         fdir = "LONG" if str(f["direction"]).endswith("BULL") else "SHORT"
         if fdir != bias:

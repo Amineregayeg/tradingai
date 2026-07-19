@@ -57,6 +57,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         environment=settings.oanda_environment,
     )
 
+    # SAFETY GATE: refuse to start in an unauthenticated (open) state. Raises if
+    # no API token is configured and auth is not explicitly disabled.
+    from app.api.deps import assert_auth_configured
+    assert_auth_configured()
+
     # Ensure data directories exist
     data_dir = settings.data_dir
     os.makedirs(data_dir, exist_ok=True)
@@ -210,7 +215,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from app.services.live.crypto_loop import LiveCryptoLoop
 
     live_loop = LiveCryptoLoop()
-    broker_manager._adapters["paper"] = live_loop.paper
+    broker_manager.register_adapter("paper", live_loop.paper)
     app.state.live_loop = live_loop
     app.state.live_task = _asyncio.create_task(live_loop.run())
     logger.info("Live crypto paper-trading loop started", symbols=list(live_loop.symbols))

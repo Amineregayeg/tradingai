@@ -7,6 +7,18 @@ class Settings(BaseSettings):
     secret_key: str = "dev-secret-key"
     log_level: str = "INFO"
 
+    # ---- API authentication (SAFETY) --------------------------------------
+    # The API is single-user/self-hosted. Every /api route requires a bearer
+    # token equal to `api_auth_token`. If the token is unset AND auth is not
+    # explicitly disabled, the app REFUSES TO START (fail closed) rather than
+    # serving anonymously. `auth_disabled=true` is a LOCAL-DEV-ONLY escape and
+    # logs a loud warning.
+    api_auth_token: str = ""
+    auth_disabled: bool = False
+    # Server-side switch that must be true for any real-money order to be
+    # honoured. Mirrors the ALLOW_LIVE_TRADING env read in the broker manager.
+    allow_live_trading: bool = False
+
     database_url: str = "postgresql+asyncpg://tradingai:tradingai@localhost:5432/tradingai"
     redis_url: str = "redis://localhost:6379/0"
 

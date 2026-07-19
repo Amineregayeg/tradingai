@@ -40,7 +40,7 @@ class LiveCryptoLoop:
         entry_tf: str = "1H",
         bias_tf: str = "D",
         starting_balance: float = 50_000.0,
-        risk_pct: float = 0.02,
+        risk_pct: float = 0.01,   # pre-registered FIXED at 1% (not a tunable knob)
         max_concurrent: int = 3,
         poll_interval: float = 10.0,
     ) -> None:
@@ -75,11 +75,49 @@ class LiveCryptoLoop:
             pass
 
     async def status(self) -> dict:
-        """Engine status + metrics for the monitoring panel."""
+        """Engine status + metrics for the monitoring panel.
+
+        SINGLE SOURCE OF TRUTH: realized figures (trade count, wins/losses,
+        balance) are read from the DB `trades` table — the same source the Trade
+        Journal uses — so every view agrees and the numbers survive an app
+        restart. Open positions / unrealized P&L come from the live broker. Falls
+        back to in-memory only if the DB is unreachable, so the panel never 500s.
+        """
         acct = await self.paper.get_account()
-        closed = list(self.paper._closed)
-        wins = sum(1 for c in closed if c["pnl"] > 0)
-        losses = sum(1 for c in closed if c["pnl"] <= 0)
+        closed_n = wins = losses = 0
+        try:
+            from sqlalchemy import select
+
+            from app.db.enums import OutcomeType, TradeStatus
+            from app.db.session import async_session_maker
+            from app.models.trade import Trade
+
+            async with async_session_maker() as db:
+                rows = (
+                    await db.execute(
+                        select(Trade.outcome, Trade.pnl_dollars).where(
+                            Trade.broker == "paper", Trade.status == TradeStatus.CLOSED
+                        )
+                    )
+                ).all()
+            closed_n = len(rows)
+            realized = 0.0
+            for outcome, pnl in rows:
+                realized += float(pnl or 0)
+                if outcome == OutcomeType.WIN:
+                    wins += 1
+                else:
+                    losses += 1
+        except Exception as exc:  # noqa: BLE001 - never let the panel 500
+            logger.warning("status: DB read failed, using in-memory", error=str(exc))
+            closed = list(self.paper._closed)
+            closed_n = len(closed)
+            wins = sum(1 for c in closed if c["pnl"] > 0)
+            losses = sum(1 for c in closed if c["pnl"] <= 0)
+            realized = self.paper.balance - self.starting_balance
+
+        balance = round(self.starting_balance + realized, 2)
+        equity = round(balance + acct.unrealized_pl, 2)
         return {
             "running": self._running,
             "paused": self.paused,
@@ -89,16 +127,16 @@ class LiveCryptoLoop:
             "risk_pct": self.risk_pct,
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "starting_balance": self.starting_balance,
-            "balance": acct.balance,
-            "equity": acct.equity,
+            "balance": balance,
+            "equity": equity,
             "unrealized_pl": acct.unrealized_pl,
             "open_positions": acct.open_trade_count,
-            "closed_trades": len(closed),
+            "closed_trades": closed_n,
             "wins": wins,
             "losses": losses,
-            "win_rate": round(100 * wins / len(closed), 1) if closed else 0.0,
-            "total_pnl": round(acct.equity - self.starting_balance, 2),
-            "total_pnl_pct": round(100 * (acct.equity / self.starting_balance - 1), 2),
+            "win_rate": round(100 * wins / closed_n, 1) if closed_n else 0.0,
+            "total_pnl": round(equity - self.starting_balance, 2),
+            "total_pnl_pct": round(100 * (equity / self.starting_balance - 1), 2),
             "activity": list(self.activity)[:40],
         }
 
@@ -152,13 +190,16 @@ class LiveCryptoLoop:
                 r_multiple=Decimal(str(round(t.r_multiple, 2))),
                 outcome=OutcomeType.WIN if t.r_multiple > 0 else OutcomeType.LOSS,
                 status=TradeStatus.CLOSED, pnl_dollars=Decimal(str(pnl)),
-                setup_tag="ICT Magic Alignment",
+                setup_tag="Backtest replay",   # honest: these are injected backtest trades, not live
             ))
         try:
             async with async_session_maker() as db:
                 # clear any prior warmup rows so re-running doesn't duplicate
                 from sqlalchemy import delete
-                await db.execute(delete(Trade).where(Trade.broker == "paper"))
+                # F3: only wipe replay rows on re-warmup — never the durable live trades
+                await db.execute(
+                    delete(Trade).where(Trade.broker == "paper", Trade.setup_tag == "Backtest replay")
+                )
                 db.add_all(rows)
                 await db.commit()
         except Exception as exc:  # noqa: BLE001
@@ -175,6 +216,25 @@ class LiveCryptoLoop:
         end = datetime.now(tz=timezone.utc)
         start = end - timedelta(minutes=minutes * (count + 5))
         return await asyncio.to_thread(self.source.fetch_ohlcv, binance_symbol, tf, start, end)
+
+    async def _entry_block_reason(self, pair: str) -> str | None:
+        """Return a human-readable reason if a new entry is blocked, else None.
+
+        Pure gate logic (no network) so it is directly testable. The kill switch
+        is authoritative: while ARMED, no new entry is allowed regardless of the
+        loop's own pause state — this is what makes the kill switch actually stop
+        trading rather than merely closing positions once.
+        """
+        from app.services.compliance.kill_switch import kill_switch
+        if kill_switch.is_armed:
+            return f"KILL SWITCH ARMED ({kill_switch.reason or 'no reason given'})"
+        if self.paused:
+            return "engine paused"
+        if await self._has_position(pair):
+            return "already in a position"
+        if await self._open_count() >= self.max_concurrent:
+            return f"max concurrent {self.max_concurrent} reached"
+        return None
 
     async def _open_count(self) -> int:
         return len((await self.paper.get_positions()))
@@ -195,6 +255,37 @@ class LiveCryptoLoop:
                   "unrealized_pl": acct.unrealized_pl, "open_trade_count": acct.open_trade_count},
         )
 
+    async def _persist_live_close(self, ev: dict) -> None:
+        """F3: persist a LIVE paper close to the DB so live trades are durable
+        across restarts and separable from the warm-up replay (source tag
+        'ICT (live)' vs 'Backtest replay'). The close-event carries no sl/tp/r,
+        which are nullable columns, so this is a clean closed-trade insert."""
+        try:
+            from decimal import Decimal
+
+            from app.db.enums import DirectionType, OutcomeType, TradeStatus
+            from app.db.session import async_session_maker
+            from app.models.trade import Trade
+
+            pnl = float(ev.get("pnl", 0) or 0)
+            is_long = str(ev.get("direction")) == "LONG"
+            row = Trade(
+                user_id="system", broker_id="paper", broker="paper", pair=str(ev.get("pair")),
+                direction=DirectionType.LONG if is_long else DirectionType.SHORT,
+                entry_price=Decimal(str(round(float(ev.get("entry", 0) or 0), 6))),
+                exit_price=Decimal(str(round(float(ev.get("exit", 0) or 0), 6))),
+                lot_size=Decimal(str(round(float(ev.get("units", 0) or 0), 6))),
+                entry_time=ev.get("open_time"), exit_time=ev.get("close_time"),
+                outcome=OutcomeType.WIN if pnl > 0 else OutcomeType.LOSS,
+                status=TradeStatus.CLOSED, pnl_dollars=Decimal(str(round(pnl, 2))),
+                setup_tag="ICT (live)",
+            )
+            async with async_session_maker() as db:
+                db.add(row)
+                await db.commit()
+        except Exception as exc:  # noqa: BLE001 - never let persistence kill the loop
+            logger.warning("persist live close failed", error=str(exc))
+
     async def _tick_symbol(self, pair: str, bsym: str) -> None:
         price = await asyncio.to_thread(_ticker_price, bsym)
         if price is None:
@@ -204,6 +295,7 @@ class LiveCryptoLoop:
         for ev in self.paper.on_tick(pair, price):
             await ws_manager.push_position_close(ev)
             await self._act("exit", f"Closed {pair} {ev.get('reason')} {ev.get('pnl', 0):+.0f} USDT")
+            await self._persist_live_close(ev)   # F3: durable live-trade record
         await ws_manager.push_tick(pair, price, price, 0.0)
 
         # new closed entry-TF bar? -> evaluate strategy
@@ -216,7 +308,14 @@ class LiveCryptoLoop:
             return
         self._last_eval[pair] = closed_t
 
-        if self.paused or await self._has_position(pair) or await self._open_count() >= self.max_concurrent:
+        # Entry gates — the bar is marked consumed above, BEFORE these gates, on
+        # purpose (re-testing a stale bar later in the hour would fire a market
+        # order sized off a stale FVG edge). Each block reason is surfaced to the
+        # UI so the engine never no-ops silently.
+        block = await self._entry_block_reason(pair)
+        if block is not None:
+            kind = "halt" if block.startswith("KILL SWITCH") else "skip"
+            await self._act(kind, f"{pair} {self.entry_tf} bar closed — {block}, skipped")
             return
         bias = await self._fetch_bars(bsym, self.bias_tf, 220)
         sig = evaluate_latest_bar(pair, entry, bias, risk_pct=self.risk_pct)

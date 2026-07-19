@@ -259,7 +259,13 @@ def run_backtest(
             for c in active:
                 if c["triggered"] or c["dir"] != bias:
                     continue
-                if (i - c["born"]) < 1:   # FVG only usable after it has fully formed
+                # LOOKAHEAD GUARD: the smc FVG near-edge (c["ph"]/c["pl"]) is
+                # low/high.shift(-1) — the bar AFTER `born`. At i == born+1 the
+                # edge IS this bar's own low/high, so `lo <= ph` is vacuously
+                # true and we fill at the bar's exact extreme (a lookahead
+                # tautology). Entry is only admissible from born+2 onward, when
+                # the edge is a strictly earlier bar and the retrace is real.
+                if (i - c["born"]) < 2:
                     continue
                 if p.require_ltf_bos and bos_dir_upto[i] != bias:
                     continue

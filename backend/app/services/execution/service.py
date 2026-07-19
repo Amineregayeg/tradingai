@@ -3,10 +3,12 @@
 This is the piece the engine was missing (place_order had zero callers). It:
   * sizes the position from account equity + risk-% + stop distance,
   * attaches SL/TP,
-  * routes through a single MODE GATE so the same code paper-trades or live-trades.
+  * routes through a single MODE GATE (OBSERVE = compute only, PAPER = simulate).
 
-Safety: mode defaults to PAPER. LIVE requires an explicit, auditable opt-in AND
-an approved=True signal — nothing reaches a real broker by accident.
+Safety: there is NO real-money mode here. The former ExecMode.LIVE branch was
+removed — this service only ever runs against a simulation broker. Real brokers
+are reached (if at all) through the broker manager, which is separately guarded
+by the is_simulation contract. Mode defaults to PAPER.
 """
 from __future__ import annotations
 
@@ -21,8 +23,10 @@ from app.services.broker.base import BrokerAdapter, OrderRequest
 
 class ExecMode(str, Enum):
     OBSERVE = "observe"   # compute only, never place (current legacy default)
-    PAPER = "paper"       # place against the PaperBroker (simulation)
-    LIVE = "live"         # place against a real adapter (gated)
+    PAPER = "paper"       # place against a SIMULATION broker (PaperBroker / SimPropFirmBroker)
+    # NOTE: there is deliberately NO LIVE member. This service cannot place a
+    # real-money order. Any adapter it receives must be is_simulation=True
+    # (asserted in execute()).
 
 
 @dataclass
@@ -52,6 +56,15 @@ class ExecutionService:
         self.mode = mode
 
     async def execute(self, sig: Signal) -> dict:
+        # HARD SAFETY: this service only ever runs against a simulation broker.
+        # A non-simulation adapter here is a programming error, not a runtime
+        # condition — fail loud rather than risk a real order.
+        if not getattr(self.broker, "is_simulation", False):
+            raise RuntimeError(
+                "ExecutionService requires a simulation broker "
+                f"(is_simulation=True); got {type(self.broker).__name__}"
+            )
+
         acct = await self.broker.get_account()
         units = size_position(acct.equity, sig.risk_pct, sig.entry, sig.sl)
         if units <= 0:
@@ -60,9 +73,6 @@ class ExecutionService:
         if self.mode == ExecMode.OBSERVE:
             return {"status": "observed", "would_size": round(units, 6),
                     "symbol": sig.symbol, "direction": sig.direction.value}
-
-        if self.mode == ExecMode.LIVE and not sig.approved:
-            return {"status": "blocked", "reason": "LIVE requires approved=True (safety gate)"}
 
         req = OrderRequest(
             pair=sig.symbol, direction=sig.direction, order_type=sig.order_type,

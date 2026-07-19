@@ -4,6 +4,7 @@ from app.models.audit_log import AuditLog
 from app.models.broker_connection import BrokerConnection
 from app.models.candle import Candle
 from app.models.checklist import Checklist
+from app.models.decision_record import DecisionRecord
 from app.models.edit_diff import EditDiff
 from app.models.ict_detection import ICTDetection
 from app.models.order import Order
@@ -30,4 +31,5 @@ __all__ = [
     "Order",
     "UserSettings",
     "BrokerConnection",
+    "DecisionRecord",
 ]

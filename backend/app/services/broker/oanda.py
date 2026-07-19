@@ -20,14 +20,16 @@ from app.services.broker.base import Account, BrokerAdapter, OrderRequest
 # Constants
 # ---------------------------------------------------------------------------
 
+# NOTE: the live real-money hosts were removed. This app is crypto-only and the
+# OANDA adapter is retained only so historical/forex practice data still parses;
+# the live host is intentionally NOT constructible, and the write methods below
+# refuse regardless. Selecting a "live" environment now raises at construction.
 OANDA_BASE_URLS: dict[str, str] = {
     "practice": "https://api-fxpractice.oanda.com",
-    "live": "https://api-fxtrade.oanda.com",
 }
 
 OANDA_STREAM_URLS: dict[str, str] = {
     "practice": "https://stream-fxpractice.oanda.com",
-    "live": "https://stream-fxtrade.oanda.com",
 }
 
 OANDA_PRICE_RATE_LIMIT = 10  # max ticks/s per pair to forward
@@ -53,9 +55,17 @@ def from_oanda_pair(instrument: str) -> str:
 
 
 class OANDAAdapter(BrokerAdapter):
-    """OANDA v20 REST + streaming implementation."""
+    """OANDA v20 REST + streaming implementation.
+
+    Real-money trading is DISABLED: ``is_simulation`` is False, the live host is
+    not constructible, and place/close raise :class:`RealMoneyBlocked`.
+    """
 
     broker_name: str = "oanda"
+
+    @property
+    def is_simulation(self) -> bool:
+        return False
 
     def __init__(
         self,
@@ -360,6 +370,10 @@ class OANDAAdapter(BrokerAdapter):
 
     async def place_order(self, request: OrderRequest) -> dict:
         """Place an order via OANDA v20 OrderCreate."""
+        raise BrokerError(
+            "OANDA real-money trading is disabled in this build "
+            "(place_order refused before any network call)."
+        )
         instrument = to_oanda_pair(request.pair)
 
         # Units: positive = long, negative = short
@@ -428,6 +442,10 @@ class OANDAAdapter(BrokerAdapter):
                 positions/close endpoint.
             lot_size: Partial close in units (lots × 100_000). ``None`` = ALL.
         """
+        raise BrokerError(
+            "OANDA real-money trading is disabled in this build "
+            "(close_position refused before any network call)."
+        )
         # OANDA close endpoint works on instruments, not individual trade IDs
         instrument = to_oanda_pair(position_id)
 
@@ -462,6 +480,10 @@ class OANDAAdapter(BrokerAdapter):
 
     async def close_all_positions(self) -> list[dict]:
         """Close all open positions.  Returns results list."""
+        raise BrokerError(
+            "OANDA real-money trading is disabled in this build "
+            "(close_all_positions refused before any network call)."
+        )
         positions = await self.get_positions()
         results = []
         for pos in positions:

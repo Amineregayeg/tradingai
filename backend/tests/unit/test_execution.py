@@ -50,14 +50,27 @@ async def test_paper_short_hits_sl_realizes_minus_1r():
     assert round((await b.get_account()).balance - 50_000) == -500  # -1R = -1% = -$500
 
 
-async def test_live_mode_blocks_unapproved_signal():
-    b = PaperBroker(50_000.0, price_fn=lambda p: 60_000.0)
-    await b.connect()
-    ex = ExecutionService(b, ExecMode.LIVE)
-    sig = Signal("BTCUSDT", DirectionType.LONG, entry=60_000, sl=59_400, tp=61_200, approved=False)
-    res = await ex.execute(sig)
-    assert res["status"] == "blocked"             # safety gate holds
-    assert (await b.get_account()).open_trade_count == 0
+def test_no_live_execmode_exists():
+    # The real-money execution path was removed. There must be no LIVE member.
+    assert not hasattr(ExecMode, "LIVE")
+    assert {m.name for m in ExecMode} == {"OBSERVE", "PAPER"}
+
+
+async def test_execute_rejects_non_simulation_broker():
+    # A broker that is not a simulation must never be executable here.
+    class FakeLiveBroker:
+        is_simulation = False
+
+        async def get_account(self):  # pragma: no cover - should never be reached
+            raise AssertionError("get_account must not be called on a live broker")
+
+    ex = ExecutionService(FakeLiveBroker(), ExecMode.PAPER)
+    sig = Signal("BTCUSDT", DirectionType.LONG, entry=60_000, sl=59_400, tp=61_200)
+    try:
+        await ex.execute(sig)
+        raise AssertionError("expected RuntimeError for non-simulation broker")
+    except RuntimeError as exc:
+        assert "simulation" in str(exc)
 
 
 async def test_observe_mode_sizes_but_never_places():

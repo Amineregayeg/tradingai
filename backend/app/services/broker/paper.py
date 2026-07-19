@@ -43,6 +43,10 @@ class PaperBroker(BrokerAdapter):
 
     broker_name = "paper"
 
+    @property
+    def is_simulation(self) -> bool:
+        return True
+
     def __init__(
         self,
         starting_balance: float = 50_000.0,
