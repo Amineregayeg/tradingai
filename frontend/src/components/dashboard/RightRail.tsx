@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { api } from '@/services/api'
+import { api, authHeaders } from '@/services/api'
 import { wsService } from '@/services/ws'
 import { InlineApprovalQueue } from '@/components/governance/InlineApprovalQueue'
 import { EnginePanel } from '@/components/dashboard/EnginePanel'
@@ -127,7 +127,7 @@ export function RightRail() {
     reloadFeed()
     loadLastAnalysis()
     // seed the live activity feed from the engine's recent history
-    fetch('/api/engine/status')
+    fetch('/api/engine/status', { headers: authHeaders() })
       .then((r) => r.json())
       .then((d) => setLiveActs(Array.isArray(d?.activity) ? d.activity : []))
       .catch(() => {})

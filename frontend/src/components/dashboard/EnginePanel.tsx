@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { wsService } from '@/services/ws'
+import { authHeaders } from '@/services/api'
 
 interface EngineStatus {
   running: boolean
@@ -13,6 +14,7 @@ interface EngineStatus {
   win_rate: number
   closed_trades: number
   wins: number
+  losses: number
   open_positions: number
   risk_pct: number
   entry_tf: string
@@ -32,7 +34,7 @@ function Stat({ k, v, c }: { k: string; v: string; c?: string }) {
 export function EnginePanel() {
   const [s, setS] = useState<EngineStatus | null>(null)
 
-  const load = () => fetch('/api/engine/status').then((r) => r.json()).then(setS).catch(() => {})
+  const load = () => fetch('/api/engine/status', { headers: authHeaders() }).then((r) => r.json()).then(setS).catch(() => {})
 
   useEffect(() => {
     load()
@@ -50,7 +52,7 @@ export function EnginePanel() {
   }, [])
 
   const toggle = () =>
-    fetch('/api/engine/' + (s?.paused ? 'resume' : 'pause'), { method: 'POST' })
+    fetch('/api/engine/' + (s?.paused ? 'resume' : 'pause'), { method: 'POST', headers: authHeaders() })
       .then((r) => r.json()).then(setS).catch(() => {})
 
   if (!s) return <div style={{ padding: 14, color: '#55556a', fontSize: 11 }}>Loading engine…</div>

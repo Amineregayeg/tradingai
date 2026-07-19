@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { api } from '@/services/api'
+import { api, authHeaders } from '@/services/api'
 
 interface EconomicEvent {
   time: string
@@ -36,7 +36,7 @@ export default function MorningBriefingPage() {
   useEffect(() => {
     // Try to fetch calendar from backend
     setIsLoading(true)
-    fetch('/api/calendar/today')
+    fetch('/api/calendar/today', { headers: authHeaders() })
       .then((r) => {
         if (!r.ok) throw new Error(`${r.status}`)
         return r.json()

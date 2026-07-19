@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { Trade } from '@/types/api'
+import { authHeaders } from '@/services/api'
 
 interface EngineStatus {
   mode: string
@@ -70,9 +71,10 @@ export default function ReportPage() {
   const [trades, setTrades] = useState<Trade[]>([])
 
   useEffect(() => {
-    fetch('/api/engine/status').then((r) => r.json()).then(setS).catch(() => {})
+    const h = authHeaders()
+    fetch('/api/engine/status', { headers: h }).then((r) => r.json()).then(setS).catch(() => {})
     // backend pagination param is page_size (max 500) — fetch all closed trades for the curve/stats
-    fetch('/api/trades?page_size=500').then((r) => r.json()).then((r) => setTrades(Array.isArray(r) ? r : [])).catch(() => setTrades([]))
+    fetch('/api/trades?page_size=500', { headers: h }).then((r) => r.json()).then((r) => setTrades(Array.isArray(r) ? r : [])).catch(() => setTrades([]))
   }, [])
 
   const stats = useMemo(() => {
