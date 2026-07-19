@@ -145,11 +145,15 @@ class LiveCryptoLoop:
                     losses += 1
         except Exception as exc:  # noqa: BLE001 - never let the panel 500
             logger.warning("status: DB read failed, using in-memory", error=str(exc))
-            closed = list(self.paper._closed)
+            # Exclude warmup replay rows here too (reason='replay') so the DB-down
+            # fallback matches the happy path — never fold replay into live counts,
+            # and derive realized from the live closes only (not paper.balance,
+            # which the warmup seeds with replay pnl).
+            closed = [c for c in self.paper._closed if c.get("reason") != "replay"]
             closed_n = len(closed)
             wins = sum(1 for c in closed if c["pnl"] > 0)
             losses = sum(1 for c in closed if c["pnl"] <= 0)
-            realized = self.paper.balance - self.starting_balance
+            realized = sum(float(c.get("pnl", 0) or 0) for c in closed)
 
         balance = round(self.starting_balance + realized, 2)
         equity = round(balance + acct.unrealized_pl, 2)

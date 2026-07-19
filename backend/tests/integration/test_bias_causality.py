@@ -75,3 +75,26 @@ def test_run_backtest_uses_causal_bias(monkeypatch):
     bias = _series(seed=4, n=120)
     E.run_backtest(entry, bias, "BTCUSDT", E.Params(require_ltf_bos=False))
     assert called["causal"] >= 1, "run_backtest must build bias from the causal timeline"
+
+
+def test_intraday_flip_is_not_applied_before_its_day_closes():
+    """INTRADAY causality (third-lookahead regression): the bias applied to
+    intraday times ON day j must not depend on day j's own (not-yet-closed)
+    candle. We blank each day's OHLC to a doji-at-open and confirm the bias
+    as-of that day's 00:00 is unchanged — i.e. the flip that day j's full candle
+    would trigger is stamped at the NEXT open, not consumed intraday."""
+    df = _series(seed=4, n=140)
+    full = E._causal_daily_bias_events(df, 10)
+    changed = 0
+    for j in range(30, len(df), 5):
+        day_open = df.index[j]
+        blanked = df.copy()
+        o = float(blanked["open"].iloc[j])
+        blanked.iloc[j, blanked.columns.get_loc("high")] = o
+        blanked.iloc[j, blanked.columns.get_loc("low")] = o
+        blanked.iloc[j, blanked.columns.get_loc("close")] = o
+        tl_blank = E._causal_daily_bias_events(blanked, 10)
+        # bias as-of the START of day j must be identical with/without day j's candle
+        if E._bias_at(full, day_open) != E._bias_at(tl_blank, day_open):
+            changed += 1
+    assert changed == 0, f"day-j candle leaked into day-j intraday bias on {changed} days"

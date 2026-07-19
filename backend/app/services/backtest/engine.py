@@ -130,11 +130,20 @@ def _causal_daily_bias_events(
     last: str | None = None
     for j in range(min_bars, n):
         lo = max(0, j + 1 - window)
-        sub = bias_df.iloc[lo : j + 1]
+        sub = bias_df.iloc[lo : j + 1]  # includes day j's COMPLETE candle
         evs = _daily_bias_events(sub, swing_length)
         cur = evs[-1][1] if evs else None
         if cur is not None and cur != last:
-            timeline.append((bias_df.index[j], cur))
+            # INTRADAY CAUSALITY: this flip may have needed day j's completed
+            # OHLC to appear, but daily bars are OPEN-time indexed (00:00) and the
+            # 1H entry loop consumes the bias via `et <= t`. Stamping at index[j]
+            # would apply the flip to day-j intraday entries BEFORE day j closed —
+            # a same-day leak. Stamp at the NEXT day's open, when day j's candle is
+            # actually complete/known. (The final day has no next open; its flip
+            # would never be actionable anyway, so it is dropped.)
+            stamp = j + 1
+            if stamp < n:
+                timeline.append((bias_df.index[stamp], cur))
             last = cur
     return timeline
 

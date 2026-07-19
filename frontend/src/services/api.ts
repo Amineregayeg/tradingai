@@ -63,6 +63,24 @@ export function authHeaders(): Record<string, string> {
   return t ? { Authorization: `Bearer ${t}` } : {}
 }
 
+/**
+ * Mint a short-lived, single-use WebSocket ticket. The /ws handshake takes this
+ * ticket (NOT the master token) in its query string, so the long-lived
+ * credential never lands in a URL / access log / browser history.
+ */
+export async function getWsTicket(): Promise<string> {
+  const res = await fetch(BASE + '/auth/ws-ticket', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+  })
+  if (!res.ok) {
+    if (res.status === 401) onUnauthorized()
+    throw new Error(`ws-ticket failed: ${res.status}`)
+  }
+  const d = await res.json()
+  return String(d.ticket || '')
+}
+
 function onUnauthorized(): void {
   clearToken()
   // Reload so the login gate re-mounts (avoids a stale, permanently-401 app).

@@ -1,4 +1,5 @@
 from app.api.routers.alerts import router as alerts_router
+from app.api.routers.auth import router as auth_router
 from app.api.routers.calendar import router as calendar_router
 from app.api.routers.analysis import router as analysis_router
 from app.api.routers.audit_log import router as audit_log_router
@@ -17,6 +18,7 @@ from app.api.routers.ws import router as ws_router
 
 __all__ = [
     "alerts_router",
+    "auth_router",
     "calendar_router",
     "analysis_router",
     "audit_log_router",

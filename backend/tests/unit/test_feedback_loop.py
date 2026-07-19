@@ -235,3 +235,22 @@ def test_winners_short_of_target_lowers_rr_partial():
     assert len(rr) == 1
     assert rr[0].proposed < rr[0].current          # lowered
     assert rr[0].current - rr[0].proposed <= 2.0 * MAX_DELTA_FRAC + _EPS  # bounded
+
+
+def test_profitable_runner_not_flagged_below_breakeven():
+    """A PROFITABLE runner strategy (winners realize far more than the target RR)
+    must NOT trip Rule C (widen sl_buffer) or Rule D (force require_ltf_bos). The
+    old break-even used the TARGET RR and wrongly flagged such strategies; the fix
+    uses the REALIZED win/loss geometry."""
+    # winners realize +6R (runners) on a 3R target; losers -1R; WR 22% (18/81).
+    # realized break-even = 1/(6+1) = 14.3%, so 22% is ABOVE break-even -> profitable.
+    recs = [_rec(6.0, "WIN", expected_r=3.0) for _ in range(18)] \
+         + [_rec(-1.0, "LOSS", expected_r=3.0) for _ in range(63)]
+    result = analyze(recs, _params(rr_partial=3.0, sl_buffer_atr=0.25, require_ltf_bos=False), min_evidence=30)
+    ev = result["expected_vs_actual"]
+    assert ev["mean_winner_realized_r"] == 6.0
+    assert abs(ev["expected_win_rate"] - 1.0 / 7.0) < 1e-6  # realized geometry, not 1/(1+3)
+    assert ev["actual_win_rate"] > ev["expected_win_rate"]  # genuinely profitable
+    targets = {c.target_param for c in result["corrections"]}
+    assert "sl_buffer_atr" not in targets   # Rule C must not fire
+    assert "require_ltf_bos" not in targets  # Rule D must not fire

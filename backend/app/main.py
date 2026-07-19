@@ -15,6 +15,7 @@ from slowapi.util import get_remote_address
 from app.api.routers import (
     alerts_router,
     analysis_router,
+    auth_router,
     audit_log_router,
     brokers_router,
     calendar_router,
@@ -427,6 +428,7 @@ def create_app() -> FastAPI:
     app.include_router(system_router, prefix=api_prefix)
     app.include_router(prop_firm_router, prefix=api_prefix)
     app.include_router(calendar_router, prefix=api_prefix)
+    app.include_router(auth_router, prefix=api_prefix)
     app.include_router(ws_router)  # WebSocket has no /api prefix
 
     return app

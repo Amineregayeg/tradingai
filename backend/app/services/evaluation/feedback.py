@@ -439,12 +439,6 @@ def analyze(records: list[dict], params: dict, min_evidence: int = 30) -> dict:
 
     wins = sum(1 for v in views if v.outcome == "win")
     actual_win_rate = (wins / n) if n else None
-    # Break-even win rate implied by the mean targeted RR: 1 / (1 + RR).
-    expected_win_rate = (
-        1.0 / (1.0 + mean_expected_r)
-        if (mean_expected_r is not None and mean_expected_r > -1.0 + 1e-9)
-        else None
-    )
 
     # WINNER-CONDITIONAL realized-vs-target (the ONLY like-for-like basis for
     # judging rr_partial). Comparing the mean realized R over ALL trades (which
@@ -456,14 +450,34 @@ def analyze(records: list[dict], params: dict, min_evidence: int = 30) -> dict:
         v for v in views
         if v.outcome == "win" and v.realized_r is not None and v.expected_r is not None
     ]
+    loser_views = [v for v in views if v.outcome == "loss" and v.realized_r is not None]
     n_winners = len(winner_views)
     mean_winner_realized_r = _mean([v.realized_r for v in winner_views])
     mean_winner_target_r = _mean([v.expected_r for v in winner_views])
+    mean_loser_realized_r = _mean([v.realized_r for v in loser_views])
     winner_realized_minus_target_r = (
         (mean_winner_realized_r - mean_winner_target_r)
         if (mean_winner_realized_r is not None and mean_winner_target_r is not None)
         else None
     )
+
+    # Break-even win rate from REALIZED geometry, not the target RR. Winners can
+    # realize far MORE than the target (runners), so 1/(1+target_RR) understates
+    # the true break-even and would flag a profitable runner strategy as
+    # sub-break-even (the same category error as the old Rule A). Correct form:
+    #   be = |avg_loss| / (avg_win + |avg_loss|)   using realized R.
+    expected_win_rate = None
+    if (
+        mean_winner_realized_r is not None
+        and mean_loser_realized_r is not None
+        and n_winners > 0
+        and len(loser_views) > 0
+    ):
+        avg_win = mean_winner_realized_r
+        avg_loss = abs(mean_loser_realized_r)
+        denom = avg_win + avg_loss
+        if denom > 1e-9:
+            expected_win_rate = avg_loss / denom
 
     expected_vs_actual = {
         "n_closed": n,
@@ -473,10 +487,11 @@ def analyze(records: list[dict], params: dict, min_evidence: int = 30) -> dict:
         "mean_realized_r": mean_realized_r,
         "mean_slippage_r": mean_slippage_r,
         "actual_win_rate": actual_win_rate,
-        "expected_win_rate": expected_win_rate,
+        "expected_win_rate": expected_win_rate,  # break-even from REALIZED geometry
         "n_winners": n_winners,
         "mean_winner_realized_r": mean_winner_realized_r,
         "mean_winner_target_r": mean_winner_target_r,
+        "mean_loser_realized_r": mean_loser_realized_r,
     }
 
     # --- structured gaps ---------------------------------------------------------
@@ -590,8 +605,9 @@ def analyze(records: list[dict], params: dict, min_evidence: int = 30) -> dict:
             frac,
             rationale=(
                 f"Actual win rate ({actual_win_rate:.0%}) is below the break-even rate "
-                f"({expected_win_rate:.0%}) implied by the targeted RR (gap "
-                f"{win_rate_gap:+.0%}, n={n}); widen the SL buffer to cut premature "
+                f"({expected_win_rate:.0%}) implied by the REALIZED win/loss geometry "
+                f"(avg win {mean_winner_realized_r:.2f}R vs avg loss {mean_loser_realized_r:.2f}R; "
+                f"gap {win_rate_gap:+.0%}, n={n}); widen the SL buffer to cut premature "
                 "stop-outs before the setup resolves."
             ),
             n=n,

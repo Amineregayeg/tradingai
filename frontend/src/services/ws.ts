@@ -1,5 +1,5 @@
 import type { WSChannel, WSMessage } from '@/types/ws'
-import { getToken } from '@/services/api'
+import { getWsTicket } from '@/services/api'
 import { useWSStore } from '@/stores/wsStore'
 import { usePositionsStore } from '@/stores/positionsStore'
 import { useAlertsStore } from '@/stores/alertsStore'
@@ -67,14 +67,23 @@ export class WebSocketService {
   // ── Private ───────────────────────────────────────────────────────────────
 
   private _connect(): void {
-    const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
-    // The /ws endpoint requires the bearer token; browsers can't set headers on
-    // a WS upgrade, so it goes in the query string.
-    const token = getToken()
-    const q = token ? `?token=${encodeURIComponent(token)}` : ''
-    const url = `${protocol}://${window.location.host}/ws${q}`
+    void this._connectWithTicket()
+  }
 
+  private async _connectWithTicket(): Promise<void> {
+    const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
     useWSStore.getState().setStatus('connecting')
+
+    // Mint a short-lived single-use ticket (authenticated). The master token is
+    // NEVER placed in the WS URL — only this disposable ticket is.
+    let ticket = ''
+    try {
+      ticket = await getWsTicket()
+    } catch {
+      this._scheduleReconnect()
+      return
+    }
+    const url = `${protocol}://${window.location.host}/ws?ticket=${encodeURIComponent(ticket)}`
 
     try {
       this.ws = new WebSocket(url)

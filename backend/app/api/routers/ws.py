@@ -5,6 +5,7 @@ import secrets
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 
 from app.config import settings
+from app.core import ws_tickets
 from app.core.logging import logger
 from app.services.ws.manager import ws_manager
 
@@ -12,21 +13,26 @@ router = APIRouter(tags=["websocket"])
 
 
 def _ws_authorized(websocket: WebSocket) -> bool:
-    """Authenticate a WebSocket handshake. Browsers can't set Authorization on a
-    WS upgrade, so the bearer token is passed as ``?token=<token>`` (or an
-    Authorization header for non-browser clients). Mirrors HTTP auth: open only
-    when auth_disabled (local dev); otherwise a constant-time token match."""
+    """Authenticate a WebSocket handshake WITHOUT putting the master token in the
+    URL. A browser mints a short-lived single-use ticket via POST /api/auth/ws-ticket
+    (authenticated) and connects with ``?ticket=<ticket>``; a leaked ticket is
+    worthless in seconds and can't be replayed. Non-browser clients may still send
+    a bearer HEADER. Open only when auth_disabled (local dev)."""
     if settings.auth_disabled:
         return True
+    # Preferred: single-use ticket in the query string.
+    ticket = websocket.query_params.get("ticket", "")
+    if ticket and ws_tickets.consume(ticket):
+        return True
+    # Fallback for non-browser clients: bearer token in the HEADER (never the URL).
     expected = settings.api_auth_token
-    if not expected:
-        return False
-    token = websocket.query_params.get("token", "")
-    if not token:
+    if expected:
         header = websocket.headers.get("authorization", "")
         if header.lower().startswith("bearer "):
             token = header[7:].strip()
-    return bool(token) and secrets.compare_digest(token, expected)
+            if token and secrets.compare_digest(token, expected):
+                return True
+    return False
 
 
 @router.websocket("/ws")
