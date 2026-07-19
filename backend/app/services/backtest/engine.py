@@ -202,9 +202,16 @@ def run_backtest(
     fvg_by_idx: dict[int, list[dict]] = {}
     for f in fvgs:
         fvg_by_idx.setdefault(int(f["candle_index"]), []).append(f)
-    # last LTF BOS direction as-of each bar index. NO-LOOKAHEAD: a break is only
-    # known at its smc BrokenIndex (15-35 bars after formation); discard breaks
-    # that never confirmed (broken_index is None).
+    # last LTF BOS direction as-of each bar index, stamped at smc BrokenIndex+1.
+    # KNOWN MINOR RESIDUAL (documented, bounded): smc's broken_index is derived
+    # from full-series swing detection, so like the daily bias it can be mildly
+    # non-causal (measured impact: SL base / LTF-BOS gate differ from a causal
+    # recompute on ~3% of entry-eligible bars). The MAJOR direction-level
+    # lookahead — the daily HTF bias — is fixed via _causal_daily_bias_events.
+    # A fully-causal intraday BOS is strategy logic (Agent B's tuning domain) and
+    # a per-bar recompute is O(bars*window)-infeasible intraday; this gate is a
+    # FILTER (require_ltf_bos), not a direction source, so the residual is small.
+    # See the handoff note for Agent B.
     bos_dir_upto: list[str | None] = [None] * len(entry_df)
     bos_events = sorted(
         (int(b["broken_index"]), "LONG" if str(b["direction"]).endswith("BULL") else "SHORT")

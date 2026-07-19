@@ -259,7 +259,7 @@ async def test_new_day_resets_daily_loss_guard():
     _day_pnl BEFORE _roll_day ran, so on a new day it evaluated against the
     previous day's accumulated loss and wrongly refused valid orders.
     """
-    from datetime import date, timedelta
+    from datetime import datetime, timedelta, timezone
 
     price = _MutablePrice(100.0)
     rules = PropFirmRules(
@@ -271,8 +271,10 @@ async def test_new_day_resets_daily_loss_guard():
     )
     sim = SimPropFirmBroker(rules, price)
 
-    # Simulate YESTERDAY having accumulated a near-limit loss.
-    sim._current_day = date.today() - timedelta(days=1)
+    # Simulate YESTERDAY having accumulated a near-limit loss. Use the UTC date
+    # (the code rolls on datetime.now(timezone.utc).date()); date.today() is
+    # LOCAL and would be a day off near midnight in a non-UTC timezone.
+    sim._current_day = datetime.now(timezone.utc).date() - timedelta(days=1)
     sim._day_pnl = -2_400.0  # just under the $2,500 daily limit, yesterday
 
     # A modest order TODAY (worst case $1,000) must FILL: the day rolls and
