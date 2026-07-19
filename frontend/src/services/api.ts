@@ -82,8 +82,11 @@ export async function getWsTicket(): Promise<string> {
 }
 
 function onUnauthorized(): void {
+  // Only act on a 401 for a request that CARRIED a token — i.e. a stale/rejected
+  // token. If there is no token, we're simply not logged in yet; reloading would
+  // loop forever before the login gate can be used.
+  if (!getToken()) return
   clearToken()
-  // Reload so the login gate re-mounts (avoids a stale, permanently-401 app).
   try {
     if (typeof window !== 'undefined') window.location.reload()
   } catch {

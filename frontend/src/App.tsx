@@ -29,7 +29,11 @@ const Fallback = () => (
   </div>
 )
 
-export default function App() {
+// Everything that requires a valid token lives here, so it only mounts AFTER the
+// LoginGate has a token. Running the WS connection / settings fetch before login
+// would 401 (and the WS retry loop would hammer the ws-ticket endpoint into a
+// rate limit), so they must not run on the login screen.
+function AuthedShell() {
   const setSettings = useSettingsStore((s) => s.setSettings)
   useWebSocket()
 
@@ -38,23 +42,29 @@ export default function App() {
   }, [setSettings])
 
   return (
+    <Suspense fallback={<Fallback />}>
+      <Routes>
+        <Route element={<SharedLayout />}>
+          <Route path="/" element={<DashboardPage />} />
+          <Route path="/engine" element={<EnginePage />} />
+          <Route path="/journal" element={<JournalPage />} />
+          <Route path="/report" element={<ReportPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/prop-firm" element={<PropFirmPage />} />
+          <Route path="/checklist" element={<ChecklistPage />} />
+          <Route path="/weekly" element={<WeeklyReviewPage />} />
+          <Route path="/briefing" element={<MorningBriefingPage />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Route>
+      </Routes>
+    </Suspense>
+  )
+}
+
+export default function App() {
+  return (
     <LoginGate>
-      <Suspense fallback={<Fallback />}>
-        <Routes>
-          <Route element={<SharedLayout />}>
-            <Route path="/" element={<DashboardPage />} />
-            <Route path="/engine" element={<EnginePage />} />
-            <Route path="/journal" element={<JournalPage />} />
-            <Route path="/report" element={<ReportPage />} />
-            <Route path="/settings" element={<SettingsPage />} />
-            <Route path="/prop-firm" element={<PropFirmPage />} />
-            <Route path="/checklist" element={<ChecklistPage />} />
-            <Route path="/weekly" element={<WeeklyReviewPage />} />
-            <Route path="/briefing" element={<MorningBriefingPage />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Route>
-        </Routes>
-      </Suspense>
+      <AuthedShell />
     </LoginGate>
   )
 }
