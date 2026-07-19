@@ -86,9 +86,11 @@ async def test_feedback_measures_gap_with_enough_evidence(client, db_session):
     assert body["n"] == 40
     ev = body["expected_vs_actual"]
     assert ev["mean_expected_r"] == pytest.approx(2.0, abs=1e-6)
-    # mean realized R = mean(1.0, -1.0) = 0.0, well below expected 2.0
+    # mean realized R = mean(1.0, -1.0) = 0.0
     assert ev["mean_realized_r"] == pytest.approx(0.0, abs=1e-6)
-    assert body["gaps"]["realized_minus_expected_r"] == pytest.approx(-2.0, abs=1e-6)
+    # LIKE-FOR-LIKE gap: winners realize 1.0 vs the 2.0 they targeted = -1.0
+    assert ev["n_winners"] == 20
+    assert body["gaps"]["winner_realized_minus_target_r"] == pytest.approx(-1.0, abs=1e-6)
     # any corrections must never target risk_pct
     for c in body["corrections"]:
         assert c["target_param"] != "risk_pct"

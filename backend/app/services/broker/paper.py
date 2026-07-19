@@ -60,6 +60,11 @@ class PaperBroker(BrokerAdapter):
         self._positions: dict[str, PaperPosition] = {}
         self._closed: list[dict] = []
         self._fill_log: list[dict] = []
+        # Optional hook fired on EVERY settle (SL/TP tick, manual close, kill
+        # switch) so the owner can persist the close + resolve its decision
+        # uniformly — no close path can be silently lost. Sync; the owner
+        # schedules any async work itself.
+        self._on_settle: Callable[[dict], None] | None = None
 
     # ---- connection lifecycle ----
     async def connect(self) -> None:
@@ -118,6 +123,11 @@ class PaperBroker(BrokerAdapter):
         }
         self._closed.append(ev)
         logger.info(f"PaperBroker close {pos.pair} {reason} pnl={pnl:.2f} bal={self.balance:.2f}")
+        if self._on_settle is not None:
+            try:
+                self._on_settle(ev)
+            except Exception:  # noqa: BLE001 - a persistence hook must never break a close
+                logger.warning("PaperBroker on_settle hook failed", exc_info=True)
         return ev
 
     # ---- account / positions ----

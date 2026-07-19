@@ -130,9 +130,9 @@ export default function EnginePage() {
         <Panel title="Feedback Loop — Expected vs Actual"
           right={feedback?.abstained ? <span style={{ fontSize: 11, color: MUTE }}>abstained · thin evidence</span> : <span style={{ fontSize: 11, color: MUTE }}>{String(feedback?.n ?? 0)} closed</span>}>
           <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: corrections.length ? 14 : 0 }}>
-            <Stat label="Mean expected R" value={r(eva.mean_expected_r)} />
-            <Stat label="Mean realized R" value={r(eva.mean_realized_r)} color={(n(eva.mean_realized_r) ?? 0) >= (n(eva.mean_expected_r) ?? 0) ? GREEN : RED} />
-            <Stat label="Realized − expected" value={r(gaps.realized_minus_expected_r)} color={(n(gaps.realized_minus_expected_r) ?? 0) >= 0 ? GREEN : RED} />
+            <Stat label="Mean realized R" value={r(eva.mean_realized_r)} color={(n(eva.mean_realized_r) ?? 0) >= 0 ? GREEN : RED} />
+            <Stat label="Winners realized R" value={r(eva.mean_winner_realized_r)} color={GREEN} />
+            <Stat label="Winners vs target" value={r(gaps.winner_realized_minus_target_r)} color={(n(gaps.winner_realized_minus_target_r) ?? 0) >= 0 ? GREEN : RED} />
             <Stat label="Slippage" value={r(gaps.mean_slippage_r)} color={AMBER} />
             <Stat label="Win-rate gap" value={eva.actual_win_rate != null ? `${(((n(gaps.win_rate_gap) ?? 0)) * 100).toFixed(1)}pp` : '—'} />
           </div>

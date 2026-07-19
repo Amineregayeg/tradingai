@@ -194,3 +194,44 @@ def test_boolean_knob_correction_has_none_delta():
     assert flip.proposed is True
     # Even here, risk_pct never appears.
     assert all(c.target_param != "risk_pct" for c in result["corrections"])
+
+
+# ---------------------------------------------------------------------------
+# Rule A soundness — winner-conditional, NOT a one-directional ratchet
+# ---------------------------------------------------------------------------
+
+
+def _rec(realized_r: float, outcome: str, expected_r: float = 2.0) -> dict:
+    return {
+        "symbol": "BTCUSDT", "timeframe": "1H", "signal_dir": "LONG",
+        "signal_entry": 100.0, "signal_sl": 99.0,
+        "signal_tp": 100.0 + expected_r, "sized_units": 1000.0,
+        "expected_r": expected_r, "realized_r": realized_r,
+        "outcome": outcome, "fill_price": 100.0, "cohort": "paper", "abstained": False,
+    }
+
+
+def test_profitable_strategy_does_not_ratchet_rr_partial():
+    """A PROFITABLE strategy whose winners hit exactly their target must NOT
+    trigger an rr_partial cut. The old all-trades gap (mean_realized - mean_expected)
+    was structurally negative here and would have lowered rr_partial every round;
+    the winner-conditional gap is 0, so Rule A correctly stays silent."""
+    recs = [_rec(2.0, "WIN") for _ in range(30)] + [_rec(-1.0, "LOSS") for _ in range(15)]
+    # sanity: this strategy is profitable (mean R = (30*2 - 15)/45 = +1.0)
+    result = analyze(recs, _params(rr_partial=2.0), min_evidence=30)
+    ev = result["expected_vs_actual"]
+    assert ev["mean_realized_r"] > 0            # genuinely profitable
+    assert ev["mean_winner_realized_r"] == 2.0  # winners hit target
+    assert result["gaps"]["winner_realized_minus_target_r"] == 0.0
+    assert all(c.target_param != "rr_partial" for c in result["corrections"])
+
+
+def test_winners_short_of_target_lowers_rr_partial():
+    """When winners systematically fall SHORT of the RR they targeted (reverse
+    before it), Rule A lowers rr_partial — and only downward here."""
+    recs = [_rec(1.2, "WIN") for _ in range(20)] + [_rec(-1.0, "LOSS") for _ in range(20)]
+    result = analyze(recs, _params(rr_partial=2.0), min_evidence=30)
+    rr = [c for c in result["corrections"] if c.target_param == "rr_partial"]
+    assert len(rr) == 1
+    assert rr[0].proposed < rr[0].current          # lowered
+    assert rr[0].current - rr[0].proposed <= 2.0 * MAX_DELTA_FRAC + _EPS  # bounded

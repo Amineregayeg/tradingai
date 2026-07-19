@@ -99,6 +99,9 @@ class SimPropFirmBroker(BrokerAdapter):
         self._positions: dict[str, SimPosition] = {}
         self._closed: list[dict] = []
         self._fill_log: list[dict] = []
+        # Fired on every settle (see PaperBroker) so the owner persists closes
+        # + resolves decisions on all paths, not just the SL/TP tick path.
+        self._on_settle: Callable[[dict], None] | None = None
 
         # rule / compliance state
         self._day_pnl: float = 0.0                 # realized PnL for the current day
@@ -278,6 +281,11 @@ class SimPropFirmBroker(BrokerAdapter):
         self._closed.append(ev)
         logger.info(f"cft_sim close {pos.pair} {reason} pnl={pnl:.2f} bal={self.balance:.2f}")
         self._evaluate_rules(ts)
+        if self._on_settle is not None:
+            try:
+                self._on_settle(ev)
+            except Exception:  # noqa: BLE001
+                logger.warning("cft_sim on_settle hook failed", exc_info=True)
         return ev
 
     def _reject(self, request: OrderRequest, reason: str) -> dict:

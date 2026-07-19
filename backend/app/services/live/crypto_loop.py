@@ -75,6 +75,10 @@ class LiveCryptoLoop:
         else:
             self.paper = PaperBroker(starting_balance=starting_balance, price_fn=self._mark)
             self.mode = "PAPER"
+        # Persist + resolve EVERY close (SL/TP tick, manual DELETE, kill switch)
+        # through one hook — no close path can be silently lost from the DB or
+        # leave its DecisionRecord stuck OPEN.
+        self.paper._on_settle = self._on_settle_cb
         self.execution = ExecutionService(self.paper, ExecMode.PAPER)
         self.source = BinanceSource()
         self._last_eval: dict[str, datetime] = {}
@@ -118,10 +122,16 @@ class LiveCryptoLoop:
             from app.models.trade import Trade
 
             async with async_session_maker() as db:
+                # LIVE metrics only: exclude the injected backtest-replay rows
+                # (setup_tag='Backtest replay'). Folding replay into the live
+                # panel is exactly the "presents replay as live performance"
+                # defect the stress test flagged. NULL/other tags count as live.
                 rows = (
                     await db.execute(
                         select(Trade.outcome, Trade.pnl_dollars).where(
-                            Trade.broker == "paper", Trade.status == TradeStatus.CLOSED
+                            Trade.broker == "paper",
+                            Trade.status == TradeStatus.CLOSED,
+                            (Trade.setup_tag.is_distinct_from("Backtest replay")),
                         )
                     )
                 ).all()
@@ -213,7 +223,9 @@ class LiveCryptoLoop:
                 "position_id": f"warmup-{len(self.paper._closed)}",
                 "pair": t.symbol, "direction": t.direction,
                 "entry": t.entry, "exit": exit_px, "units": 0.0, "pnl": pnl,
-                "reason": "TP" if pnl > 0 else "SL",
+                # honest: replay exits are back-solved from a blended R, not a
+                # single TP/SL touch — don't mislabel them as such.
+                "reason": "replay",
                 "open_time": t.entry_time, "close_time": t.exit_time or t.entry_time,
                 "balance_after": round(self.paper.balance, 2),
             })
@@ -385,6 +397,21 @@ class LiveCryptoLoop:
         except Exception as exc:  # noqa: BLE001
             logger.warning("resolve decision failed", pair=pair, error=str(exc))
 
+    def _on_settle_cb(self, ev: dict) -> None:
+        """Sync hook fired by the broker on every close. Schedules durable
+        persistence + decision resolution on the running loop. If no loop is
+        running (e.g. a sync unit test), it's a no-op — the test drives
+        _persist_and_resolve directly."""
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        loop.create_task(self._persist_and_resolve(dict(ev)))
+
+    async def _persist_and_resolve(self, ev: dict) -> None:
+        await self._persist_live_close(ev)
+        await self._resolve_decision(ev)
+
     async def _persist_live_close(self, ev: dict) -> None:
         """F3: persist a LIVE paper close to the DB so live trades are durable
         across restarts and separable from the warm-up replay (source tag
@@ -423,10 +450,10 @@ class LiveCryptoLoop:
         self._marks[pair] = price
         # mark-to-market + auto-close SL/TP
         for ev in self.paper.on_tick(pair, price):
+            # Persistence + decision resolution happen via the broker's settle
+            # hook (_on_settle_cb) for ALL close paths; here we only push UI.
             await ws_manager.push_position_close(ev)
             await self._act("exit", f"Closed {pair} {ev.get('reason')} {ev.get('pnl', 0):+.0f} USDT")
-            await self._persist_live_close(ev)   # F3: durable live-trade record
-            await self._resolve_decision(ev)     # feedback loop: fill realized_r/gap_r/outcome
         await ws_manager.push_tick(pair, price, price, 0.0)
 
         # new closed entry-TF bar? -> evaluate strategy
@@ -463,6 +490,15 @@ class LiveCryptoLoop:
                 "entry",
                 f"Entered {pair} {sig.direction.value} {res.get('sized_units', 0):.3f} "
                 f"@ {res.get('fill', sig.entry):.0f} (SL {sig.sl:.0f} TP {sig.tp:.0f})",
+            )
+        else:
+            # NEVER drop a generated signal silently. A rejection (non-positive
+            # size, or a sim-mode prop-firm breach) is surfaced with its reason.
+            reason = res.get("reason") or res.get("status") or "rejected"
+            logger.info("Live signal not filled", pair=pair, dir=sig.direction.value, reason=reason)
+            await self._act(
+                "reject",
+                f"{pair} {sig.direction.value} setup NOT taken — {reason}",
             )
 
     async def run(self) -> None:

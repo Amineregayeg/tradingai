@@ -103,6 +103,42 @@ def _daily_bias_events(bias_df: pd.DataFrame, swing_length: int) -> list[tuple[p
     return events
 
 
+def _causal_daily_bias_events(
+    bias_df: pd.DataFrame, swing_length: int, window: int = 250
+) -> list[tuple[pd.Timestamp, str]]:
+    """Causal daily bias timeline — the ONLY correct input for a walk-forward
+    backtest.
+
+    ``_daily_bias_events`` runs smc BOS/CHoCH over the WHOLE series, whose
+    ``broken_index`` is non-causal: whether a break at bar k is confirmed (and
+    when) depends on bars AFTER k, so the full-series bias on a given day can
+    reflect future price action (a stress test found real direction flips). The
+    live ``strategy_step`` path never has that problem because it only ever sees
+    a trailing window.
+
+    This reconstructs the bias the live engine WOULD have held on each day by
+    recomputing the events from a TRAILING WINDOW ending at that day (the same
+    shape of input the live path gets), and emitting a change-point whenever the
+    as-of bias flips. ``_bias_at`` reads it exactly as before. The trailing
+    window both guarantees causality and bounds cost to O(days * window); it
+    also matches the live engine's own trailing-window computation, so the
+    backtest and live bias agree on identical data.
+    """
+    n = len(bias_df)
+    min_bars = max(2 * swing_length + 2, 5)
+    timeline: list[tuple[pd.Timestamp, str]] = []
+    last: str | None = None
+    for j in range(min_bars, n):
+        lo = max(0, j + 1 - window)
+        sub = bias_df.iloc[lo : j + 1]
+        evs = _daily_bias_events(sub, swing_length)
+        cur = evs[-1][1] if evs else None
+        if cur is not None and cur != last:
+            timeline.append((bias_df.index[j], cur))
+            last = cur
+    return timeline
+
+
 def _bias_at(events: list[tuple[pd.Timestamp, str]], t: pd.Timestamp) -> str | None:
     bias = None
     for et, d in events:
@@ -183,7 +219,8 @@ def run_backtest(
             bptr += 1
         bos_dir_upto[i] = cur
 
-    bias_events = _daily_bias_events(bias_df, p.swing_length)
+    # CAUSAL bias only — never the full-series (lookahead) events.
+    bias_events = _causal_daily_bias_events(bias_df, p.swing_length)
 
     times = entry_df.index
     highs = entry_df["high"].to_numpy()

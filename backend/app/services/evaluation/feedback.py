@@ -446,6 +446,25 @@ def analyze(records: list[dict], params: dict, min_evidence: int = 30) -> dict:
         else None
     )
 
+    # WINNER-CONDITIONAL realized-vs-target (the ONLY like-for-like basis for
+    # judging rr_partial). Comparing the mean realized R over ALL trades (which
+    # includes losers at ~-1R) to the planned RR (which only winners can reach)
+    # is a category error: the difference is structurally negative for any real
+    # strategy and would ratchet rr_partial down forever. We instead ask, among
+    # trades that WON, did they reach / overshoot the RR they targeted?
+    winner_views = [
+        v for v in views
+        if v.outcome == "win" and v.realized_r is not None and v.expected_r is not None
+    ]
+    n_winners = len(winner_views)
+    mean_winner_realized_r = _mean([v.realized_r for v in winner_views])
+    mean_winner_target_r = _mean([v.expected_r for v in winner_views])
+    winner_realized_minus_target_r = (
+        (mean_winner_realized_r - mean_winner_target_r)
+        if (mean_winner_realized_r is not None and mean_winner_target_r is not None)
+        else None
+    )
+
     expected_vs_actual = {
         "n_closed": n,
         "n_with_expected_r": len(expected_rs),
@@ -455,21 +474,20 @@ def analyze(records: list[dict], params: dict, min_evidence: int = 30) -> dict:
         "mean_slippage_r": mean_slippage_r,
         "actual_win_rate": actual_win_rate,
         "expected_win_rate": expected_win_rate,
+        "n_winners": n_winners,
+        "mean_winner_realized_r": mean_winner_realized_r,
+        "mean_winner_target_r": mean_winner_target_r,
     }
 
     # --- structured gaps ---------------------------------------------------------
-    realized_minus_expected_r = (
-        (mean_realized_r - mean_expected_r)
-        if (mean_realized_r is not None and mean_expected_r is not None)
-        else None
-    )
     win_rate_gap = (
         (actual_win_rate - expected_win_rate)
         if (actual_win_rate is not None and expected_win_rate is not None)
         else None
     )
     gaps = {
-        "realized_minus_expected_r": realized_minus_expected_r,
+        # like-for-like: winners' realized R vs the RR they targeted
+        "winner_realized_minus_target_r": winner_realized_minus_target_r,
         "mean_slippage_r": mean_slippage_r,
         "win_rate_gap": win_rate_gap,
     }
@@ -493,43 +511,50 @@ def analyze(records: list[dict], params: dict, min_evidence: int = 30) -> dict:
     def _cur(knob: str) -> Any:
         return params.get(knob, _KNOB_DEFAULTS.get(knob))
 
-    # Rule A — realized R vs targeted R (rr_partial).
-    # Trades systematically fall short of / overshoot the geometry they committed to.
-    if realized_minus_expected_r is not None and mean_expected_r not in (None, 0.0):
-        gap = realized_minus_expected_r
+    # Rule A — WINNERS' realized R vs the RR they targeted (rr_partial).
+    # Like-for-like (winner-conditional both sides), so it is NOT the one-way
+    # ratchet the all-trades mean gap would be. Requires enough winners to matter.
+    _MIN_WINNERS = 10
+    if (
+        winner_realized_minus_target_r is not None
+        and n_winners >= _MIN_WINNERS
+        and mean_winner_target_r not in (None, 0.0)
+    ):
+        gap = winner_realized_minus_target_r
         if gap < -0.25:
-            # Underperforming the target: bank the partial sooner (lower rr_partial).
-            frac = -_clamp(abs(gap) / abs(mean_expected_r), 0.0, MAX_DELTA_FRAC)
+            # Winners systematically fall SHORT of their target (reverse before it):
+            # the partial is too greedy — bank it sooner.
+            frac = -_clamp(abs(gap) / abs(mean_winner_target_r), 0.0, MAX_DELTA_FRAC)
             mag = _clamp(abs(gap) / 1.0, 0.0, 1.0)
             corr = _numeric_correction(
                 "rr_partial",
                 _cur("rr_partial"),
                 frac,
                 rationale=(
-                    f"Mean realized R ({mean_realized_r:.2f}) trails the targeted RR "
-                    f"({mean_expected_r:.2f}) by {gap:.2f}R over {n} trades; the partial "
-                    "target is too greedy — bank it sooner to convert more of the move."
+                    f"Winning trades realize {mean_winner_realized_r:.2f}R vs the "
+                    f"{mean_winner_target_r:.2f}R they targeted ({gap:.2f}R short) over "
+                    f"{n_winners} winners; the partial target is too greedy — bank it sooner."
                 ),
-                n=n,
-                confidence=_confidence(mag, n, min_evidence),
+                n=n_winners,
+                confidence=_confidence(mag, n_winners, min_evidence),
             )
             if corr is not None:
                 corrections.append(corr)
         elif gap > 0.25:
-            # Overshooting: trades run past the partial — let them target more.
-            frac = _clamp(abs(gap) / abs(mean_expected_r), 0.0, MAX_DELTA_FRAC)
+            # Winners overshoot the target (runners keep extending): raise it.
+            frac = _clamp(abs(gap) / abs(mean_winner_target_r), 0.0, MAX_DELTA_FRAC)
             mag = _clamp(abs(gap) / 1.0, 0.0, 1.0)
             corr = _numeric_correction(
                 "rr_partial",
                 _cur("rr_partial"),
                 frac,
                 rationale=(
-                    f"Mean realized R ({mean_realized_r:.2f}) exceeds the targeted RR "
-                    f"({mean_expected_r:.2f}) by {gap:.2f}R over {n} trades; the partial "
-                    "is left on the table — raise it to capture the fuller move."
+                    f"Winning trades realize {mean_winner_realized_r:.2f}R vs the "
+                    f"{mean_winner_target_r:.2f}R they targeted ({gap:+.2f}R over) across "
+                    f"{n_winners} winners; the target is left on the table — raise it."
                 ),
-                n=n,
-                confidence=_confidence(mag, n, min_evidence),
+                n=n_winners,
+                confidence=_confidence(mag, n_winners, min_evidence),
             )
             if corr is not None:
                 corrections.append(corr)

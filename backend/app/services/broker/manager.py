@@ -37,13 +37,25 @@ def _make_adapter(
     """
     key = broker.lower()
     if key in _CFT_ALIASES:
+        # Centralised live-trading guard: a stored observe_only=False is honoured
+        # ONLY when ALLOW_LIVE_TRADING is set server-side. This runs on EVERY
+        # construction path (connect, load_from_db, reconnect), so a persisted
+        # live-write connection cannot be silently reconstructed.
+        allow_live = os.getenv("ALLOW_LIVE_TRADING", "false").strip().lower() == "true"
+        observe_only = creds.get("observe_only", True)
+        if observe_only is False and not allow_live:
+            logger.warning(
+                "Forcing observe_only=True for stored connection — live trading disabled",
+                broker=broker,
+            )
+            observe_only = True
         return CryptoFundTraderAdapter(
             email=creds.get("email", ""),
             password=creds.get("password", ""),
             base_url=creds.get("base_url", creds.get("server", "")),
             account_id=account_id,
             environment=environment,
-            observe_only=creds.get("observe_only", True),
+            observe_only=observe_only,
         )
     raise ValueError(f"Unsupported broker: {broker!r}")
 
