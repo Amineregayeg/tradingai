@@ -1,0 +1,166 @@
+name: CI
+
+# Tier 0 enforcement. acceptance_criteria.yaml describes the Tier 0 invariants as
+# "CI-enforced" — until this file existed, they were not. They were enforced by
+# someone remembering to run pytest locally, in an environment that did not match
+# production. This workflow makes the claim true.
+#
+# The load-bearing detail: the backend jobs install requirements-prod.txt, the
+# EXACT pin set the VPS installs at container start. Testing against a
+# conveniently-resolved local environment proves nothing about what ships.
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: '3.12'   # matches the api container's python:3.12-slim
+
+jobs:
+  backend:
+    name: Backend suite (production pins)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements-prod.txt
+            backend/requirements-dev.txt
+
+      - name: Install the production dependency set
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-prod.txt -r requirements-dev.txt
+
+      # Test tooling must never drag in a different numpy/pandas/detector than
+      # production runs. If it does, the suite is green about the wrong system —
+      # which is the precise failure this workflow was created to prevent.
+      - name: Assert the strategy-critical versions match production
+        run: |
+          python - <<'PY'
+          import re, sys
+          from importlib.metadata import version, PackageNotFoundError
+
+          want = {}
+          for line in open("requirements-prod.txt"):
+              line = line.split("#")[0].strip()
+              m = re.match(r"^([A-Za-z0-9_.\-]+)(?:\[[^\]]+\])?==(.+)$", line)
+              if m:
+                  want[m.group(1).lower()] = m.group(2)
+
+          critical = ["numpy", "pandas", "smartmoneyconcepts", "pandas-ta"]
+          bad = []
+          for pkg in critical:
+              expected = want.get(pkg)
+              if expected is None:
+                  print(f"DRIFT {pkg}: not pinned in requirements-prod.txt at all")
+                  bad.append(pkg)
+                  continue
+              try:
+                  actual = version(pkg)
+              except PackageNotFoundError:
+                  print(f"DRIFT {pkg}: NOT INSTALLED (production installs {expected})")
+                  bad.append(pkg)
+                  continue
+              flag = "OK " if actual == expected else "DRIFT"
+              print(f"{flag} {pkg}: installed={actual} expected={expected}")
+              if actual != expected:
+                  bad.append(pkg)
+
+          if bad:
+              print(f"\nFAIL: {', '.join(bad)} do not match the production pins.")
+              print("The suite would be green about a system that is not the one shipping.")
+              sys.exit(1)
+          PY
+
+      - name: Run the suite
+        env:
+          AUTH_DISABLED: 'true'
+        run: python -m pytest -q
+
+  guards:
+    name: Tier 0.2 - lookahead guards must bite
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      # fetch-depth 0 is NOT needed, but a real checkout IS: verify_guards.sh
+      # restores the files it mutates via `git checkout --`.
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements-prod.txt
+            backend/requirements-dev.txt
+
+      - name: Install the production dependency set
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-prod.txt -r requirements-dev.txt
+
+      # A green suite proves the guards are present, not that they do anything.
+      # This mutates each guard back to its known-buggy form and requires the
+      # suite to go red. See the script's header for the full rationale.
+      - name: Verify every lookahead guard is load-bearing
+        run: bash scripts/verify_guards.sh
+
+  frontend:
+    name: Frontend typecheck / test / build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9          # lockfileVersion 9.0; the VPS uses pnpm@9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20    # matches the web container's node:20-slim
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      # --frozen-lockfile, unlike the VPS's --no-frozen-lockfile, so CI fails on
+      # a lockfile that drifted from package.json instead of silently resolving
+      # something new. Verified to install cleanly against the committed lockfile.
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm tsc
+
+      - name: Unit tests
+        run: pnpm exec vitest run   # `pnpm test` is bare `vitest`, which watches forever
+
+      - name: Production build
+        run: pnpm build
+
+      # NON-BLOCKING ON PURPOSE. `pnpm lint` currently reports 7 pre-existing
+      # errors (6x no-explicit-any across DashboardPage/PropFirmPage/others, plus
+      # a react-hooks/exhaustive-deps warning in EditModal). Landing CI red would
+      # train everyone to ignore it, so lint reports without blocking.
+      # FLIP continue-on-error TO false once those 7 are cleared — that is a
+      # small, self-contained cleanup task.
+      - name: Lint (advisory until the 7 pre-existing errors are cleared)
+        run: pnpm lint
+        continue-on-error: true

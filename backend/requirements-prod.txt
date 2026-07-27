@@ -1,0 +1,44 @@
+# PRODUCTION RUNTIME PINS — the exact set the VPS installs.
+#
+# WHY THIS FILE EXISTS
+# The api container does not install from pyproject.toml. It pip-installs an
+# inline pinned list baked into /docker/tradingai/docker-compose.yml on the VPS,
+# a file that is NOT in this repo. That meant the versions running in production
+# were invisible here, and the test suite had never been run against them.
+#
+# This file mirrors that list verbatim so CI can test what actually ships.
+# If you change the VPS compose, change this file in the same commit.
+#
+# KNOWN DIVERGENCE (deliberate, do not "fix" by editing this file):
+# pyproject.toml still declares numpy<2.0.0 and pandas<3.0.0, which production
+# violates on both counts. Production is the source of truth; pyproject is stale.
+# Reconciling the two is tracked separately — see docs note in CI workflow.
+
+fastapi==0.136.1
+uvicorn[standard]==0.44.0
+sqlalchemy[asyncio]==2.0.49
+asyncpg==0.31.0
+alembic==1.18.4
+pydantic[email]==2.13.2
+pydantic-settings==2.13.1
+loguru==0.7.3
+httpx==0.28.1
+# NOTE: the [asyncio] extra does not exist on redis>=5 and pip warns about it.
+# Kept verbatim to match the VPS command exactly; the warning is harmless.
+redis[asyncio]==7.4.0
+anthropic==0.96.0
+cryptography==46.0.7
+python-multipart==0.0.26
+aiosmtplib==5.1.0
+APScheduler==3.11.2
+slowapi==0.1.9
+
+# --- strategy-critical: these decide what the engine "sees" on a chart ---
+# smartmoneyconcepts supplies FVG / BOS / CHoCH detection. The three lookahead
+# fixes are written against its exact output semantics (notably that a bullish
+# FVG's near edge is low.shift(-1)). Treat any bump here as a strategy change
+# and re-run scripts/verify_guards.sh before merging.
+smartmoneyconcepts==0.0.27
+pandas==3.0.2
+numpy==2.2.6
+pandas-ta==0.4.71b0
