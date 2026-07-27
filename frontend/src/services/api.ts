@@ -189,6 +189,14 @@ export const api = {
       outcome?: Outcome
       page?: number
       page_size?: number
+      /**
+       * Which cohort to return. The API defaults to 'live', which excludes
+       * injected backtest-replay rows — anything computing performance should
+       * take that default. The trade journal passes 'all' on purpose: it is a
+       * ledger, not a performance view, and it renders the setup tag so replay
+       * rows are visibly labelled rather than silently counted.
+       */
+      cohort?: 'live' | 'replay' | 'all'
     }) =>
       request<Trade[]>(
         'GET',

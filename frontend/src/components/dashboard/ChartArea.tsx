@@ -122,7 +122,9 @@ export function ChartArea({ pair, timeframe, onTimeframeChange, score, aiBias }:
 
   const refreshOverlays = useCallback(() => {
     api.positions.list().then(drawPositionLines).catch(() => {})
-    fetch(`/api/trades?pair=${encodeURIComponent(pair)}&page_size=500`, { headers: authHeaders() })
+    // cohort=live: these markers sit on the LIVE chart, so replay rows would
+    // draw entries and exits at prices the account never traded at.
+    fetch(`/api/trades?cohort=live&pair=${encodeURIComponent(pair)}&page_size=500`, { headers: authHeaders() })
       .then((r) => r.json())
       .then((ts) => { if (Array.isArray(ts)) drawTradeMarkers(ts) })
       .catch(() => {})

@@ -1,6 +1,7 @@
 """Trade history endpoints."""
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import select
@@ -10,7 +11,7 @@ from app.api.deps import CurrentUser, DBSession
 from app.db.enums import OutcomeType, TradeStatus
 from app.models.alert import Alert
 from app.models.edit_diff import EditDiff
-from app.models.trade import Trade
+from app.models.trade import SETUP_TAG_REPLAY, Trade
 from app.schemas.trade import TradeDetailRead, TradeRead, TradeUpdate
 
 router = APIRouter(prefix="/trades", tags=["trades"])
@@ -27,9 +28,36 @@ async def list_trades(
     outcome: OutcomeType | None = Query(default=None),
     from_dt: datetime | None = Query(default=None),
     to_dt: datetime | None = Query(default=None),
+    cohort: Literal["live", "replay", "all"] = Query(
+        default="live",
+        description=(
+            "Which trade cohort to return. 'live' (default) excludes injected "
+            "backtest-replay rows; 'replay' returns only those; 'all' returns both."
+        ),
+    ),
 ) -> list[TradeRead]:
-    """Return paginated trade history with optional filters."""
+    """Return paginated trade history with optional filters.
+
+    COHORT DEFAULTS TO LIVE, AND THAT DEFAULT IS THE POINT. This endpoint used to
+    return every row indiscriminately, so callers that just wanted performance
+    data silently got backtest-replay rows mixed in. Two shipped views did
+    exactly that: the report page drew an equity curve over 247 rows (245 of them
+    replay) beside a headline that correctly said 2 trades, and the dashboard
+    chart drew markers for replay trades that never happened on the live account.
+
+    Making the honest answer the default means a new caller has to opt IN to
+    mixed data rather than remember to opt out. The rows are still reachable —
+    the trade journal asks for 'all' deliberately, and shows the tag.
+    """
     stmt = select(Trade).where(Trade.user_id == user_id)
+
+    if cohort == "live":
+        # is_distinct_from, not `!=`: in SQL, NULL != 'x' evaluates to NULL, not
+        # TRUE, so a plain `!=` would silently drop every untagged row — and
+        # untagged rows are live trades. Same predicate the engine status uses.
+        stmt = stmt.where(Trade.setup_tag.is_distinct_from(SETUP_TAG_REPLAY))
+    elif cohort == "replay":
+        stmt = stmt.where(Trade.setup_tag == SETUP_TAG_REPLAY)
 
     if pair:
         stmt = stmt.where(Trade.pair == pair)

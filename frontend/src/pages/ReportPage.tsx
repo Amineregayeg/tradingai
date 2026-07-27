@@ -73,8 +73,12 @@ export default function ReportPage() {
   useEffect(() => {
     const h = authHeaders()
     fetch('/api/engine/status', { headers: h }).then((r) => r.json()).then(setS).catch(() => {})
-    // backend pagination param is page_size (max 500) — fetch all closed trades for the curve/stats
-    fetch('/api/trades?page_size=500', { headers: h }).then((r) => r.json()).then((r) => setTrades(Array.isArray(r) ? r : [])).catch(() => setTrades([]))
+    // cohort=live is explicit even though it is the API default: this page used
+    // to draw an equity curve over 247 rows, 245 of them injected backtest
+    // replay, right beside a headline that correctly read "2 closed trades".
+    // Stating the cohort here means a future change to the API default cannot
+    // quietly put replay back into a performance chart.
+    fetch('/api/trades?cohort=live&page_size=500', { headers: h }).then((r) => r.json()).then((r) => setTrades(Array.isArray(r) ? r : [])).catch(() => setTrades([]))
   }, [])
 
   const stats = useMemo(() => {
@@ -134,11 +138,25 @@ export default function ReportPage() {
       </div>
 
       <div style={{ padding: '20px 28px', maxWidth: 1100 }}>
-        {/* Honesty banner — these figures are a backtest replay, not live trading */}
+        {/* Honesty banner.
+            REWRITTEN when this page stopped rendering replay rows. It used to
+            read "these figures are a 2-year BACKTEST REPLAY" — accurate then,
+            because the curve was drawn over 245 injected rows, but the reverse
+            of the truth now that the page shows live trades only. A stale
+            disclaimer is worse than none: it teaches people to ignore the
+            banner. The counts below are read from the engine rather than
+            hardcoded, so this text cannot go stale again. */}
         <div style={{ background: 'rgba(245,158,11,0.10)', border: '1px solid #5c3d00', borderRadius: 10, padding: '11px 14px', marginBottom: 14, display: 'flex', gap: 10, alignItems: 'flex-start' }}>
           <span style={{ fontSize: 15, lineHeight: 1.2 }}>⚠️</span>
           <div style={{ fontSize: 12, color: '#e3b341', lineHeight: 1.5 }}>
-            <b>These figures are a 2-year BACKTEST REPLAY</b>, injected for demonstration — <b>not live trading results</b>, and not a guarantee. Live paper trading has produced <b>0 completed trades</b> so far, and the strategy's edge has <b>not</b> passed out-of-sample robustness testing.
+            <b>Live paper trading only — {s.closed_trades} closed {s.closed_trades === 1 ? 'trade' : 'trades'}.</b>{' '}
+            {s.closed_trades < 200 ? (
+              <>This is <b>far below the {200} trades</b> needed to tell an edge from noise, so none of these figures are a track record. </>
+            ) : (
+              <>Sample size is adequate, but significance still has to be measured, not assumed. </>
+            )}
+            Backtest-replay rows are <b>excluded</b> from this page. The strategy's edge has <b>not</b> passed
+            out-of-sample validation — the corrected backtest of the base method loses money (−16% over 15 months).
           </div>
         </div>
         {/* Headline metrics */}

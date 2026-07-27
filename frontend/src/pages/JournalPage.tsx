@@ -51,6 +51,11 @@ export default function JournalPage() {
       from_dt: filters.from || undefined,
       to_dt: filters.to || undefined,
       page_size: 500,
+      // The journal is a LEDGER, not a performance view, so it opts back in to
+      // the full history the API now excludes by default. Replay rows stay
+      // visible here and carry their setup tag; what changed is that they no
+      // longer leak into pages that compute returns.
+      cohort: 'all',
     })
       .then((result) => setTrades(Array.isArray(result) ? result : []))
       .catch(() => setTrades([]))

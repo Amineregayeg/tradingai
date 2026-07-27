@@ -119,19 +119,19 @@ class LiveCryptoLoop:
 
             from app.db.enums import OutcomeType, TradeStatus
             from app.db.session import async_session_maker
-            from app.models.trade import Trade
+            from app.models.trade import SETUP_TAG_REPLAY, Trade
 
             async with async_session_maker() as db:
-                # LIVE metrics only: exclude the injected backtest-replay rows
-                # (setup_tag='Backtest replay'). Folding replay into the live
-                # panel is exactly the "presents replay as live performance"
-                # defect the stress test flagged. NULL/other tags count as live.
+                # LIVE metrics only: exclude the injected backtest-replay rows.
+                # Folding replay into the live panel is exactly the "presents
+                # replay as live performance" defect the stress test flagged.
+                # NULL/other tags count as live (see is_live_cohort).
                 rows = (
                     await db.execute(
                         select(Trade.outcome, Trade.pnl_dollars).where(
                             Trade.broker == "paper",
                             Trade.status == TradeStatus.CLOSED,
-                            (Trade.setup_tag.is_distinct_from("Backtest replay")),
+                            (Trade.setup_tag.is_distinct_from(SETUP_TAG_REPLAY)),
                         )
                     )
                 ).all()
@@ -215,7 +215,7 @@ class LiveCryptoLoop:
 
         from app.db.enums import DirectionType, OutcomeType, TradeStatus
         from app.db.session import async_session_maker
-        from app.models.trade import Trade
+        from app.models.trade import SETUP_TAG_REPLAY, Trade
 
         rows = []
         for t in loaded:
@@ -243,7 +243,7 @@ class LiveCryptoLoop:
                 r_multiple=Decimal(str(round(t.r_multiple, 2))),
                 outcome=OutcomeType.WIN if t.r_multiple > 0 else OutcomeType.LOSS,
                 status=TradeStatus.CLOSED, pnl_dollars=Decimal(str(pnl)),
-                setup_tag="Backtest replay",   # honest: these are injected backtest trades, not live
+                setup_tag=SETUP_TAG_REPLAY,   # honest: injected backtest trades, not live
             ))
         try:
             async with async_session_maker() as db:
@@ -251,7 +251,7 @@ class LiveCryptoLoop:
                 from sqlalchemy import delete
                 # F3: only wipe replay rows on re-warmup — never the durable live trades
                 await db.execute(
-                    delete(Trade).where(Trade.broker == "paper", Trade.setup_tag == "Backtest replay")
+                    delete(Trade).where(Trade.broker == "paper", Trade.setup_tag == SETUP_TAG_REPLAY)
                 )
                 db.add_all(rows)
                 await db.commit()
@@ -426,7 +426,7 @@ class LiveCryptoLoop:
 
             from app.db.enums import DirectionType, OutcomeType, TradeStatus
             from app.db.session import async_session_maker
-            from app.models.trade import Trade
+            from app.models.trade import SETUP_TAG_LIVE, Trade
 
             pnl = float(ev.get("pnl", 0) or 0)
             is_long = str(ev.get("direction")) == "LONG"
@@ -439,7 +439,7 @@ class LiveCryptoLoop:
                 entry_time=ev.get("open_time"), exit_time=ev.get("close_time"),
                 outcome=OutcomeType.WIN if pnl > 0 else OutcomeType.LOSS,
                 status=TradeStatus.CLOSED, pnl_dollars=Decimal(str(round(pnl, 2))),
-                setup_tag="ICT (live)",
+                setup_tag=SETUP_TAG_LIVE,
             )
             async with async_session_maker() as db:
                 db.add(row)
