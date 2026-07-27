@@ -1,0 +1,64 @@
+# BOOTSTRAP variant of compose.dominance.yaml — TEMPORARY, replace when possible.
+#
+# Deployed at: /home/deploy/tradingai-dominance/compose.yaml on 31.97.183.142
+#     docker compose -p tradingai-dominance up -d
+#
+# WHY THIS EXISTS
+# compose.dominance.yaml runs the collector by git-cloning the repo at container
+# start, like every other service on this VPS. That requires the collector to be
+# on GitHub `main`. At the time of deployment it was not: the code lived only on
+# an unpushed local branch, and pushing was not authorized.
+#
+# The data, however, could not wait — intraday dominance history cannot be
+# backfilled, so every day of delay is permanently unmeasurable. So this variant
+# bind-mounts the script from the host instead of cloning it, which lets
+# collection start today without touching the repo's publishing story.
+#
+# THE COST, STATED PLAINLY
+# This puts a copy of application code on the VPS that the repo cannot see —
+# precisely the pattern that let production drift onto numpy 2.2.6 while
+# pyproject declared numpy<2.0.0. It is acceptable ONLY because it is small,
+# recorded here, and temporary.
+#
+# HOW TO RETIRE IT (do this once the branch reaches GitHub main)
+#     ssh pfe-vps 'cd ~/tradingai-dominance && docker compose -p tradingai-dominance down'
+#     # copy deploy/compose.dominance.yaml to the VPS as compose.yaml
+#     docker compose -p tradingai-dominance up -d
+# The collected CSV lives in /opt/dominance on the host, NOT in the container,
+# so swapping the compose file does not lose a single sample.
+
+name: tradingai-dominance
+
+services:
+  collector:
+    image: python:3.12-slim
+    working_dir: /app
+    environment:
+      DOMINANCE_DIR: "/data"
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      # The script, read-only — the container has no business rewriting it.
+      - /home/deploy/tradingai-dominance/app:/app:ro
+      # The data, read-write. The pre-existing dominance-web project mounts this
+      # same path read-only and serves it on :8097, so output is published with
+      # no change to that service.
+      - /opt/dominance:/data
+    # Stdlib only: nothing to install, so the container is up in seconds and
+    # cannot fail on dependency resolution.
+    command: ["python", "collect_dominance.py", "--loop", "60"]
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "python -c \"import sys,os,csv,datetime as dt;
+           p='/data/dominance_intraday_raw.csv';
+           sys.exit(1) if not os.path.exists(p) else None;
+           rows=list(csv.DictReader(open(p)));
+           sys.exit(1) if not rows else None;
+           last=dt.datetime.fromisoformat(rows[-1]['ts_utc']);
+           age=(dt.datetime.now(dt.timezone.utc)-last).total_seconds();
+           sys.exit(0 if age < 600 else 1)\""
+      interval: 5m
+      timeout: 30s
+      retries: 3
+      start_period: 3m
