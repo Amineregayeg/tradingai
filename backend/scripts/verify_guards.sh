@@ -26,6 +26,8 @@ set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1   # -> backend/
 
 ENGINE="app/services/backtest/engine.py"
+DOMINANCE="app/services/market_data/sources/dominance.py"
+GUARDED_FILES=("$ENGINE" "$DOMINANCE")
 FAILED=0
 
 if ! git rev-parse --git-dir >/dev/null 2>&1; then
@@ -33,30 +35,41 @@ if ! git rev-parse --git-dir >/dev/null 2>&1; then
   exit 1
 fi
 
-restore() { git checkout -- "$ENGINE" 2>/dev/null || true; }
+restore() { git checkout -- "${GUARDED_FILES[@]}" 2>/dev/null || true; }
 # Restore on ANY exit path, including Ctrl-C or an unexpected failure, so a
-# mutated engine can never be left behind in a working tree or a CI cache.
+# mutated file can never be left behind in a working tree or a CI cache.
 trap restore EXIT INT TERM
 
-if ! git diff --quiet -- "$ENGINE"; then
-  echo "ERROR: $ENGINE has uncommitted changes. Commit or stash them first —"
-  echo "       this script overwrites that file and would destroy your work."
-  exit 1
-fi
+for f in "${GUARDED_FILES[@]}"; do
+  # An UNTRACKED file cannot be restored by `git checkout --`, so mutating it
+  # would leave the mutation in place permanently. (This bit during development:
+  # three probes silently accumulated in a new file because rollback no-oped.)
+  if ! git ls-files --error-unmatch "$f" >/dev/null 2>&1; then
+    echo "ERROR: $f is not tracked by git."
+    echo "       This script mutates it and restores via git checkout, which"
+    echo "       cannot restore an untracked file. Commit it first."
+    exit 1
+  fi
+  if ! git diff --quiet -- "$f"; then
+    echo "ERROR: $f has uncommitted changes. Commit or stash them first —"
+    echo "       this script overwrites that file and would destroy your work."
+    exit 1
+  fi
+done
 
-# probe <name> <sed-expression> <test-path> <what-the-guard-prevents>
+# probe <name> <file> <sed-expression> <test-path> <what-the-guard-prevents>
 probe() {
-  local name="$1" expr="$2" tests="$3" prevents="$4"
+  local name="$1" file="$2" expr="$3" tests="$4" prevents="$5"
 
   restore
-  sed -i "$expr" "$ENGINE"
+  sed -i "$expr" "$file"
 
   # If the mutation did not change the file, the guard has been refactored or
   # renamed and this probe is now testing nothing. That is a FAILURE, not a
   # pass — a silently-inert probe is exactly the rot this script exists to catch.
-  if git diff --quiet -- "$ENGINE"; then
+  if git diff --quiet -- "$file"; then
     echo "FAIL  $name"
-    echo "      The mutation matched nothing in $ENGINE."
+    echo "      The mutation matched nothing in $file."
     echo "      The guard was moved/renamed and this probe is now inert."
     echo "      Fix the sed expression in scripts/verify_guards.sh to match the new code."
     FAILED=1
@@ -79,15 +92,33 @@ probe() {
 echo "Tier 0.2 — verifying each lookahead guard is load-bearing"
 echo "-------------------------------------------------------------------"
 
-probe "FVG entry admissible only from born+2" \
+probe "FVG entry admissible only from born+2" "$ENGINE" \
       's/if (i - c\["born"\]) < 2:/if (i - c["born"]) < 1:/' \
       "tests/integration/test_lookahead_regression.py" \
       "filling at a bar's own extreme (the smc near-edge is low.shift(-1), so at born+1 the retrace test is vacuously true)"
 
-probe "daily bias built from the causal trailing window" \
+probe "daily bias built from the causal trailing window" "$ENGINE" \
       's/bias_events = _causal_daily_bias_events(bias_df, p.swing_length)/bias_events = _daily_bias_events(bias_df, p.swing_length)/' \
       "tests/integration/test_bias_causality.py" \
       "trade direction chosen using bars that had not happened yet"
+
+# Dominance bars feed Magic Alignment's confirmation signal. A lookahead here is
+# harder to notice than one in the entry logic and just as capable of inventing
+# an edge, so the same standard applies.
+probe "dominance bars close on their left edge" "$DOMINANCE" \
+      's/label="left", closed="left"/label="left", closed="right"/' \
+      "tests/unit/test_dominance_source.py" \
+      "a dominance bar absorbing a sample from after its own period closed"
+
+probe "dominance partial trailing bar dropped" "$DOMINANCE" \
+      's/if last_sample < period_end:/if False:/' \
+      "tests/unit/test_dominance_source.py" \
+      "confirming an entry against a still-forming dominance bar"
+
+probe "dominance gaps stay gaps" "$DOMINANCE" \
+      's/bars = bars.dropna(how="all")/bars = bars.ffill()/' \
+      "tests/unit/test_dominance_source.py" \
+      "flat synthetic candles across a collector outage, which read as real structure"
 
 echo "-------------------------------------------------------------------"
 

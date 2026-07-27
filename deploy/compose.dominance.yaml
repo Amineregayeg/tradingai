@@ -1,0 +1,75 @@
+# Intraday dominance collector — separate compose project, deliberately.
+#
+#     docker compose -f compose.dominance.yaml -p tradingai-dominance up -d
+#
+# WHY A SEPARATE PROJECT
+# The VPS owner's standing constraint is "choose a free port, don't use any
+# running port or alter any running service." This adds NO port and touches no
+# existing container. It is its own project so it can be started, stopped and
+# recreated without ever passing near the `tradingai` stack, and so a mistake
+# here cannot take the app down.
+#
+# HOW THE DATA GETS SERVED
+# It writes into /opt/dominance, which the pre-existing `dominance-web` project
+# already bind-mounts READ-ONLY and serves on :8097 via `python -m http.server`.
+# So the new file appears at http://31.97.183.142:8097/dominance_intraday_raw.csv
+# the moment it is written. Nothing about that server changes.
+#
+# ON PERMISSIONS
+# /opt/dominance is root-owned and the `deploy` user cannot write to it. The
+# container can, because containers run as root against a bind mount. That is an
+# existing property of docker-group membership on this box, not something this
+# file introduces.
+#
+# WHY IT MUST START SOON RATHER THAN LATER
+# Intraday dominance history cannot be bought or backfilled — see the header of
+# backend/scripts/collect_dominance.py. The series begins the day this starts.
+# Every day it is not running is a day Magic Alignment can never be measured on.
+# It is independent of the unanswered platform question: collect now, decide later.
+
+name: tradingai-dominance
+
+services:
+  collector:
+    image: python:3.12-slim
+    working_dir: /app
+    environment:
+      DOMINANCE_DIR: "/data"
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      # READ-WRITE here (the :8097 server mounts the same path read-only).
+      - /opt/dominance:/data
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        set -e
+        apt-get update -qq
+        apt-get install -y --no-install-recommends git ca-certificates >/dev/null
+        if [ ! -f /app/.ready ]; then
+          rm -rf /tmp/src
+          git clone --depth 1 https://github.com/Amineregayeg/tradingai.git /tmp/src
+          cp -a /tmp/src/backend/scripts/. /app/
+          touch /app/.ready
+        fi
+        # Stdlib only — nothing to pip install, which is why this container comes
+        # up in seconds and cannot break on a dependency resolution.
+        exec python collect_dominance.py --loop 60
+    restart: unless-stopped
+    # The collector is the series. If it dies quietly, data stops and nobody
+    # notices until someone goes looking months later — so make the container
+    # unhealthy when samples stop arriving, rather than sitting "Up" while idle.
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "python -c \"import sys,os,csv,datetime as dt;
+           p='/data/dominance_intraday_raw.csv';
+           sys.exit(1) if not os.path.exists(p) else None;
+           rows=list(csv.DictReader(open(p)));
+           sys.exit(1) if not rows else None;
+           last=dt.datetime.fromisoformat(rows[-1]['ts_utc']);
+           age=(dt.datetime.now(dt.timezone.utc)-last).total_seconds();
+           sys.exit(0 if age < 600 else 1)\""
+      interval: 5m
+      timeout: 30s
+      retries: 3
+      start_period: 3m
