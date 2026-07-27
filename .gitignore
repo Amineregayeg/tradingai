@@ -8,6 +8,9 @@ dist/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+# setuptools build metadata from `pip install -e .`
+*.egg-info/
+build/
 *.log
 .DS_Store
 demo-screenshots/
