@@ -1,8 +1,43 @@
+# THE ACTUAL VPS DEPLOYMENT — Hostinger 31.97.183.142, compose project "tradingai".
+#
+# ------------------------------------------------------------------------------
+# KEEP THIS IDENTICAL TO /docker/tradingai/docker-compose.yml ON THE VPS, except
+# for API_AUTH_TOKEN. This is not a template or an example — it is the record of
+# what runs.
+# ------------------------------------------------------------------------------
+#
+# The previous version of this file described a completely different deployment:
+# Docker git build-contexts (`build: context: https://github.com/...`), a plain
+# `alembic upgrade head`, and no API_AUTH_TOKEN at all. That is not how this
+# deploys. Hostinger runs `docker compose up` WITHOUT `--build`, so build
+# contexts fail outright. The real deployment is a RUNTIME CLONE: stock
+# python/node images that `git clone` the repo at container start. Anyone
+# trusting the old file would have deployed nothing and wondered why.
+#
+# WHY THE INLINE PIP LIST IS GONE
+# The api service used to carry ~20 inline `pkg==version` pins in its command
+# block. That was a copy of the dependency list living only on the VPS —
+# invisible to the repo and to CI. It is how production came to run numpy 2.2.6
+# while pyproject.toml declared numpy<2.0.0, with the suite never once run
+# against what actually ships. It now installs from backend/requirements-prod.txt,
+# the same file pyproject.toml and CI read. One list, three consumers.
+# .github/workflows/ci.yml fails the build if inline pins reappear here.
+#
+# THE DEPLOY GOTCHA (unchanged)
+# Both app containers guard setup with `if [ ! -f /app/.ready ]`, so a plain
+# `docker compose restart` KEEPS THE OLD CODE. To ship new code:
+#     docker compose up -d --force-recreate api web
+# Downtime ~3-5 min while pip/pnpm reinstall.
+#
+# KNOWN, NOT FIXED HERE (deliberate — separate tasks, each needs its own testing):
+#   * `pnpm dev` serves the frontend in production. That is the Vite DEV server:
+#     unminified, source maps exposed, HMR websocket open. Should be a built
+#     bundle behind a static server.
+#   * `git clone --depth 1` pins no commit. Whatever `main` happens to be when a
+#     container starts is what runs, and nothing records which commit that was.
+
 name: tradingai
-# Self-contained VPS deployment. Docker builds each app service straight from the
-# GitHub repo (git build-context), so nothing but this file is needed on the host.
-# Only the web service is published (host :8095). DB + Redis stay on the internal
-# network. Does not touch any other project/port on the VPS.
+
 services:
   db:
     image: timescale/timescaledb:latest-pg16
@@ -17,31 +52,75 @@ services:
       test: ["CMD-SHELL", "pg_isready -U tradingai -d tradingai"]
       interval: 5s
       timeout: 5s
-      retries: 40
+      retries: 60
 
   redis:
     image: redis:7-alpine
     restart: unless-stopped
 
   api:
-    build:
-      context: "https://github.com/Amineregayeg/tradingai.git#main:backend"
+    image: python:3.12-slim
+    working_dir: /app
     environment:
       DATABASE_URL: "postgresql+asyncpg://tradingai:tradingai@db:5432/tradingai"
       REDIS_URL: "redis://redis:6379/0"
       DATA_DIR: "/tmp/tradingai-data"
-    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+      PYTHONPATH: "/app"
+      # SECRET — the real value lives ONLY in the VPS copy of this file and is
+      # deliberately not committed. Set it there; never here.
+      API_AUTH_TOKEN: "__SET_ON_VPS_ONLY__"
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      # ENGINE_BROKER: "sim"   # uncomment to run the prop-firm challenge sim
+      #                        # (the Tier 2 vehicle). Unset = "paper".
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        set -e
+        apt-get update -qq
+        apt-get install -y --no-install-recommends git ca-certificates >/dev/null
+        if [ ! -f /app/.ready ]; then
+          rm -rf /tmp/src
+          git clone --depth 1 https://github.com/Amineregayeg/tradingai.git /tmp/src
+          cp -a /tmp/src/backend/. /app/
+          # SINGLE SOURCE OF TRUTH for versions. Do not inline pins here again.
+          pip install --no-cache-dir -r /app/requirements-prod.txt
+          touch /app/.ready
+        fi
+        python deploy_migrate.py
+        exec uvicorn app.main:app --host 0.0.0.0 --port 8000
     depends_on:
       db:
         condition: service_healthy
     restart: unless-stopped
 
   web:
-    build:
-      context: "https://github.com/Amineregayeg/tradingai.git#main:frontend"
+    image: node:20-slim
+    working_dir: /app
     environment:
       VITE_API_TARGET: "http://api:8000"
-    command: sh -c "pnpm dev --host 0.0.0.0 --port 5173"
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        set -e
+        apt-get update -qq
+        apt-get install -y --no-install-recommends git ca-certificates >/dev/null
+        if [ ! -f /app/.ready ]; then
+          rm -rf /tmp/src
+          git clone --depth 1 https://github.com/Amineregayeg/tradingai.git /tmp/src
+          cp -a /tmp/src/frontend/. /app/
+          corepack enable
+          corepack prepare pnpm@9 --activate
+          # --frozen-lockfile (was --no-frozen-lockfile): the committed
+          # pnpm-lock.yaml is the source of truth for frontend versions. The old
+          # flag let production silently resolve packages CI never tested — the
+          # same drift the backend had. Verified to install cleanly against the
+          # committed lockfile.
+          pnpm install --frozen-lockfile
+          touch /app/.ready
+        fi
+        corepack enable
+        corepack prepare pnpm@9 --activate
+        exec pnpm dev --host 0.0.0.0 --port 5173
     ports:
       - "8095:5173"
     depends_on:
