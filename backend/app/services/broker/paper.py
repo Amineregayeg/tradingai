@@ -188,6 +188,13 @@ class PaperBroker(BrokerAdapter):
         logger.info(f"PaperBroker FILL {pos.pair} {pos.direction.value} {pos.units}@{fill} sl={pos.sl} tp={pos.tp}")
         return rec
 
+    async def reference_price(self, pair: str) -> float | None:
+        """The mark a MARKET order fills at here — see place_order's `fill`."""
+        try:
+            return float(self._price(pair))
+        except Exception:  # noqa: BLE001 - no mark yet is "unknown", not fatal
+            return None
+
     async def close_position(self, position_id: str, lot_size: float | None = None) -> dict:
         pos = self._positions.get(position_id)
         if not pos:

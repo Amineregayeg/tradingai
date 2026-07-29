@@ -115,6 +115,21 @@ class DecisionRecord(Base):
     signal_tp: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
     sized_units: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
 
+    #: The price the order ACTUALLY filled at, as reported by the broker.
+    #:
+    #: `signal_entry` is what the strategy asked for; this is what it got. They
+    #: differ on every market order, and the difference is the whole reason this
+    #: column exists: R computed against `signal_entry` measures performance
+    #: against a price that was never paid.
+    #:
+    #: It also un-blocks the feedback loop's Rule B, which targets adverse fill
+    #: slippage and has been dormant since it was written — `_slippage_r()` looks
+    #: for exactly this value and, finding nothing, returned None every time.
+    #:
+    #: Nullable: rows written before this column existed have no fill price, and
+    #: readers fall back to `signal_entry` rather than discarding the row.
+    fill_price: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
+
     # Expected vs realized (feedback loop inputs) --------------------------
     expected_r: Mapped[Decimal | None] = mapped_column(Numeric(12, 4), nullable=True)
     realized_r: Mapped[Decimal | None] = mapped_column(Numeric(12, 4), nullable=True)

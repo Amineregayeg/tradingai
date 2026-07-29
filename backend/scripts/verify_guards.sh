@@ -27,7 +27,9 @@ cd "$(dirname "$0")/.." || exit 1   # -> backend/
 
 ENGINE="app/services/backtest/engine.py"
 DOMINANCE="app/services/market_data/sources/dominance.py"
-GUARDED_FILES=("$ENGINE" "$DOMINANCE")
+EXECUTION="app/services/execution/service.py"
+RESOLVE="app/services/live/crypto_loop.py"
+GUARDED_FILES=("$ENGINE" "$DOMINANCE" "$EXECUTION" "$RESOLVE")
 FAILED=0
 
 if ! git rev-parse --git-dir >/dev/null 2>&1; then
@@ -119,6 +121,24 @@ probe "dominance gaps stay gaps" "$DOMINANCE" \
       's/bars = bars.dropna(how="all")/bars = bars.ffill()/' \
       "tests/unit/test_dominance_source.py" \
       "flat synthetic candles across a collector outage, which read as real structure"
+
+# risk_pct is pre-registered and frozen so that risk is a CONSTANT. Sizing a
+# market order from a price it will not fill at turns it back into a variable
+# that nothing measures, which is a Tier-0 problem wearing execution clothes.
+probe "market orders sized from the real fill price" "$EXECUTION" \
+      's/            sizing_price = mark/            sizing_price = sig.entry/' \
+      "tests/unit/test_execution_fill_sizing.py" \
+      "risking more or less than risk_pct depending on which way price drifted before the order"
+
+probe "entry refused once price is through the stop" "$EXECUTION" \
+      's/            if (long and mark <= sig.sl) or (not long and mark >= sig.sl):/            if False:/' \
+      "tests/unit/test_execution_fill_sizing.py" \
+      "opening a position already beyond its own stop — a guaranteed instant loss"
+
+probe "realized R measured against the fill, not the ask" "$RESOLVE" \
+      's/                entry = float(fill if fill is not None else (rec.signal_entry or 0))/                entry = float(rec.signal_entry or 0)/' \
+      "tests/integration/test_settle_persist_resolve_adv.py" \
+      "every R (and every gap_r the feedback loop reads) being off by the fill drift"
 
 echo "-------------------------------------------------------------------"
 

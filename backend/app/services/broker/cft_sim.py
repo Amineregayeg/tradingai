@@ -341,6 +341,14 @@ class SimPropFirmBroker(BrokerAdapter):
     # ------------------------------------------------------------------
     # Order management
     # ------------------------------------------------------------------
+    async def reference_price(self, pair: str) -> float | None:
+        """The mark a MARKET order fills at here — see place_order's `fill`."""
+        try:
+            px = await self._fetch_price(pair)
+            return float(px) if px else None
+        except Exception:  # noqa: BLE001 - unknown price, not a crash
+            return None
+
     async def place_order(self, request: OrderRequest) -> dict:
         if request.lot_size <= 0:
             raise ValueError("lot_size must be > 0")

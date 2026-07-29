@@ -1,11 +1,19 @@
-"""Migration 0002 must match the DecisionRecord ORM model exactly.
+"""The migration CHAIN must produce exactly the DecisionRecord ORM model.
 
 The SQLite test DB is built from ORM metadata, so a migration that diverges from
 the model would never fail those tests — it would only blow up on the real
-Postgres deploy. This test drives the migration's ``upgrade()`` through a
-recording shim and asserts its columns and CHECK constraints equal the model's,
-so drift (an earlier draft shipped an outcome CHECK missing ABSTAINED and no
-cohort CHECK) is caught here instead.
+Postgres deploy, at container boot, with the API down.
+
+This drives each migration's ``upgrade()`` through a recording shim and replays
+their DDL intent in order, then asserts the resulting columns and CHECK
+constraints equal the model's. Drift is caught here instead (an earlier draft
+shipped an outcome CHECK missing ABSTAINED and no cohort CHECK).
+
+It walks the whole chain rather than a single revision on purpose: when 0003
+added ``fill_price``, a version of this test that only inspected 0002 failed —
+correctly, but for the wrong reason. It would have been "fixed" by pinning it to
+the newest migration, which quietly narrows the guard to one file and lets any
+column added by an *earlier* revision drift unnoticed.
 """
 from __future__ import annotations
 
@@ -16,69 +24,118 @@ import sqlalchemy as sa
 
 from app.models.decision_record import DecisionRecord
 
-_MIG = Path(__file__).resolve().parents[2] / "alembic" / "versions" / "0002_decision_records.py"
+_VERSIONS = Path(__file__).resolve().parents[2] / "alembic" / "versions"
+
+#: Every migration touching decision_records, in apply order.
+_CHAIN = [
+    ("0002", "0002_decision_records.py", "0001"),
+    ("0003", "0003_decision_fill_price.py", "0002"),
+]
 
 
-def _load_migration():
-    spec = importlib.util.spec_from_file_location("m0002", _MIG)
+def _load(filename: str):
+    path = _VERSIONS / filename
+    spec = importlib.util.spec_from_file_location(f"mig_{path.stem}", path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
 
 
 class _RecordingOp:
-    """Captures create_table so we can inspect the migration's DDL intent."""
+    """Captures DDL intent instead of executing it."""
 
     def __init__(self):
-        self.table = None
-        self.indexes = []
+        self.table_name: str | None = None
+        self.columns: dict[str, sa.Column] = {}
+        self.checks: dict[str, sa.CheckConstraint] = {}
+        self.indexes: list[tuple] = []
 
     def create_table(self, name, *cols):
-        self.table = (name, cols)
+        self.table_name = name
+        for c in cols:
+            if isinstance(c, sa.Column):
+                self.columns[c.name] = c
+            elif isinstance(c, sa.CheckConstraint):
+                self.checks[c.name] = c
+
+    def add_column(self, table, col):
+        assert table == self.table_name, f"add_column on unexpected table {table}"
+        self.columns[col.name] = col
+
+    def drop_column(self, table, name):
+        self.columns.pop(name, None)
 
     def create_index(self, name, table, cols):
         self.indexes.append((name, table, tuple(cols)))
 
+    def get_bind(self):  # pragma: no cover - migrations under test never use it
+        raise AssertionError("the recording shim has no real connection")
 
-def _captured_upgrade():
-    mod = _load_migration()
+
+def _replay_chain() -> _RecordingOp:
+    """Apply every migration's upgrade() in order against the shim."""
     rec = _RecordingOp()
-    orig = mod.op
-    mod.op = rec
-    try:
-        mod.upgrade()
-    finally:
-        mod.op = orig
+    for _rev, filename, _down in _CHAIN:
+        mod = _load(filename)
+        orig_op = mod.op
+        mod.op = rec
+        # Migrations added after 0002 guard themselves with a live-schema check
+        # (`_has_column`) so a bootstrapped DB can be upgraded safely. That needs
+        # a real connection; here we assert the DDL INTENT, so force the guard to
+        # report "not present yet" and let the DDL through.
+        orig_has = getattr(mod, "_has_column", None)
+        if orig_has is not None:
+            mod._has_column = lambda: False
+        try:
+            mod.upgrade()
+        finally:
+            mod.op = orig_op
+            if orig_has is not None:
+                mod._has_column = orig_has
     return rec
 
 
-def test_revision_chain():
-    mod = _load_migration()
-    assert mod.revision == "0002"
-    assert mod.down_revision == "0001"
+def test_revision_chain_is_linear_and_complete():
+    for rev, filename, down in _CHAIN:
+        mod = _load(filename)
+        assert mod.revision == rev, f"{filename} declares revision {mod.revision}"
+        assert mod.down_revision == down, f"{filename} declares down_revision {mod.down_revision}"
 
 
 def test_migration_columns_match_model():
-    rec = _captured_upgrade()
-    assert rec.table is not None and rec.table[0] == "decision_records"
-    mig_cols = {c.name for c in rec.table[1] if isinstance(c, sa.Column)}
+    rec = _replay_chain()
+    assert rec.table_name == "decision_records"
     model_cols = {c.name for c in DecisionRecord.__table__.columns}
-    assert mig_cols == model_cols, f"drift: migration-only={mig_cols - model_cols}, model-only={model_cols - mig_cols}"
+    mig_cols = set(rec.columns)
+    assert mig_cols == model_cols, (
+        f"drift: migration-only={mig_cols - model_cols}, model-only={model_cols - mig_cols}"
+    )
+
+
+def test_fill_price_is_in_the_chain():
+    """Explicit, because this column is what makes R measurable against reality.
+
+    Without it, realized_r is computed against `signal_entry` — the price the
+    strategy asked for rather than the one it paid — and the feedback loop's
+    slippage rule has nothing to read.
+    """
+    rec = _replay_chain()
+    assert "fill_price" in rec.columns
+    assert rec.columns["fill_price"].nullable is True, (
+        "fill_price must be nullable: rows written before it existed have no "
+        "recoverable fill, and backfilling one would fabricate zero slippage"
+    )
 
 
 def test_migration_check_constraints_match_model():
-    rec = _captured_upgrade()
-    mig_checks = {
-        c.name for c in rec.table[1] if isinstance(c, sa.CheckConstraint)
-    }
+    rec = _replay_chain()
     model_checks = {
         c.name
         for c in DecisionRecord.__table__.constraints
         if isinstance(c, sa.CheckConstraint)
     }
-    assert mig_checks == model_checks
-    # the three enum-like columns must all be guarded
-    assert mig_checks == {
+    assert set(rec.checks) == model_checks
+    assert set(rec.checks) == {
         "ck_decision_records_signal_dir",
         "ck_decision_records_outcome",
         "ck_decision_records_cohort",
@@ -88,9 +145,26 @@ def test_migration_check_constraints_match_model():
 def test_outcome_vocab_includes_abstained():
     # ABSTAINED is the whole reason this table exists (it records no-trade
     # decisions too) — guard against a future edit dropping it.
-    rec = _captured_upgrade()
-    outcome_check = next(
-        c for c in rec.table[1]
-        if isinstance(c, sa.CheckConstraint) and c.name == "ck_decision_records_outcome"
-    )
-    assert "ABSTAINED" in str(outcome_check.sqltext)
+    rec = _replay_chain()
+    assert "ABSTAINED" in str(rec.checks["ck_decision_records_outcome"].sqltext)
+
+
+def test_fill_price_migration_is_idempotent():
+    """upgrade() must no-op when the column already exists.
+
+    deploy_migrate.py can bootstrap a fresh DB from offline SQL and then run
+    `alembic upgrade head` over it, so a migration can meet a schema that already
+    contains its target. Adding it twice aborts the upgrade and takes the API
+    container down on boot.
+    """
+    mod = _load("0003_decision_fill_price.py")
+    rec = _RecordingOp()
+    rec.table_name = "decision_records"
+    orig_op, orig_has = mod.op, mod._has_column
+    mod.op = rec
+    mod._has_column = lambda: True          # pretend it is already there
+    try:
+        mod.upgrade()
+    finally:
+        mod.op, mod._has_column = orig_op, orig_has
+    assert "fill_price" not in rec.columns, "upgrade() re-added an existing column"

@@ -329,9 +329,18 @@ class LiveCryptoLoop:
             raw = str(len(entry_df))
         return hashlib.sha1(raw.encode()).hexdigest()[:16]
 
-    async def _record_signal_decision(self, pair: str, entry_df, sig, sized_units: float) -> None:
+    async def _record_signal_decision(
+        self, pair: str, entry_df, sig, sized_units: float, fill_price: float | None = None
+    ) -> None:
         """Persist a DecisionRecord for a taken signal (outcome OPEN), and remember
-        its id so the eventual close can fill realized_r / gap_r / outcome."""
+        its id so the eventual close can fill realized_r / gap_r / outcome.
+
+        `fill_price` is what the broker actually paid. expected_r is computed from
+        it rather than from `sig.entry`, because expected_r is the RR of the
+        position that EXISTS, not of the one the strategy drew on the chart. With
+        a market order those differ every time, and the gap between them used to
+        be silently absorbed into the "expected" side of expected-vs-realized —
+        the one measurement this whole feedback loop is built on."""
         try:
             from decimal import Decimal
 
@@ -341,7 +350,11 @@ class LiveCryptoLoop:
             )
             entry = float(sig.entry); sl = float(sig.sl)
             tp = float(sig.tp) if sig.tp is not None else None
-            expected_r = abs(tp - entry) / abs(entry - sl) if (tp is not None and entry != sl) else None
+            fill = float(fill_price) if fill_price is not None else None
+            # Basis for the RR we actually committed to: the real fill when we
+            # have one, the signal price only as a fallback.
+            basis = fill if fill is not None else entry
+            expected_r = abs(tp - basis) / abs(basis - sl) if (tp is not None and basis != sl) else None
             rec = DecisionRecord(
                 symbol=pair, timeframe=self.entry_tf,
                 inputs_hash=self._inputs_hash(entry_df), code_path_hash=self._code_path_hash(),
@@ -350,6 +363,7 @@ class LiveCryptoLoop:
                 signal_entry=Decimal(str(round(entry, 6))),
                 signal_sl=Decimal(str(round(sl, 6))),
                 signal_tp=Decimal(str(round(tp, 6))) if tp is not None else None,
+                fill_price=Decimal(str(round(fill, 6))) if fill is not None else None,
                 sized_units=Decimal(str(round(float(sized_units), 6))),
                 expected_r=Decimal(str(round(expected_r, 4))) if expected_r is not None else None,
                 outcome=OUTCOME_OPEN, cohort=COHORT_PAPER,
@@ -385,7 +399,15 @@ class LiveCryptoLoop:
                     select(DecisionRecord).where(DecisionRecord.id == dec_id))).scalar_one_or_none()
                 if rec is None:
                     return
-                entry = float(rec.signal_entry or 0); sl = float(rec.signal_sl or 0)
+                # Measure against the price PAID, not the price asked for. Using
+                # signal_entry here divided pnl by a dollar risk the account
+                # never actually had, so realized_r was systematically wrong by
+                # the fill drift — and gap_r, the feedback loop's core input,
+                # inherited that error. Falls back to signal_entry for rows
+                # written before fill_price was recorded.
+                fill = rec.fill_price
+                entry = float(fill if fill is not None else (rec.signal_entry or 0))
+                sl = float(rec.signal_sl or 0)
                 units = float(rec.sized_units or 0)
                 risk_dollars = abs(entry - sl) * units
                 realized_r = (pnl / risk_dollars) if risk_dollars > 0 else None
@@ -488,7 +510,9 @@ class LiveCryptoLoop:
         res = await self.execution.execute(sig)
         if res.get("status") == "FILLED":
             logger.info("Live paper entry", pair=pair, dir=sig.direction.value, fill=res.get("fill"))
-            await self._record_signal_decision(pair, entry, sig, res.get("sized_units", 0))
+            await self._record_signal_decision(
+                pair, entry, sig, res.get("sized_units", 0), fill_price=res.get("fill")
+            )
             await ws_manager.push_position_open(res)
             await self._act(
                 "entry",

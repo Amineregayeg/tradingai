@@ -50,10 +50,27 @@ def size_position(equity: float, risk_pct: float, entry: float, sl: float) -> fl
     return (equity * risk_pct) / risk_per_unit
 
 
+#: Reject a market entry once the market has drifted this far from the price the
+#: strategy named, measured in R (drift / intended stop distance).
+#:
+#: The strategy picks an entry at a structural level (an FVG edge). By the time
+#: the bar closes and the order goes in, the market has moved. A small drift is
+#: ordinary slippage and is now sized for correctly. A LARGE drift means the
+#: setup being filled is not the setup that was analysed — the reward-to-risk has
+#: materially changed — and taking it anyway is closer to chasing than trading.
+DEFAULT_MAX_ENTRY_DRIFT_R = 0.25
+
+
 class ExecutionService:
-    def __init__(self, broker: BrokerAdapter, mode: ExecMode = ExecMode.PAPER) -> None:
+    def __init__(
+        self,
+        broker: BrokerAdapter,
+        mode: ExecMode = ExecMode.PAPER,
+        max_entry_drift_r: float = DEFAULT_MAX_ENTRY_DRIFT_R,
+    ) -> None:
         self.broker = broker
         self.mode = mode
+        self.max_entry_drift_r = max_entry_drift_r
 
     async def execute(self, sig: Signal) -> dict:
         # HARD SAFETY: this service only ever runs against a simulation broker.
@@ -66,13 +83,62 @@ class ExecutionService:
             )
 
         acct = await self.broker.get_account()
-        units = size_position(acct.equity, sig.risk_pct, sig.entry, sig.sl)
+
+        # ------------------------------------------------------------------
+        # SIZE FROM THE PRICE THIS ORDER WILL ACTUALLY FILL AT.
+        #
+        # This used to size from `sig.entry` — the FVG edge the strategy named —
+        # and then send a MARKET order, which fills at the mark. Whenever the two
+        # differed (they almost always do), the position's real risk was not
+        # risk_pct: it was risk_pct * |sig.entry - sl| / |fill - sl|. The account
+        # silently took more or less than 1% depending on which way the market
+        # had drifted, and every R recorded afterwards was measured against a
+        # price that was never paid.
+        #
+        # `risk_pct` is pre-registered and fixed precisely so that risk is a
+        # constant. Sizing off a hypothetical price made it a variable.
+        # ------------------------------------------------------------------
+        sizing_price = sig.entry
+        drift_r: float | None = None
+
+        if sig.order_type == OrderType.MARKET:
+            mark = await self.broker.reference_price(sig.symbol)
+            if mark is None or mark <= 0:
+                # Abstain rather than size off a price we know we will not get.
+                return {"status": "rejected",
+                        "reason": "no reference price available; refusing to size a market order"}
+
+            intended_risk = abs(sig.entry - sig.sl)
+            if intended_risk <= 0:
+                return {"status": "rejected", "reason": "non-positive size / stop"}
+
+            drift_r = abs(mark - sig.entry) / intended_risk
+            if drift_r > self.max_entry_drift_r:
+                return {"status": "rejected",
+                        "reason": (f"price moved {drift_r:.2f}R from the signal entry "
+                                   f"({sig.entry:.2f} -> {mark:.2f}); "
+                                   f"limit {self.max_entry_drift_r:.2f}R")}
+
+            # The mark can drift past the stop entirely. Sizing would "succeed"
+            # (the distance is still non-zero) and open a position that is
+            # already beyond its own stop — a guaranteed instant loss, and on the
+            # wrong side, so the trade thesis is dead regardless of distance.
+            long = sig.direction == DirectionType.LONG
+            if (long and mark <= sig.sl) or (not long and mark >= sig.sl):
+                return {"status": "rejected",
+                        "reason": (f"market {mark:.2f} is already through the stop {sig.sl:.2f}; "
+                                   "the setup is invalidated")}
+
+            sizing_price = mark
+
+        units = size_position(acct.equity, sig.risk_pct, sizing_price, sig.sl)
         if units <= 0:
             return {"status": "rejected", "reason": "non-positive size / stop"}
 
         if self.mode == ExecMode.OBSERVE:
             return {"status": "observed", "would_size": round(units, 6),
-                    "symbol": sig.symbol, "direction": sig.direction.value}
+                    "symbol": sig.symbol, "direction": sig.direction.value,
+                    "sizing_price": sizing_price, "entry_drift_r": drift_r}
 
         req = OrderRequest(
             pair=sig.symbol, direction=sig.direction, order_type=sig.order_type,
@@ -86,6 +152,18 @@ class ExecutionService:
         res["mode"] = self.mode.value
         res["sized_units"] = round(units, 8)
         res["equity_at_entry"] = acct.equity
+        # What we sized against, and how far the market had already moved. Both
+        # are recorded on the DecisionRecord so R can be measured against the
+        # price actually paid rather than the one the strategy hoped for.
+        res["sizing_price"] = sizing_price
+        res["entry_drift_r"] = drift_r
+        # The broker reports the true fill. It should equal sizing_price for
+        # these in-process sims, but trust the broker's number, not our estimate.
+        fill = res.get("fill")
+        if fill is not None:
+            res["realized_risk_per_unit"] = abs(float(fill) - sig.sl)
         logger.info(f"ExecutionService[{self.mode.value}] {sig.symbol} {sig.direction.value} "
-                    f"units={units:.6f} -> {res.get('status')}")
+                    f"units={units:.6f} sized@{sizing_price:.2f} "
+                    f"drift={drift_r if drift_r is None else round(drift_r, 3)}R "
+                    f"-> {res.get('status')}")
         return res

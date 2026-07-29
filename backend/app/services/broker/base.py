@@ -165,3 +165,21 @@ class BrokerAdapter(ABC):
             callback: Async or sync callable called with each price tick dict.
         """
         ...
+
+    # ------------------------------------------------------------------
+    async def reference_price(self, pair: str) -> float | None:
+        """Price a MARKET order would fill at right now, or None if unknown.
+
+        Deliberately NOT abstract. Adding an abstract method here would make
+        every existing adapter un-instantiable, and the ``is_simulation``
+        contract already uses that lever for the one property worth enforcing
+        that way. Returning None is a safe default: ``ExecutionService`` refuses
+        to size a market order without a reference price rather than guessing.
+
+        Why this exists: a market order does not fill at the price the strategy
+        named, it fills at the market. Sizing off the strategy's intended price
+        makes the position's real risk differ from the configured risk_pct by
+        however far the market has moved — silently, and in whichever direction
+        the market happened to go.
+        """
+        return None

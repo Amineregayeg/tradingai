@@ -41,6 +41,10 @@ def _serialize_decision(r) -> dict:
         "signal_entry": _num(r.signal_entry),
         "signal_sl": _num(r.signal_sl),
         "signal_tp": _num(r.signal_tp),
+        # feedback._slippage_r() reads "fill_price" and, until this column
+        # existed, found nothing on every row — which is why Rule B (adverse
+        # fill slippage -> min_fvg_atr) has never once fired.
+        "fill_price": _num(r.fill_price),
         "sized_units": _num(r.sized_units),
         "expected_r": _num(r.expected_r),
         "realized_r": _num(r.realized_r),
