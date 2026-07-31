@@ -3,6 +3,41 @@ import { useSettingsStore } from '@/stores/settingsStore'
 import { api } from '@/services/api'
 import type { Settings, BrokerConnection, BrokerConnectRequest } from '@/types/api'
 
+/**
+ * What the BACKEND can actually construct — see broker/manager.py::_make_adapter.
+ *
+ * This form used to offer four brokers and two environments. Three of those
+ * brokers (OANDA, Alpaca, MetaAPI) do not exist in _make_adapter and raise
+ * "Unsupported broker"; the OANDA adapter was deliberately removed as the only
+ * unguarded real-money path. And CryptoFundTrader has exactly one environment —
+ * CFT_BASE_URLS is {"live": ...} — so "Practice" raised "no 'practice'
+ * environment" every time.
+ *
+ * Worse, the form DEFAULTED to oanda + practice, so the out-of-the-box state was
+ * a guaranteed failure, and each failure surfaced as an opaque 500. Offering a
+ * choice that cannot work is not a neutral extra option: it sends the user
+ * hunting for a mistake they did not make.
+ *
+ * Keep this in step with _make_adapter. Adding an adapter there means adding it
+ * here; the reverse is not true and must never be — a broker listed here that
+ * the backend cannot build is exactly the bug this replaced.
+ *
+ * NOTE ON "live": it selects CFT's only HOST, not real-money trading. A
+ * challenge account is fake money on that same host. Order placement is gated
+ * separately by observe_only and the server-side ALLOW_LIVE_TRADING flag.
+ */
+const BROKER_CAPABILITIES = {
+  cryptofundtrader: {
+    label: 'Crypto Fund Trader',
+    environments: [{ value: 'live', label: 'Live' }],
+    envNote: 'CFT runs a single host. A challenge account is simulated funds on it.',
+  },
+} as const
+
+type SupportedBroker = keyof typeof BROKER_CAPABILITIES
+
+const SUPPORTED_BROKERS = Object.keys(BROKER_CAPABILITIES) as SupportedBroker[]
+
 // Section wrapper
 function Section({ title, description, children }: { title: string; description?: string; children: React.ReactNode }) {
   return (
@@ -74,10 +109,13 @@ export default function SettingsPage() {
   const [brokers, setBrokers] = useState<BrokerConnection[]>([])
   const [showAddBroker, setShowAddBroker] = useState(false)
   const [brokerForm, setBrokerForm] = useState<BrokerConnectRequest>({
-    broker: 'oanda',
+    // Defaults must be a combination that CAN succeed — see BROKER_CAPABILITIES.
+    // These were previously 'oanda' + 'practice', neither of which the backend
+    // supports, so an untouched form failed on submit.
+    broker: 'cryptofundtrader',
     api_key: '',
     account_id: '',
-    environment: 'practice',
+    environment: 'live',
     observe_only: true,
   })
   const [connectLoading, setConnectLoading] = useState(false)
@@ -216,10 +254,9 @@ export default function SettingsPage() {
                       onChange={(e) => setBrokerForm((f) => ({ ...f, broker: e.target.value as BrokerConnectRequest['broker'] }))}
                       style={{ width: '100%' }}
                     >
-                      <option value="oanda">OANDA</option>
-                      <option value="cryptofundtrader">Crypto Fund Trader</option>
-                      <option value="alpaca">Alpaca</option>
-                      <option value="metaapi">MetaAPI</option>
+                      {SUPPORTED_BROKERS.map((b) => (
+                        <option key={b} value={b}>{BROKER_CAPABILITIES[b].label}</option>
+                      ))}
                     </select>
                   </div>
 
@@ -256,15 +293,24 @@ export default function SettingsPage() {
                           style={{ width: '100%' }}
                         />
                       </div>
+                      {/* The old placeholder was "https://<host>/mtr-api/<system-uuid>",
+                          wrong twice over: the adapter appends /mtr-api/{uuid}
+                          itself (following it produced
+                          .../mtr-api/x/mtr-api/x/balance — a 404 on every
+                          request), and the uuid is DISCOVERED from the login
+                          response, never typed. Host only; blank = default. */}
                       <div style={{ marginBottom: 14 }}>
                         <label style={{ fontSize: 12, color: '#8888a0', display: 'block', marginBottom: 5 }}>API Base URL</label>
                         <input
                           type="text"
-                          placeholder="https://<host>/mtr-api/<system-uuid>"
+                          placeholder="https://trading.cryptofundtrader.com (leave blank for default)"
                           value={brokerForm.server ?? ''}
                           onChange={(e) => setBrokerForm((f) => ({ ...f, server: e.target.value }))}
                           style={{ width: '100%' }}
                         />
+                        <div style={{ fontSize: 11, color: '#55556a', marginTop: 4 }}>
+                          Host only — the rest of the path is added automatically.
+                        </div>
                       </div>
                       <div style={{ marginBottom: 14 }}>
                         <label style={{ fontSize: 12, color: '#8888a0', display: 'block', marginBottom: 5 }}>Account ID (optional)</label>
@@ -310,17 +356,38 @@ export default function SettingsPage() {
                     </>
                   )}
 
-                  <div style={{ marginBottom: 14 }}>
-                    <label style={{ fontSize: 12, color: '#8888a0', display: 'block', marginBottom: 5 }}>Environment</label>
-                    <select
-                      value={brokerForm.environment}
-                      onChange={(e) => setBrokerForm((f) => ({ ...f, environment: e.target.value as BrokerConnectRequest['environment'] }))}
-                      style={{ width: '100%' }}
-                    >
-                      <option value="practice">Practice</option>
-                      <option value="live">Live</option>
-                    </select>
-                  </div>
+                  {(() => {
+                    const caps = BROKER_CAPABILITIES[brokerForm.broker as SupportedBroker]
+                    if (!caps) return null
+                    // A single-environment broker gets a label, not a dropdown: a
+                    // "choice" with one option is noise, and offering the others
+                    // guarantees a failure (that was the "Practice" bug).
+                    return (
+                      <div style={{ marginBottom: 14 }}>
+                        <label style={{ fontSize: 12, color: '#8888a0', display: 'block', marginBottom: 5 }}>Environment</label>
+                        {caps.environments.length > 1 ? (
+                          <select
+                            value={brokerForm.environment}
+                            onChange={(e) => setBrokerForm((f) => ({ ...f, environment: e.target.value as BrokerConnectRequest['environment'] }))}
+                            style={{ width: '100%' }}
+                          >
+                            {caps.environments.map((env) => (
+                              <option key={env.value} value={env.value}>{env.label}</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <div style={{ fontSize: 12, color: '#e8e8ef', padding: '6px 0' }}>
+                            {caps.environments[0].label}
+                          </div>
+                        )}
+                        {caps.envNote && (
+                          <div style={{ fontSize: 11, color: '#55556a', marginTop: 4, lineHeight: 1.45 }}>
+                            {caps.envNote}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })()}
 
                   {connectError && (
                     <div style={{ fontSize: 12, color: '#ff3b5c', marginBottom: 12, padding: '8px 12px', background: '#ff3b5c15', borderRadius: 6 }}>

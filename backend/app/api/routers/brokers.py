@@ -54,6 +54,17 @@ async def create_broker_connection(
         ) from exc
     except BrokerError as exc:
         raise HTTPException(status_code=400, detail=exc.detail) from exc
+    except ValueError as exc:
+        # Configuration the adapter refuses: an unsupported broker, or an
+        # environment a broker does not have (CFT is live-only). These carry a
+        # precise, actionable message — "CryptoFundTrader has no 'practice'
+        # environment" — but ValueError was uncaught, so it fell through to the
+        # generic 500 handler and the user saw "An unexpected error occurred.
+        # Please try again later." That is worse than unhelpful: it hides a
+        # perfect explanation AND advises retrying, which can never work.
+        # 400, because the request is invalid, not the server broken.
+        logger.warning("Broker connection rejected", broker=payload.broker, error=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     # Run initial reconciliation in background (best-effort)
     adapter = broker_manager.get_adapter_by_connection_id(str(conn.id))
@@ -128,6 +139,12 @@ async def reconnect_broker(
         ) from exc
     except BrokerError as exc:
         raise HTTPException(status_code=400, detail=exc.detail) from exc
+    except ValueError as exc:
+        # Same reasoning as create_broker_connection. This path matters more than
+        # it looks: a connection stored with an environment the adapter no longer
+        # accepts can only be rebuilt here, and a bare 500 would give no clue why.
+        logger.warning("Broker reconnect rejected", connection_id=connection_id, error=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     # Reconcile after reconnect
     adapter = broker_manager.get_adapter_by_connection_id(connection_id)

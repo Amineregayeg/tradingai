@@ -118,7 +118,11 @@ button {
 }
 
 /* ─── Dark form elements (global override of browser defaults) ─────────────── */
-input,
+
+/* :not(checkbox/radio) matters — see the checkbox block below. This rule sets
+   `appearance: none`, which on a checkbox deletes the tick the browser draws and
+   leaves nothing in its place: checked and unchecked render identically. */
+input:not([type="checkbox"]):not([type="radio"]),
 select,
 textarea {
   background: #12121a;
@@ -134,7 +138,7 @@ textarea {
   -webkit-appearance: none;
 }
 
-input:focus,
+input:not([type="checkbox"]):not([type="radio"]):focus,
 select:focus,
 textarea:focus {
   border-color: #a78bfa;
@@ -144,6 +148,44 @@ textarea:focus {
 input::placeholder,
 textarea::placeholder {
   color: #3a3a50;
+}
+
+/* ─── Checkboxes and radios ────────────────────────────────────────────────────
+   These were previously swept up by the rule above, so `appearance: none`
+   stripped the native tick and nothing replaced it. Every checkbox in the app
+   rendered as an identical grey pill whether checked or not — the click
+   registered, the state changed, and the user saw nothing.
+
+   That is a safety problem here, not a cosmetic one: one of these two
+   checkboxes is "Observe-only (no automated orders)". A control that arms or
+   disarms automated trading MUST show its state unambiguously.
+
+   `accent-color` keeps the native widget (correct semantics, keyboard, a11y)
+   and just recolours it; the explicit size/border makes it clearly visible on
+   the dark background. */
+input[type="checkbox"],
+input[type="radio"] {
+  appearance: auto;
+  -webkit-appearance: auto;
+  accent-color: #a78bfa;
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;      /* never let flex layouts squash it to nothing */
+  margin: 0;
+  cursor: pointer;
+  color-scheme: dark;  /* dark-appropriate unchecked box in Chrome/Safari */
+}
+
+input[type="checkbox"]:focus-visible,
+input[type="radio"]:focus-visible {
+  outline: 2px solid #a78bfa;
+  outline-offset: 2px;
+}
+
+input[type="checkbox"]:disabled,
+input[type="radio"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 input[type="date"],
