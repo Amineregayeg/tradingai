@@ -7,6 +7,7 @@ import type {
   Analysis,
   AuditEvent,
   BrokerConnectRequest,
+  BrokerAccount,
   BrokerConnection,
   HealthStatus,
   ICTDetection,
@@ -146,6 +147,15 @@ export const api = {
   brokers: {
     // GET /api/brokers — list all connections
     list: () => request<BrokerConnection[]>('GET', '/brokers'),
+    /**
+     * GET /api/brokers/accounts — live balance/equity per connected broker.
+     *
+     * Distinct from list(): that returns what is CONFIGURED, this returns what
+     * is actually reachable right now. A broker can be configured and connected
+     * in the database while its transport is down, and the two must not be
+     * conflated — `reachable` is the honest signal.
+     */
+    accounts: () => request<BrokerAccount[]>('GET', '/brokers/accounts'),
     // alias kept for backward compat in components
     status: () => request<BrokerConnection[]>('GET', '/brokers'),
     // POST /api/brokers — create/connect

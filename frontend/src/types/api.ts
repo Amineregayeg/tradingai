@@ -208,6 +208,45 @@ export interface BrokerConnection {
   created_at: string
 }
 
+/**
+ * Live account state for one connected broker (GET /api/brokers/accounts).
+ *
+ * `reachable` is the load-bearing field. A broker can be marked connected in
+ * the database while its transport is down, so `account` is null whenever we
+ * could not actually read it — never a cached or last-known figure. A stale
+ * balance shown as current is the exact class of dishonesty this project was
+ * rebuilt to remove.
+ */
+export interface BrokerAccount {
+  connection_id: string
+  broker: BrokerName
+  is_simulation: boolean
+  /** False means this connection is permitted to place orders. */
+  observe_only: boolean
+  reachable: boolean
+  error: string | null
+  account: {
+    account_id: string
+    currency: string
+    balance: number
+    equity: number
+    unrealized_pl: number
+    margin_used: number
+    margin_available: number
+    open_trade_count: number
+  } | null
+  /** Transport health, where the adapter reports it (e.g. the CFT browser bridge). */
+  transport?: {
+    reachable: boolean
+    logged_in?: boolean
+    session_age_s?: number | null
+    logins?: number
+    calls?: number
+    last_error?: string | null
+    error?: string
+  }
+}
+
 export interface BrokerConnectRequest {
   broker: BrokerName
   label?: string

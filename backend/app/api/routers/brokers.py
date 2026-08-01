@@ -17,6 +17,27 @@ from app.services.broker.reconciler import reconcile_positions
 router = APIRouter(prefix="/brokers", tags=["brokers"])
 
 
+@router.get("/accounts")
+async def list_broker_accounts(user_id: CurrentUser) -> list[dict]:
+    """Live balance / equity / positions for every connected broker.
+
+    This is what makes a connected account *visible*: until now the platform
+    could reach CFT but nothing displayed it, so "connected" was a claim with
+    nothing behind it.
+
+    Two deliberate properties:
+
+    * An unreachable broker still appears, with ``reachable: false`` and the
+      reason. Dropping it would read as "no such account"; showing a cached
+      number would be worse still — a stale balance presented as current is the
+      class of dishonesty this project exists to have stopped.
+    * It never 500s. One broker being down must not blank the panel for the
+      others, and a status endpoint that fails when things are failing is
+      useless exactly when it is needed.
+    """
+    return await broker_manager.get_all_accounts()
+
+
 @router.get("", response_model=list[BrokerConnectionRead])
 async def list_broker_connections(
     db: DBSession,

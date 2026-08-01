@@ -343,6 +343,67 @@ class BrokerManager:
                 )
         return all_positions
 
+    async def get_all_accounts(self) -> list[dict]:
+        """Account summary + reachability for every connected adapter.
+
+        One entry per adapter, ALWAYS — a broker that cannot be reached returns
+        ``reachable: False`` with the reason rather than being omitted. A
+        disappearing row reads as "no such account"; a row that says "cannot
+        reach this account right now" is the truth, and it is the difference
+        between a dashboard you can trust and one you cannot.
+
+        Never raises. This feeds a status surface, and a status endpoint that
+        500s when one broker is down tells you nothing about the others.
+        """
+        out: list[dict] = []
+        for connection_id, adapter in self._adapters.items():
+            entry: dict = {
+                "connection_id": connection_id,
+                "broker": adapter.broker_name,
+                "is_simulation": bool(getattr(adapter, "is_simulation", False)),
+                # Whether this connection may place orders at all. Surfacing it
+                # here means the UI can show, at a glance, that a real-money
+                # broker is attached in read-only mode.
+                "observe_only": bool(getattr(adapter, "observe_only", True)),
+                "reachable": False,
+                "account": None,
+                "error": None,
+            }
+            try:
+                acct = await adapter.get_account()
+                entry["reachable"] = True
+                entry["account"] = {
+                    "account_id": acct.account_id,
+                    "currency": acct.currency,
+                    "balance": float(acct.balance),
+                    "equity": float(acct.equity),
+                    "unrealized_pl": float(acct.unrealized_pl),
+                    "margin_used": float(acct.margin_used),
+                    "margin_available": float(acct.margin_available),
+                    "open_trade_count": int(acct.open_trade_count),
+                }
+            except Exception as exc:  # noqa: BLE001 - report, never propagate
+                entry["error"] = f"{type(exc).__name__}: {exc}"
+                logger.warning(
+                    "Failed to fetch account",
+                    connection_id=connection_id,
+                    broker=adapter.broker_name,
+                    error=str(exc),
+                )
+
+            # Transport health, where the adapter can report it. For the CFT
+            # bridge this distinguishes "the browser session died" from "CFT
+            # rejected us" — different problems, different responses.
+            probe = getattr(adapter, "bridge_status", None)
+            if callable(probe):
+                try:
+                    entry["transport"] = await probe()
+                except Exception as exc:  # noqa: BLE001
+                    entry["transport"] = {"reachable": False, "error": str(exc)}
+
+            out.append(entry)
+        return out
+
     async def close_all_positions(self) -> list[dict]:
         """Kill switch: close ALL positions across ALL adapters."""
         results: list[dict] = []
