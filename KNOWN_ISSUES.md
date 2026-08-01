@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-01 (after task 4.2)
+Last updated: 2026-08-01 (after task 4.3)
 
 ---
 
@@ -101,33 +101,10 @@ an alert.
 and repeated failures are only visible in container logs.
 **Why it matters:** an order attempted during a dead session fails. Nothing
 currently surfaces "the bridge is unhealthy" to a human.
-**Fix:** connection health in the UI (task 4.3), plus alerting on repeated
-bridge failures.
-
-### B4. A host reboot can leave CFT silently disconnected
-**Found in:** 4.2 (verifying startup behaviour)
-**What it is:** `load_from_db` calls `adapter.connect()` at startup and, on
-failure, logs a warning, sets `connected = False` in the database, and **moves
-on**. There is no retry.
-
-The timings make that reachable rather than theoretical:
-
-| | time to usable |
-|---|---|
-| api container | ~1.4s (measured from logs) |
-| cft-bridge | ~2 min (pip install + Chromium launch) |
-
-So on a host reboot, or if both are recreated together, the api will try to
-connect roughly two minutes before the bridge can answer. It fails once, marks
-the connection disconnected, and never tries again.
-
-**Why it matters:** the failure is quiet. The dashboard shows no broker rather
-than an error, and the only recovery is a human noticing and calling
-`POST /api/brokers/{id}/reconnect`. `depends_on` cannot express this because the
-bridge is a separate compose project by design.
-**Fix:** retry with backoff in `load_from_db`, or a periodic reconnect for
-connections marked connected in the database. Planned as part of task 4.3
-(connection health + auto-recovery).
+**Partly addressed (4.2 / 4.3):** session health is now visible on the dashboard
+(`/api/brokers/accounts` reports transport state), and a supervisor reconnects a
+dead session within ~1 min. What remains is **alerting** — nothing tells a human
+unprompted; you still have to be looking at the page.
 
 ### B3. Nobody can tell which code version is running
 **Found in:** I6 (never started)

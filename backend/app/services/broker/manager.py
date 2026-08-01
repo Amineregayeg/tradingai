@@ -77,12 +77,32 @@ def _make_adapter(
     raise ValueError(f"Unsupported broker: {broker!r}")
 
 
+def _looks_like_uuid(key: str) -> bool:
+    """True for a connection-id key, False for a registered alias like "paper".
+
+    ``register_adapter`` lets the live loop register its PaperBroker under a
+    plain name. Reconcile must never evict those: they have no DB row, so a
+    naive "not in the wanted set -> drop it" would take the engine's own broker
+    away mid-run.
+    """
+    try:
+        uuid.UUID(key)
+        return True
+    except (ValueError, AttributeError, TypeError):
+        return False
+
+
 class BrokerManager:
     """Singleton manager that holds live broker adapter instances."""
 
     def __init__(self) -> None:
         # Maps connection_id (str UUID) → adapter instance
         self._adapters: dict[str, BrokerAdapter] = {}
+        # Consecutive reconnect failures per connection, and a tick counter, so
+        # reconcile_connections() can back off instead of retrying a
+        # long-dead broker every single minute.
+        self._reconnect_failures: dict[str, int] = {}
+        self._reconnect_ticks: int = 0
         self._price_stream_tasks: list[asyncio.Task] = []
         self._price_callback: Callable | None = None
 
@@ -116,15 +136,31 @@ class BrokerManager:
                     connection_id=str(conn.id),
                 )
             except Exception as exc:
+                # DO NOT write connected=False here.
+                #
+                # That flag is the DESIRED state — "this connection should be
+                # live" — and it is the only record of the user's intent. A
+                # deliberate disconnect writes it too (disconnect_broker), so
+                # clearing it on a transient failure makes the two
+                # indistinguishable, and nothing can tell "the user turned this
+                # off" from "this broke and should be retried".
+                #
+                # That ambiguity was the real cause of a silent outage: the api
+                # is ready ~1.4s after start while the cft-bridge needs ~2 min
+                # (pip install + Chromium), so on a host reboot the api asks
+                # before the bridge can answer, fails once, erased the intent,
+                # and never tried again. The dashboard then showed no broker at
+                # all rather than an error.
+                #
+                # Leaving the flag alone lets reconcile_connections() retry.
+                # Actual reachability is reported separately and live by
+                # get_all_accounts().
                 logger.warning(
-                    "Failed to reconnect broker on startup",
+                    "Broker failed to connect on startup — will retry in background",
                     connection_id=str(conn.id),
                     broker=conn.broker,
                     error=str(exc),
                 )
-                # Mark as disconnected in DB
-                conn.connected = False
-                db.add(conn)
 
         await db.commit()
 
@@ -342,6 +378,93 @@ class BrokerManager:
                     error=str(exc),
                 )
         return all_positions
+
+    async def reconcile_connections(self, db: AsyncSession) -> dict:
+        """Bring reality back in line with intent. Safe to call repeatedly.
+
+        For every connection the user wants live (``connected=True``) that has no
+        working adapter, try to establish one. This is what makes a failed
+        startup temporary rather than permanent — see the comment in
+        ``load_from_db`` for how a transient failure used to become a silent,
+        indefinite outage.
+
+        Also drops adapters whose row was deleted, so a removed connection does
+        not keep answering from memory.
+
+        Returns a summary for logging. Never raises: this runs on a scheduler,
+        and a supervisor that dies on the first error supervises nothing.
+        """
+        summary = {"checked": 0, "recovered": 0, "still_failing": 0, "dropped": 0}
+        try:
+            stmt = select(BrokerConnection).where(BrokerConnection.connected.is_(True))
+            wanted = list((await db.execute(stmt)).scalars().all())
+        except Exception as exc:  # noqa: BLE001 - DB blip must not kill the job
+            logger.warning("Reconcile could not read connections", error=str(exc))
+            return summary
+
+        wanted_ids = {str(c.id) for c in wanted}
+
+        # Adapters with no surviving row (deleted connection). Skip keys that are
+        # not connection ids — the live loop registers its PaperBroker under the
+        # literal key "paper", and evicting that would take the engine's own
+        # broker out from under it.
+        for key in list(self._adapters):
+            if key in wanted_ids or not _looks_like_uuid(key):
+                continue
+            logger.info("Dropping adapter for a deleted connection", connection_id=key)
+            adapter = self._adapters.pop(key, None)
+            summary["dropped"] += 1
+            if adapter is not None:
+                try:
+                    await adapter.disconnect()
+                except Exception:  # noqa: BLE001 - best effort
+                    pass
+
+        for conn in wanted:
+            cid = str(conn.id)
+            summary["checked"] += 1
+            if cid in self._adapters:
+                continue  # already live; health is reported by get_all_accounts()
+
+            # Back off after repeated failures so a broker that is down for
+            # hours does not produce a login attempt every minute — each CFT
+            # attempt can cost the bridge an ~11s browser login.
+            fails = self._reconnect_failures.get(cid, 0)
+            if fails and (self._reconnect_ticks % min(2 ** min(fails, 5), 32)) != 0:
+                summary["still_failing"] += 1
+                continue
+
+            try:
+                # Must mirror load_from_db exactly: decrypt THEN parse. The
+                # decrypted blob is JSON text, not a dict.
+                creds = json.loads(decrypt_credentials(conn.encrypted_creds))
+                adapter = _make_adapter(
+                    broker=conn.broker,
+                    creds=creds,
+                    account_id=conn.account_id or "",
+                    environment=conn.environment or "live",
+                )
+                await adapter.connect()
+                self._adapters[cid] = adapter
+                self._reconnect_failures.pop(cid, None)
+                summary["recovered"] += 1
+                logger.info(
+                    "Broker connection recovered",
+                    connection_id=cid, broker=conn.broker,
+                )
+            except Exception as exc:  # noqa: BLE001 - keep trying next tick
+                self._reconnect_failures[cid] = fails + 1
+                summary["still_failing"] += 1
+                # First failure at INFO, thereafter DEBUG-ish volume via count:
+                # a broker down for a day should not write 1440 warnings.
+                if fails == 0:
+                    logger.warning(
+                        "Broker still unreachable — will keep retrying",
+                        connection_id=cid, broker=conn.broker, error=str(exc),
+                    )
+
+        self._reconnect_ticks += 1
+        return summary
 
     async def get_all_accounts(self) -> list[dict]:
         """Account summary + reachability for every connected adapter.

@@ -269,6 +269,27 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     scheduler.add_job(_sync_propfirm_observe, "interval", minutes=2)
 
+    # Broker connection supervisor — reconnects anything the user wants live
+    # that is not. Without this a single failed attempt is permanent: the api is
+    # ready ~1.4s after start while the cft-bridge needs ~2 min (pip install +
+    # Chromium), so on a host reboot the api asks before the bridge can answer.
+    # That produced a SILENT outage — the dashboard showed no broker at all
+    # rather than an error.
+    #
+    # Every minute, because the cost of being disconnected is unbounded (a
+    # missed trading decision) while the cost of a check is one dict lookup when
+    # everything is healthy. It backs off internally once a broker keeps failing.
+    async def _reconcile_brokers() -> None:
+        try:
+            async with async_session_maker() as db:
+                result = await broker_manager.reconcile_connections(db)
+                if result["recovered"] or result["dropped"]:
+                    logger.info("Broker reconcile", **result)
+        except Exception as exc:  # noqa: BLE001 - a supervisor must not die
+            logger.warning("Broker reconcile failed", error=str(exc))
+
+    scheduler.add_job(_reconcile_brokers, "interval", minutes=1)
+
     scheduler.start()
     logger.info("Trading AI Co-Pilot startup complete")
 
