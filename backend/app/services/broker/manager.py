@@ -49,7 +49,7 @@ def _make_adapter(
                 broker=broker,
             )
             observe_only = True
-        return CryptoFundTraderAdapter(
+        common = dict(
             email=creds.get("email", ""),
             password=creds.get("password", ""),
             base_url=creds.get("base_url", creds.get("server", "")),
@@ -57,6 +57,23 @@ def _make_adapter(
             environment=environment,
             observe_only=observe_only,
         )
+
+        # CFT sits behind Cloudflare bot protection that fingerprints the TLS
+        # handshake, so direct HTTP is refused (403) even with a valid token —
+        # see cft_bridge_transport for the measurements. When a bridge is
+        # configured, route through it; the two adapters are otherwise identical
+        # (CFTBridgeAdapter subclasses this one and swaps only the transport).
+        if os.getenv("CFT_BRIDGE_TOKEN"):
+            from app.services.broker.cft_bridge_adapter import CFTBridgeAdapter
+
+            logger.info("Using browser bridge for Crypto Fund Trader")
+            return CFTBridgeAdapter(**common)
+
+        # No bridge configured: the direct adapter. It will almost certainly be
+        # blocked by Cloudflare, but it stays the default so behaviour does not
+        # change silently for anyone who has not deployed the bridge, and so the
+        # existing adapter tests keep exercising the path they were written for.
+        return CryptoFundTraderAdapter(**common)
     raise ValueError(f"Unsupported broker: {broker!r}")
 
 

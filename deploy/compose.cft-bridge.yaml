@@ -1,0 +1,80 @@
+# CFT browser bridge — the only path that reaches Crypto Fund Trader.
+#
+#     docker compose -f compose.cft-bridge.yaml -p tradingai-cft-bridge up -d
+#
+# WHY IT EXISTS
+# CFT is behind Cloudflare bot protection that fingerprints the TLS handshake.
+# Measured against a valid, freshly captured session: plain HTTP is refused (403)
+# with the token, with a browser User-Agent, with the full cookie jar, and even
+# through Playwright's own HTTP stack. Only a fetch() issued inside a real
+# browser page succeeds. This service owns that browser.
+#
+# NO PUBLISHED PORT, DELIBERATELY.
+# It joins the app's network and is reachable only as `cft-bridge:8100` from
+# inside it. Publishing it to the host would expose an authenticated proxy into
+# a funded trading account to anything that can reach the box. The VPS owner's
+# standing rule — "choose a free port, don't touch any running service" — is
+# honoured by taking no host port at all.
+#
+# BEFORE STARTING, on the VPS (never in this repo):
+#   1. Create /docker/tradingai/cft-bridge.env, mode 600:
+#          CFT_EMAIL=<the account email>
+#          CFT_PASSWORD=<the account password>
+#          BRIDGE_TOKEN=<openssl rand -hex 32>
+#   2. Put the SAME BRIDGE_TOKEN in the api service's environment as
+#      CFT_BRIDGE_TOKEN, plus CFT_BRIDGE_URL=http://cft-bridge:8100
+#   3. Attach this to the app network (see `networks` below).
+#
+# The api container needs no browser and no CFT credentials — it holds only the
+# bridge token. Credentials live in exactly one place.
+
+name: tradingai-cft-bridge
+
+services:
+  cft-bridge:
+    # Microsoft's Playwright image: Chromium plus every system library it needs,
+    # already installed. Building this ourselves would mean maintaining a list of
+    # ~40 shared objects (the local attempt failed on 4 missing ones).
+    image: mcr.microsoft.com/playwright/python:v1.56.0-noble
+    container_name: cft-bridge
+    working_dir: /app
+    env_file:
+      - /docker/tradingai/cft-bridge.env
+    environment:
+      BRIDGE_PORT: "8100"
+      CFT_HOST: "https://trading.cryptofundtrader.com"
+      # Refresh the session every 6h. The ~11s login then happens while idle
+      # rather than in the middle of a trading decision.
+      SESSION_MAX_AGE_S: "21600"
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - /docker/tradingai/cft-bridge/bridge.py:/app/bridge.py:ro
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        set -e
+        pip install --no-cache-dir --quiet playwright==1.56.0 aiohttp
+        # xvfb-run is load-bearing, not cosmetic: headless Chrome is detected and
+        # served the "Just a moment..." challenge, while a real headed browser on
+        # a virtual display passes cleanly. Verified both ways.
+        exec xvfb-run -a python /app/bridge.py
+    restart: unless-stopped
+    # Chromium is memory-hungry and will grow over a long session. Cap it so a
+    # leaking browser cannot take the whole VPS — and its other projects — down.
+    mem_limit: 1g
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/health', timeout=5)\""]
+      interval: 1m
+      timeout: 15s
+      retries: 3
+      start_period: 2m
+    networks:
+      - tradingai
+
+networks:
+  tradingai:
+    # The network Docker Compose created for the main `tradingai` project. The
+    # bridge joins it rather than creating its own, so the api container can
+    # reach `cft-bridge` by name with no host port anywhere.
+    external: true
+    name: tradingai_default

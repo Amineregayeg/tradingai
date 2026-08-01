@@ -27,6 +27,7 @@ from app.services.broker.base import BrokerAdapter, OrderRequest
 # Importing the concrete adapters registers them as subclasses of BrokerAdapter so
 # the recursive __subclasses__() discovery below can see them.
 from app.services.broker.cft_sim import PropFirmRules, SimPropFirmBroker
+from app.services.broker.cft_bridge_adapter import CFTBridgeAdapter
 from app.services.broker.cryptofundtrader import CryptoFundTraderAdapter
 from app.services.broker.oanda import OANDAAdapter
 from app.services.broker.paper import PaperBroker
@@ -73,6 +74,18 @@ LIVE_ADAPTERS = [
         lambda: CryptoFundTraderAdapter(
             email="e", password="p", base_url="https://host/mtr-api/uuid"
         ),
+    ),
+    (
+        # Same broker, different transport: reaches CFT through a real browser
+        # because Cloudflare fingerprints the TLS handshake and refuses plain
+        # HTTP even with a valid token. It is a SUBCLASS of the adapter above,
+        # which is exactly why this registry uses recursive discovery — a
+        # subclass-of-a-subclass that quietly flipped is_simulation to True
+        # would otherwise sail past the contract and disarm the assert in
+        # ExecutionService.
+        "cryptofundtrader_bridge",
+        CFTBridgeAdapter,
+        lambda: CFTBridgeAdapter(email="e", password="p", bridge_token="t"),
     ),
 ]
 
@@ -217,10 +230,22 @@ def test_adapter_is_concrete_subclass(name, cls, factory):
     assert type(adapter).__abstractmethods__ == frozenset()
 
 
+#: Registry label -> the broker_name the adapter must report, where the two
+#: differ. They differ only when several adapters serve the SAME broker over
+#: different transports: `cryptofundtrader_bridge` is a distinct label here (the
+#: registry needs unique keys) but must still identify itself as
+#: `cryptofundtrader`, because broker_name drives real routing and reporting —
+#: /positions and /system key off it. An adapter that renamed itself to look
+#: unique would report a second, non-existent broker for the same account.
+EXPECTED_BROKER_NAME = {
+    "cryptofundtrader_bridge": "cryptofundtrader",
+}
+
+
 @pytest.mark.parametrize("name,cls,factory", ALL_ADAPTERS, ids=IDS)
 def test_adapter_declares_identity(name, cls, factory):
     adapter = factory()
-    assert adapter.broker_name == name
+    assert adapter.broker_name == EXPECTED_BROKER_NAME.get(name, name)
     assert adapter.broker_name != "unknown"
     assert isinstance(adapter.default_pairs, list)
 
