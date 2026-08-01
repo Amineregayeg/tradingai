@@ -54,10 +54,25 @@ services:
       - |
         set -e
         pip install --no-cache-dir --quiet playwright==1.56.0 aiohttp
-        # xvfb-run is load-bearing, not cosmetic: headless Chrome is detected and
-        # served the "Just a moment..." challenge, while a real headed browser on
-        # a virtual display passes cleanly. Verified both ways.
-        exec xvfb-run -a python /app/bridge.py
+
+        # A VIRTUAL DISPLAY IS LOAD-BEARING, NOT COSMETIC. Headless Chrome is
+        # detected and served the "Just a moment..." challenge; a real headed
+        # browser on a virtual display passes cleanly. Verified both ways.
+        #
+        # Xvfb is started EXPLICITLY rather than via `xvfb-run`. As PID 1 in a
+        # container, xvfb-run starts Xvfb and then never execs its command —
+        # observed directly: Xvfb running, python absent, no output, container
+        # "up" but nothing listening. (It works when run by hand, which is what
+        # makes it a trap.) Starting Xvfb ourselves is deterministic and lets
+        # python be PID 1, so its logs and exit code actually surface.
+        rm -f /tmp/.X99-lock
+        Xvfb :99 -screen 0 1440x900x24 -nolisten tcp &
+        for i in $$(seq 1 30); do
+          [ -e /tmp/.X11-unix/X99 ] && break
+          sleep 0.5
+        done
+        export DISPLAY=:99
+        exec python /app/bridge.py
     restart: unless-stopped
     # Chromium is memory-hungry and will grow over a long session. Cap it so a
     # leaking browser cannot take the whole VPS — and its other projects — down.
