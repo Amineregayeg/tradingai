@@ -10,6 +10,32 @@ Last updated: 2026-08-01 (after task 4.2)
 
 ---
 
+## The rule for keeping this file honest
+
+**At the end of every task, any problem found but not fixed gets written here
+before moving on.** Not mentioned in passing, not left in a commit message —
+written here, where it will actually be reviewed.
+
+This exists because of a specific failure: a problem was described as "noted"
+when it had only been said out loud and never recorded. A conversation scrolls
+away. Claiming something is written down when it is not is worse than saying
+nothing, because it stops anyone else from writing it down either.
+
+Two things that make entries worth having:
+
+* **Verify before you write.** Checking one such claim showed the claim itself
+  was wrong *and* uncovered a more serious defect underneath (B4 — a startup
+  race that silently disconnects the broker). A register full of guesses is a
+  register nobody trusts.
+* **Say what it could break, not just what it is.** "X is unset" is a note;
+  "X is unset, so a reboot silently drops the broker and the dashboard shows
+  nothing" is a decision someone can act on.
+
+Fixed something? Delete its entry in the same commit as the fix. A register that
+only grows becomes wallpaper.
+
+---
+
 ## A. Wrong numbers — these can mislead a decision
 
 ### A1. The baseline edge measurement was never re-verified under production's libraries
