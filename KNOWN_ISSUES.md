@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-03 (after D1 — verified backups running)
+Last updated: 2026-08-03 (after B1 — data health surfaced)
 
 ---
 
@@ -128,46 +128,22 @@ doing so shifts the baseline you compare against.
 
 ## B. Silent failure — things that break without telling anyone
 
-### B1. Nothing watches the dominance collector
-**Found in:** I4 (dominance collector)
-**What it is:** the container reports unhealthy ~10 minutes after samples stop,
-but nothing reads that healthcheck. No alert, no UI indicator.
-**Why it matters:** **this data cannot be recovered.** Intraday dominance
-history exists only if something was recording at the time. A quiet death costs
-days that no later fix can retrieve.
-**Fix:** surface collector status in the UI (planned as 1.3 / 3.3), ideally with
-an alert.
-
-### B2. The CFT browser session is a single point of failure
-**Found in:** 4.1 (browser bridge)
-**What it is:** one Chromium session serves every CFT call. It self-heals on
-401/403 and refreshes every 6h, but a crash mid-trade costs an ~11s re-login,
-and repeated failures are only visible in container logs.
-**Why it matters:** an order attempted during a dead session fails. Nothing
-currently surfaces "the bridge is unhealthy" to a human.
-**Partly addressed (4.2 / 4.3):** session health is now visible on the dashboard
-(`/api/brokers/accounts` reports transport state), and a supervisor reconnects a
-dead session within ~1 min. What remains is **alerting** — nothing tells a human
-unprompted; you still have to be looking at the page.
-
-### B5. The balance-drift check is inactive — no snapshot history exists
-**Found in:** 4.6 (verified against production)
-**What it is:** reconciliation's balance check compares CFT's current balance
-against the most recent `PropFirmSnapshot`. Production has **0 profiles and 0
-snapshots**, because `observe_sync` only writes a snapshot for a configured
-prop-firm profile and none has been created. Live proof: the endpoint returns
-`checks_run: ["positions"]` — the drift check silently does not run.
-**Why it matters:** of the four reconciliation checks, drift is the one that
-catches a balance moving when nothing of ours explains it — i.e. manual trading
-or a malfunction. Position checks only catch a position that is still OPEN; a
-trade opened and closed between two runs is invisible without it.
-**Not a silent failure by luck:** `checks_run` was built precisely so "no
-findings" cannot be mistaken for "all clear". It is working as intended — the
-gap is visible rather than hidden.
-**Fix:** create a prop-firm profile for the CFT account (the Prop Firm page
-does this), which starts `observe_sync` writing snapshots every 2 minutes and
-activates the check. Alternatively, record balance history independently of
-prop-firm profiles.
+### B1. Failures are visible but nothing tells you unprompted
+**Found in:** I4 / 4.1; **narrowed by B1's monitoring work**
+**What is now done:** `/api/system/data-health` and a dashboard panel report the
+dominance collector, backups, and the CFT bridge session. A component the
+backend cannot read reports `unavailable`, never `healthy`, so silence is never
+mistaken for health. The collector also self-reports density over the last hour
+rather than lifetime, so a recent death cannot hide behind a good long-run
+average.
+**What remains:** all of it is PULL. You have to open the dashboard. If nobody
+looks for three days and the collector died on day one, three days of
+dominance history are still gone — and that data cannot be backfilled.
+**Why it was not finished:** pushing a notification needs a destination —
+email (SMTP is a dependency but unconfigured), Telegram, a webhook. That is a
+choice about where you want to be interrupted, not a code decision.
+**Fix:** pick a channel, then alert on `data-health.ok == false` and on repeated
+bridge failures. The detection already exists; only delivery is missing.
 
 ### B3. Nobody can tell which code version is running
 **Found in:** I6 (never started)
