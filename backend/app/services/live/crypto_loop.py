@@ -80,7 +80,31 @@ class LiveCryptoLoop:
         # leave its DecisionRecord stuck OPEN.
         self.paper._on_settle = self._on_settle_cb
         self.execution = ExecutionService(self.paper, ExecMode.PAPER)
-        self.source = BinanceSource()
+
+        # PRICE SOURCE — analyse the venue you execute on.
+        #
+        # With PRICE_SOURCE=cft the loop reads Crypto Fund Trader's own candles
+        # instead of Binance's. That matters because the strategy trades
+        # structure: measured over 300 matched 1H bars, CFT closes sit a
+        # near-constant -0.0485% below Binance (a BID-side spread, harmless to
+        # scale-invariant structure) but individual bar RANGES differ by up to
+        # 0.117% of price — and a high or low that moves by that much can create
+        # or erase the very FVG the entry depends on.
+        #
+        # Binance stays the DEFAULT deliberately. CFT serves only ~125 days of
+        # 1H history against the ~470 the corrected backtest needs, and the CFT
+        # path requires the browser bridge to be up. Switching is an explicit
+        # decision, not something that changes underneath anyone.
+        source_name = (os.getenv("PRICE_SOURCE", "binance") or "binance").strip().lower()
+        if source_name == "cft":
+            from app.services.market_data.sources.cft import CFTSource
+
+            self.source = CFTSource()
+            self.price_source_name = "cft"
+            logger.info("Price source: Crypto Fund Trader (execution venue)")
+        else:
+            self.source = BinanceSource()
+            self.price_source_name = "binance"
         self._last_eval: dict[str, datetime] = {}
         # pair -> id of the DecisionRecord opened for the currently-open position,
         # so a close can be resolved back to the decision that caused it.
@@ -265,10 +289,30 @@ class LiveCryptoLoop:
         return await self.status()
 
     async def _fetch_bars(self, binance_symbol: str, tf: str, count: int):
+        """Fetch `count` bars of `tf`, from whichever price source is configured.
+
+        Callers pass the BINANCE symbol ("BTCUSDT") because that is what
+        self.symbols maps to. CFTSource expects the canonical pair ("BTC/USD")
+        and appends its own USDT+.cft suffix, so handing it "BTCUSDT" directly
+        would build "BTCUSDTUSDT.cft" and 404 on every bar. Translate here, at
+        the one boundary, rather than teaching every call site about venues.
+        """
         minutes = {"1m": 1, "5m": 5, "15m": 15, "30m": 30, "1H": 60, "4H": 240, "D": 1440}.get(tf, 60)
         end = datetime.now(tz=timezone.utc)
         start = end - timedelta(minutes=minutes * (count + 5))
-        return await asyncio.to_thread(self.source.fetch_ohlcv, binance_symbol, tf, start, end)
+
+        symbol = binance_symbol
+        if getattr(self, "price_source_name", "binance") == "cft":
+            symbol = self._pair_for(binance_symbol)
+
+        return await asyncio.to_thread(self.source.fetch_ohlcv, symbol, tf, start, end)
+
+    def _pair_for(self, binance_symbol: str) -> str:
+        """Reverse self.symbols: "BTCUSDT" -> "BTC/USD"."""
+        for pair, bsym in self.symbols.items():
+            if bsym == binance_symbol:
+                return pair
+        return binance_symbol
 
     async def _entry_block_reason(self, pair: str) -> str | None:
         """Return a human-readable reason if a new entry is blocked, else None.

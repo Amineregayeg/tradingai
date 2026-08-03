@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-01 (after task 4.3)
+Last updated: 2026-08-03 (after task 4.4)
 
 ---
 
@@ -60,15 +60,42 @@ evaluated at all — and a simulation cannot prove a live bot correct if they ar
 not the same program.
 **Fix:** point the live path at the causal builder; add a regression test.
 
-### A3. Price feed and execution venue disagree
-**Found in:** Phase 4 planning
-**What it is:** the strategy reads **Binance** prices but would execute on
-**CFT**, which quotes its own symbols (`BTCUSDT.cft`) from its own feed.
-**Why it matters:** for a strategy built on structural price levels, the engine
-can see a setup that never existed on the chart it actually trades. Silent, and
-nothing currently measures the divergence.
-**Fix:** planned as task 4.4 — read prices from CFT. Note CFT history may be
-shorter than Binance's, so backtests may need to keep using Binance.
+### A3. Backtests still measure a different venue than they trade
+**Found in:** Phase 4 planning; **narrowed by 4.4**
+**What it is:** the LIVE path can now read CFT's own candles
+(`PRICE_SOURCE=cft`), so live analysis and execution finally agree. Historical
+backtests cannot: CFT serves only ~125 days of 1H history against the ~470 the
+corrected backtest window needs, so backtests stay on Binance.
+**The divergence is now measured rather than unknown** (300 matched 1H bars):
+
+| | BTC | ETH |
+|---|---|---|
+| close vs Binance | −0.0485% (stdev 0.0093) | −0.0485% (stdev 0.0090) |
+| bar-range difference | mean 0.013%, max 0.060% | mean 0.014%, max 0.117% |
+
+The close offset is a near-constant BID-side spread and moves no structure —
+BOS/FVG/direction are scale-invariant. The **bar ranges** are the real risk: a
+high or low differing by up to 0.117% can create or erase the FVG an entry
+depends on.
+**Why it still matters:** a backtest result on Binance bars is not strictly a
+prediction of CFT behaviour, and the gap is largest exactly where the strategy
+is most sensitive.
+**Fix options:** accept and disclose it (the divergence is now quantified); or
+start archiving CFT candles now so that in ~1 year a same-venue backtest becomes
+possible. Archiving is cheap and the history is unrecoverable if not collected —
+the same argument as the dominance collector.
+
+### A5. PRICE_SOURCE=cft is built but not switched on
+**Found in:** 4.4
+**What it is:** the live loop still defaults to Binance. Switching is a
+deliberate env change, not automatic.
+**Why it matters:** until it is switched, live analysis still reads a different
+venue than it would trade on — the thing 4.4 exists to fix.
+**Why it was left off:** CFT bars come through the browser bridge, so the engine
+would gain a dependency on it; and CFT's short 1H history means a restart cannot
+rebuild as much context as Binance provides. Worth switching once the bridge has
+demonstrated a few days of uptime.
+**Fix:** set `PRICE_SOURCE=cft` on the api service.
 
 ### A4. LTF-BOS gate is mildly non-causal
 **Found in:** inherited (residual #1)
