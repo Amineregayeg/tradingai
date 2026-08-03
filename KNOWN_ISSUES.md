@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-03 (after task 4.6 — Phase 4 complete)
+Last updated: 2026-08-03 (after A1 — baseline verified)
 
 ---
 
@@ -37,18 +37,6 @@ only grows becomes wallpaper.
 ---
 
 ## A. Wrong numbers — these can mislead a decision
-
-### A1. The baseline edge measurement was never re-verified under production's libraries
-**Found in:** I1 (test against production dependencies)
-**What it is:** the headline result this whole project is judged against — *143
-trades, −0.118R, −16.1%* — was only ever produced under numpy 1.x. Production
-runs numpy 2.2.6. The test suite passes under both, but the backtest itself was
-not re-run (deliberately deferred at the time).
-**Why it matters:** that number is the yardstick for judging Magic Alignment. If
-numpy 2's floating-point reductions shift it even slightly, every future
-"better than baseline" comparison inherits the error.
-**Fix:** re-run `code/run_corrected_backtest.py` under the production pins and
-compare. Needs network access to Binance; about a minute.
 
 ### A2. Live and backtest engines decide direction differently
 **Found in:** inherited (residual #2); still open, listed as task I8
