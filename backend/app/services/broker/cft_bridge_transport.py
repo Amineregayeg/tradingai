@@ -42,7 +42,7 @@ from typing import Any
 
 import httpx
 
-from app.core.exceptions import BrokerConnectionError
+from app.core.exceptions import BrokerConnectionError, BrokerError
 
 DEFAULT_BRIDGE_URL = os.getenv("CFT_BRIDGE_URL", "http://cft-bridge:8100")
 
@@ -143,6 +143,25 @@ class BridgeTransport:
                 "CFT bridge rejected our token",
                 broker="cryptofundtrader",
                 detail="CFT_BRIDGE_TOKEN does not match the bridge's BRIDGE_TOKEN.",
+            )
+        if resp.status_code == 403:
+            # The BRIDGE refused this, not CFT. Without this branch the refusal
+            # fell through to the generic path and surfaced as "Crypto Fund
+            # Trader API error 502" — pointing the operator at the venue when
+            # the cause is a local flag they can actually change. Same class of
+            # defect as a 500 handler swallowing a precise message.
+            try:
+                info = resp.json()
+            except Exception:  # noqa: BLE001
+                info = {}
+            raise BrokerError(
+                "Blocked by the CFT bridge, not by the broker",
+                broker="cryptofundtrader",
+                detail=str(
+                    info.get("detail")
+                    or info.get("error")
+                    or "the bridge refused this request"
+                ),
             )
         if resp.status_code >= 500:
             detail = resp.text[:300]

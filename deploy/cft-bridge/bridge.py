@@ -35,11 +35,25 @@ SECURITY
   * The CFT session token is held in memory only and is never returned to
     callers or written to disk.
 
-DELIBERATELY NOT IMPLEMENTED HERE: any notion of "should this order be allowed".
-The bridge is dumb transport. Every safety decision — observe_only, the
-ALLOW_LIVE_TRADING gate, the is_simulation contract — stays in the backend where
-it is tested. A bridge that also enforced policy would be a second, untested
-place for those rules to disagree.
+  * WRITES ARE REFUSED unless BRIDGE_ALLOW_TRADING=true. See the write-guard
+    section below.
+
+ON POLICY (this changed, and the reasoning is worth keeping)
+An earlier version of this file said the bridge was "dumb transport" and that
+every safety decision belonged in the backend, on the argument that a second
+enforcement point is a second place for rules to disagree.
+
+That is right for BUSINESS rules and wrong for the one rule that matters here.
+All three backend guards — the is_simulation assert, the ALLOW_LIVE_TRADING
+gate, observe_only — sit UPSTREAM of this process. The bridge is the last hop
+before a funded account, so "the backend will have checked" is precisely the
+assumption defence in depth exists to refuse. A bug past those checks, a
+mistaken curl, or any other container on this network reaching the bridge would
+otherwise place a real order.
+
+So the bridge enforces exactly ONE thing, the narrowest possible: can this
+request move money at all. It still makes no judgement about size, symbol,
+direction or strategy — those stay in the backend where they are tested.
 """
 from __future__ import annotations
 
@@ -67,6 +81,57 @@ BRIDGE_PORT = int(os.getenv("BRIDGE_PORT", "8099"))
 #: expires; refreshing on a schedule means the ~11s login cost is paid while
 #: idle rather than in the middle of a trading decision.
 SESSION_MAX_AGE_S = int(os.getenv("SESSION_MAX_AGE_S", str(6 * 3600)))
+
+# ---------------------------------------------------------------------------
+# WRITE GUARD — the last line before a real order on a funded account.
+#
+# Everything else that protects this account lives in the Python app:
+# ExecutionService asserts is_simulation, _make_adapter forces observe_only
+# unless ALLOW_LIVE_TRADING, and the adapter's _guard_trading refuses writes.
+# All three are UPSTREAM of this process. The bridge is the last hop, and until
+# now it would proxy any path and any method for anything holding its token — so
+# a bug downstream of those checks, a mistaken curl, or any other container on
+# the network reaching this service, would place a real order.
+#
+# Defence in depth means the innermost layer does not trust that the outer ones
+# held. This guard is independent of every app-side flag on purpose: enabling
+# trading has to be a deliberate act in TWO separate places (ALLOW_LIVE_TRADING
+# on the api, BRIDGE_ALLOW_TRADING here), which no single mistake can satisfy.
+# ---------------------------------------------------------------------------
+
+#: Path fragments that CREATE, MODIFY or CLOSE a position — anything that moves
+#: real money. Matched as substrings against the request path, so a renamed or
+#: versioned CFT route still trips it.
+WRITE_PATH_FRAGMENTS = (
+    "/position/open",
+    "/position/close",
+    "/position/edit",
+    "/position/modify",
+    "/order",          # covers /order, /order/place, /active-orders mutations
+    "/positions/close",
+)
+
+BRIDGE_ALLOW_TRADING = os.getenv("BRIDGE_ALLOW_TRADING", "false").strip().lower() == "true"
+
+
+def is_write_request(method: str, path: str) -> bool:
+    """True if this request could create or change a position.
+
+    Deliberately conservative in two ways:
+
+    * ANY non-GET method counts. A write dressed as PUT/PATCH/DELETE is still a
+      write, and enumerating only POST would be an obvious gap.
+    * A GET to a write path counts too. If CFT ever accepts a position action
+      over GET (some Match-Trader routes do), a method-only check would sail
+      past it.
+
+    False negatives here place real orders; false positives only block a read
+    the app can retry. The asymmetry decides the design.
+    """
+    lowered = (path or "").lower()
+    if any(frag in lowered for frag in WRITE_PATH_FRAGMENTS):
+        return True
+    return (method or "GET").upper() != "GET"
 
 #: A login takes ~11s (measured). Give it generous headroom before declaring
 #: failure — a slow login that succeeds beats a fast failure that trades nothing.
@@ -268,6 +333,9 @@ class CFTSession:
             "logins": self.login_count,
             "calls": self.call_count,
             "last_error": self.last_error,
+            # Surfaced so the dashboard can show, without anyone guessing,
+            # whether this bridge is currently able to move real money.
+            "trading_enabled": BRIDGE_ALLOW_TRADING,
         }
 
 
@@ -309,6 +377,24 @@ async def handle_call(request: web.Request) -> web.Response:
         return web.json_response({"error": "path is required"}, status=400)
     method = payload.get("method", "GET")
 
+    # WRITE GUARD. Refused BEFORE the request reaches the browser, so a blocked
+    # order never touches CFT at all. 403 (not 401) to distinguish "you are
+    # authenticated but this action is disabled" from "your token is wrong".
+    if is_write_request(method, path) and not BRIDGE_ALLOW_TRADING:
+        LOG.warning("BLOCKED write request: %s %s (BRIDGE_ALLOW_TRADING is off)", method, path)
+        return web.json_response(
+            {
+                "error": "trading is disabled on this bridge",
+                "detail": (
+                    f"{method} {path} would create or modify a position. Set "
+                    "BRIDGE_ALLOW_TRADING=true to permit it — and note the app "
+                    "has its own separate ALLOW_LIVE_TRADING gate."
+                ),
+                "blocked": True,
+            },
+            status=403,
+        )
+
     try:
         result = await SESSION.call(method, path, payload.get("body"))
         SESSION.last_error = None
@@ -346,6 +432,12 @@ def main() -> None:
         web.post("/reconnect", handle_reconnect),
     ])
     LOG.info("cft-bridge listening on :%d (host=%s)", BRIDGE_PORT, CFT_HOST)
+    # State this loudly at boot. "Is trading on?" should be answerable from the
+    # logs alone, not by reading env vars off a running container.
+    if BRIDGE_ALLOW_TRADING:
+        LOG.warning("TRADING IS ENABLED on this bridge — writes will reach the real account")
+    else:
+        LOG.info("Trading disabled (BRIDGE_ALLOW_TRADING off) — reads only, writes are refused")
     web.run_app(app, port=BRIDGE_PORT, print=None)
 
 
