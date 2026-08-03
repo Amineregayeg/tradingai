@@ -38,6 +38,22 @@ async def list_broker_accounts(user_id: CurrentUser) -> list[dict]:
     return await broker_manager.get_all_accounts()
 
 
+@router.get("/reconciliation")
+async def broker_reconciliation(db: DBSession, user_id: CurrentUser) -> list[dict]:
+    """Disagreements between our records and each broker's live state.
+
+    Read-only, and deliberately so: it reports, it does not correct. Making the
+    two sides agree by overwriting one of them destroys the evidence that they
+    disagreed — the same mistake as an equity curve that looked right because
+    nobody checked what it was drawn from.
+
+    An empty `findings` list with `ok: true` means the checks ran and agreed.
+    `checks_run` says which actually executed, so "no findings" is never confused
+    with "nothing was checked".
+    """
+    return await broker_manager.reconcile_all(db, user_id)
+
+
 @router.get("", response_model=list[BrokerConnectionRead])
 async def list_broker_connections(
     db: DBSession,

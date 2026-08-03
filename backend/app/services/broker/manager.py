@@ -466,6 +466,42 @@ class BrokerManager:
         self._reconnect_ticks += 1
         return summary
 
+    async def reconcile_all(self, db: AsyncSession, user_id: str = "system") -> list[dict]:
+        """Reconcile every connected broker. Read-only; never raises.
+
+        Reports disagreements between our records and the broker's. It
+        deliberately does not correct them — see services/broker/reconciliation.py
+        for why a reconciler that auto-fixes destroys the evidence it exists to
+        surface.
+        """
+        from app.services.broker.reconciliation import reconcile_broker
+
+        out: list[dict] = []
+        for connection_id, adapter in self._adapters.items():
+            # Skip the engine's own PaperBroker: it is not a third party whose
+            # records could disagree with ours, it IS our records. Reconciling a
+            # simulation against itself would produce noise, not signal.
+            if getattr(adapter, "is_simulation", False):
+                continue
+            try:
+                report = await reconcile_broker(adapter, db, user_id)
+                out.append({"connection_id": connection_id, **report.as_dict()})
+            except Exception as exc:  # noqa: BLE001 - one broker must not hide others
+                logger.warning(
+                    "Reconciliation failed",
+                    connection_id=connection_id,
+                    broker=getattr(adapter, "broker_name", "?"),
+                    error=str(exc),
+                )
+                out.append({
+                    "connection_id": connection_id,
+                    "broker": getattr(adapter, "broker_name", "?"),
+                    "reachable": False, "ok": False,
+                    "error": f"{type(exc).__name__}: {exc}",
+                    "findings": [], "finding_count": 0,
+                })
+        return out
+
     async def get_all_accounts(self) -> list[dict]:
         """Account summary + reachability for every connected adapter.
 
