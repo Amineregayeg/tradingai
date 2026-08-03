@@ -148,6 +148,89 @@ def _causal_daily_bias_events(
     return timeline
 
 
+def causal_bias_now(
+    bias_df: pd.DataFrame, swing_length: int, window: int = 250
+) -> str | None:
+    """The daily bias a causal engine holds RIGHT NOW. Shared by live and backtest.
+
+    ``_causal_daily_bias_events`` builds the whole historical timeline, which is
+    what a backtest needs and what live must agree with. Live only needs the
+    single current value, and this computes exactly that — the same answer the
+    timeline would give for the present moment, without the O(days x window)
+    cost of rebuilding all of history on every bar.
+
+    Two things make it match, and both were live/backtest divergences before:
+
+    1. THE STILL-FORMING DAILY BAR IS DROPPED. Daily bars are open-stamped at
+       00:00, so the last row of a to-now frame is today's INCOMPLETE candle.
+       The live path used to include it, which meant intraday decisions were
+       influenced by a day that had not finished — the same class of error as
+       the intraday flip-stamping bug that ``_causal_daily_bias_events`` exists
+       to prevent. (The entry frame was already truncated for this reason;
+       the bias frame was not.)
+
+    2. A TRAILING WINDOW, not the whole series. smc's ``broken_index`` depends
+       on bars after the break, so running it over an entire to-now frame
+       produces a different answer than the windowed recompute the backtest
+       uses.
+
+    Measured before the fix, over 710 days of real data: the two methods
+    disagreed on ~2.8% of days, and on 32 of those they chose OPPOSITE
+    directions. That is not drift, it is two different strategies — and it made
+    Tier 1.7 ("the forward run must agree with the backtest") unevaluable.
+
+    ``test_bias_parity.py`` asserts this agrees with the timeline, so the two
+    cannot drift apart again.
+
+    HOW PARITY IS ACHIEVED — two steps, each fixing a real divergence found by
+    measuring against the backtest on 710 days of real data.
+
+    1. The value from the trailing window ending at the LAST COMPLETE day. The
+       backtest stamps a change detected on day j at day j+1's open, so a live
+       engine acting intraday on day j+1 should hold exactly that value.
+
+       Note this cannot be read off ``_causal_daily_bias_events`` for a frame
+       ending at j: that builder drops a flip detected on its final bar, because
+       there is no next open within the frame to stamp it at (``stamp < n``).
+       For the backtest that is correct — such a flip is never actionable inside
+       the window it has. For live it is wrong, because live IS standing at
+       j+1. Reading the window directly is what closes that gap.
+
+    2. If that window holds no event, carry the last known direction forward,
+       which is what ``_bias_at`` does for the backtest — it returns the most
+       recent stamped flip, however old. A lone window returning None where the
+       backtest still holds a direction was a real divergence on 6 of 710 days.
+
+    The fallback is the only expensive path (~1s vs ~7ms), and it is rare: a
+    window with no structure at all. The common case stays cheap.
+    """
+    if bias_df is None or len(bias_df) == 0:
+        return None
+
+    df = bias_df
+    # Drop today's partial bar. A daily bar stamped for today's date has not
+    # closed yet; only yesterday's and earlier are complete.
+    today = pd.Timestamp.now(tz="UTC").normalize()
+    last = df.index[-1]
+    if last.tz is None:
+        last = last.tz_localize("UTC")
+    if last.normalize() >= today:
+        df = df.iloc[:-1]
+
+    if len(df) < max(2 * swing_length + 2, 5):
+        return None
+
+    # 1. the window the backtest would have evaluated for the last complete day
+    sub = df.iloc[max(0, len(df) - window):]
+    events = _daily_bias_events(sub, swing_length)
+    if events:
+        return events[-1][1]
+
+    # 2. nothing in this window — carry forward, as _bias_at does
+    timeline = _causal_daily_bias_events(df, swing_length, window=window)
+    return timeline[-1][1] if timeline else None
+
+
 def _bias_at(events: list[tuple[pd.Timestamp, str]], t: pd.Timestamp) -> str | None:
     bias = None
     for et, d in events:

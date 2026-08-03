@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-03 (after B1 — data health surfaced)
+Last updated: 2026-08-03 (after 2.4 — live/backtest bias parity)
 
 ---
 
@@ -37,16 +37,6 @@ only grows becomes wallpaper.
 ---
 
 ## A. Wrong numbers — these can mislead a decision
-
-### A2. Live and backtest engines decide direction differently
-**Found in:** inherited (residual #2); still open, listed as task I8
-**What it is:** `strategy_step.py` calls `_daily_bias_events` (non-causal,
-whole-series) while `backtest/engine.py` calls `_causal_daily_bias_events`.
-**Why it matters:** Tier 1.7 requires the forward run to agree with the
-backtest. They are currently different decision rules, so that gate cannot be
-evaluated at all — and a simulation cannot prove a live bot correct if they are
-not the same program.
-**Fix:** point the live path at the causal builder; add a regression test.
 
 ### A3. Backtests still measure a different venue than they trade
 **Found in:** Phase 4 planning; **narrowed by 4.4**

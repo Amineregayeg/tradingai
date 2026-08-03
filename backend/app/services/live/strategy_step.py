@@ -14,8 +14,7 @@ from app.db.enums import DirectionType, OrderType
 from app.services.backtest.engine import (
     Params,
     _atr,
-    _bias_at,
-    _daily_bias_events,
+    causal_bias_now,
 )
 from app.services.execution.service import Signal
 from app.services.ict.detector import _normalize_df, ict_detector
@@ -50,7 +49,13 @@ def evaluate_latest_bar(
     lo = float(entry_df["low"].iloc[i])
     cl = float(entry_df["close"].iloc[i])
 
-    bias = _bias_at(_daily_bias_events(bias_df, p.swing_length), t)
+    # SAME BIAS AS THE BACKTEST. This used to call _daily_bias_events over the
+    # whole to-now frame, including today's still-forming daily bar. Measured
+    # over 710 days, that disagreed with the backtest on ~2.8% of days and chose
+    # the OPPOSITE direction on 32 of them — so the live engine and the
+    # instrument meant to validate it were different programs, and Tier 1.7
+    # ("the forward run must agree with the backtest") could not be evaluated.
+    bias = causal_bias_now(bias_df, p.swing_length)
     if bias is None:
         return None
 
