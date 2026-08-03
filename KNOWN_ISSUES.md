@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-03 (after A1 — baseline verified)
+Last updated: 2026-08-03 (after D1 — verified backups running)
 
 ---
 
@@ -214,11 +214,17 @@ lost in the swap.
 
 ## D. Production hygiene
 
-### D1. No database backup
-**Found in:** I11 (never started)
-**What it is:** TimescaleDB sits in a named Docker volume with no backup.
-**Why it matters:** the `decision_records` table **is** the evidence that the
-strategy does or does not work. Losing it loses the proof, not just data.
+### D5. Backups are on the same host as the database
+**Found in:** D1 (recorded when backups were built)
+**What it is:** verified daily backups now run, but they live in
+`~/tradingai-backups/` on the same VPS as the database they protect.
+**Why it matters:** they cover database corruption, a dropped table, a bad
+migration, a deleted Docker volume — not loss of the machine. If the VPS goes
+away, the backups go with it, including the unrecoverable dominance history.
+**Why it was left:** off-site copies need a destination and credentials for it,
+which is a decision (and a cost) rather than a code change.
+**Fix:** sync `~/tradingai-backups/` to object storage or another host. The
+directory is small — ~2 MB per run, so a year is under 1 GB.
 
 ### D2. Plain HTTP, and the API token needs rotating
 **Found in:** I10 (never started)
