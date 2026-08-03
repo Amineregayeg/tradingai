@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-03 (after task 4.4)
+Last updated: 2026-08-03 (after task 4.5)
 
 ---
 
@@ -84,6 +84,35 @@ is most sensitive.
 start archiving CFT candles now so that in ~1 year a same-venue backtest becomes
 possible. Archiving is cheap and the history is unrecoverable if not collected —
 the same argument as the dominance collector.
+
+### A6. The CFT order body has never been accepted by CFT
+**Found in:** 4.5
+**What it is:** the order path is built and tested, but only against a MOCK. Its
+endpoint map was reverse-engineered from CFT's web terminal by network capture,
+so the field names are inferred, not documented — `stopLoss` vs `sl`,
+`volume` vs `lots`, whether `instrument` is required alongside `symbol`.
+**Why it matters:** a mock accepts whatever it is given. The first real order is
+therefore also the first test of the body shape, and the plausible failure modes
+are not symmetric: a rejected order is harmless, but a *partially* accepted one —
+filled with the stop-loss field silently ignored — is an unprotected live
+position.
+**Fix:** the first live order must be placed manually, at minimum size, with a
+human watching, and the result compared against what the adapter expected. That
+is precisely the Tier-3 decision `ALLOW_LIVE_TRADING` exists to force; do not let
+the first real order be one the engine placed on its own.
+
+### A7. Two flags must be set to trade, and nothing warns if only one is
+**Found in:** 4.5
+**What it is:** enabling live orders needs `ALLOW_LIVE_TRADING=true` on the api
+AND `BRIDGE_ALLOW_TRADING=true` on the bridge. That is deliberate — one mistake
+cannot arm a funded account. But the halfway state is silent.
+**Why it matters:** with only the api flag set, the engine believes it can trade
+and every order fails at the bridge with a 403. The reason is now clear in the
+message (fixed in 4.5), but nothing surfaces the mismatch *before* an order is
+attempted.
+**Fix:** show both flags on the dashboard's broker panel — `trading_enabled` is
+already reported by `/status` on the bridge and flows through
+`/api/brokers/accounts`. Small piece of UI.
 
 ### A5. PRICE_SOURCE=cft is built but not switched on
 **Found in:** 4.4
