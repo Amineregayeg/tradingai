@@ -66,6 +66,23 @@ async def health_check(db: DBSession) -> dict[str, Any]:
     }
 
 
+@router.get("/data-health")
+async def data_health_check(user_id: CurrentUser) -> dict[str, Any]:
+    """Health of the systems that fail silently — the collector and backups.
+
+    Authenticated, unlike /health: "backups are failing" is operational detail
+    that need not be public.
+
+    A component this endpoint cannot read reports `unavailable`, never
+    `healthy`. Silence and health look identical from outside, and conflating
+    them is how a dashboard ends up reassuring people about something it stopped
+    watching weeks ago.
+    """
+    from app.services.monitoring.data_health import data_health
+
+    return data_health()
+
+
 @router.get("/readiness")
 async def readiness_check(db: DBSession) -> dict[str, Any]:
     """Readiness probe — checks DB connectivity."""

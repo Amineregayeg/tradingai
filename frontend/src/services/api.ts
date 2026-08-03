@@ -8,6 +8,7 @@ import type {
   AuditEvent,
   BrokerConnectRequest,
   BrokerAccount,
+  DataHealth,
   BrokerConnection,
   HealthStatus,
   ICTDetection,
@@ -318,6 +319,14 @@ export const api = {
   // ── System ────────────────────────────────────────────────────────────────
   system: {
     health: () => request<HealthStatus>('GET', '/system/health'),
+    /**
+     * GET /api/system/data-health — the systems that fail silently.
+     *
+     * A component the backend cannot read reports status "unavailable", never
+     * "healthy". Treat "unavailable" as a problem in the UI, not as an absence
+     * of news: it means nothing is watching that component.
+     */
+    dataHealth: () => request<DataHealth>('GET', '/system/data-health'),
   },
 
   // ── Prop Firm ─────────────────────────────────────────────────────────────

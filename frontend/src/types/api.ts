@@ -247,6 +247,31 @@ export interface BrokerAccount {
   }
 }
 
+/** One monitored component. `unavailable` means nothing is watching it. */
+export interface ComponentHealth {
+  status: 'healthy' | 'stale' | 'down' | 'failing' | 'unavailable'
+  /** False when the backend could not read this component's data at all. */
+  watching?: boolean
+  reason?: string
+  warning?: string
+  age_minutes?: number
+  age_hours?: number
+  recent_density_pct?: number
+  live_priced_pct?: number
+  backup_count?: number
+  last_sample?: string
+  last_run?: string
+  message?: string
+}
+
+export interface DataHealth {
+  ok: boolean
+  checked_at: string
+  problems: string[]
+  dominance_collector: ComponentHealth
+  backups: ComponentHealth
+}
+
 export interface BrokerConnectRequest {
   broker: BrokerName
   label?: string

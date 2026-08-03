@@ -65,6 +65,12 @@ services:
       DATABASE_URL: "postgresql+asyncpg://tradingai:tradingai@db:5432/tradingai"
       REDIS_URL: "redis://redis:6379/0"
       DATA_DIR: "/tmp/tradingai-data"
+      # Read-only views of the two things that fail silently, so /api/system/
+      # data-health can actually see them. Read-only is deliberate: the api must
+      # never be able to corrupt the collector's unrecoverable data or the
+      # backups it reports on.
+      DOMINANCE_DATA_DIR: "/data/dominance"
+      BACKUP_STATUS_DIR: "/data/backups"
       PYTHONPATH: "/app"
       # SECRET — the real value lives ONLY in the VPS copy of this file and is
       # deliberately not committed. Set it there; never here.
@@ -72,6 +78,9 @@ services:
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
       # ENGINE_BROKER: "sim"   # uncomment to run the prop-firm challenge sim
       #                        # (the Tier 2 vehicle). Unset = "paper".
+    volumes:
+      - /opt/dominance:/data/dominance:ro
+      - /home/deploy/tradingai-backups:/data/backups:ro
     entrypoint: ["sh", "-c"]
     command:
       - |

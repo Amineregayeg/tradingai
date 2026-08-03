@@ -4,6 +4,7 @@ import { wsService } from '@/services/ws'
 import { InlineApprovalQueue } from '@/components/governance/InlineApprovalQueue'
 import { EnginePanel } from '@/components/dashboard/EnginePanel'
 import { BrokerAccountsPanel } from '@/components/dashboard/BrokerAccountsPanel'
+import { DataHealthPanel } from '@/components/dashboard/DataHealthPanel'
 import type { Analysis, AuditEvent } from '@/types/api'
 import type { AlertNewData, AlertStatusData } from '@/types/ws'
 
@@ -160,6 +161,7 @@ export function RightRail() {
       {/* LIVE ENGINE — status, metrics, control */}
       <EnginePanel />
       <BrokerAccountsPanel />
+      <DataHealthPanel />
 
       {/* APPROVAL QUEUE — the product's headline differentiator */}
       <InlineApprovalQueue />
