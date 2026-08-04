@@ -87,6 +87,19 @@ export default function EnginePage() {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            onClick={() => {
+              // A reset is NOT destructive — nothing is deleted and the previous
+              // run stays queryable — but it does zero the visible numbers, and
+              // an unexpected reset would look exactly like data loss.
+              if (!window.confirm(
+                'Start a new run?\n\n' +
+                'Metrics restart at zero and the balance returns to its starting value.\n' +
+                'Nothing is deleted \u2014 the current run is kept and stays viewable.'
+              )) return
+              api.engine.reset().then(setStatus).catch(() => {})
+            }}
+            style={{ padding: '8px 14px', border: '1px solid #5c3d00', borderRadius: 8, background: 'transparent', color: '#e3b341', fontSize: 12, cursor: 'pointer' }}>Reset run</button>
           <button onClick={() => api.engine.pause().then(setStatus).catch(() => {})} disabled={paused}
             style={{ padding: '8px 14px', border: '1px solid #252540', borderRadius: 8, background: paused ? '#1a1a24' : 'transparent', color: paused ? '#55556a' : '#e8e8ef', fontSize: 12, cursor: paused ? 'default' : 'pointer' }}>Pause</button>
           <button onClick={() => api.engine.resume().then(setStatus).catch(() => {})} disabled={!paused}

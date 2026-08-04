@@ -183,6 +183,16 @@ export const api = {
       request<Record<string, unknown>>('GET', `/engine/feedback${buildQuery({ min_evidence: minEvidence })}`),
     pause: () => request<Record<string, unknown>>('POST', '/engine/pause'),
     resume: () => request<Record<string, unknown>>('POST', '/engine/resume'),
+    /**
+     * POST /engine/reset — end the current run and start a clean one.
+     *
+     * Deletes NOTHING. The previous run's trades and decision records remain,
+     * scoped to their run_id; the slate is clean because metrics are scoped to
+     * the new run, not because history was removed.
+     */
+    reset: (label?: string) =>
+      request<Record<string, unknown>>('POST', `/engine/reset${label ? `?label=${encodeURIComponent(label)}` : ''}`),
+    runs: () => request<Record<string, unknown>[]>('GET', '/engine/runs'),
   },
 
   // ── Candles (internal, not in OpenAPI — backed by TimescaleDB) ────────────

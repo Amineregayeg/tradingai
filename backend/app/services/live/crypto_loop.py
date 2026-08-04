@@ -11,6 +11,7 @@ import asyncio
 import json
 import os
 import urllib.request
+import uuid
 from collections import deque
 from datetime import datetime, timedelta, timezone
 
@@ -111,6 +112,10 @@ class LiveCryptoLoop:
         self._open_decision: dict[str, str] = {}
         self._running = False
         self.paused = False
+        # The active run. Held in the DB rather than only in memory so
+        # recreating the api container CONTINUES the same run instead of
+        # silently resetting the dashboard's numbers on every deploy.
+        self.run_id: "uuid.UUID | None" = None
         self.started_at: datetime | None = None
         self.starting_balance = starting_balance
         self.activity: deque[dict] = deque(maxlen=80)
@@ -150,13 +155,19 @@ class LiveCryptoLoop:
                 # Folding replay into the live panel is exactly the "presents
                 # replay as live performance" defect the stress test flagged.
                 # NULL/other tags count as live (see is_live_cohort).
+                # Scoped to the CURRENT RUN. This is what makes a reset a real
+                # reset: metrics start at zero because they only count this
+                # run's trades, and nothing had to be deleted to achieve it.
+                conditions = [
+                    Trade.broker == "paper",
+                    Trade.status == TradeStatus.CLOSED,
+                    (Trade.setup_tag.is_distinct_from(SETUP_TAG_REPLAY)),
+                ]
+                if self.run_id is not None:
+                    conditions.append(Trade.run_id == self.run_id)
                 rows = (
                     await db.execute(
-                        select(Trade.outcome, Trade.pnl_dollars).where(
-                            Trade.broker == "paper",
-                            Trade.status == TradeStatus.CLOSED,
-                            (Trade.setup_tag.is_distinct_from(SETUP_TAG_REPLAY)),
-                        )
+                        select(Trade.outcome, Trade.pnl_dollars).where(*conditions)
                     )
                 ).all()
             closed_n = len(rows)
@@ -416,6 +427,7 @@ class LiveCryptoLoop:
                 sized_units=Decimal(str(round(float(sized_units), 6))),
                 expected_r=Decimal(str(round(expected_r, 4))) if expected_r is not None else None,
                 outcome=OUTCOME_OPEN, cohort=COHORT_PAPER,
+                run_id=self.run_id,
             )
             async with async_session_maker() as db:
                 db.add(rec)
@@ -423,6 +435,138 @@ class LiveCryptoLoop:
                 self._open_decision[pair] = str(rec.id)
         except Exception as exc:  # noqa: BLE001 - never let bookkeeping kill the loop
             logger.warning("record decision failed", pair=pair, error=str(exc))
+
+    # ------------------------------------------------------------------
+    # Run lifecycle (task 2.1)
+    # ------------------------------------------------------------------
+    def _config_snapshot(self) -> dict:
+        """What the engine was configured to do. Stored with the run so a result
+        can never be read against the wrong settings later."""
+        return {
+            "broker_mode": self.broker_mode,
+            "mode": self.mode,
+            "symbols": list(self.symbols),
+            "entry_tf": self.entry_tf,
+            "bias_tf": self.bias_tf,
+            "risk_pct": self.risk_pct,
+            "starting_balance": self.starting_balance,
+            "max_concurrent": self.max_concurrent,
+            "price_source": getattr(self, "price_source_name", "binance"),
+            "engine_version": ENGINE_CODE_VERSION,
+        }
+
+    async def ensure_run(self) -> "uuid.UUID | None":
+        """Adopt the active run, or open one if there is none.
+
+        ADOPTING matters more than creating: a restart must continue the same
+        run. If this created a run every boot, every deploy would silently zero
+        the dashboard and no run would ever be long enough to judge.
+        """
+        if self.run_id is not None:
+            return self.run_id
+        try:
+            from sqlalchemy import select
+
+            from app.db.session import async_session_maker
+            from app.models.engine_run import EngineRun
+
+            async with async_session_maker() as db:
+                active = (
+                    await db.execute(
+                        select(EngineRun)
+                        .where(EngineRun.ended_at.is_(None))
+                        .order_by(EngineRun.started_at.desc())
+                        .limit(1)
+                    )
+                ).scalar_one_or_none()
+                if active is None:
+                    active = EngineRun(
+                        config=self._config_snapshot(),
+                        note="opened automatically on engine start",
+                    )
+                    db.add(active)
+                    await db.commit()
+                    await db.refresh(active)
+                self.run_id = active.id
+                logger.info("Engine run active", run_id=str(self.run_id))
+        except Exception as exc:  # noqa: BLE001 - the engine must still trade
+            logger.warning("Could not establish an engine run", error=str(exc))
+        return self.run_id
+
+    async def reset_run(self, note: str | None = None, label: str | None = None) -> dict:
+        """End the current run and start a clean one.
+
+        NOTHING IS DELETED. The previous run's trades and decision records stay
+        exactly where they are, still queryable by their run_id — they are the
+        evidence of what the strategy did, and a reset button that destroyed
+        them would undo the reason backups exist. The slate is clean because
+        metrics are scoped to the new run, not because history was removed.
+        """
+        from datetime import datetime as _dt
+
+        from sqlalchemy import select
+
+        from app.db.session import async_session_maker
+        from app.models.engine_run import EngineRun
+
+        async with async_session_maker() as db:
+            for row in (
+                await db.execute(select(EngineRun).where(EngineRun.ended_at.is_(None)))
+            ).scalars().all():
+                row.ended_at = _dt.now(tz=timezone.utc)
+                db.add(row)
+            fresh = EngineRun(
+                config=self._config_snapshot(),
+                note=note or "reset from the engine page",
+                label=label,
+            )
+            db.add(fresh)
+            await db.commit()
+            await db.refresh(fresh)
+            self.run_id = fresh.id
+
+        # Reset the in-memory simulation to match. Without this the broker would
+        # carry the previous run's balance and open positions into a run whose
+        # metrics start at zero — the same incoherence this task exists to fix.
+        await self._reset_broker_state()
+
+        self.started_at = datetime.now(tz=timezone.utc)
+        self._last_eval.clear()
+        self._open_decision.clear()
+        self.activity.clear()
+        self.paused = False
+
+        await self._act("engine", f"Run reset — new run started, balance back to "
+                                  f"${self.starting_balance:,.0f}")
+        logger.info("Engine run reset", run_id=str(self.run_id))
+        return await self.status()
+
+    async def _reset_broker_state(self) -> None:
+        """Rebuild the simulation broker at its starting balance.
+
+        Closing positions is deliberately NOT done through the normal close path:
+        that fires the settle hook, which would persist phantom closes into the
+        NEW run. A reset must leave no trace in the run it is starting.
+        """
+        try:
+            self.paper._on_settle = None  # noqa: SLF001 - suppress settle during reset
+            if self.broker_mode == "sim":
+                from app.services.broker.cft_sim import PropFirmRules, SimPropFirmBroker
+
+                async def _price_source(pair: str) -> float:
+                    return self._marks.get(pair, 0.0)
+
+                self.paper = SimPropFirmBroker(
+                    PropFirmRules(starting_balance=self.starting_balance), _price_source
+                )
+            else:
+                self.paper = PaperBroker(
+                    starting_balance=self.starting_balance, price_fn=self._mark
+                )
+            self.paper._on_settle = self._on_settle_cb  # noqa: SLF001
+            self.execution = ExecutionService(self.paper, ExecMode.PAPER)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Broker reset failed", error=str(exc))
 
     async def _record_abstention(self, pair: str, entry_df, trace) -> None:
         """Persist WHY no trade was taken.
@@ -446,6 +590,7 @@ class LiveCryptoLoop:
                 score=None, abstained=True,
                 reasons=trace.reasons,
                 outcome=OUTCOME_ABSTAINED, cohort=COHORT_PAPER,
+                run_id=self.run_id,
             )
             async with async_session_maker() as db:
                 db.add(rec)
@@ -540,6 +685,7 @@ class LiveCryptoLoop:
                 outcome=OutcomeType.WIN if pnl > 0 else OutcomeType.LOSS,
                 status=TradeStatus.CLOSED, pnl_dollars=Decimal(str(round(pnl, 2))),
                 setup_tag=SETUP_TAG_LIVE,
+                run_id=self.run_id,
             )
             async with async_session_maker() as db:
                 db.add(row)
@@ -619,6 +765,7 @@ class LiveCryptoLoop:
     async def run(self) -> None:
         self._running = True
         self.started_at = datetime.now(tz=timezone.utc)
+        await self.ensure_run()
         await self.paper.connect()
         logger.info("LiveCryptoLoop started", symbols=list(self.symbols))
         await self._act(

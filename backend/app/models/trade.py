@@ -79,6 +79,11 @@ class Trade(UserScopedMixin, TimestampMixin, Base):
     pnl_dollars: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
     pnl_pips: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: Which engine run produced this trade. Lets a reset scope metrics to the
+    #: new run without deleting anything — see models/engine_run.py.
+    run_id: Mapped[uuid.UUID | None] = mapped_column(
+        SAUUID(as_uuid=True), nullable=True, index=True
+    )
     setup_tag: Mapped[str | None] = mapped_column(String, nullable=True)
 
     # Relationships

@@ -76,6 +76,71 @@ async def engine_resume(request: Request, user_id: CurrentUser) -> dict:
     return await loop.status()
 
 
+@router.post("/reset")
+async def engine_reset(
+    request: Request, user_id: CurrentUser,
+    note: str | None = None, label: str | None = None,
+) -> dict:
+    """End the current run and start a clean one.
+
+    NOTHING IS DELETED. The previous run's trades and decision records remain,
+    still queryable by their run_id — they are the evidence of what the strategy
+    did, and a reset that destroyed them would undo the reason backups exist.
+    The slate is clean because metrics are scoped to the new run.
+
+    Until this existed, starting a clean run meant an SSH session and a
+    container restart, which meant in practice that runs were never restarted
+    and results accumulated across configuration changes.
+    """
+    loop = _loop(request)
+    return await loop.reset_run(note=note, label=label)
+
+
+@router.get("/runs")
+async def engine_runs(request: Request, user_id: CurrentUser, db: DBSession) -> list[dict]:
+    """Past and present runs, newest first, with each one's result.
+
+    Results are computed from the trades actually stamped with each run_id
+    rather than stored at reset time, so they cannot drift from the underlying
+    rows.
+    """
+    from sqlalchemy import func, select
+
+    from app.db.enums import TradeStatus
+    from app.models.engine_run import EngineRun
+    from app.models.trade import SETUP_TAG_REPLAY, Trade
+
+    runs = (
+        await db.execute(select(EngineRun).order_by(EngineRun.started_at.desc()).limit(50))
+    ).scalars().all()
+
+    out: list[dict] = []
+    active_id = getattr(_loop(request), "run_id", None)
+    for r in runs:
+        agg = (
+            await db.execute(
+                select(func.count(Trade.id), func.coalesce(func.sum(Trade.pnl_dollars), 0))
+                .where(
+                    Trade.run_id == r.id,
+                    Trade.status == TradeStatus.CLOSED,
+                    Trade.setup_tag.is_distinct_from(SETUP_TAG_REPLAY),
+                )
+            )
+        ).one()
+        out.append({
+            "id": str(r.id),
+            "started_at": r.started_at.isoformat() if r.started_at else None,
+            "ended_at": r.ended_at.isoformat() if r.ended_at else None,
+            "active": r.ended_at is None and str(r.id) == str(active_id),
+            "label": r.label,
+            "note": r.note,
+            "config": r.config,
+            "closed_trades": int(agg[0] or 0),
+            "realized_pnl": float(agg[1] or 0),
+        })
+    return out
+
+
 @router.post("/warmup")
 async def engine_warmup(request: Request, user_id: CurrentUser, days: int = 14) -> dict:
     """Backfill the paper account with the strategy's real recent trades."""

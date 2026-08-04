@@ -115,6 +115,12 @@ class DecisionRecord(Base):
     signal_tp: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
     sized_units: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
 
+    #: Which engine run produced this decision. See models/engine_run.py — a
+    #: reset starts a new run rather than deleting the evidence of the old one.
+    run_id: Mapped[uuid.UUID | None] = mapped_column(
+        SAUUID(as_uuid=True), nullable=True, index=True
+    )
+
     #: The price the order ACTUALLY filled at, as reported by the broker.
     #:
     #: `signal_entry` is what the strategy asked for; this is what it got. They

@@ -30,6 +30,7 @@ _VERSIONS = Path(__file__).resolve().parents[2] / "alembic" / "versions"
 _CHAIN = [
     ("0002", "0002_decision_records.py", "0001"),
     ("0003", "0003_decision_fill_price.py", "0002"),
+    ("0004", "0004_engine_runs.py", "0003"),
 ]
 
 
@@ -49,8 +50,15 @@ class _RecordingOp:
         self.columns: dict[str, sa.Column] = {}
         self.checks: dict[str, sa.CheckConstraint] = {}
         self.indexes: list[tuple] = []
+        self.other_tables: set[str] = set()
 
-    def create_table(self, name, *cols):
+    #: Only decision_records is under assertion here. Migration 0004 also
+    #: creates engine_runs, and DDL for other tables is recorded separately so
+    #: it neither pollutes the assertions nor fails the replay.
+    def create_table(self, name, *cols, **kw):
+        if name != "decision_records":
+            self.other_tables.add(name)
+            return
         self.table_name = name
         for c in cols:
             if isinstance(c, sa.Column):
@@ -58,18 +66,46 @@ class _RecordingOp:
             elif isinstance(c, sa.CheckConstraint):
                 self.checks[c.name] = c
 
-    def add_column(self, table, col):
-        assert table == self.table_name, f"add_column on unexpected table {table}"
+    def add_column(self, table, col, **kw):
+        if table != "decision_records":
+            return
         self.columns[col.name] = col
 
-    def drop_column(self, table, name):
-        self.columns.pop(name, None)
+    def drop_column(self, table, name, **kw):
+        if table == "decision_records":
+            self.columns.pop(name, None)
 
-    def create_index(self, name, table, cols):
+    def create_index(self, name, table, cols, **kw):
         self.indexes.append((name, table, tuple(cols)))
 
-    def get_bind(self):  # pragma: no cover - migrations under test never use it
-        raise AssertionError("the recording shim has no real connection")
+    def drop_index(self, name, table_name=None, **kw):
+        self.indexes = [i for i in self.indexes if i[0] != name]
+
+    def drop_table(self, name, **kw):
+        self.other_tables.discard(name)
+
+    def get_bind(self):
+        """A bind that swallows data statements.
+
+        Migrations may run DML as well as DDL — 0004 backfills run_id onto
+        existing rows. This test asserts DDL INTENT against an in-memory
+        recorder, so data statements have nothing to act on and are discarded.
+        Raising here instead (the earlier behaviour) made the suite fail the
+        moment any migration touched data, which is a normal thing to do.
+        """
+
+        class _NullResult:
+            def scalar(self):
+                return 0
+
+            def fetchall(self):
+                return []
+
+        class _NullBind:
+            def execute(self, *_a, **_kw):
+                return _NullResult()
+
+        return _NullBind()
 
 
 def _replay_chain() -> _RecordingOp:
@@ -83,15 +119,34 @@ def _replay_chain() -> _RecordingOp:
         # (`_has_column`) so a bootstrapped DB can be upgraded safely. That needs
         # a real connection; here we assert the DDL INTENT, so force the guard to
         # report "not present yet" and let the DDL through.
-        orig_has = getattr(mod, "_has_column", None)
-        if orig_has is not None:
-            mod._has_column = lambda: False
+        # Migrations guard themselves against an already-migrated schema by
+        # probing the live database (_has_column / _cols / _tables). Those need
+        # a real connection; here we assert DDL INTENT, so make every probe
+        # report "nothing exists yet" and let the DDL through.
+        # The right stub semantics are "the tables from earlier migrations
+        # exist, but this migration's new columns do not yet" — which is the
+        # state a migration is written to expect. Returning an empty table set
+        # instead made 0004 skip its add_column entirely and the drift check
+        # then reported a column the migration does add.
+        class _AnyTable(set):
+            def __contains__(self, item):  # every table is present
+                return True
+
+        probes = {}
+        for name, stub in (
+            ("_has_column", lambda: False),
+            ("_cols", lambda _t=None: set()),
+            ("_tables", lambda: _AnyTable()),
+        ):
+            if hasattr(mod, name):
+                probes[name] = getattr(mod, name)
+                setattr(mod, name, stub)
         try:
             mod.upgrade()
         finally:
             mod.op = orig_op
-            if orig_has is not None:
-                mod._has_column = orig_has
+            for name, original in probes.items():
+                setattr(mod, name, original)
     return rec
 
 
