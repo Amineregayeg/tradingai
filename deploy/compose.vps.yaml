@@ -23,16 +23,23 @@
 # the same file pyproject.toml and CI read. One list, three consumers.
 # .github/workflows/ci.yml fails the build if inline pins reappear here.
 #
-# THE DEPLOY GOTCHA (unchanged)
-# Both app containers guard setup with `if [ ! -f /app/.ready ]`, so a plain
+# THE DEPLOY GOTCHA
+# The api guards setup with `if [ ! -f /app/.ready ]`, so a plain
 # `docker compose restart` KEEPS THE OLD CODE. To ship new code:
-#     docker compose up -d --force-recreate api web
+#     docker compose up -d --force-recreate api web-build web
 # Downtime ~3-5 min while pip/pnpm reinstall.
 #
-# KNOWN, NOT FIXED HERE (deliberate — separate tasks, each needs its own testing):
-#   * `pnpm dev` serves the frontend in production. That is the Vite DEV server:
-#     unminified, source maps exposed, HMR websocket open. Should be a built
-#     bundle behind a static server.
+# `web-build` is different: it keys on the commit, not a marker file, so it
+# rebuilds exactly when the code changed and no-ops in seconds otherwise. It is
+# a one-shot container and EXITING IS ITS SUCCESS — `docker compose ps` showing
+# it as Exited (0) is the healthy state, not a crash.
+#
+# HOW THE FRONTEND IS SERVED (was KNOWN_ISSUES D4)
+# `pnpm dev` used to serve the real site — the Vite DEV server, unminified with
+# source maps exposed and an HMR websocket open. It is now a built bundle behind
+# nginx (deploy/nginx-web.conf). nginx has to reproduce three things the dev
+# server did implicitly: proxy /api, UPGRADE /ws to a websocket, and fall back to
+# index.html for client-side routes. Each fails silently if missed.
 #
 # WHICH COMMIT IS RUNNING (was KNOWN_ISSUES B3)
 # Both services now fetch an explicit `GIT_REF` and write the resolved SHA to
@@ -128,50 +135,84 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  web:
+  # Builds the frontend bundle, then exits. Not a server (D4).
+  #
+  # It is a separate service because building and serving want different images:
+  # the build needs node and the repo, serving needs neither. Keeping node alive
+  # to serve files is what produced the dev-server-in-production problem.
+  web-build:
     image: node:20-slim
     working_dir: /app
     environment:
-      VITE_API_TARGET: "http://api:8000"
       # Keep in step with the api's GIT_REF. Recreating one container and not the
       # other is how the two halves end up on different commits — the specific
       # thing B3 says nobody could detect.
       GIT_REF: "main"
+    volumes:
+      - web_html:/out/html
+      - web_conf:/out/conf
     entrypoint: ["sh", "-c"]
     command:
       - |
         set -e
         apt-get update -qq
         apt-get install -y --no-install-recommends git ca-certificates >/dev/null
-        if [ ! -f /app/.ready ]; then
-          rm -rf /tmp/src
-          git init -q /tmp/src
-          git -C /tmp/src remote add origin https://github.com/Amineregayeg/tradingai.git
-          git -C /tmp/src fetch -q --depth 1 origin "$${GIT_REF:-main}"
-          git -C /tmp/src checkout -q FETCH_HEAD
-          cp -a /tmp/src/frontend/. /app/
-          # Nothing serves this one — the frontend has no endpoint. It is written
-          # so `docker exec tradingai-web-1 cat /app/.build-sha` can answer
-          # "is web on the same commit as api?", which is otherwise unanswerable.
-          git -C /tmp/src rev-parse HEAD > /app/.build-sha
-          corepack enable
-          corepack prepare pnpm@9 --activate
-          # --frozen-lockfile (was --no-frozen-lockfile): the committed
-          # pnpm-lock.yaml is the source of truth for frontend versions. The old
-          # flag let production silently resolve packages CI never tested — the
-          # same drift the backend had. Verified to install cleanly against the
-          # committed lockfile.
-          pnpm install --frozen-lockfile
-          touch /app/.ready
+        rm -rf /tmp/src
+        git init -q /tmp/src
+        git -C /tmp/src remote add origin https://github.com/Amineregayeg/tradingai.git
+        git -C /tmp/src fetch -q --depth 1 origin "$${GIT_REF:-main}"
+        git -C /tmp/src checkout -q FETCH_HEAD
+        sha=$$(git -C /tmp/src rev-parse HEAD)
+        mkdir -p /out/html /out/conf
+        # The nginx config is refreshed every run. It is small, and it must track
+        # the repo — a config that only updates when the bundle changes would
+        # silently keep serving an old routing rule.
+        cp /tmp/src/deploy/nginx-web.conf /out/conf/default.conf
+        # SKIP THE BUILD WHEN THE COMMIT ALREADY MATCHES.
+        # The old web service guarded on `[ ! -f /app/.ready ]`, which was safe
+        # only because /app was container-local and died on recreate. These are
+        # named volumes: a .ready marker in one would survive forever and no new
+        # frontend code would EVER deploy. Keying on the commit instead makes the
+        # guard self-correcting — it rebuilds exactly when the code differs.
+        if [ "$$(cat /out/html/.build-sha 2>/dev/null)" = "$$sha" ]; then
+          echo "frontend already built at $$sha — nothing to do"
+          exit 0
         fi
+        cp -a /tmp/src/frontend/. /app/
         corepack enable
         corepack prepare pnpm@9 --activate
-        exec pnpm dev --host 0.0.0.0 --port 5173
+        # --frozen-lockfile: the committed pnpm-lock.yaml is the source of truth
+        # for frontend versions. Re-resolving here would let production run
+        # packages CI never tested.
+        pnpm install --frozen-lockfile
+        pnpm build
+        # Marker removed FIRST and written LAST, so a build that dies halfway
+        # cannot leave a matching SHA sitting beside missing files — which would
+        # make every later start skip the rebuild and serve a broken bundle.
+        rm -f /out/html/.build-sha
+        rm -rf /out/html/*
+        cp -a dist/. /out/html/
+        echo "$$sha" > /out/html/.build-sha
+        echo "frontend built at $$sha"
+    restart: "no"
+
+  web:
+    image: nginx:alpine
+    volumes:
+      - web_html:/usr/share/nginx/html:ro
+      - web_conf:/etc/nginx/conf.d:ro
     ports:
-      - "8095:5173"
+      - "8095:80"
     depends_on:
-      - api
+      # Must not start before the bundle exists, or nginx serves an empty root
+      # and the site is a 404 until someone notices.
+      web-build:
+        condition: service_completed_successfully
+      api:
+        condition: service_started
     restart: unless-stopped
 
 volumes:
   tradingai_db:
+  web_html:
+  web_conf:
