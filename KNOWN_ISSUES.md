@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-04 (after B3/I6 — running commit now reported)
+Last updated: 2026-08-04 (after B3/I6; D7 added — shared non-expiring token)
 
 ---
 
@@ -257,6 +257,26 @@ serves ~8 domains this way (`aasp-mvp.aminereg.com`, `app.harbyx.com`,
 travelling in clear.
 **Interim:** the token is fresh and single-use-by-you; the exposure is passive
 network observation between you and the VPS.
+
+### D7. One shared, non-expiring token is the entire auth model
+**Found in:** D2 follow-up (asked whether the token ever changes — it does not)
+**What it is:** `API_AUTH_TOKEN` is a static string in the VPS compose file,
+read at container start. It has no expiry and no rotation schedule, and it
+survives restarts, redeploys and recreates. It changes only when a human edits
+that file.
+**Why it matters:** three separate consequences, none urgent on a small trusted
+team, all of which get worse the moment real money is involved.
+  * A leak is permanent until someone notices and rotates by hand. There is no
+    backstop — which is exactly why the D2 rotation had to be done manually.
+  * It is one token for every person, not a login. There is no way to revoke one
+    person's access; rotating locks everyone out and everyone must re-fetch.
+  * Nothing is attributable. Every action through the dashboard is "whoever held
+    the token", so the audit log cannot answer who placed an order.
+**Why it is fine for now:** the platform places no real orders (the CFT bridge
+still reports `trading_enabled: false`) and the team is three people.
+**Fix when it stops being fine:** per-user credentials with an expiry, so the
+audit log names a person and access can be withdrawn individually. Worth doing
+before the bridge write-guard is ever unlocked, not after.
 
 
 ### D3. Nothing stops a broken merge — BLOCKED ON ADMIN ACCESS
