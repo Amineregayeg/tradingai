@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { api } from '@/services/api'
 import { useLoadState } from '@/hooks/useLoadState'
-import { LoadFailure } from '@/components/shared'
+import { LoadFailure, ActionError } from '@/components/shared'
+import { useAction } from '@/hooks/useAction'
 import type { Settings, BrokerConnection, BrokerConnectRequest } from '@/types/api'
 
 /**
@@ -110,6 +111,7 @@ export default function SettingsPage() {
   const setSettings = useSettingsStore((s) => s.setSettings)
   const [brokers, setBrokers] = useState<BrokerConnection[]>([])
   const { failed, track } = useLoadState()
+  const { error: actionErr, run, dismiss } = useAction()
   const [showAddBroker, setShowAddBroker] = useState(false)
   const [brokerForm, setBrokerForm] = useState<BrokerConnectRequest>({
     // Defaults must be a combination that CAN succeed — see BROKER_CAPABILITIES.
@@ -135,9 +137,15 @@ export default function SettingsPage() {
 
   const updateSetting = (key: keyof Settings, value: unknown) => {
     if (!settings) return
+    // The update is OPTIMISTIC — the control moves before the server agrees.
+    // Swallowing the failure left the UI showing a setting that was never
+    // saved, which survives until a reload and is then silently wrong (E5).
+    // Revert on failure and say why.
+    const previous = settings
     const updated = { ...settings, [key]: value }
     setSettings(updated)
-    api.settings.update({ [key]: value }).catch(() => {})
+    void run(`Saving ${String(key)}`, () => api.settings.update({ [key]: value }))
+      .then((r) => { if (!r.ok) setSettings(previous) })
   }
 
   const handleConnect = async () => {
@@ -191,6 +199,7 @@ export default function SettingsPage() {
         {activeSection === 'broker' && (
           <Section title="Broker Connections" description="Connect your trading accounts to sync positions and trades.">
             <LoadFailure what={failed} />
+            <ActionError message={actionErr} onDismiss={dismiss} />
             {brokers.length === 0 && failed.length === 0 ? (
               <div style={{ padding: '32px 20px', textAlign: 'center' }}>
                 <div style={{ fontSize: 13, color: '#55556a', marginBottom: 16 }}>
@@ -219,7 +228,10 @@ export default function SettingsPage() {
                         {b.connected ? 'Connected' : 'Disconnected'}
                       </span>
                       <button
-                        onClick={() => api.brokers.disconnect(b.id).then(() => setBrokers((brs) => brs.filter((x) => x.id !== b.id))).catch(() => {})}
+                        onClick={() => {
+                          void run('Disconnect broker', () => api.brokers.disconnect(b.id))
+                            .then((r) => { if (r.ok) setBrokers((brs) => brs.filter((x) => x.id !== b.id)) })
+                        }}
                         style={{
                           padding: '4px 10px', border: '1px solid #252540', borderRadius: 5,
                           background: 'transparent', color: '#8888a0', fontSize: 11, cursor: 'pointer',

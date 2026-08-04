@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import { api } from '@/services/api'
 import { useLoadState } from '@/hooks/useLoadState'
-import { LoadFailure } from '@/components/shared'
+import { LoadFailure, ActionError } from '@/components/shared'
+import { useAction } from '@/hooks/useAction'
 import type { Trade, Outcome } from '@/types/api'
 import { formatPrice, formatDate } from '@/utils/format'
 
@@ -43,6 +44,7 @@ export default function JournalPage() {
   const [trades, setTrades] = useState<Trade[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const { failed, track } = useLoadState()
+  const { error: actionErr, run, dismiss } = useAction()
   const [filters, setFilters] = useState<JournalFilters>({ pair: '', outcome: '', from: '', to: '' })
   const [selectedTrade, setSelectedTrade] = useState<Trade | null>(null)
 
@@ -94,17 +96,19 @@ export default function JournalPage() {
         </div>
         <button
           onClick={() => {
-            api.trades.exportCsv({ from: filters.from || undefined, to: filters.to || undefined })
-              .then((r) => r.blob())
-              .then((b) => {
-                const url = URL.createObjectURL(b)
-                const a = document.createElement('a')
-                a.href = url
-                a.download = 'trades.csv'
-                a.click()
-                URL.revokeObjectURL(url)
-              })
-              .catch(() => {})
+            // A silently failed export is indistinguishable from a browser that
+            // ignored the download — you press Export, no file appears, and
+            // nothing says why (E5).
+            void run('Export CSV', async () => {
+              const r = await api.trades.exportCsv({ from: filters.from || undefined, to: filters.to || undefined })
+              const b = await r.blob()
+              const url = URL.createObjectURL(b)
+              const a = document.createElement('a')
+              a.href = url
+              a.download = 'trades.csv'
+              a.click()
+              URL.revokeObjectURL(url)
+            })
           }}
           style={{
             display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px',
@@ -194,7 +198,10 @@ export default function JournalPage() {
 
       {/* Table */}
       <div style={{ flex: 1, overflow: 'auto' }}>
-        <div style={{ padding: '12px 24px 0' }}><LoadFailure what={failed} /></div>
+        <div style={{ padding: '12px 24px 0' }}>
+          <LoadFailure what={failed} />
+          <ActionError message={actionErr} onDismiss={dismiss} />
+        </div>
         {/* Column headers */}
         <div style={{
           display: 'grid',
