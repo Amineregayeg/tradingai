@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-04 (after C4 — deploy drift is now checkable)
+Last updated: 2026-08-04 (after C3 — the repo now describes production exactly)
 
 ---
 
@@ -181,19 +181,14 @@ older SHA are both verified working against GitHub.
 
 ## C. Drift — the repo and the server disagree
 
-### C3. The dominance collector runs from a hand-copied file
-**Found in:** I4 deployment
-**What it is:** it bind-mounts `/home/deploy/tradingai-dominance/app/`, a copy
-made before the code reached GitHub, rather than cloning the repo.
-**Why it matters:** application code on the server that the repo cannot see —
-the same pattern as C1. Editing the repo does not change what runs.
-**Fix:** now unblocked (the code is on `main`); switch to
-`deploy/compose.dominance.yaml`. The CSV lives on the host, so no samples are
-lost in the swap.
-**Now measurable:** `scripts/check_deploy_drift.py` reports this independently —
-the server bind-mounts `/home/deploy/tradingai-dominance/app:/app:ro` and skips
-the clone the repo copy performs. This is the ONLY drift it reports, so it exits
-1 until C3 is fixed. Anything it flags beyond the `collector` service is new.
+*Empty as of 2026-08-04.* All four entries here (C1 the api's inline pip list,
+C2 `--no-frozen-lockfile`, C3 the hand-copied collector, C4 no way to detect any
+of it) are closed, and `scripts/check_deploy_drift.py` reports all seven
+deployed services matching their committed description.
+
+The category is kept rather than deleted because it will come back — every entry
+above appeared the same way, by someone editing the server without the repo.
+Run the check after a deploy; anything it reports belongs here.
 
 ---
 

@@ -63,17 +63,9 @@ api with no route to its broker. This makes checking it one command.
 It needs ssh to `pfe-vps`, so it cannot run in CI as things stand. Run it after
 any deploy, and after changing anything in `deploy/`.
 
-**It currently exits 1, and that is correct.** There is exactly one known drift:
-
-```
-deploy/compose.dominance.yaml
-  DRIFT collector: ... volumes: server has /home/deploy/tradingai-dominance/app:/app:ro
-```
-
-That is KNOWN_ISSUES **C3** — the dominance collector runs from a hand-copied
-directory instead of the repo. The check will go green when C3 is fixed. If it
-ever reports anything *beyond* the `collector` service, something new has
-drifted and is worth stopping for.
+**It currently exits 0** — all seven services across the three projects match
+their committed description. Any drift it reports is therefore new, and worth
+stopping for rather than explaining away.
 
 It compares parsed YAML with shell comments stripped, because a raw diff of
 these files is ~91 lines of comment noise. Secret **values** are never compared
