@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-04 (after Phase 1 audit)
+Last updated: 2026-08-04 (after D2 — secrets rotated)
 
 ---
 
@@ -219,12 +219,25 @@ which is a decision (and a cost) rather than a code change.
 **Fix:** sync `~/tradingai-backups/` to object storage or another host. The
 directory is small — ~2 MB per run, so a year is under 1 GB.
 
-### D2. Plain HTTP, and the API token needs rotating
-**Found in:** I10 (never started)
-**What it is:** the site runs on `http://`, so the bearer token crosses the
-network readable. It is also a single long-lived token, and it has appeared in
-chat transcripts.
-**Fix:** put it behind the Caddy already on the box, then rotate the token.
+### D2. The site is still plain HTTP — blocked on a DNS record
+**Found in:** I10; **token half done 2026-08-04**
+**Done:** both secrets rotated — the API token and the CFT bridge token, the
+latter because it leaked into a chat transcript through an unredacted diff. The
+old API token is confirmed revoked (401).
+**Still open:** traffic is unencrypted, so the bearer token crosses the network
+readable on every request.
+**What blocks it:** a certificate needs a hostname. The app is reached at
+`http://31.97.183.142:8095`, and Let's Encrypt will not issue for a bare IP.
+Everything else is already in place — the host runs nginx with certbot and
+serves ~8 domains this way (`aasp-mvp.aminereg.com`, `app.harbyx.com`,
+`cal.evidenss.ai` …), so this is one vhost away once a name exists.
+**What is needed from you:** point a hostname (e.g. `tradingai.aminereg.com`) at
+`31.97.183.142` with an A record. Then it is one nginx site plus
+`certbot --nginx -d <host>`, and the app moves to https with the token no longer
+travelling in clear.
+**Interim:** the token is fresh and single-use-by-you; the exposure is passive
+network observation between you and the VPS.
+
 
 ### D3. Nothing stops a broken merge
 **Found in:** I2 (CI)
