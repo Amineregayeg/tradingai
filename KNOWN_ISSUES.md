@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-04 (after B3/I6; D7 added — shared non-expiring token)
+Last updated: 2026-08-04 (after D4 — built bundle behind nginx)
 
 ---
 
@@ -205,14 +205,6 @@ while `pyproject.toml` demanded numpy<2.0.0. It will drift again.
 The repo copy (`deploy/compose.vps.yaml`) is already correct — the server is
 what is stale.
 
-### C2. Frontend installs with `--no-frozen-lockfile` in production
-**Found in:** I3
-**What it is:** the VPS web container ignores the committed lockfile and
-re-resolves packages.
-**Why it matters:** production can silently run frontend versions CI never
-tested — the same class of drift as C1, on the other half of the app.
-**Fix:** same edit as C1; the repo copy already says `--frozen-lockfile`.
-
 ### C3. The dominance collector runs from a hand-copied file
 **Found in:** I4 deployment
 **What it is:** it bind-mounts `/home/deploy/tradingai-dominance/app/`, a copy
@@ -295,12 +287,23 @@ Admin role on `Amineregayeg/tradingai` must run the script.
 `git push origin main` starts being rejected and all work moves to PRs. That is
 intended, and it is the whole cost.
 
-### D4. Production serves the frontend from the Vite dev server
-**Found in:** I3 (reading the real compose)
-**What it is:** the web container runs `pnpm dev` — unminified, source maps
-exposed, HMR websocket open, slower.
-**Fix:** `pnpm build` plus a static server. Needs testing, so it was not bundled
-into a dependency change.
+### D8. A failed frontend build now takes the whole site down
+**Found in:** D4
+**What it is:** `web` (nginx) declares
+`depends_on: web-build: service_completed_successfully`. If the build fails —
+a bad lockfile, a type error, an npm registry blip — nginx never starts and
+`http://31.97.183.142:8095` serves nothing at all.
+**Why it matters:** the previous bundle is still sitting in the `web_html`
+volume, intact and servable. Refusing to start means a broken *new* build is
+treated as worse than no site, when serving the last known-good bundle would
+keep the dashboard usable while the build is fixed. Availability now depends on
+the build succeeding every time.
+**Why it was built this way:** the alternative failure is worse in the other
+direction — starting nginx before any bundle exists serves a 404 site that
+looks like data loss. Ordering was the safe default for the first deploy.
+**Fix:** let `web` start whenever a bundle exists, and gate only on the volume
+being non-empty rather than on the build's exit code. A stale-but-working
+dashboard plus a loud build failure beats a dark site.
 
 ---
 
