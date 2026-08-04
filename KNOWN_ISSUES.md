@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-04 (after D2 — secrets rotated)
+Last updated: 2026-08-04 (after D3 — branch protection written, blocked on admin)
 
 ---
 
@@ -239,11 +239,21 @@ travelling in clear.
 network observation between you and the VPS.
 
 
-### D3. Nothing stops a broken merge
+### D3. Nothing stops a broken merge — BLOCKED ON ADMIN ACCESS
 **Found in:** I2 (CI)
 **What it is:** CI runs on every push, but `main` has no branch protection.
 **Why it matters:** a red build can be merged anyway; the robot reports and is
 ignored.
+**State:** the fix is written and tested as far as it can be —
+`scripts/enable_branch_protection.sh`. It verifies the four required check names
+against a real workflow run before applying, because a required check that no job
+reports makes `main` permanently unmergeable with no visible cause.
+**Blocked on:** the `Docz2868` token has `push`, not `admin`, and this endpoint
+needs admin. GitHub reports that as `404 Not Found`, not `403`. Someone with the
+Admin role on `Amineregayeg/tradingai` must run the script.
+**Note before running it:** required checks apply to direct pushes too, so
+`git push origin main` starts being rejected and all work moves to PRs. That is
+intended, and it is the whole cost.
 
 ### D4. Production serves the frontend from the Vite dev server
 **Found in:** I3 (reading the real compose)
