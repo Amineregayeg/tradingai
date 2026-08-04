@@ -31,6 +31,8 @@ packages, and checks that the strategy-critical versions match production.
 | Frontend tests (153 tests, ~1 min) | `pnpm exec vitest run` | `frontend/` |
 | Frontend typecheck | `pnpm tsc` | `frontend/` |
 | Lookahead guards (Tier 0.2) | `PYTHON=~/.venvs/tradingai/bin/python ./scripts/verify_guards.sh` | `backend/` |
+| Dependency single-source | `python3 scripts/check_dependency_sources.py` | repo root |
+| Deploy drift (needs ssh) | `~/.venvs/tradingai/bin/python scripts/check_deploy_drift.py` | repo root |
 
 **`pnpm test` is bare `vitest`, which watches forever.** Use `vitest run`.
 
@@ -49,6 +51,34 @@ guard bit" — and a missing command is also a failure. Before this was fixed, o
 a box without `python` on PATH it reported every guard as load-bearing and
 printed `TIER 0.2 PASSED` without running a single test. It now proves the
 baseline is green before trusting any mutation result.
+
+### About `check_deploy_drift.py`
+
+Three compose files in `deploy/` each claim to be "the record of what runs" on
+the VPS. Nothing verified that, and the claim was untrue three separate ways
+before anyone looked — an inline pip list on the server, a lockfile flag, and
+two missing CFT bridge variables that meant the committed record described an
+api with no route to its broker. This makes checking it one command.
+
+It needs ssh to `pfe-vps`, so it cannot run in CI as things stand. Run it after
+any deploy, and after changing anything in `deploy/`.
+
+**It currently exits 1, and that is correct.** There is exactly one known drift:
+
+```
+deploy/compose.dominance.yaml
+  DRIFT collector: ... volumes: server has /home/deploy/tradingai-dominance/app:/app:ro
+```
+
+That is KNOWN_ISSUES **C3** — the dominance collector runs from a hand-copied
+directory instead of the repo. The check will go green when C3 is fixed. If it
+ever reports anything *beyond* the `collector` service, something new has
+drifted and is worth stopping for.
+
+It compares parsed YAML with shell comments stripped, because a raw diff of
+these files is ~91 lines of comment noise. Secret **values** are never compared
+or printed — only whether each side has the variable at all, which is the check
+that would have caught the missing bridge wiring.
 
 ## Two things this environment does not prove
 

@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-04 (after C1 — one dependency list, everywhere)
+Last updated: 2026-08-04 (after C4 — deploy drift is now checkable)
 
 ---
 
@@ -181,26 +181,6 @@ older SHA are both verified working against GitHub.
 
 ## C. Drift — the repo and the server disagree
 
-### C4. Nothing detects drift between the repo compose and the VPS compose
-**Found in:** C1
-**What it is:** `deploy/compose.vps.yaml` says "KEEP THIS IDENTICAL to the VPS
-copy". Nothing enforces that, and the claim has been untrue three times: the
-server kept its own pip list (C1), installed the frontend with
-`--no-frozen-lockfile` (C2), and the repo copy was missing `CFT_BRIDGE_URL` and
-`CFT_BRIDGE_TOKEN` entirely — so the committed record described an api with no
-route to its broker.
-**Why it matters:** the repo copy is what anyone reads to understand the
-deployment, and what a rebuild would be based on. When it is wrong, it is wrong
-silently and confidently. CI checks the *committed* file for inline pins; it has
-no way to see the server.
-**Awkward detail:** the two files differ by ~91 lines of comments that do not
-run, so a raw `diff` is unreadable noise. The comparison has to be done on the
-PARSED yaml, ignoring comments and the two secrets — the procedure is written at
-the top of `deploy/compose.vps.yaml`.
-**Fix:** a script that pulls the VPS file and compares parsed structures, run
-manually after each deploy, or from CI given read-only ssh. Until then, drift is
-found only when someone goes looking.
-
 ### C3. The dominance collector runs from a hand-copied file
 **Found in:** I4 deployment
 **What it is:** it bind-mounts `/home/deploy/tradingai-dominance/app/`, a copy
@@ -210,6 +190,10 @@ the same pattern as C1. Editing the repo does not change what runs.
 **Fix:** now unblocked (the code is on `main`); switch to
 `deploy/compose.dominance.yaml`. The CSV lives on the host, so no samples are
 lost in the swap.
+**Now measurable:** `scripts/check_deploy_drift.py` reports this independently —
+the server bind-mounts `/home/deploy/tradingai-dominance/app:/app:ro` and skips
+the clone the repo copy performs. This is the ONLY drift it reports, so it exits
+1 until C3 is fixed. Anything it flags beyond the `collector` service is new.
 
 ---
 
