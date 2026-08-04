@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-04 (after E5 — controls report their own failures)
+Last updated: 2026-08-04 (after M0 — integration points answered)
 
 ---
 
@@ -62,6 +62,20 @@ is most sensitive.
 start archiving CFT candles now so that in ~1 year a same-venue backtest becomes
 possible. Archiving is cheap and the history is unrecoverable if not collected —
 the same argument as the dominance collector.
+**SECOND AXIS, added by the Magic Strategy M0 work:** the strategy's roster names
+`BTCUSDT.P`, the Binance PERPETUAL, and everything we have ever measured — the
+corrected baseline, the CFT comparison above, every backtest — was computed on
+Binance SPOT. Measured over 500 matched 1H bars, the perp extends beyond the spot
+bar on **497 of 500 (99%)**, with a median bar-range difference of **2.89%** of
+the bar's own range — two orders of magnitude larger than the CFT divergence in
+the table above.
+**Why it matters:** adopting the perpetual (see `MAGIC_STRATEGY_M0_CONTRACT.md`
+§1.1) is correct for fidelity to the documented strategy, but it means the
+existing baseline and `scripts/baseline/reference_trades.csv` describe a
+different series from the one the engine will run on. They do not carry over.
+**Fix:** re-run the corrected baseline on perpetual bars before comparing any new
+result to it, and mark the spot-era baseline as belonging to a different venue
+rather than deleting it.
 
 ### A6. The CFT order body has never been accepted by CFT
 **Found in:** 4.5
