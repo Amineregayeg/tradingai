@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-04 (after D8 — releases, atomic swap, no dark site)
+Last updated: 2026-08-04 (after B7 — tests runnable locally)
 
 ---
 
@@ -177,19 +177,6 @@ different code — it is now *detectable* rather than prevented.
 releasing, so a deploy is a deliberate act. Fetch-by-SHA and rollback to an
 older SHA are both verified working against GitHub.
 
-### B7. The test suite cannot be run anywhere but CI
-**Found in:** B3/I6
-**What it is:** there is no Python environment on the dev machine (no venv, no
-pytest, no local Docker) and the api container ships production pins only, so
-`pytest` exists nowhere outside GitHub Actions.
-**Why it matters:** the only way to run 632 tests is to commit, push, and wait
-~4 minutes. That pressures changes toward being pushed unverified, and it means
-a failure can only be reproduced by pushing again. During B3/I6 two real bugs
-(a `__name__`-derived diagnostic, and Compose eating `${GIT_REF}`) had to be
-caught by hand-rolled probes because no runner was available.
-**Fix:** a `backend/requirements-dev.txt` venv on the dev box, or a small
-`docker compose -f deploy/compose.test.yaml run tests` target on the VPS.
-
 ---
 
 ## C. Drift — the repo and the server disagree
@@ -328,6 +315,17 @@ the CI lint job runs with `continue-on-error: true`.
 ---
 
 ## F. Known-minor (documented, low impact)
+
+### F8. The local dev environment runs node 24, production runs node 20
+**Found in:** B7
+**What it is:** `scripts/dev_env.sh` uses whatever node is installed. This box
+has v24.16.0; CI and the `web` container pin node 20.
+**Why it matters:** vitest and `tsc` are unaffected in practice, but a local
+`pnpm build` succeeding is NOT evidence the production build works — a
+node-version-sensitive build failure would only appear in CI. DEVELOPING.md says
+so explicitly, so the risk is someone trusting a local build anyway.
+**Fix:** install node 20 (nvm/fnm) for parity, or leave it and keep treating CI
+as the authority on `pnpm build`. Low impact either way.
 
 ### F1. 1-minute dominance bars are degenerate
 **Found in:** I4. At 60s polling a 1m bar holds one observation, so O=H=L=C. 5m
