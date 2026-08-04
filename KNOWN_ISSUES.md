@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-04 (after D4 — built bundle behind nginx)
+Last updated: 2026-08-04 (after D8 — releases, atomic swap, no dark site)
 
 ---
 
@@ -287,23 +287,22 @@ Admin role on `Amineregayeg/tradingai` must run the script.
 `git push origin main` starts being rejected and all work moves to PRs. That is
 intended, and it is the whole cost.
 
-### D8. A failed frontend build now takes the whole site down
-**Found in:** D4
-**What it is:** `web` (nginx) declares
-`depends_on: web-build: service_completed_successfully`. If the build fails —
-a bad lockfile, a type error, an npm registry blip — nginx never starts and
-`http://31.97.183.142:8095` serves nothing at all.
-**Why it matters:** the previous bundle is still sitting in the `web_html`
-volume, intact and servable. Refusing to start means a broken *new* build is
-treated as worse than no site, when serving the last known-good bundle would
-keep the dashboard usable while the build is fixed. Availability now depends on
-the build succeeding every time.
-**Why it was built this way:** the alternative failure is worse in the other
-direction — starting nginx before any bundle exists serves a 404 site that
-looks like data loss. Ordering was the safe default for the first deploy.
-**Fix:** let `web` start whenever a bundle exists, and gate only on the volume
-being non-empty rather than on the build's exit code. A stale-but-working
-dashboard plus a loud build failure beats a dark site.
+### D9. A changed nginx config does not take effect until web is restarted
+**Found in:** D8
+**What it is:** `web-build` copies `deploy/nginx-web.conf` into the shared
+volume on every run, but nginx reads its configuration only at startup. A deploy
+that changes routing therefore updates the file and keeps serving the old rules.
+**Why it matters:** it is silent and it looks like it worked — the file on disk
+is correct, `docker compose ps` is green, and the behaviour is stale. The
+failure mode it would hide is a routing rule (an /api or /ws location) that
+appears deployed but is not.
+**Workaround for now:** `docker compose restart web` after any change to
+`nginx-web.conf`. Restarting is safe and near-instant — nginx re-reads the
+config and the release symlink is untouched.
+**Fix:** have `web-build` signal a reload after copying a changed config
+(`docker kill -s HUP tradingai-web-1` needs a docker socket, so more likely a
+sentinel file the web container watches), or fold the config hash into the
+healthcheck so a stale one is at least visible.
 
 ---
 
