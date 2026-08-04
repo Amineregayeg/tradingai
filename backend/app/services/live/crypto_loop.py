@@ -493,7 +493,31 @@ class LiveCryptoLoop:
             logger.warning("Could not establish an engine run", error=str(exc))
         return self.run_id
 
-    async def reset_run(self, note: str | None = None, label: str | None = None) -> dict:
+    def apply_config(self, cfg) -> None:
+        """Adopt a validated RunConfig. Only ever called as part of starting a
+        new run — changing timeframe or symbols mid-run would make the result
+        uninterpretable, which is why config belongs to a run."""
+        self.symbols = dict(cfg.symbols)
+        self.entry_tf = cfg.entry_tf
+        self.bias_tf = cfg.bias_tf
+        self.starting_balance = cfg.starting_balance
+        self.broker_mode = cfg.broker_mode
+        self.max_concurrent = cfg.max_concurrent
+
+        # risk_pct is NOT settable — see services/live/run_config.py. It is
+        # pre-registered at 1% and validate() refuses any request naming it.
+
+        if cfg.price_source != getattr(self, "price_source_name", "binance"):
+            if cfg.price_source == "cft":
+                from app.services.market_data.sources.cft import CFTSource
+
+                self.source = CFTSource()
+            else:
+                self.source = BinanceSource()
+            self.price_source_name = cfg.price_source
+
+    async def reset_run(self, note: str | None = None, label: str | None = None,
+                        config=None) -> dict:
         """End the current run and start a clean one.
 
         NOTHING IS DELETED. The previous run's trades and decision records stay
@@ -508,6 +532,13 @@ class LiveCryptoLoop:
 
         from app.db.session import async_session_maker
         from app.models.engine_run import EngineRun
+
+        # Apply BEFORE snapshotting, so the run records what it will actually
+        # run under rather than what it replaced.
+        if config is not None:
+            self.apply_config(config)
+            note = note or config.note
+            label = label or config.label
 
         async with async_session_maker() as db:
             for row in (

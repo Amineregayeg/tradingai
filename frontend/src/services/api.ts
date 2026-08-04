@@ -190,8 +190,17 @@ export const api = {
      * scoped to their run_id; the slate is clean because metrics are scoped to
      * the new run, not because history was removed.
      */
-    reset: (label?: string) =>
-      request<Record<string, unknown>>('POST', `/engine/reset${label ? `?label=${encodeURIComponent(label)}` : ''}`),
+    /**
+     * POST /engine/reset — apply a configuration and start a new run.
+     *
+     * Deletes NOTHING: the previous run keeps its trades and decisions and
+     * stays viewable. An invalid setting is REFUSED with a reason rather than
+     * silently defaulted, so the stored config always describes what actually
+     * ran.
+     */
+    reset: (config?: Record<string, unknown>) =>
+      request<Record<string, unknown>>('POST', '/engine/reset', config ?? {}),
+    configOptions: () => request<Record<string, unknown>>('GET', '/engine/config-options'),
     runs: () => request<Record<string, unknown>[]>('GET', '/engine/runs'),
   },
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, is_dataclass
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Body, HTTPException, Request
 from sqlalchemy import select
 
 from app.api.deps import CurrentUser, DBSession
@@ -76,9 +76,25 @@ async def engine_resume(request: Request, user_id: CurrentUser) -> dict:
     return await loop.status()
 
 
+@router.get("/config-options")
+async def engine_config_options(user_id: CurrentUser) -> dict:
+    """What may be configured for a run, served from the backend.
+
+    The form is built from this so it can never offer a choice the backend would
+    refuse — the exact defect the broker connection form had, where three of
+    four brokers and one of two environments could only ever fail.
+
+    Includes `fixed`, which names what is deliberately NOT configurable and why.
+    """
+    from app.services.live.run_config import options
+
+    return options()
+
+
 @router.post("/reset")
 async def engine_reset(
     request: Request, user_id: CurrentUser,
+    payload: dict | None = Body(default=None),
     note: str | None = None, label: str | None = None,
 ) -> dict:
     """End the current run and start a clean one.
@@ -92,8 +108,25 @@ async def engine_reset(
     container restart, which meant in practice that runs were never restarted
     and results accumulated across configuration changes.
     """
+    from app.services.live.run_config import ConfigError, reject_forbidden, validate
+
+    # Refuse pre-registered fields BEFORE needing a running engine. Otherwise a
+    # request naming risk_pct gets "service unavailable" while the engine is
+    # down, which hides the far more important message.
+    try:
+        reject_forbidden(payload)
+    except ConfigError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     loop = _loop(request)
-    return await loop.reset_run(note=note, label=label)
+    try:
+        cfg = validate(payload, loop)
+    except ConfigError as exc:
+        # 400 with the REASON. A refused setting must say why — silently
+        # substituting a default would start a run whose stored config does not
+        # describe what actually ran.
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return await loop.reset_run(note=note, label=label, config=cfg)
 
 
 @router.get("/runs")

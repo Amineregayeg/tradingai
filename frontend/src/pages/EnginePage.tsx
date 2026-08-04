@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '@/services/api'
 import { RunHistoryPanel } from '@/components/dashboard/RunHistoryPanel'
+import { RunConfigForm } from '@/components/dashboard/RunConfigForm'
 
 const GREEN = '#00d68f'
 const RED = '#ff3b5c'
@@ -175,6 +176,10 @@ export default function EnginePage() {
         </Panel>
 
         {/* Decision log */}
+        <Panel title="New run" right={<span style={{ fontSize: 11, color: MUTE }}>settings apply to a new run</span>}>
+          <RunConfigForm onApplied={() => window.location.reload()} />
+        </Panel>
+
         <Panel title="Runs" right={<span style={{ fontSize: 11, color: MUTE }}>reset starts a new one</span>}>
           <RunHistoryPanel />
         </Panel>
