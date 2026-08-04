@@ -37,6 +37,45 @@ if ! git rev-parse --git-dir >/dev/null 2>&1; then
   exit 1
 fi
 
+# THE RUNNER MUST WORK, AND THE BASELINE MUST BE GREEN.
+#
+# This script reads "the mutated test run failed" as "the guard bit". A shell
+# returns 127 for a command that does not exist, which is also a failure — so on
+# a machine without `python` on PATH, EVERY probe reported ok and the script
+# printed "TIER 0.2 PASSED" without having run a single test. Vacuously green,
+# in the script whose entire purpose is catching vacuously-green checks.
+#
+# The same hole swallows a baseline that is red for unrelated reasons: if the
+# test already fails before mutation, its failure after mutation proves nothing.
+# So both are checked up front, and neither is recoverable — there is no useful
+# partial result once the instrument is untrustworthy.
+PYTHON="${PYTHON:-}"
+if [[ -z "$PYTHON" ]]; then
+  for cand in python python3; do
+    if command -v "$cand" >/dev/null 2>&1 && "$cand" -c 'import pytest' >/dev/null 2>&1; then
+      PYTHON="$cand"; break
+    fi
+  done
+fi
+if [[ -z "$PYTHON" ]] || ! "$PYTHON" -m pytest --version >/dev/null 2>&1; then
+  echo "ERROR: no working python with pytest was found."
+  echo "       Tried: python, python3. Set PYTHON=/path/to/python to override,"
+  echo "       or run ./scripts/dev_env.sh from the repo root to build one."
+  echo "       Refusing to continue: without a runner every probe would report"
+  echo "       'ok' because a missing command looks exactly like a failing test."
+  exit 2
+fi
+
+#: Every test path any probe uses. probe() asserts its own path is listed here,
+#: so this cannot drift out of step with the probes below.
+BASELINE_TESTS=(
+  "tests/integration/test_bias_causality.py"
+  "tests/integration/test_lookahead_regression.py"
+  "tests/integration/test_settle_persist_resolve_adv.py"
+  "tests/unit/test_dominance_source.py"
+  "tests/unit/test_execution_fill_sizing.py"
+)
+
 restore() { git checkout -- "${GUARDED_FILES[@]}" 2>/dev/null || true; }
 # Restore on ANY exit path, including Ctrl-C or an unexpected failure, so a
 # mutated file can never be left behind in a working tree or a CI cache.
@@ -63,6 +102,18 @@ done
 probe() {
   local name="$1" file="$2" expr="$3" tests="$4" prevents="$5"
 
+  # Keeps BASELINE_TESTS honest: a probe pointing at a file the baseline never
+  # proved green would be trusting an unverified instrument.
+  local listed=0 t
+  for t in "${BASELINE_TESTS[@]}"; do [[ "$t" == "$tests" ]] && listed=1; done
+  if [[ "$listed" -eq 0 ]]; then
+    echo "FAIL  $name"
+    echo "      $tests is not in BASELINE_TESTS, so it was never checked green"
+    echo "      before mutation. Add it there in scripts/verify_guards.sh."
+    FAILED=1
+    return
+  fi
+
   restore
   sed -i "$expr" "$file"
 
@@ -79,7 +130,7 @@ probe() {
     return
   fi
 
-  if AUTH_DISABLED=true python -m pytest -q -p no:cacheprovider "$tests" >/dev/null 2>&1; then
+  if AUTH_DISABLED=true "$PYTHON" -m pytest -q -p no:cacheprovider "$tests" >/dev/null 2>&1; then
     echo "FAIL  $name"
     echo "      Reverted the guard and $tests STILL PASSES."
     echo "      Nothing is defending against: $prevents"
@@ -92,6 +143,18 @@ probe() {
 }
 
 echo "Tier 0.2 — verifying each lookahead guard is load-bearing"
+echo "-------------------------------------------------------------------"
+echo "baseline: $PYTHON $("$PYTHON" -m pytest --version 2>&1 | head -1)"
+if ! AUTH_DISABLED=true "$PYTHON" -m pytest -q -p no:cacheprovider \
+     "${BASELINE_TESTS[@]}" >/dev/null 2>&1; then
+  echo "ERROR: the probed tests are RED before any mutation."
+  echo "       Every probe would then report 'ok' for the wrong reason — a test"
+  echo "       that already fails cannot demonstrate that removing a guard is"
+  echo "       what broke it. Fix the suite first:"
+  printf '         %s\n' "${BASELINE_TESTS[@]}"
+  exit 2
+fi
+echo "ok    baseline green — mutations are measured against a working suite"
 echo "-------------------------------------------------------------------"
 
 probe "FVG entry admissible only from born+2" "$ENGINE" \

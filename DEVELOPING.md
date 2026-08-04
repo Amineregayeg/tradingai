@@ -30,13 +30,25 @@ packages, and checks that the strategy-critical versions match production.
 | One file | `~/.venvs/tradingai/bin/python -m pytest tests/unit/test_build_info.py` | `backend/` |
 | Frontend tests (153 tests, ~1 min) | `pnpm exec vitest run` | `frontend/` |
 | Frontend typecheck | `pnpm tsc` | `frontend/` |
-| Lookahead guards (Tier 0.2) | `./scripts/verify_guards.sh` | `backend/` |
+| Lookahead guards (Tier 0.2) | `PYTHON=~/.venvs/tradingai/bin/python ./scripts/verify_guards.sh` | `backend/` |
 
 **`pnpm test` is bare `vitest`, which watches forever.** Use `vitest run`.
 
-`verify_guards.sh` refuses to run with uncommitted or untracked files in the
-paths it mutates — it edits real source to prove the guards bite, and it must be
-able to restore exactly what was there. Commit first.
+### About `verify_guards.sh`
+
+It refuses to run with uncommitted or untracked files in the paths it mutates —
+it edits real source to prove the guards bite, and must be able to restore
+exactly what was there. Commit first.
+
+It needs a python that has pytest. It looks for `python` then `python3`, so on a
+machine where neither has pytest installed you must point it at the venv with
+`PYTHON=`. It exits 2 rather than guessing.
+
+That strictness is not fussiness. The script reads "the test run failed" as "the
+guard bit" — and a missing command is also a failure. Before this was fixed, on
+a box without `python` on PATH it reported every guard as load-bearing and
+printed `TIER 0.2 PASSED` without running a single test. It now proves the
+baseline is green before trusting any mutation result.
 
 ## Two things this environment does not prove
 
