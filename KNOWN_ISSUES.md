@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-04 (after C3 — the repo now describes production exactly)
+Last updated: 2026-08-04 (after D9 — nginx config changes apply themselves)
 
 ---
 
@@ -261,23 +261,6 @@ Admin role on `Amineregayeg/tradingai` must run the script.
 **Note before running it:** required checks apply to direct pushes too, so
 `git push origin main` starts being rejected and all work moves to PRs. That is
 intended, and it is the whole cost.
-
-### D9. A changed nginx config does not take effect until web is restarted
-**Found in:** D8
-**What it is:** `web-build` copies `deploy/nginx-web.conf` into the shared
-volume on every run, but nginx reads its configuration only at startup. A deploy
-that changes routing therefore updates the file and keeps serving the old rules.
-**Why it matters:** it is silent and it looks like it worked — the file on disk
-is correct, `docker compose ps` is green, and the behaviour is stale. The
-failure mode it would hide is a routing rule (an /api or /ws location) that
-appears deployed but is not.
-**Workaround for now:** `docker compose restart web` after any change to
-`nginx-web.conf`. Restarting is safe and near-instant — nginx re-reads the
-config and the release symlink is untouched.
-**Fix:** have `web-build` signal a reload after copying a changed config
-(`docker kill -s HUP tradingai-web-1` needs a docker socket, so more likely a
-sentinel file the web container watches), or fold the config hash into the
-healthcheck so a stale one is at least visible.
 
 ---
 
