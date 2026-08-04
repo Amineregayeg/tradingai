@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-04 (after M0 — integration points answered)
+Last updated: 2026-08-04 (after M1 — telemetry layer built)
 
 ---
 
@@ -133,6 +133,25 @@ doing so shifts the baseline you compare against.
 ---
 
 ## B. Silent failure — things that break without telling anyone
+
+### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
+**Found in:** M1 (implementing the telemetry layer)
+**What it is:** `TELEMETRY_SCHEMA.json` hard-pins `engine.rule_registry_version` with
+`"const": "1.1.0"`, while the delivered `RULE_REGISTRY.json` ships as **1.2.0** — the
+version the corpus triage produced when it cleared all 8 DEFECT rules and moved 20 rules
+from OPEN to READY.
+**Why it matters:** no record emitted against the real registry can ever validate against
+the delivered schema. This is not the stale-prose problem in
+`MAGIC_STRATEGY_INTEGRATION.md` §2.1 — that one misleads a reader; this one blocks emission.
+**What we did instead of picking a side:** records keep stamping the TRUE versions. Writing
+`1.1.0` while running 1.2.0 would make stored evidence claim a registry it was never
+evaluated against, which defeats the only purpose of the field. The validator relaxes
+exactly the two version `const`s and nothing else, and
+`contract_loader.contract_version_skew()` reports the mismatch so it cannot pass silently.
+**How it ends:** Salim ships a schema regenerated against registry 1.2.0.
+`test_the_delivered_artefacts_are_mutually_incompatible_and_we_say_so` FAILS at that point
+— deliberately — which is the prompt to delete the relaxation in `validate.py`.
+
 
 ### B1. Failures are visible but nothing tells you unprompted
 **Found in:** I4 / 4.1; **narrowed by B1's monitoring work**
