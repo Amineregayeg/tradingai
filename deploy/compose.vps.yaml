@@ -41,6 +41,17 @@
 # server did implicitly: proxy /api, UPGRADE /ws to a websocket, and fall back to
 # index.html for client-side routes. Each fails silently if missed.
 #
+# RELEASES AND ROLLBACK (was KNOWN_ISSUES D8)
+# Each build lands in /srv/rel-<sha> inside the web_html volume and goes live by
+# renaming the /srv/current symlink, which the kernel does atomically. Two
+# consequences worth knowing:
+#   * A FAILED BUILD CHANGES NOTHING. nginx keeps serving the previous release;
+#     the failure shows up as web-build exiting non-zero, not as an outage.
+#   * ROLLBACK IS ONE COMMAND, no rebuild:
+#       docker compose run --rm -T web-build sh -c \
+#         'ln -sfn rel-<older-sha> /srv/.next && mv -Tf /srv/.next /srv/current'
+#     The three most recent releases are kept. `ls -1dt /srv/rel-*` lists them.
+#
 # WHICH COMMIT IS RUNNING (was KNOWN_ISSUES B3)
 # Both services now fetch an explicit `GIT_REF` and write the resolved SHA to
 # /app/.build-sha; the api serves it at /api/system/version. Read that endpoint
@@ -149,7 +160,7 @@ services:
       # thing B3 says nobody could detect.
       GIT_REF: "main"
     volumes:
-      - web_html:/out/html
+      - web_html:/srv
       - web_conf:/out/conf
     entrypoint: ["sh", "-c"]
     command:
@@ -163,19 +174,23 @@ services:
         git -C /tmp/src fetch -q --depth 1 origin "$${GIT_REF:-main}"
         git -C /tmp/src checkout -q FETCH_HEAD
         sha=$$(git -C /tmp/src rev-parse HEAD)
-        mkdir -p /out/html /out/conf
+        mkdir -p /srv /out/conf
         # The nginx config is refreshed every run. It is small, and it must track
         # the repo — a config that only updates when the bundle changes would
         # silently keep serving an old routing rule.
+        # NOTE: nginx reads its config only at start, so a changed config needs
+        # `docker compose restart web` to take effect.
         cp /tmp/src/deploy/nginx-web.conf /out/conf/default.conf
-        # SKIP THE BUILD WHEN THE COMMIT ALREADY MATCHES.
-        # The old web service guarded on `[ ! -f /app/.ready ]`, which was safe
-        # only because /app was container-local and died on recreate. These are
-        # named volumes: a .ready marker in one would survive forever and no new
-        # frontend code would EVER deploy. Keying on the commit instead makes the
-        # guard self-correcting — it rebuilds exactly when the code differs.
-        if [ "$$(cat /out/html/.build-sha 2>/dev/null)" = "$$sha" ]; then
-          echo "frontend already built at $$sha — nothing to do"
+        # SKIP THE BUILD WHEN THE LIVE RELEASE ALREADY IS THIS COMMIT.
+        # The original web service guarded on `[ ! -f /app/.ready ]`, which was
+        # safe only because /app was container-local and died on recreate. These
+        # are named volumes, where such a marker survives forever and no new
+        # frontend would EVER deploy. Keying on the commit is self-correcting.
+        # The index.html check matters too: without it a half-written release
+        # whose marker happened to land would be skipped over and served broken.
+        if [ "$$(readlink /srv/current 2>/dev/null)" = "rel-$$sha" ] \
+           && [ -f /srv/current/index.html ]; then
+          echo "frontend already live at $$sha — nothing to do"
           exit 0
         fi
         cp -a /tmp/src/frontend/. /app/
@@ -186,28 +201,63 @@ services:
         # packages CI never tested.
         pnpm install --frozen-lockfile
         pnpm build
-        # Marker removed FIRST and written LAST, so a build that dies halfway
-        # cannot leave a matching SHA sitting beside missing files — which would
-        # make every later start skip the rebuild and serve a broken bundle.
-        rm -f /out/html/.build-sha
-        rm -rf /out/html/*
-        cp -a dist/. /out/html/
-        echo "$$sha" > /out/html/.build-sha
-        echo "frontend built at $$sha"
+        # BUILD INTO A NEW DIRECTORY, THEN FLIP A SYMLINK.
+        # Nothing above this line touches what nginx is serving, so a build that
+        # fails leaves the previous release running untouched (D8). The flip
+        # itself is a rename, which the kernel performs atomically — no request
+        # can observe a half-copied bundle.
+        rm -rf /srv/rel-$$sha
+        mkdir -p /srv/rel-$$sha
+        cp -a dist/. /srv/rel-$$sha/
+        echo "$$sha" > /srv/rel-$$sha/.build-sha
+        ln -sfn rel-$$sha /srv/.next
+        mv -Tf /srv/.next /srv/current
+        # Keep the three most recent releases so a rollback has somewhere to go:
+        #   ln -sfn rel-<older> /srv/.next && mv -Tf /srv/.next /srv/current
+        ls -1dt /srv/rel-* 2>/dev/null | tail -n +4 | xargs -r rm -rf
+        echo "frontend live at $$sha"
     restart: "no"
 
   web:
     image: nginx:alpine
     volumes:
-      - web_html:/usr/share/nginx/html:ro
+      - web_html:/srv:ro
       - web_conf:/etc/nginx/conf.d:ro
     ports:
       - "8095:80"
+    # WAITS FOR A BUNDLE — DOES NOT REQUIRE THE BUILD TO SUCCEED (D8).
+    #
+    # This used to be `depends_on: web-build: service_completed_successfully`,
+    # which meant any failed build — a bad lockfile, a type error, an npm blip —
+    # took the entire site down, even though the previous release was sitting
+    # right there in the volume, intact and servable. A stale dashboard plus a
+    # loud build failure beats a dark site.
+    #
+    # The wait still covers the opposite mistake: on a first-ever deploy there is
+    # no release yet, and starting nginx then would serve a 404 site that looks
+    # like data loss. So it blocks on a bundle EXISTING rather than on the latest
+    # build having produced it.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        # The config is written by web-build too; without it nginx would fall
+        # back to its stock config and serve the SPA with no /api proxy at all —
+        # a site that looks up while every request fails.
+        while [ ! -f /etc/nginx/conf.d/default.conf ] || [ ! -f /srv/current/index.html ]; do
+          echo "waiting for a frontend bundle and config..."
+          sleep 3
+        done
+        echo "serving release $$(readlink /srv/current)"
+        exec nginx -g 'daemon off;'
+    healthcheck:
+      # Distinguishes "container is up" from "the site actually answers" — the
+      # gap those two used to hide in.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/.build-sha"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
     depends_on:
-      # Must not start before the bundle exists, or nginx serves an empty root
-      # and the site is a 404 until someone notices.
-      web-build:
-        condition: service_completed_successfully
       api:
         condition: service_started
     restart: unless-stopped
