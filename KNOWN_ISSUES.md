@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-04 (after 2.1 — engine runs and reset)
+Last updated: 2026-08-04 (after 2.5 — run history)
 
 ---
 
@@ -134,19 +134,6 @@ email (SMTP is a dependency but unconfigured), Telegram, a webhook. That is a
 choice about where you want to be interrupted, not a code decision.
 **Fix:** pick a channel, then alert on `data-health.ok == false` and on repeated
 bridge failures. The detection already exists; only delivery is missing.
-
-### B6. Past runs have no UI — reset is safe but its history is API-only
-**Found in:** 2.1 (engine runs)
-**What it is:** a reset ends the current run and starts a clean one, deleting
-nothing. The previous run's trades and decision records remain, and
-`GET /engine/runs` returns each run with its results. But there is no screen for
-them, so after a reset the earlier results are reachable only by calling the API.
-**Why it matters:** the reset button is safe, and it does not LOOK safe. Someone
-who presses it sees the metrics go to zero with no visible way back to what was
-there, which is exactly the impression the design went to some trouble to avoid.
-The confirmation dialog says nothing is deleted; a run history would show it.
-**Fix:** a runs panel on the engine page — planned as task 2.5. The endpoint and
-the per-run results already exist, so this is UI only.
 
 ### B3. Nobody can tell which code version is running
 **Found in:** I6 (never started)

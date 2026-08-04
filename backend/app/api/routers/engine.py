@@ -117,14 +117,36 @@ async def engine_runs(request: Request, user_id: CurrentUser, db: DBSession) -> 
     out: list[dict] = []
     active_id = getattr(_loop(request), "run_id", None)
     for r in runs:
+        from app.db.enums import OutcomeType
+
         agg = (
             await db.execute(
-                select(func.count(Trade.id), func.coalesce(func.sum(Trade.pnl_dollars), 0))
+                select(
+                    func.count(Trade.id),
+                    func.coalesce(func.sum(Trade.pnl_dollars), 0),
+                    func.count(Trade.id).filter(Trade.outcome == OutcomeType.WIN),
+                )
                 .where(
                     Trade.run_id == r.id,
                     Trade.status == TradeStatus.CLOSED,
                     Trade.setup_tag.is_distinct_from(SETUP_TAG_REPLAY),
                 )
+            )
+        ).one()
+
+        # How many decisions the engine made in this run, and how many it
+        # DECLINED. A run with 4 trades and 300 abstentions was evaluated 304
+        # times; one with 4 trades and 4 abstentions barely ran at all. Trade
+        # count alone cannot distinguish those, and they mean very different
+        # things about a result.
+        from app.models.decision_record import DecisionRecord
+
+        decisions = (
+            await db.execute(
+                select(
+                    func.count(DecisionRecord.id),
+                    func.count(DecisionRecord.id).filter(DecisionRecord.abstained.is_(True)),
+                ).where(DecisionRecord.run_id == r.id)
             )
         ).one()
         out.append({
@@ -137,6 +159,9 @@ async def engine_runs(request: Request, user_id: CurrentUser, db: DBSession) -> 
             "config": r.config,
             "closed_trades": int(agg[0] or 0),
             "realized_pnl": float(agg[1] or 0),
+            "wins": int(agg[2] or 0),
+            "decisions": int(decisions[0] or 0),
+            "abstentions": int(decisions[1] or 0),
         })
     return out
 

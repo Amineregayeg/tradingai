@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '@/services/api'
+import { RunHistoryPanel } from '@/components/dashboard/RunHistoryPanel'
 
 const GREEN = '#00d68f'
 const RED = '#ff3b5c'
@@ -174,6 +175,10 @@ export default function EnginePage() {
         </Panel>
 
         {/* Decision log */}
+        <Panel title="Runs" right={<span style={{ fontSize: 11, color: MUTE }}>reset starts a new one</span>}>
+          <RunHistoryPanel />
+        </Panel>
+
         <Panel title="Decision Log" right={<span style={{ fontSize: 11, color: MUTE }}>{decisions.length} recent</span>}>
           {decisions.length === 0 ? (
             <div style={{ fontSize: 12, color: MUTE }}>No decisions recorded yet. Every evaluated bar appears here — taken trades with their expected and realized R, and refusals with the reason they were refused.</div>

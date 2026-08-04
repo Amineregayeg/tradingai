@@ -216,3 +216,60 @@ async def test_new_trades_are_stamped_with_the_active_run(bound):
     assert len(rows) == 1
     assert rows[0].run_id == loop.run_id, "a new trade was not stamped with the active run"
     assert (await loop.status())["closed_trades"] == 1
+
+
+# ---------------------------------------------------------------------------
+# The /engine/runs payload the history panel depends on
+# ---------------------------------------------------------------------------
+async def test_runs_endpoint_reports_results_and_decision_counts(bound, client, monkeypatch):
+    """Trade count alone cannot distinguish a run that was evaluated 300 times
+    and declined 296 from one that barely ran. Both look like '4 trades', and
+    they mean very different things about the result."""
+    loop = LiveCryptoLoop()
+    run_id = await loop.ensure_run()
+
+    async with bound() as db:
+        db.add_all([closed_trade(run_id, 250.0), closed_trade(run_id, -100.0)])
+        for _ in range(3):
+            db.add(DecisionRecord(
+                symbol="BTC/USD", timeframe="1H", inputs_hash="x", code_path_hash="y",
+                abstained=True, reasons=["FAIL ltf_bos: no match"],
+                outcome="ABSTAINED", cohort=COHORT_PAPER, run_id=run_id,
+            ))
+        await db.commit()
+
+    # the endpoint reads the loop off app state; point it at ours
+    from app.api.routers import engine as engine_router
+    monkeypatch.setattr(engine_router, "_loop", lambda _req: loop)
+
+    rows = (await client.get("/api/engine/runs")).json()
+    row = next(r for r in rows if r["id"] == str(run_id))
+
+    assert row["closed_trades"] == 2
+    assert row["realized_pnl"] == pytest.approx(150.0)
+    assert row["wins"] == 1
+    assert row["abstentions"] == 3, "declined decisions were not counted"
+    assert row["config"]["risk_pct"] == loop.risk_pct, "settings were not snapshotted"
+
+
+async def test_a_reset_run_still_reports_its_results(bound, client, monkeypatch):
+    """The point of the history panel: after a reset the previous run's results
+    must still be visible, or the reset looks like data loss."""
+    loop = LiveCryptoLoop()
+    old = await loop.ensure_run()
+    async with bound() as db:
+        db.add(closed_trade(old, 500.0))
+        await db.commit()
+
+    await loop.reset_run(label="run-2")
+
+    from app.api.routers import engine as engine_router
+    monkeypatch.setattr(engine_router, "_loop", lambda _req: loop)
+
+    rows = (await client.get("/api/engine/runs")).json()
+    previous = next(r for r in rows if r["id"] == str(old))
+    current = next(r for r in rows if r["id"] == str(loop.run_id))
+
+    assert previous["realized_pnl"] == pytest.approx(500.0), "the old run's result vanished"
+    assert previous["active"] is False and previous["ended_at"] is not None
+    assert current["active"] is True and current["closed_trades"] == 0
