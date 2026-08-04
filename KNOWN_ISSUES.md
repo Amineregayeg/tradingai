@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-04 (after B7 — tests runnable locally)
+Last updated: 2026-08-04 (after C1 — one dependency list, everywhere)
 
 ---
 
@@ -181,16 +181,25 @@ older SHA are both verified working against GitHub.
 
 ## C. Drift — the repo and the server disagree
 
-### C1. The VPS compose still carries its own dependency list
-**Found in:** I3 (dependency consolidation)
-**What it is:** `/docker/tradingai/docker-compose.yml` still inline-pins ~20
-packages instead of installing from `requirements-prod.txt`. Verified identical
-*today*, but it is a second list.
-**Why it matters:** this is exactly how production drifted onto numpy 2.2.6
-while `pyproject.toml` demanded numpy<2.0.0. It will drift again.
-**Fix:** update the VPS compose to `pip install -r /app/requirements-prod.txt`.
-The repo copy (`deploy/compose.vps.yaml`) is already correct — the server is
-what is stale.
+### C4. Nothing detects drift between the repo compose and the VPS compose
+**Found in:** C1
+**What it is:** `deploy/compose.vps.yaml` says "KEEP THIS IDENTICAL to the VPS
+copy". Nothing enforces that, and the claim has been untrue three times: the
+server kept its own pip list (C1), installed the frontend with
+`--no-frozen-lockfile` (C2), and the repo copy was missing `CFT_BRIDGE_URL` and
+`CFT_BRIDGE_TOKEN` entirely — so the committed record described an api with no
+route to its broker.
+**Why it matters:** the repo copy is what anyone reads to understand the
+deployment, and what a rebuild would be based on. When it is wrong, it is wrong
+silently and confidently. CI checks the *committed* file for inline pins; it has
+no way to see the server.
+**Awkward detail:** the two files differ by ~91 lines of comments that do not
+run, so a raw `diff` is unreadable noise. The comparison has to be done on the
+PARSED yaml, ignoring comments and the two secrets — the procedure is written at
+the top of `deploy/compose.vps.yaml`.
+**Fix:** a script that pulls the VPS file and compares parsed structures, run
+manually after each deploy, or from CI given read-only ssh. Until then, drift is
+found only when someone goes looking.
 
 ### C3. The dominance collector runs from a hand-copied file
 **Found in:** I4 deployment
