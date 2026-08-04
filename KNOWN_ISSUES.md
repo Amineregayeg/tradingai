@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-04 (after D3 — branch protection written, blocked on admin)
+Last updated: 2026-08-04 (after B3/I6 — running commit now reported)
 
 ---
 
@@ -162,13 +162,33 @@ simply does not work.
 Morning Briefing so the page stops advertising something unavailable.
 
 
-### B3. Nobody can tell which code version is running
-**Found in:** I6 (never started)
-**What it is:** containers `git clone --depth 1 main` at startup and record
-nothing. No commit SHA anywhere.
-**Why it matters:** you cannot debug or roll back what you cannot identify. Two
-containers recreated at different times can silently run different code.
-**Fix:** pin a commit/tag and expose the running SHA on an endpoint.
+### B3. Deploys are identifiable but not reproducible
+**Found in:** I6. Narrowed after B3/I6 — the "nobody can tell" half is fixed and
+deployed: both containers record the resolved SHA and `/api/system/version`
+serves it. Verified in production on `9a383d907`, api and web matching.
+**What remains:** `GIT_REF` defaults to `main`, so recreating a container
+tomorrow gets a different commit. The deploy is now honest about this
+(`pinned: false`) rather than silently floating, but honest is not the same as
+reproducible.
+**Why it matters:** a rollback still means finding the previous SHA by hand, and
+recreating one container and not the other can still put the two halves on
+different code — it is now *detectable* rather than prevented.
+**Fix:** set `GIT_REF` to a full 40-char SHA in the VPS compose as part of
+releasing, so a deploy is a deliberate act. Fetch-by-SHA and rollback to an
+older SHA are both verified working against GitHub.
+
+### B7. The test suite cannot be run anywhere but CI
+**Found in:** B3/I6
+**What it is:** there is no Python environment on the dev machine (no venv, no
+pytest, no local Docker) and the api container ships production pins only, so
+`pytest` exists nowhere outside GitHub Actions.
+**Why it matters:** the only way to run 632 tests is to commit, push, and wait
+~4 minutes. That pressures changes toward being pushed unverified, and it means
+a failure can only be reproduced by pushing again. During B3/I6 two real bugs
+(a `__name__`-derived diagnostic, and Compose eating `${GIT_REF}`) had to be
+caught by hand-rolled probes because no runner was available.
+**Fix:** a `backend/requirements-dev.txt` venv on the dev box, or a small
+`docker compose -f deploy/compose.test.yaml run tests` target on the VPS.
 
 ---
 
