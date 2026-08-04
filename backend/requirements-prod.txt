@@ -1,18 +1,27 @@
 # PRODUCTION RUNTIME PINS — the exact set the VPS installs.
 #
-# WHY THIS FILE EXISTS
-# The api container does not install from pyproject.toml. It pip-installs an
-# inline pinned list baked into /docker/tradingai/docker-compose.yml on the VPS,
-# a file that is NOT in this repo. That meant the versions running in production
-# were invisible here, and the test suite had never been run against them.
+# THIS FILE IS THE DEPENDENCY LIST. It has three consumers and no rivals:
 #
-# This file mirrors that list verbatim so CI can test what actually ships.
-# If you change the VPS compose, change this file in the same commit.
+#   1. the api container on the VPS — `pip install -r /app/requirements-prod.txt`
+#   2. pyproject.toml — reads it via setuptools dynamic metadata, so
+#      `pip install -e ".[dev]"` resolves the same versions
+#   3. CI — installs through (2) and then asserts the strategy-critical
+#      packages match this file exactly
 #
-# KNOWN DIVERGENCE (deliberate, do not "fix" by editing this file):
-# pyproject.toml still declares numpy<2.0.0 and pandas<3.0.0, which production
-# violates on both counts. Production is the source of truth; pyproject is stale.
-# Reconciling the two is tracked separately — see docs note in CI workflow.
+# HOW IT GOT THIS WAY, so nobody re-introduces the second list:
+# The api used to carry ~20 inline `pkg==version` pins in its command block in
+# /docker/tradingai/docker-compose.yml — a file not in this repo. The versions
+# actually running were therefore invisible here, and the suite had never once
+# been run against them. That is how production came to run numpy 2.2.6 and
+# pandas 3.0.2 while pyproject.toml declared numpy<2.0.0 and pandas<3.0.0 —
+# a pair so contradictory that `pip install -e .` failed outright.
+#
+# Both halves are now closed: pyproject reads this file instead of declaring its
+# own ranges, and the VPS installs from it instead of an inline copy (C1).
+# .github/workflows/ci.yml fails the build if inline pins reappear in the
+# committed compose.
+#
+# Changing a version here changes production on the next `--force-recreate`.
 
 fastapi==0.136.1
 uvicorn[standard]==0.44.0

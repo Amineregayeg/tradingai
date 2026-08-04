@@ -155,16 +155,26 @@ check(
 # --------------------------------------------------------------------------
 # 5. No real secret committed. The VPS copy carries the token; this one must not.
 # --------------------------------------------------------------------------
-token_match = re.search(r'API_AUTH_TOKEN:\s*"([^"]*)"', compose)
-check(
-    "no API_AUTH_TOKEN committed",
-    token_match is not None and token_match.group(1) == "__SET_ON_VPS_ONLY__",
-    """
-    deploy/compose.vps.yaml carries something other than the placeholder in
-    API_AUTH_TOKEN. The real token belongs only in the VPS copy of this file.
-    If a real token was committed, rotate it -- git history keeps it forever.
-    """,
-)
+PLACEHOLDER = "__SET_ON_VPS_ONLY__"
+
+# Every secret the api service carries, not just the first one that existed.
+# CFT_BRIDGE_TOKEN was added to this file later and was NOT covered here, even
+# though it is the last gate before a funded trading account and has already
+# leaked once (through an unredacted diff in a chat transcript). A check that
+# guards one of two secrets reads as "secrets are checked" while half of them
+# are not.
+for secret in ("API_AUTH_TOKEN", "CFT_BRIDGE_TOKEN"):
+    m = re.search(rf'{secret}:\s*"([^"]*)"', compose)
+    check(
+        f"no {secret} committed",
+        m is not None and m.group(1) == PLACEHOLDER,
+        f"""
+        deploy/compose.vps.yaml carries something other than the placeholder in
+        {secret} (expected "{PLACEHOLDER}"). The real value belongs only in the
+        VPS copy of this file. If a real secret was committed, ROTATE IT --
+        git history keeps it forever.
+        """,
+    )
 
 # --------------------------------------------------------------------------
 # 6. The two requirements files must not both pin the same package, which would

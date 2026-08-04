@@ -2,8 +2,18 @@
 #
 # ------------------------------------------------------------------------------
 # KEEP THIS IDENTICAL TO /docker/tradingai/docker-compose.yml ON THE VPS, except
-# for API_AUTH_TOKEN. This is not a template or an example — it is the record of
-# what runs.
+# for the two secrets (API_AUTH_TOKEN, CFT_BRIDGE_TOKEN). This is not a template
+# or an example — it is the record of what runs.
+#
+# NOTHING ENFORCES THAT. The claim above was untrue three times over: the server
+# kept its own pip list (C1), installed the frontend with --no-frozen-lockfile
+# (C2), and this file was missing the two CFT bridge variables entirely, so the
+# committed record described an api that could not reach its broker. Comments do
+# not run and no check compares the two files. To verify by hand:
+#
+#   ssh pfe-vps 'cat /docker/tradingai/docker-compose.yml' > /tmp/server.yml
+#   # then diff the PARSED yaml, ignoring comments and the two secrets —
+#   # a raw text diff is all comment noise and tells you nothing.
 # ------------------------------------------------------------------------------
 #
 # The previous version of this file described a completely different deployment:
@@ -103,6 +113,21 @@ services:
       # SECRET — the real value lives ONLY in the VPS copy of this file and is
       # deliberately not committed. Set it there; never here.
       API_AUTH_TOKEN: "__SET_ON_VPS_ONLY__"
+      # THE BROKER TRANSPORT. Cloudflare fingerprints TLS, so no plain HTTP
+      # client can reach CryptoFundTrader whatever token it carries — every call
+      # goes through the headed-browser bridge (deploy/compose.cft-bridge.yaml),
+      # a SEPARATE compose project that attaches itself to this project's
+      # `tradingai_default` network.
+      #
+      # These two were missing from this file while production had them, so the
+      # committed record described an api that could not reach its broker at all.
+      # That is the same repo-vs-server drift C1 was about, on the connection
+      # that matters most.
+      CFT_BRIDGE_URL: "http://cft-bridge:8100"
+      # SECRET — as with API_AUTH_TOKEN, the real value lives only on the VPS.
+      # This is the last gate before a funded account; it has been rotated once
+      # already after leaking through an unredacted diff.
+      CFT_BRIDGE_TOKEN: "__SET_ON_VPS_ONLY__"
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
       # WHAT CODE TO RUN. A branch name is convenient and NOT reproducible:
       # recreate the container tomorrow and you get different code. Put a full
