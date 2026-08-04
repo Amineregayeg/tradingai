@@ -19,10 +19,17 @@ from app.services.rules.base import (  # noqa: F401
     open_rule_requires_declared_parameter,
 )
 from app.services.rules.gate_023_timezone import NewYorkTimestamps  # noqa: F401
+from app.services.rules.prim_001_swings import Bar, Swing, SwingPoints  # noqa: F401
+from app.services.rules.prim_005_breaks import BreakEvent, BreakEvents  # noqa: F401
 
 __all__ = [
+    "Bar",
+    "BreakEvent",
+    "BreakEvents",
     "DuplicateRuleImplementation",
     "NewYorkTimestamps",
+    "Swing",
+    "SwingPoints",
     "RuleImplementation",
     "implementations",
     "implemented_ids",
