@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-04 (after 2.2 — Phase 2 complete)
+Last updated: 2026-08-04 (after Phase 1 audit)
 
 ---
 
@@ -136,6 +136,31 @@ email (SMTP is a dependency but unconfigured), Telegram, a webhook. That is a
 choice about where you want to be interrupted, not a code decision.
 **Fix:** pick a channel, then alert on `data-health.ok == false` and on repeated
 bridge failures. The detection already exists; only delivery is missing.
+
+### E3. A failed page load renders as "no data" on 7 of 9 pages
+**Found in:** Phase 1 audit
+**What it is:** every page swallows fetch errors and shows an empty state
+(`.catch(() => setX([]))`). An API outage is therefore indistinguishable from a
+genuinely quiet week. ReportPage was fixed — it now says outright that the load
+failed — and MorningBriefingPage already handled it, but Dashboard, Journal,
+WeeklyReview, Settings, Checklist, PropFirm and Engine still do not.
+**Why it matters:** it is the same silence-versus-health confusion the
+monitoring surfaces were built to avoid. Severity is lower than it sounds —
+most show "—" or an empty list rather than a wrong number — but "no trades this
+week" and "the backend is down" call for very different responses.
+**Fix:** a shared load-state hook, so the pattern is right by default rather
+than remembered per page.
+
+### E4. The economic calendar is dead — no FINNHUB_API_KEY
+**Found in:** Phase 1 audit
+**What it is:** `/api/calendar/today` returns 503 with
+"FINNHUB_API_KEY not configured". MorningBriefingPage handles it honestly and
+shows the error rather than pretending, so nothing is misleading — the feature
+simply does not work.
+**Why it matters:** only that a page of the app is permanently non-functional.
+**Fix:** set FINNHUB_API_KEY on the api service, or remove the calendar from the
+Morning Briefing so the page stops advertising something unavailable.
+
 
 ### B3. Nobody can tell which code version is running
 **Found in:** I6 (never started)

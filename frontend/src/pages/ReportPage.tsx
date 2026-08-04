@@ -69,6 +69,10 @@ function EquityCurve({ points, start }: { points: number[]; start: number }) {
 export default function ReportPage() {
   const [s, setS] = useState<EngineStatus | null>(null)
   const [trades, setTrades] = useState<Trade[]>([])
+  // An outage must not render as "no trades". Without this, a failed fetch and
+  // a genuinely empty account are indistinguishable — the same silence-versus-
+  // health confusion the monitoring surfaces avoid.
+  const [loadFailed, setLoadFailed] = useState(false)
 
   useEffect(() => {
     const h = authHeaders()
@@ -78,7 +82,8 @@ export default function ReportPage() {
     // replay, right beside a headline that correctly read "2 closed trades".
     // Stating the cohort here means a future change to the API default cannot
     // quietly put replay back into a performance chart.
-    fetch('/api/trades?cohort=live&page_size=500', { headers: h }).then((r) => r.json()).then((r) => setTrades(Array.isArray(r) ? r : [])).catch(() => setTrades([]))
+    fetch('/api/trades?cohort=live&page_size=500', { headers: h }).then((r) => r.json()).then((r) => { setTrades(Array.isArray(r) ? r : []); setLoadFailed(false) })
+      .catch(() => setLoadFailed(true))
   }, [])
 
   const stats = useMemo(() => {
@@ -159,6 +164,16 @@ export default function ReportPage() {
             out-of-sample validation — the corrected backtest of the base method loses money (−16% over 15 months).
           </div>
         </div>
+        {loadFailed && (
+          <div style={{
+            background: 'rgba(255,59,92,0.10)', border: '1px solid #5c0018', borderRadius: 10,
+            padding: '11px 14px', marginBottom: 14, fontSize: 12, color: '#ff8fa3', lineHeight: 1.5,
+          }}>
+            <b>Trade history could not be loaded.</b> The figures below are
+            incomplete — this is a loading failure, not an empty account.
+          </div>
+        )}
+
         {/* Headline metrics */}
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
           <Metric big label="Equity" value={money(s.equity)} sub={`from ${money(s.starting_balance)} starting`} />
@@ -180,12 +195,17 @@ export default function ReportPage() {
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
           <Metric label="Profit Factor" value={stats.profitFactor ? stats.profitFactor.toFixed(2) : '—'} sub="gross win ÷ gross loss" color={stats.profitFactor >= 1 ? GREEN : RED} />
           <Metric label="Max Drawdown" value={stats.maxDD ? `-${stats.maxDD.toFixed(1)}%` : '—'} sub="peak-to-trough" color={AMBER} />
-          <Metric label="Avg R" value={`${stats.avgR >= 0 ? '+' : ''}${stats.avgR.toFixed(2)}R`} sub="per trade" color={stats.avgR >= 0 ? GREEN : RED} />
-          <Metric label="Avg Win / Loss" value={`${money(stats.avgWin)} / ${money(-stats.avgLoss)}`} sub="winners are bigger" />
+          {/* Guarded like Profit Factor and Max Drawdown above. Unguarded these
+              rendered "+0.00R" and "$0 / $0" with no trades at all, which reads
+              as "we measured it and it is zero" rather than "there is nothing to
+              measure". On the page that once showed a phantom equity curve that
+              is precisely the wrong impression. */}
+          <Metric label="Avg R" value={stats.nClosed ? `${stats.avgR >= 0 ? '+' : ''}${stats.avgR.toFixed(2)}R` : '—'} sub="per trade" color={!stats.nClosed ? undefined : stats.avgR >= 0 ? GREEN : RED} />
+          <Metric label="Avg Win / Loss" value={stats.nClosed ? `${money(stats.avgWin)} / ${money(-stats.avgLoss)}` : '—'} sub="winners are bigger" />
         </div>
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 18 }}>
-          <Metric label="Best Trade" value={'+' + money2(stats.best)} color={GREEN} />
-          <Metric label="Worst Trade" value={money2(stats.worst)} color={RED} />
+          <Metric label="Best Trade" value={stats.nClosed ? '+' + money2(stats.best) : '—'} color={stats.nClosed ? GREEN : undefined} />
+          <Metric label="Worst Trade" value={stats.nClosed ? money2(stats.worst) : '—'} color={stats.nClosed ? RED : undefined} />
           <Metric label="Balance" value={money(s.balance)} sub="realized cash" />
           <Metric label="Wins / Losses" value={`${s.wins} / ${s.losses}`} />
         </div>
