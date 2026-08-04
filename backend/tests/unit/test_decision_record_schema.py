@@ -31,6 +31,7 @@ _CHAIN = [
     ("0002", "0002_decision_records.py", "0001"),
     ("0003", "0003_decision_fill_price.py", "0002"),
     ("0004", "0004_engine_runs.py", "0003"),
+    ("0005", "0005_telemetry_records.py", "0004"),
 ]
 
 
@@ -46,6 +47,9 @@ class _RecordingOp:
     """Captures DDL intent instead of executing it."""
 
     def __init__(self):
+        #: Columns per created table, so a new table is covered the moment it is
+        #: created rather than only when someone remembers to assert it.
+        self.tables: dict[str, dict[str, sa.Column]] = {}
         self.table_name: str | None = None
         self.columns: dict[str, sa.Column] = {}
         self.checks: dict[str, sa.CheckConstraint] = {}
@@ -56,6 +60,7 @@ class _RecordingOp:
     #: creates engine_runs, and DDL for other tables is recorded separately so
     #: it neither pollutes the assertions nor fails the replay.
     def create_table(self, name, *cols, **kw):
+        self.tables[name] = {c.name: c for c in cols if isinstance(c, sa.Column)}
         if name != "decision_records":
             self.other_tables.add(name)
             return
@@ -150,6 +155,22 @@ def _replay_chain() -> _RecordingOp:
     return rec
 
 
+def test_the_chain_covers_every_migration_on_disk():
+    """_CHAIN is hand-written, so a new migration is invisible to every test here until
+    someone remembers to add it.
+
+    That is not hypothetical: 0005 was added and replayed by nothing — the linearity test
+    below passed without ever loading it. A migration nobody replays is a migration nobody
+    checks against its model.
+    """
+    on_disk = {p.name for p in _VERSIONS.glob("0*.py")}
+    in_chain = {filename for _rev, filename, _down in _CHAIN} | {"0001_initial.py"}
+    assert on_disk == in_chain, (
+        f"not replayed: {sorted(on_disk - in_chain)}; "
+        f"listed but missing: {sorted(in_chain - on_disk)}"
+    )
+
+
 def test_revision_chain_is_linear_and_complete():
     for rev, filename, down in _CHAIN:
         mod = _load(filename)
@@ -223,3 +244,21 @@ def test_fill_price_migration_is_idempotent():
     finally:
         mod.op, mod._has_column = orig_op, orig_has
     assert "fill_price" not in rec.columns, "upgrade() re-added an existing column"
+
+
+def test_telemetry_records_migration_matches_model():
+    """The same drift check the decision_records table has, for the telemetry store.
+
+    Its shape is fixed by the engine contract and read by the knowledge team's conformance
+    suite, so a migration that disagrees with the model would produce records that validate
+    in tests and fail to store in production.
+    """
+    from app.models.telemetry_record import TelemetryRecord
+
+    rec = _replay_chain()
+    mig_cols = set(rec.tables.get("telemetry_records", {}))
+    model_cols = {c.name for c in TelemetryRecord.__table__.columns}
+    assert mig_cols, "0005 did not create telemetry_records during the replay"
+    assert mig_cols == model_cols, (
+        f"drift: migration-only={mig_cols - model_cols}, model-only={model_cols - mig_cols}"
+    )

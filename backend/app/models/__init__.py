@@ -6,6 +6,7 @@ from app.models.candle import Candle
 from app.models.checklist import Checklist
 from app.models.decision_record import DecisionRecord
 from app.models.engine_run import EngineRun  # noqa: F401
+from app.models.telemetry_record import TelemetryRecord  # noqa: F401
 from app.models.edit_diff import EditDiff
 from app.models.ict_detection import ICTDetection
 from app.models.order import Order
@@ -34,4 +35,5 @@ __all__ = [
     "BrokerConnection",
     "DecisionRecord",
     "EngineRun",
+    "TelemetryRecord",
 ]
