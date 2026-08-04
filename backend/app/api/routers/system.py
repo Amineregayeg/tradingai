@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import AppSettings, CurrentUser, DBSession
 from app.config import settings as app_settings
+from app.core.build_info import build_info
 from app.core.logging import logger
 
 router = APIRouter(prefix="/system", tags=["system"])
@@ -56,14 +57,33 @@ async def health_check(db: DBSession) -> dict[str, Any]:
     # AI status: enabled if anthropic key configured
     ai_status = "ok" if app_settings.anthropic_api_key else "disabled"
 
+    build = build_info()
+
     return {
         "status": "ok",
         "db": db_status,
         "redis": redis_status,
         "brokers": broker_statuses,
         "ai": ai_status,
-        "version": "0.1.0",
+        # Was the constant "0.1.0" — present on every response, identical on
+        # every deploy, and therefore describing nothing. A commit SHA is not a
+        # secret (it grants no access to a private repo), and being able to ask
+        # a running container what it is beats reconstructing it from deploy
+        # timestamps.
+        "version": build.short,
+        "build": build.as_dict(),
     }
+
+
+@router.get("/version")
+async def version() -> dict[str, Any]:
+    """Which commit this process is running.
+
+    Separate from /health so a rollback check is one cheap call that touches no
+    database — during an incident, the question "what is even deployed right
+    now" should not depend on the components you are trying to diagnose.
+    """
+    return build_info().as_dict()
 
 
 @router.get("/data-health")

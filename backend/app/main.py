@@ -52,9 +52,19 @@ limiter = Limiter(key_func=get_remote_address, default_limits=["100/minute"])
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan handler — initialises all services in dependency order."""
     setup_logging()
+    # The commit goes in the FIRST line of every boot. `version` here is the
+    # OpenAPI version ("0.1.0") and has never changed, so on its own it cannot
+    # tell you which code produced the log you are reading — which is the one
+    # question worth asking when a container misbehaves (KNOWN_ISSUES B3).
+    from app.core.build_info import build_info
+
+    _build = build_info()
     logger.info(
         "Trading AI Co-Pilot starting up",
         version=app.version,
+        commit=_build.short,
+        ref=_build.ref,
+        pinned=_build.pinned,
         environment=settings.oanda_environment,
     )
 

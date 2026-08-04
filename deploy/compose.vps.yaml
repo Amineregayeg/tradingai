@@ -33,8 +33,18 @@
 #   * `pnpm dev` serves the frontend in production. That is the Vite DEV server:
 #     unminified, source maps exposed, HMR websocket open. Should be a built
 #     bundle behind a static server.
-#   * `git clone --depth 1` pins no commit. Whatever `main` happens to be when a
-#     container starts is what runs, and nothing records which commit that was.
+#
+# WHICH COMMIT IS RUNNING (was KNOWN_ISSUES B3)
+# Both services now fetch an explicit `GIT_REF` and write the resolved SHA to
+# /app/.build-sha; the api serves it at /api/system/version. Read that endpoint
+# rather than inferring a version from deploy timestamps.
+#
+# Note what this does and does not fix. GIT_REF still defaults to `main`, so the
+# deploy is IDENTIFIABLE but not yet REPRODUCIBLE — recreate a container tomorrow
+# and you get a different commit, correctly reported. The endpoint says
+# `pinned: false` when that is the case, deliberately, so the distinction is
+# visible instead of assumed. Set GIT_REF to a full SHA to make a release
+# reproducible.
 
 name: tradingai
 
@@ -76,6 +86,11 @@ services:
       # deliberately not committed. Set it there; never here.
       API_AUTH_TOKEN: "__SET_ON_VPS_ONLY__"
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      # WHAT CODE TO RUN. A branch name is convenient and NOT reproducible:
+      # recreate the container tomorrow and you get different code. Put a full
+      # 40-character commit SHA here to pin a release — /api/system/version then
+      # reports pinned:true, and rolling back is editing this one line.
+      GIT_REF: "main"
       # ENGINE_BROKER: "sim"   # uncomment to run the prop-firm challenge sim
       #                        # (the Tier 2 vehicle). Unset = "paper".
     volumes:
@@ -89,8 +104,19 @@ services:
         apt-get install -y --no-install-recommends git ca-certificates >/dev/null
         if [ ! -f /app/.ready ]; then
           rm -rf /tmp/src
-          git clone --depth 1 https://github.com/Amineregayeg/tradingai.git /tmp/src
+          # fetch-by-ref rather than `clone --depth 1`: this accepts a branch, a
+          # tag, OR a full commit SHA with the same three commands, so pinning a
+          # release is a value change and not a rewrite. `clone --branch` cannot
+          # take a SHA, which is why the old form could only ever float.
+          git init -q /tmp/src
+          git -C /tmp/src remote add origin https://github.com/Amineregayeg/tradingai.git
+          git -C /tmp/src fetch -q --depth 1 origin "$${GIT_REF:-main}"
+          git -C /tmp/src checkout -q FETCH_HEAD
           cp -a /tmp/src/backend/. /app/
+          # Record what was ACTUALLY checked out, not what was asked for. Asking
+          # for "main" and never recording which commit that resolved to is the
+          # entire defect (KNOWN_ISSUES B3) — /api/system/version reads this file.
+          git -C /tmp/src rev-parse HEAD > /app/.build-sha
           # SINGLE SOURCE OF TRUTH for versions. Do not inline pins here again.
           pip install --no-cache-dir -r /app/requirements-prod.txt
           touch /app/.ready
@@ -107,6 +133,10 @@ services:
     working_dir: /app
     environment:
       VITE_API_TARGET: "http://api:8000"
+      # Keep in step with the api's GIT_REF. Recreating one container and not the
+      # other is how the two halves end up on different commits — the specific
+      # thing B3 says nobody could detect.
+      GIT_REF: "main"
     entrypoint: ["sh", "-c"]
     command:
       - |
@@ -115,8 +145,15 @@ services:
         apt-get install -y --no-install-recommends git ca-certificates >/dev/null
         if [ ! -f /app/.ready ]; then
           rm -rf /tmp/src
-          git clone --depth 1 https://github.com/Amineregayeg/tradingai.git /tmp/src
+          git init -q /tmp/src
+          git -C /tmp/src remote add origin https://github.com/Amineregayeg/tradingai.git
+          git -C /tmp/src fetch -q --depth 1 origin "$${GIT_REF:-main}"
+          git -C /tmp/src checkout -q FETCH_HEAD
           cp -a /tmp/src/frontend/. /app/
+          # Nothing serves this one — the frontend has no endpoint. It is written
+          # so `docker exec tradingai-web-1 cat /app/.build-sha` can answer
+          # "is web on the same commit as api?", which is otherwise unanswerable.
+          git -C /tmp/src rev-parse HEAD > /app/.build-sha
           corepack enable
           corepack prepare pnpm@9 --activate
           # --frozen-lockfile (was --no-frozen-lockfile): the committed
