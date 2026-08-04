@@ -49,6 +49,8 @@ export default function EnginePage() {
   const [status, setStatus] = useState<Dict | null>(null)
   const [sim, setSim] = useState<Dict | null>(null)
   const [decisions, setDecisions] = useState<Dict[]>([])
+  // which decision's reasoning is expanded (null = none)
+  const [expanded, setExpanded] = useState<number | null>(null)
   const [feedback, setFeedback] = useState<Dict | null>(null)
   const [err, setErr] = useState<string | null>(null)
 
@@ -161,7 +163,7 @@ export default function EnginePage() {
         {/* Decision log */}
         <Panel title="Decision Log" right={<span style={{ fontSize: 11, color: MUTE }}>{decisions.length} recent</span>}>
           {decisions.length === 0 ? (
-            <div style={{ fontSize: 12, color: MUTE }}>No decisions recorded yet. When the engine takes a setup it appears here with its expected and realized R.</div>
+            <div style={{ fontSize: 12, color: MUTE }}>No decisions recorded yet. Every evaluated bar appears here — taken trades with their expected and realized R, and refusals with the reason they were refused.</div>
           ) : (
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
@@ -176,8 +178,20 @@ export default function EnginePage() {
                   {decisions.map((d, i) => {
                     const out = String(d.outcome ?? '')
                     const oc = out === 'WIN' ? GREEN : out === 'LOSS' ? RED : MUTE
+                    // The engine's own reasoning. Abstentions are the majority
+                    // of what it does and used to leave no record at all, so
+                    // they are shown in the same log rather than hidden behind
+                    // a filter — the refusals ARE the strategy.
+                    const abstained = Boolean(d.abstained)
+                    const reasons = Array.isArray(d.reasons) ? (d.reasons as string[]) : []
+                    const open = expanded === i
                     return (
-                      <tr key={i} style={{ borderBottom: '1px solid #15151f' }}>
+                      <>
+                      <tr key={i}
+                          onClick={() => reasons.length && setExpanded(open ? null : i)}
+                          style={{ borderBottom: reasons.length && open ? 'none' : '1px solid #15151f',
+                                   cursor: reasons.length ? 'pointer' : 'default',
+                                   opacity: abstained ? 0.75 : 1 }}>
                         <td style={{ padding: '6px 10px', color: MUTE, whiteSpace: 'nowrap' }}>{d.created_at ? new Date(String(d.created_at)).toLocaleString() : '—'}</td>
                         <td style={{ padding: '6px 10px', color: '#e8e8ef' }}>{String(d.symbol ?? '')}</td>
                         <td style={{ padding: '6px 10px', color: String(d.signal_dir) === 'LONG' ? GREEN : RED }}>{String(d.signal_dir ?? '')}</td>
@@ -185,8 +199,33 @@ export default function EnginePage() {
                         <td style={{ padding: '6px 10px', fontFamily: 'var(--font-mono)' }}>{r(d.expected_r)}</td>
                         <td style={{ padding: '6px 10px', fontFamily: 'var(--font-mono)', color: oc }}>{d.realized_r != null ? r(d.realized_r) : '—'}</td>
                         <td style={{ padding: '6px 10px', fontFamily: 'var(--font-mono)', color: (n(d.gap_r) ?? 0) >= 0 ? GREEN : RED }}>{d.gap_r != null ? r(d.gap_r) : '—'}</td>
-                        <td style={{ padding: '6px 10px', color: oc, fontWeight: 600 }}>{out || 'OPEN'}</td>
+                        <td style={{ padding: '6px 10px', color: oc, fontWeight: 600 }}>
+                          {out || 'OPEN'}
+                          {reasons.length > 0 && (
+                            <span style={{ color: MUTE, marginLeft: 6, fontWeight: 400 }}>
+                              {open ? '▾' : '▸'}
+                            </span>
+                          )}
+                        </td>
                       </tr>
+                      {open && reasons.length > 0 && (
+                        <tr key={`${i}-why`} style={{ borderBottom: '1px solid #15151f' }}>
+                          <td colSpan={8} style={{ padding: '2px 10px 10px 10px', background: '#0f0f17' }}>
+                            <div style={{ fontSize: 10, color: MUTE, marginBottom: 4, letterSpacing: '0.06em' }}>
+                              WHY
+                            </div>
+                            {reasons.map((rs, k) => (
+                              <div key={k} style={{
+                                fontSize: 11, lineHeight: 1.6, fontFamily: 'var(--font-mono)',
+                                color: rs.startsWith('FAIL') ? '#ff8fa3'
+                                     : rs.startsWith('PASS') ? '#7fe3c0' : MUTE,
+                                paddingLeft: rs.startsWith('  ') ? 14 : 0,
+                              }}>{rs.trim()}</div>
+                            ))}
+                          </td>
+                        </tr>
+                      )}
+                      </>
                     )
                   })}
                 </tbody>

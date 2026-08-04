@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 from app.core.logging import logger
 from app.services.broker.paper import PaperBroker
 from app.services.execution.service import ExecMode, ExecutionService
-from app.services.live.strategy_step import evaluate_latest_bar
+from app.services.live.strategy_step import evaluate_latest_bar_traced
 from app.services.market_data.sources.binance import BinanceSource
 from app.services.ws.manager import ws_manager
 
@@ -374,7 +374,8 @@ class LiveCryptoLoop:
         return hashlib.sha1(raw.encode()).hexdigest()[:16]
 
     async def _record_signal_decision(
-        self, pair: str, entry_df, sig, sized_units: float, fill_price: float | None = None
+        self, pair: str, entry_df, sig, sized_units: float, fill_price: float | None = None,
+        trace=None,
     ) -> None:
         """Persist a DecisionRecord for a taken signal (outcome OPEN), and remember
         its id so the eventual close can fill realized_r / gap_r / outcome.
@@ -402,7 +403,11 @@ class LiveCryptoLoop:
             rec = DecisionRecord(
                 symbol=pair, timeframe=self.entry_tf,
                 inputs_hash=self._inputs_hash(entry_df), code_path_hash=self._code_path_hash(),
-                score=None, abstained=False, reasons=None,
+                score=None, abstained=False,
+                # The reasoning behind a TAKEN trade matters as much as behind a
+                # refusal: it is what lets you check the entry was justified
+                # rather than merely profitable.
+                reasons=(trace.reasons if trace is not None else None),
                 signal_dir=sig.direction.value,
                 signal_entry=Decimal(str(round(entry, 6))),
                 signal_sl=Decimal(str(round(sl, 6))),
@@ -418,6 +423,35 @@ class LiveCryptoLoop:
                 self._open_decision[pair] = str(rec.id)
         except Exception as exc:  # noqa: BLE001 - never let bookkeeping kill the loop
             logger.warning("record decision failed", pair=pair, error=str(exc))
+
+    async def _record_abstention(self, pair: str, entry_df, trace) -> None:
+        """Persist WHY no trade was taken.
+
+        Volume is modest — one row per symbol per closed bar, so ~48/day at 1H
+        on two symbols — and it is the only record that the strategy was
+        evaluated at all. Without it a quiet detector and a correctly selective
+        one look identical.
+
+        Never raises: bookkeeping must not be able to stop the engine trading.
+        """
+        try:
+            from app.db.session import async_session_maker
+            from app.models.decision_record import (
+                COHORT_PAPER, OUTCOME_ABSTAINED, DecisionRecord,
+            )
+            rec = DecisionRecord(
+                symbol=pair, timeframe=self.entry_tf,
+                inputs_hash=self._inputs_hash(entry_df),
+                code_path_hash=self._code_path_hash(),
+                score=None, abstained=True,
+                reasons=trace.reasons,
+                outcome=OUTCOME_ABSTAINED, cohort=COHORT_PAPER,
+            )
+            async with async_session_maker() as db:
+                db.add(rec)
+                await db.commit()
+        except Exception as exc:  # noqa: BLE001 - never let bookkeeping kill the loop
+            logger.warning("record abstention failed", pair=pair, error=str(exc))
 
     async def _resolve_decision(self, ev: dict) -> None:
         """On close, fill the matching OPEN decision's realized_r / gap_r / outcome.
@@ -546,16 +580,25 @@ class LiveCryptoLoop:
             await self._act(kind, f"{pair} {self.entry_tf} bar closed — {block}, skipped")
             return
         bias = await self._fetch_bars(bsym, self.bias_tf, 220)
-        sig = evaluate_latest_bar(pair, entry, bias, risk_pct=self.risk_pct)
+        sig, trace = evaluate_latest_bar_traced(pair, entry, bias, risk_pct=self.risk_pct)
         if sig is None:
-            await self._act("eval", f"{pair} {self.entry_tf} bar closed — no valid setup")
+            # Record WHY, not just that nothing happened. DecisionRecord has
+            # carried `abstained`/`reasons`/ABSTAINED since it was written and
+            # nothing ever populated them — rows appeared only when an order
+            # filled, so the engine's refusals (most of what it does) left no
+            # trace at all. "No valid setup" is indistinguishable from "the
+            # detector never fires", which is precisely the question a
+            # simulation exists to answer.
+            await self._record_abstention(pair, entry, trace)
+            await self._act("eval", f"{pair} {self.entry_tf} bar closed — {trace.summary}")
             return
         await self._act("signal", f"{pair} {sig.direction.value} setup @ {sig.entry:.0f}")
         res = await self.execution.execute(sig)
         if res.get("status") == "FILLED":
             logger.info("Live paper entry", pair=pair, dir=sig.direction.value, fill=res.get("fill"))
             await self._record_signal_decision(
-                pair, entry, sig, res.get("sized_units", 0), fill_price=res.get("fill")
+                pair, entry, sig, res.get("sized_units", 0), fill_price=res.get("fill"),
+                trace=trace,
             )
             await ws_manager.push_position_open(res)
             await self._act(
