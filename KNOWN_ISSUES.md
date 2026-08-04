@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-04 (after E3 — outages no longer render as empty results)
+Last updated: 2026-08-04 (after E5 — controls report their own failures)
 
 ---
 
@@ -136,22 +136,6 @@ email (SMTP is a dependency but unconfigured), Telegram, a webhook. That is a
 choice about where you want to be interrupted, not a code decision.
 **Fix:** pick a channel, then alert on `data-health.ok == false` and on repeated
 bridge failures. The detection already exists; only delivery is missing.
-
-### E5. A failed ACTION is silently swallowed
-**Found in:** E3 (auditing the load paths turned these up)
-**What it is:** buttons still catch and discard their own failures —
-`api.engine.reset()`, `pause()`, `resume()`, `api.settings.update()`,
-`api.brokers.disconnect()`, and the journal's CSV export all end in
-`.catch(() => {})`.
-**Why it matters:** same family as E3, opposite direction. E3 was "the page
-claims something false about the data"; this is "you pressed a button, nothing
-happened, and nothing said so". Pausing the engine is the sharp one — you click
-Pause, the button does not visibly fail, and the engine keeps trading. The
-operator's belief and the system's state diverge with no signal.
-**Why it was not bundled into E3:** E3 is about rendering. These need a
-different treatment — a transient error next to the control, and for
-pause/resume a re-read of the real state afterwards so the UI reflects what the
-engine actually did rather than what was requested.
 
 ### E4. The economic calendar is dead — no FINNHUB_API_KEY
 **Found in:** Phase 1 audit
