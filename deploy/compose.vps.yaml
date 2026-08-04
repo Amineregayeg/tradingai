@@ -203,8 +203,10 @@ services:
         # The nginx config is refreshed every run. It is small, and it must track
         # the repo — a config that only updates when the bundle changes would
         # silently keep serving an old routing rule.
-        # NOTE: nginx reads its config only at start, so a changed config needs
-        # `docker compose restart web` to take effect.
+        # The web container watches this file and reloads nginx within ~15s of
+        # it changing (D9), so no restart is needed. A config nginx refuses is
+        # not loaded and marks that container unhealthy — the previous config
+        # keeps serving.
         cp /tmp/src/deploy/nginx-web.conf /out/conf/default.conf
         # SKIP THE BUILD WHEN THE LIVE RELEASE ALREADY IS THIS COMMIT.
         # The original web service guarded on `[ ! -f /app/.ready ]`, which was
@@ -273,11 +275,55 @@ services:
           sleep 3
         done
         echo "serving release $$(readlink /srv/current)"
+
+        # RELOAD WHEN THE CONFIG CHANGES (D9).
+        #
+        # web-build copies nginx-web.conf into the shared volume on every run,
+        # but nginx reads its configuration only at startup. So a deployed
+        # routing change landed on disk, showed green everywhere, and did not
+        # take effect — silent, and it would hide exactly the change most worth
+        # noticing (an /api or /ws location).
+        #
+        # A watcher rather than a reload signal from web-build: signalling
+        # another container needs the docker socket mounted, which is
+        # root-equivalent on this host. Watching a file this container already
+        # mounts costs nothing and grants nothing.
+        #
+        # An INVALID config is never loaded. nginx keeps serving the previous
+        # one, which is the right call for uptime but would otherwise be
+        # invisible — so the rejection is logged and marked, and the healthcheck
+        # below turns the container unhealthy while the intended config is not
+        # the live one. `restart: unless-stopped` does not restart on unhealthy,
+        # so the site stays up while the mistake stays visible.
+        CONF=/etc/nginx/conf.d/default.conf
+        (
+          last=$$(md5sum "$$CONF" | cut -d' ' -f1)
+          while true; do
+            sleep 15
+            cur=$$(md5sum "$$CONF" 2>/dev/null | cut -d' ' -f1)
+            [ -z "$$cur" ] && continue
+            [ "$$cur" = "$$last" ] && continue
+            last=$$cur
+            if nginx -t >/tmp/conftest 2>&1; then
+              nginx -s reload && echo "nginx: config changed -> reloaded"
+              rm -f /tmp/config-rejected
+            else
+              echo "nginx: CONFIG REJECTED — still serving the previous one:"
+              cat /tmp/conftest
+              touch /tmp/config-rejected
+            fi
+          done
+        ) &
+
         exec nginx -g 'daemon off;'
     healthcheck:
-      # Distinguishes "container is up" from "the site actually answers" — the
-      # gap those two used to hide in.
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/.build-sha"]
+      # Two different failures, one signal. The fetch distinguishes "container
+      # is up" from "the site actually answers" — the gap those two used to hide
+      # in. The sentinel reports that the config on disk was refused, so the
+      # behaviour being served is not the behaviour that was deployed.
+      test:
+        - "CMD-SHELL"
+        - "[ ! -f /tmp/config-rejected ] && wget -qO- http://127.0.0.1/.build-sha >/dev/null"
       interval: 30s
       timeout: 5s
       retries: 3
