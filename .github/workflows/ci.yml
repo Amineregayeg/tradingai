@@ -110,6 +110,16 @@ jobs:
           AUTH_DISABLED: 'true'
         run: python -m pytest -q
 
+      # The static link between our source and the engine contract. Fails on an id that
+      # is not in the registry, an id claimed twice, or a RULE_ID constant that never
+      # registers an implementation — the last of which reads as covered while being
+      # invisible to the coverage report. Incomplete coverage does NOT fail: it is
+      # reported, and readiness gate 5 is what eventually requires every unevaluated hard
+      # gate to be explained.
+      - name: Rule ids resolve against the pinned registry
+        working-directory: .
+        run: python3 scripts/check_rule_coverage.py
+
   guards:
     name: Tier 0.2 - lookahead guards must bite
     runs-on: ubuntu-latest
