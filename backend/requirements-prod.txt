@@ -51,3 +51,10 @@ smartmoneyconcepts==0.0.27
 pandas==3.0.2
 numpy==2.2.6
 pandas-ta==0.4.71b0
+
+# Validates every telemetry record against the vendored engine contract before it is
+# stored (M1). Production rather than dev on purpose: emission is a handful of records per
+# hour, so validation costs nothing measurable, and a telemetry store that can accept an
+# invalid record is not evidence — the whole conformance suite is a pure function of what
+# lands here.
+jsonschema==4.26.0

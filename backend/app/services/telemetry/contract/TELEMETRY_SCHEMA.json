@@ -1,0 +1,2814 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://engine-contract.local/magic-strategy/telemetry/v1.1.0",
+  "title": "Magic Strategy Engine — Telemetry Contract v1.1.0",
+  "description": "What the execution engine MUST emit. Three record types: `setup_evaluation` (every setup considered, INCLUDING rejected ones — rejections are the richest fidelity signal), `trade_execution` (taken trades) and `scan_census` (the emission population, so the engine cannot silently choose its own denominator). DESIGN CONSTRAINT: a fidelity check must be possible from these records ALONE, with no access to engine internals. Concretely that means: every decision names the rule id that produced it; every rule evaluation carries the VALUES that produced its verdict, not just a boolean; every primitive carries the price levels that define it; every parameter the engine chose (rather than read from the strategy) is stamped into the record; every value in a rule evaluation names the object it came from; and the set of records emitted is itself reconcilable against a declared emission policy. v1.1.0 adds the last two — they exist because the first version was measurable only if the engine emitted honestly, and a fidelity instrument must not assume the good faith of the thing it measures. v1.1.0 also closes three traceability holes found on audit: `setup_evaluation.stop_evaluation` (the stop ladder existed only on TAKEN trades, so the documented terminal skip carried no evidence and HG-10 could not run), `primitives.ranges` (HG-38 asserted GATE-044 over fields no record could carry) and `correlate_state.agreement_state` (nothing distinguished a directional sign from an agreement verdict, so the USDT.D inversion of §10.D D-6/D-7 was undetectable). Rule ids are those of RULE_REGISTRY.json v1.1.0 and are the load-bearing join key for conformance and for the learning loop.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/setup_evaluation"
+    },
+    {
+      "$ref": "#/$defs/trade_execution"
+    },
+    {
+      "$ref": "#/$defs/scan_census"
+    }
+  ],
+  "$defs": {
+    "iso_ny": {
+      "type": "string",
+      "description": "Timestamp in America/New_York local time WITH offset, e.g. 2026-07-31T09:34:00-04:00. GATE-023 requires a DST-aware zone, never a hardcoded UTC offset; the offset present in the string is what proves which was used.",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?[+-]\\d{2}:\\d{2}$"
+    },
+    "rule_id": {
+      "type": "string",
+      "description": "An id from RULE_REGISTRY.json. Conformance asserts every id emitted here exists in the registry (completeness check C-3).",
+      "pattern": "^(GATE|GRADE|TARGET|ENTRY|EXIT|SIZE|PRIM)-[0-9]{3}$"
+    },
+    "timeframe": {
+      "type": "string",
+      "enum": [
+        "1M",
+        "3M",
+        "5M",
+        "15M",
+        "30M",
+        "1H",
+        "2H",
+        "4H",
+        "1D",
+        "1W",
+        "1MO"
+      ],
+      "description": "1M and 3M are present ONLY because the workspace documents execution on them while the ruling excludes them — GATE-018 is OPEN. Their appearance in signal_tf is a flag, not a silent pass."
+    },
+    "price": {
+      "type": "number",
+      "description": "Absolute price in the instrument's quote currency. Never a pixel measurement, never a percentage."
+    },
+    "evidence_ref": {
+      "type": "object",
+      "description": "Where on the chart a claim comes from. Every primitive and every rule verdict that rests on chart geometry must carry one, so a human can re-open the same bars.",
+      "required": [
+        "tf",
+        "bar_time"
+      ],
+      "properties": {
+        "tf": {
+          "$ref": "#/$defs/timeframe"
+        },
+        "bar_time": {
+          "$ref": "#/$defs/iso_ny"
+        },
+        "bar_index": {
+          "type": "integer"
+        },
+        "price_levels": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/price"
+          }
+        },
+        "note": {
+          "type": "string"
+        }
+      }
+    },
+    "engine_identity": {
+      "type": "object",
+      "description": "Pins the record to a code build AND to a contract version. Without this, telemetry from two builds cannot be compared and a conformance failure cannot be attributed.",
+      "required": [
+        "engine_version",
+        "rule_registry_version",
+        "telemetry_schema_version"
+      ],
+      "properties": {
+        "engine_version": {
+          "type": "string"
+        },
+        "rule_registry_version": {
+          "type": "string",
+          "const": "1.1.0"
+        },
+        "telemetry_schema_version": {
+          "type": "string",
+          "const": "1.1.0"
+        },
+        "git_sha": {
+          "type": "string"
+        }
+      }
+    },
+    "declared_parameters": {
+      "type": "object",
+      "description": "MANDATORY. Every value the ENGINE chose because the strategy declined to fix one. These correspond to registry rules with status=OPEN. Stamping them into every record is what allows a later trader ruling to be applied RETROACTIVELY to stored telemetry instead of invalidating it. A record whose decision depended on an OPEN rule and which does not carry the corresponding parameter is itself a conformance failure (completeness check C-5).",
+      "required": [
+        "layout_size_frozen",
+        "main_asset_counts",
+        "box_scope",
+        "stop_selection_reading",
+        "runner_management_policy",
+        "reverse_quorum",
+        "virtual_account_size",
+        "evaluation_order_id",
+        "emission_policy_id"
+      ],
+      "properties": {
+        "virtual_account_size": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "SIZE-001. The virtual base every risk_pct is applied to. The source fixes the CONCEPT ('act as 1.000$') but never the number, and the number is a free multiplier on every position. It is declared here — not per trade — so that K-26 can assert it is FROZEN for the build and INDEPENDENT of box_grade/disturbance_grade. Without this, HG-08's identity is self-referential: an engine can pick a base per trade that makes any quantity conform."
+        },
+        "evaluation_order_id": {
+          "type": "string",
+          "description": "Identifier of the FIXED order in which the engine evaluates rules, constant for the build. K-25 asserts deciding_rule_id is the FIRST FAIL in decision_path and that decision_path is a prefix-consistent realisation of this order. Without a fixed order the engine may cite whichever failing gate is most convenient."
+        },
+        "emission_policy_id": {
+          "type": "string",
+          "description": "Identifier of the FIXED, documented rule that decides WHEN a setup_evaluation is emitted (e.g. 'EVERY_CLOSED_BAR_PER_EXEC_TF_PER_ROSTER_SYMBOL'). The conformance suite is a pure function of stored telemetry, so the engine's choice of what to record is the largest unmeasured surface in the contract. C-13 reconciles emissions against the scan_census under this policy."
+        },
+        "layout_size_frozen": {
+          "type": "boolean",
+          "description": "GATE-003 / GRADE-016."
+        },
+        "main_asset_counts": {
+          "type": "boolean",
+          "description": "GATE-004 / GRADE-016 — does the main asset count toward the disturbance count?"
+        },
+        "box_scope": {
+          "type": "string",
+          "enum": [
+            "ENTRY_BOX_EXEC_TF",
+            "DESTINATION_BOX"
+          ],
+          "description": "GRADE-009 — which structure box the risk-table grade refers to."
+        },
+        "stop_selection_reading": {
+          "type": "string",
+          "enum": [
+            "CLOSEST_TO_3R_TIES_TO_LARGER",
+            "LARGEST_ABOVE_2R"
+          ],
+          "description": "GATE-028 — which side of the self-contradictory step 4 actually shipped."
+        },
+        "upper_rr_cut": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "GATE-029 — null means no cut applied, which is the source as written."
+        },
+        "runner_management_policy": {
+          "type": "string",
+          "description": "EXIT-003 — 'PASSIVE' is the only attributable value until ruled."
+        },
+        "reverse_quorum": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "GATE-041 / GRADE-031 — how many of the seven Forward→Reverse conditions were required."
+        },
+        "d4_quorum": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "d5_quorum": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "amplifier_collision_basis": {
+          "type": "string",
+          "enum": [
+            "ZONE_MIDPOINT",
+            "NEAREST_EDGE",
+            "POI_PRICE"
+          ],
+          "description": "ENTRY-004 — three incompatible bases exist in the source."
+        },
+        "calibration_percentages": {
+          "type": "object",
+          "description": "ENTRY-005 — the four shipped, asset/TF-agnostic placeholders and the values actually used.",
+          "properties": {
+            "relative_equals_pct": {
+              "type": "number"
+            },
+            "weak_sweep_pct": {
+              "type": "number"
+            },
+            "amplifier_collision_pct": {
+              "type": "number"
+            },
+            "news_pre_minutes": {
+              "type": "integer"
+            },
+            "news_post_minutes": {
+              "type": "integer"
+            }
+          }
+        },
+        "execution_tf_set": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/timeframe"
+          },
+          "description": "GATE-018 — whether 1M/3M were admitted."
+        },
+        "magic_zone_enforced_as": {
+          "type": "string",
+          "enum": [
+            "FLAG_ONLY",
+            "HARD_BLOCK"
+          ],
+          "description": "GATE-020."
+        },
+        "altcoin_trading_enabled": {
+          "type": "boolean",
+          "description": "GRADE-019 — must be false until the Risk Altcoin column is ruled."
+        }
+      }
+    },
+    "swing_point": {
+      "type": "object",
+      "description": "PRIM-001. The atom of the whole system: every liquidity level, structure box and stop anchor is derived from one.",
+      "required": [
+        "id",
+        "tf",
+        "bar_time",
+        "price",
+        "kind",
+        "strength"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "tf": {
+          "$ref": "#/$defs/timeframe"
+        },
+        "bar_time": {
+          "$ref": "#/$defs/iso_ny"
+        },
+        "price": {
+          "$ref": "#/$defs/price"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "HIGH",
+            "LOW"
+          ]
+        },
+        "strength": {
+          "type": "string",
+          "enum": [
+            "STRONG",
+            "WEAK",
+            "UNCONFIRMED"
+          ]
+        },
+        "combo_tfs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/timeframe"
+          },
+          "description": "PRIM-001 — a swing that is strong on several TFs at once."
+        }
+      }
+    },
+    "structure_box": {
+      "type": "object",
+      "description": "GRADE-001 to GRADE-005. No box ⇒ no grade ⇒ the risk matrix cannot be looked up and no trade may be sized.",
+      "required": [
+        "id",
+        "tf",
+        "direction",
+        "swing_bar_time",
+        "break_bar_time",
+        "box_high",
+        "box_low",
+        "strong_swing_price",
+        "birth_break_type",
+        "grade",
+        "fuel_component_count",
+        "evidence"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "tf": {
+          "$ref": "#/$defs/timeframe"
+        },
+        "direction": {
+          "type": "string",
+          "enum": [
+            "UP",
+            "DOWN"
+          ]
+        },
+        "swing_bar_time": {
+          "$ref": "#/$defs/iso_ny"
+        },
+        "break_bar_time": {
+          "$ref": "#/$defs/iso_ny"
+        },
+        "box_high": {
+          "$ref": "#/$defs/price"
+        },
+        "box_low": {
+          "$ref": "#/$defs/price"
+        },
+        "strong_swing_price": {
+          "$ref": "#/$defs/price",
+          "description": "The box extreme — low for an up-leg, high for a down-leg. IS the Strong Low / Strong High."
+        },
+        "birth_break_type": {
+          "type": "string",
+          "enum": [
+            "MSB",
+            "BOS"
+          ]
+        },
+        "grade": {
+          "type": "string",
+          "enum": [
+            "STANDARD",
+            "SUPER",
+            "MANIPULATED"
+          ]
+        },
+        "fuel_component_count": {
+          "type": "integer",
+          "enum": [
+            1,
+            2,
+            3
+          ],
+          "description": "GRADE-005 — the grade must be monotonic in this count. Emitted separately so conformance can test the ladder without re-deriving geometry."
+        },
+        "grade_definition_used": {
+          "type": "string",
+          "enum": [
+            "WORKSPACE_KEY_IMBALANCE_MANDATORY",
+            "PDF_Q10_NO_IMBALANCE"
+          ],
+          "description": "GRADE-006 DEFECT — two incompatible definitions exist. The engine must declare which it used."
+        },
+        "evidence": {
+          "type": "object",
+          "required": [
+            "imbalance_tap",
+            "inner_sweep",
+            "fake_msb"
+          ],
+          "properties": {
+            "imbalance_tap": {
+              "type": "boolean"
+            },
+            "imbalance_id": {
+              "type": "string"
+            },
+            "inner_sweep": {
+              "type": "boolean"
+            },
+            "inner_sweep_swing_id": {
+              "type": "string"
+            },
+            "inner_sweep_wick_price": {
+              "$ref": "#/$defs/price"
+            },
+            "inner_sweep_side": {
+              "type": "string",
+              "enum": [
+                "ABOVE",
+                "BELOW"
+              ]
+            },
+            "fake_msb": {
+              "type": "boolean"
+            },
+            "fake_msb_break_bar_time": {
+              "$ref": "#/$defs/iso_ny"
+            },
+            "fake_msb_side": {
+              "type": "string",
+              "enum": [
+                "ABOVE",
+                "BELOW"
+              ]
+            }
+          }
+        },
+        "poi_qualified_at_bar_time": {
+          "$ref": "#/$defs/iso_ny",
+          "description": "GRADE-007 — the bar at which the LAST manipulation component completed. Must be strictly earlier than the decision bar; that comparison is the look-ahead test."
+        }
+      }
+    },
+    "imbalance": {
+      "type": "object",
+      "description": "PRIM-002.",
+      "required": [
+        "id",
+        "tf",
+        "price_high",
+        "price_low",
+        "type",
+        "fill_state"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "tf": {
+          "$ref": "#/$defs/timeframe"
+        },
+        "bar_time": {
+          "$ref": "#/$defs/iso_ny"
+        },
+        "price_high": {
+          "$ref": "#/$defs/price"
+        },
+        "price_low": {
+          "$ref": "#/$defs/price"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "FVG",
+            "VOLUME_IMBALANCE",
+            "GAP",
+            "BPR",
+            "SUPER_BPR"
+          ]
+        },
+        "is_momentum_imbalance": {
+          "type": "boolean"
+        },
+        "fill_state": {
+          "type": "string",
+          "enum": [
+            "UNFILLED",
+            "HALF_FILLED",
+            "FULLY_FILLED",
+            "FULLY_FILLED_AND_VIOLATED"
+          ],
+          "description": "The four captioned states of §9.J IM61."
+        },
+        "test_count": {
+          "type": "integer"
+        },
+        "purpose_verdict": {
+          "type": "string",
+          "enum": [
+            "PASS",
+            "FAIL",
+            "PENDING"
+          ],
+          "description": "GRADE-038 — did it produce a new BOS/MSB toward the target?"
+        },
+        "target_cleared_at_failure": {
+          "type": "boolean",
+          "description": "GRADE-038 — location decides meaning: failure before the target is inducement, after it is a possible permanent trend change."
+        },
+        "mutated_to_sr_flip": {
+          "type": "boolean"
+        }
+      }
+    },
+    "liquidity_pool": {
+      "type": "object",
+      "description": "PRIM-003. Six classes plus the diagonal trendline geometry.",
+      "required": [
+        "id",
+        "tf",
+        "class",
+        "state"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "tf": {
+          "$ref": "#/$defs/timeframe"
+        },
+        "class": {
+          "type": "string",
+          "enum": [
+            "SWING_LEVEL",
+            "EQUAL_HIGHS_LOWS",
+            "PARABOLIC_COMPRESSED",
+            "INSTITUTIONAL_LEVEL",
+            "INSTITUTIONAL_CANDLESTICK",
+            "SESSION_LEVEL",
+            "DIAGONAL_POOL"
+          ]
+        },
+        "label": {
+          "type": "string",
+          "description": "e.g. PDH, PDL, PWH, PWL, PMH, PML, DO, WO, DEQ, MDAY-H, ASIA_HIGH, LONDON_LOW, LIQ3."
+        },
+        "price": {
+          "$ref": "#/$defs/price",
+          "description": "Required for all classes except DIAGONAL_POOL."
+        },
+        "diagonal_endpoints": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "object",
+            "properties": {
+              "bar_time": {
+                "$ref": "#/$defs/iso_ny"
+              },
+              "price": {
+                "$ref": "#/$defs/price"
+              }
+            }
+          }
+        },
+        "equals_class": {
+          "type": "string",
+          "enum": [
+            "PERFECT",
+            "RELATIVE",
+            "SEPARATE_POOLS"
+          ],
+          "description": "TARGET-006."
+        },
+        "equals_diff_pct": {
+          "type": "number",
+          "description": "TARGET-006 — the measured difference that produced equals_class. Record it even when the class is SEPARATE_POOLS."
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "UNTESTED",
+            "TESTED_NOT_CONSUMED",
+            "CONSUMED"
+          ],
+          "description": "TARGET-005 — a body close beyond does NOT make a level CONSUMED."
+        },
+        "v_quality_drivers": {
+          "type": "object",
+          "description": "TARGET-007 — weight only, never a rejection. No scale, bounds or weights exist in the source; record the qualitative drivers observed.",
+          "properties": {
+            "turning_angle_sharp": {
+              "type": "boolean"
+            },
+            "reversal_clean": {
+              "type": "boolean"
+            },
+            "visually_obvious": {
+              "type": "boolean"
+            },
+            "sideways_at_turn": {
+              "type": "boolean"
+            }
+          }
+        },
+        "boosters": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "EQUALS",
+              "PARABOLIC",
+              "DEEP_V",
+              "MULTI_TF_STACK",
+              "INSTITUTIONAL_CONFLUENCE"
+            ]
+          }
+        }
+      }
+    },
+    "sweep_event": {
+      "type": "object",
+      "description": "PRIM-004 + TARGET-005.",
+      "required": [
+        "id",
+        "pool_id",
+        "bar_time",
+        "penetration_abs",
+        "penetration_pct",
+        "wick_or_close"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "pool_id": {
+          "type": "string"
+        },
+        "bar_time": {
+          "$ref": "#/$defs/iso_ny"
+        },
+        "penetration_abs": {
+          "type": "number"
+        },
+        "penetration_pct": {
+          "type": "number",
+          "description": "TARGET-005 / ENTRY-005 — the source never states 'percent of what'. `penetration_pct_basis` must say which convention the engine used."
+        },
+        "penetration_pct_basis": {
+          "type": "string",
+          "enum": [
+            "LEVEL_PRICE",
+            "SWING_RANGE",
+            "OTHER"
+          ]
+        },
+        "wick_or_close": {
+          "type": "string",
+          "enum": [
+            "WICK_ONLY",
+            "BODY_CLOSE_BEYOND"
+          ]
+        },
+        "weak_sweep": {
+          "type": "boolean",
+          "description": "penetration ≤ ~1% ⇒ expect a second run in the same direction."
+        },
+        "degraded_by_prior_breakout": {
+          "type": "boolean",
+          "description": "PRIM-004 (b) — prior closes/new highs beyond the level before the final poke."
+        },
+        "sweep_failed": {
+          "type": "boolean",
+          "description": "PRIM-004 (a) — approach without crossing."
+        },
+        "structural_reaction": {
+          "type": "string",
+          "description": "TARGET-005 requires a structural reaction, not a metric, before a pool may be called CONSUMED. Free text plus the break_ids that evidence it."
+        },
+        "reaction_break_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "break_event": {
+      "type": "object",
+      "description": "PRIM-005. MSB vs BOS is discriminated by GEOMETRY, never by acronym expansion.",
+      "required": [
+        "id",
+        "tf",
+        "bar_time",
+        "type",
+        "scale",
+        "consumed_swing_id",
+        "break_price"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "tf": {
+          "$ref": "#/$defs/timeframe"
+        },
+        "bar_time": {
+          "$ref": "#/$defs/iso_ny"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "MSB",
+            "BOS"
+          ]
+        },
+        "scale": {
+          "type": "string",
+          "enum": [
+            "MAIN",
+            "INTERNAL",
+            "MICRO"
+          ]
+        },
+        "consumed_swing_id": {
+          "type": "string"
+        },
+        "break_price": {
+          "$ref": "#/$defs/price"
+        },
+        "direction": {
+          "type": "string",
+          "enum": [
+            "UP",
+            "DOWN"
+          ]
+        },
+        "valid": {
+          "type": "boolean",
+          "description": "ENTRY-003 break-validity test (body close + the seven IM80 criteria). Distinct from liquidity clearance."
+        },
+        "validity_criteria_met": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "fake_msb": {
+          "type": "boolean",
+          "description": "GRADE-008."
+        },
+        "fake_msb_sequence": {
+          "type": "object",
+          "description": "GRADE-008's five steps, each recorded so the classification is auditable and provably free of candle-count proxies.",
+          "properties": {
+            "htf_target_still_valid": {
+              "type": "boolean"
+            },
+            "liquidity_sweep_id": {
+              "type": "string"
+            },
+            "counter_direction_break": {
+              "type": "boolean"
+            },
+            "genuine_reversal_confirmation_absent": {
+              "type": "boolean"
+            },
+            "continuation_toward_htf_target": {
+              "type": "boolean"
+            },
+            "trapped_sides": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "LONG",
+                  "SHORT"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "sr_flip": {
+      "type": "object",
+      "description": "PRIM-006. Zones, never lines.",
+      "required": [
+        "id",
+        "tf",
+        "price_high",
+        "price_low",
+        "origin"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "tf": {
+          "$ref": "#/$defs/timeframe"
+        },
+        "price_high": {
+          "$ref": "#/$defs/price"
+        },
+        "price_low": {
+          "$ref": "#/$defs/price"
+        },
+        "origin": {
+          "type": "string",
+          "enum": [
+            "FAILED_IMBALANCE",
+            "BROKEN_LEVEL"
+          ]
+        },
+        "touch_count": {
+          "type": "integer"
+        }
+      }
+    },
+    "correlate_state": {
+      "type": "object",
+      "description": "GATE-002 / GRADE-012 / GRADE-013. One per layout panel, evaluated at the SAME timeframe as the main asset (GATE-007).",
+      "required": [
+        "symbol",
+        "role",
+        "expected_sign",
+        "observed_order_flow",
+        "disturbed",
+        "tf"
+      ],
+      "properties": {
+        "symbol": {
+          "type": "string",
+          "description": "Canonical tickers for BTC: BTCUSDT.P, ETHUSDT.P, TOTAL, USDT.D (GATE-008)."
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "MAIN",
+            "POSITIVE",
+            "NEGATIVE"
+          ]
+        },
+        "tf": {
+          "$ref": "#/$defs/timeframe"
+        },
+        "expected_sign": {
+          "type": "string",
+          "enum": [
+            "BULLISH",
+            "BEARISH"
+          ]
+        },
+        "observed_order_flow": {
+          "type": "string",
+          "enum": [
+            "BULLISH",
+            "BEARISH",
+            "UNCLEAR"
+          ]
+        },
+        "msb_bos_state": {
+          "type": "string",
+          "enum": [
+            "MSB_CONFIRMED",
+            "BOS_CONTINUING",
+            "NONE",
+            "FAILED_EXPECTED_BREAK"
+          ]
+        },
+        "current_liquidity_objective": {
+          "type": "string"
+        },
+        "objective_already_cleared": {
+          "type": "boolean"
+        },
+        "momentum_regime": {
+          "type": "string",
+          "enum": [
+            "BULLET_TRAIN",
+            "STRONG_MOMENTUM",
+            "SLOWED_MOMENTUM",
+            "UNCLEAR"
+          ]
+        },
+        "structural_reversal_flag": {
+          "type": "boolean"
+        },
+        "relative_timing": {
+          "type": "string",
+          "enum": [
+            "LEADING",
+            "IN_STEP",
+            "LAGGING"
+          ],
+          "description": "GRADE-013 off-condition 4. NOTE: 'significantly before or after' is unquantified and any candle-count or minute bound would violate GATE-005 — record the qualitative judgement, never a threshold."
+        },
+        "agreement_state": {
+          "type": "string",
+          "enum": [
+            "ALIGNED",
+            "NEUTRAL",
+            "DISTURBED"
+          ],
+          "description": "GATE-048. The AGREEMENT-valued verdict, which for a NEGATIVE-role asset is the OPPOSITE of its raw directional sign. It MUST be derived as sign(observed_order_flow) × sign(expected_sign) — never copied from a raw directional score. Recording it separately from `observed_order_flow` is what lets conformance catch the USDT.D inversion (§10.D D-6/D-7 collision), which flips the disturbance count and therefore the risk-matrix cell."
+        },
+        "agreement_form": {
+          "type": "string",
+          "enum": [
+            "ALL_MSB_SAME_WINDOW",
+            "ALREADY_MSB_NOW_BOS",
+            "LEAD_OR_LAG_SAME_IDEA",
+            "POSITIVES_NOT_FIGHTING",
+            "NEGATIVE_OPPOSITE_AS_EXPECTED",
+            "SIMILAR_TARGET_LOGIC",
+            "NONE"
+          ],
+          "description": "GATE-009 / GRADE-015 — which of the six admissible forms fired. Required so conformance can prove the engine did not apply a stricter (same-candle) test than documented."
+        },
+        "disturbed": {
+          "type": "boolean"
+        },
+        "off_condition_id": {
+          "type": "string",
+          "enum": [
+            "OFF_1_ORDER_FLOW_OPPOSITE",
+            "OFF_2_FAILED_EXPECTED_BREAK",
+            "OFF_3_DIFFERENT_OBJECTIVE",
+            "OFF_4_TIMING_DIVERGENT",
+            "OFF_5_DIFFERENT_MOMENTUM",
+            "OFF_6_STRUCTURAL_REVERSAL",
+            "DRAWN_7_NO_SWEEP_BEFORE_MSB",
+            "DRAWN_8_NO_CLEAR_TARGET",
+            "DRAWN_9_TARGET_ALREADY_CLEARED",
+            "DRAWN_10_STUCK_BETWEEN_LIQ",
+            "NONE"
+          ],
+          "description": "The trader's six plus the drawn taxonomy that the ruling drops but which is not declared exhaustive (GRADE-013)."
+        },
+        "evidence": {
+          "$ref": "#/$defs/evidence_ref"
+        }
+      }
+    },
+    "rule_evaluation": {
+      "type": "object",
+      "description": "THE CORE FIDELITY OBJECT. One per rule evaluated, on EVERY setup, including rejected ones. `values` is not optional decoration: it is what makes the verdict re-derivable by an auditor with no engine access. A rule_evaluation with a verdict and no values is an unexplained decision and counts against the unexplained-decision rate.",
+      "required": [
+        "rule_id",
+        "verdict",
+        "values",
+        "value_provenance"
+      ],
+      "properties": {
+        "value_provenance": {
+          "type": "object",
+          "description": "MANDATORY BINDING. One entry per key in `values`, naming where that number/boolean came from. This is what converts `values` from a self-attestation into evidence: without it an engine can fabricate values that re-derive its own verdict (K-03 passes) or launder a banned input under a new name (HG-03/HG-20/HG-27's key regexes pass). C-16 asserts every key is bound; K-24 asserts the referenced object ids exist in this record's `primitives`/`correlates` and that the quoted field value matches the primitive's own field.",
+          "additionalProperties": {
+            "type": "object",
+            "required": [
+              "source"
+            ],
+            "properties": {
+              "source": {
+                "type": "string",
+                "enum": [
+                  "PRIMITIVE_FIELD",
+                  "CORRELATE_FIELD",
+                  "DECLARED_PARAMETER",
+                  "REGISTRY_CONSTANT",
+                  "RECORD_FIELD",
+                  "DERIVED"
+                ]
+              },
+              "object_id": {
+                "type": "string",
+                "description": "Required when source is PRIMITIVE_FIELD or CORRELATE_FIELD. MUST resolve inside this same record."
+              },
+              "field": {
+                "type": "string",
+                "description": "The field on that object, or the declared_parameters key, or the registry `values` path."
+              },
+              "expression": {
+                "type": "string",
+                "description": "Required when source is DERIVED: the arithmetic over other keys in this same `values` object. DERIVED may not reference anything outside this record."
+              }
+            }
+          }
+        },
+        "rule_id": {
+          "$ref": "#/$defs/rule_id"
+        },
+        "verdict": {
+          "type": "string",
+          "enum": [
+            "PASS",
+            "FAIL",
+            "NOT_APPLICABLE",
+            "FLAG",
+            "UNIMPLEMENTABLE"
+          ],
+          "description": "FLAG is the correct verdict for SOFT_PREFERENCE deviations. UNIMPLEMENTABLE is the correct verdict for a rule whose machinery is a registry DEFECT (e.g. anything consuming the momentum score) — it must never be silently reported as PASS."
+        },
+        "enforceability": {
+          "type": "string",
+          "enum": [
+            "HARD_GATE",
+            "SOFT_PREFERENCE",
+            "ADVISORY"
+          ],
+          "description": "Copied from the registry so the record is self-describing."
+        },
+        "values": {
+          "type": "object",
+          "description": "The inputs and computed quantities that produced the verdict, named as in the rule's `inputs`/`output`. Free-form but MUST be sufficient to re-derive the verdict.",
+          "additionalProperties": true
+        },
+        "evidence": {
+          "$ref": "#/$defs/evidence_ref"
+        },
+        "declared_parameter_used": {
+          "type": "string",
+          "description": "Name of the declared_parameters key this evaluation depended on, when the rule's registry status is OPEN."
+        },
+        "banned_input_check": {
+          "type": "object",
+          "description": "For rules carrying `banned_inputs`. Asserting absence explicitly is what makes the negative gates testable at all.",
+          "properties": {
+            "checked": {
+              "type": "boolean"
+            },
+            "banned_inputs_present": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "stop_candidate": {
+      "type": "object",
+      "description": "GATE-027 / GATE-025 / GATE-028. The FULL ladder must be emitted, including rejected rungs and rungs that could not be located, because 'why the earlier rungs were rejected' is a required output and because a silently skipped rung is indistinguishable from a missing detector otherwise.",
+      "required": [
+        "rung",
+        "anchor",
+        "locatable",
+        "accepted"
+      ],
+      "properties": {
+        "rung": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5
+        },
+        "anchor": {
+          "type": "string",
+          "enum": [
+            "DEEPEST_SWING",
+            "MOMENTUM_IMBALANCE",
+            "LIQUIDITY_SWEEP_QML",
+            "ORDER_BLOCK",
+            "INNER_MSB"
+          ]
+        },
+        "locatable": {
+          "type": "boolean",
+          "description": "false is a legitimate and important value — GATE-027 note (a): QML's pattern shape is drawn nowhere in the corpus, so rung 3 may be genuinely unlocatable. Recording that is honest; silently skipping it is not. BUT `locatable:false` is also the cheapest way to truncate the ladder until only the engine's preferred rung survives, after which the GATE-028 selector trivially agrees with itself (K-10 passes). HG-28 therefore requires the reason to be a closed-enum value backed by `search_evidence`."
+        },
+        "unlocatable_reason": {
+          "type": "string",
+          "enum": [
+            "QML_SHAPE_UNDEFINED_IN_SOURCE",
+            "NO_SUCH_PRIMITIVE_IN_SEARCH_WINDOW",
+            "PRIMITIVE_BEYOND_DECISION_BAR",
+            "PRIMITIVE_ON_WRONG_SIDE_OF_ENTRY"
+          ],
+          "description": "HG-28. Closed set. QML_SHAPE_UNDEFINED_IN_SOURCE is admissible ONLY on rung 3."
+        },
+        "search_evidence": {
+          "type": "object",
+          "description": "HG-28. Required whenever `locatable` is false, so that an auditor can contradict the claim from the record alone: if the engine says rung 1 (DEEPEST_SWING) was unlocatable while `primitives.swing_points` contains a qualifying swing inside the declared window, that is a CRITICAL failure, not an honest gap.",
+          "required": [
+            "search_window_from",
+            "search_window_to",
+            "candidate_object_ids_considered"
+          ],
+          "properties": {
+            "search_window_from": {
+              "$ref": "#/$defs/iso_ny"
+            },
+            "search_window_to": {
+              "$ref": "#/$defs/iso_ny"
+            },
+            "candidate_object_ids_considered": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Ids from this record's `primitives` that were examined and rejected for this rung. May be empty only if the corresponding primitive array is itself empty for the window."
+            }
+          }
+        },
+        "stop_price": {
+          "$ref": "#/$defs/price"
+        },
+        "anchor_object_id": {
+          "type": "string",
+          "description": "The primitive the stop was anchored to. A stop that names no primitive is an unexplained decision."
+        },
+        "rr": {
+          "type": "number",
+          "description": "Computed against the PREDEFINED target (TARGET-008)."
+        },
+        "accepted": {
+          "type": "boolean"
+        },
+        "rejection_reason": {
+          "type": "string",
+          "enum": [
+            "RR_BELOW_2R",
+            "NOT_LOCATABLE",
+            "NOT_SELECTED_BY_SELECTOR",
+            "NONE"
+          ]
+        },
+        "covers_whole_zone": {
+          "type": "boolean",
+          "description": "GATE-027 note (b) — the wide-cover variant and the cover-the-whole-flip-zone rule are not among the five anchors; record when one was applied."
+        }
+      }
+    },
+    "exit_event": {
+      "type": "object",
+      "description": "EXIT-001. v1 permits at most one partial tranche plus one runner tranche (EXIT-002).",
+      "required": [
+        "timestamp_ny",
+        "fraction",
+        "price",
+        "reason"
+      ],
+      "properties": {
+        "timestamp_ny": {
+          "$ref": "#/$defs/iso_ny"
+        },
+        "fraction": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "price": {
+          "$ref": "#/$defs/price"
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "PARTIAL_2R",
+            "FINAL_TARGET",
+            "STOP_HIT",
+            "SESSION_CLOSE",
+            "LIQUIDATION",
+            "MANUAL_OVERRIDE"
+          ],
+          "description": "LIQUIDATION is separate from STOP_HIT deliberately (SIZE-003): an isolated-margin liquidation can pre-empt the stop and must not be counted as the strategy's stop working."
+        },
+        "realised_r": {
+          "type": "number"
+        },
+        "rule_id": {
+          "$ref": "#/$defs/rule_id"
+        }
+      }
+    },
+    "setup_evaluation": {
+      "type": "object",
+      "title": "setup_evaluation",
+      "description": "Emitted for EVERY setup considered — taken, skipped or stood aside. Rejections carry the most fidelity signal, because a strategy is defined at least as much by what it refuses as by what it takes: a rule that never FAILs anything is a rule that was probably never implemented (see rule-coverage in FIDELITY_SCORECARD.md). WHAT IS EMITTED IS ITSELF PART OF THE CONTRACT: an engine that pre-filters candidates BEFORE this record is written can pass every assertion in the suite while running on undocumented logic, so `scan_context` and the `scan_census` record type exist to make the emission population auditable (C-13).",
+      "required": [
+        "record_type",
+        "evaluation_id",
+        "timestamp_ny",
+        "engine",
+        "declared_parameters",
+        "scan_context",
+        "instrument",
+        "mode",
+        "timeframes",
+        "session",
+        "primitives",
+        "correlates",
+        "rule_evaluations",
+        "decision_path",
+        "decision",
+        "deciding_rule_id",
+        "risk_assessment"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "block_reason": {
+                "const": "NO_CANDIDATE_REACHES_2R"
+              }
+            },
+            "required": [
+              "block_reason"
+            ]
+          },
+          "then": {
+            "required": [
+              "stop_evaluation"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "decision": {
+                "const": "TAKE"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "stop_evaluation",
+              "target_selection",
+              "entry_criteria",
+              "risk_assessment"
+            ]
+          }
+        }
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "record_type": {
+          "const": "setup_evaluation"
+        },
+        "evaluation_id": {
+          "type": "string",
+          "description": "Stable unique id. trade_execution.setup_evaluation_id joins on this."
+        },
+        "scan_context": {
+          "type": "object",
+          "description": "C-13 / C-15. Why this record exists at all, and what data the engine could see when it wrote it. The suite cannot see the setups the engine chose not to record; these fields are what let it reconcile emissions against the declared emission policy and detect an undocumented pre-filter.",
+          "required": [
+            "scan_id",
+            "sequence_no",
+            "candidate_origin",
+            "bar_close_time_ny",
+            "data_as_of_ny",
+            "pre_filters_applied"
+          ],
+          "properties": {
+            "scan_id": {
+              "type": "string",
+              "description": "Joins to the scan_census record covering this instrument/TF/session."
+            },
+            "sequence_no": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Strictly increasing per (engine_version, instrument, signal_tf). Append-only. A gap or a repeat means records were suppressed or rewritten."
+            },
+            "candidate_origin": {
+              "type": "string",
+              "enum": [
+                "SCHEDULED_BAR_CLOSE",
+                "PRIMITIVE_EVENT",
+                "OPERATOR_REQUEST",
+                "REPLAY"
+              ],
+              "description": "SCHEDULED_BAR_CLOSE is the only origin that can satisfy an exhaustive emission policy."
+            },
+            "bar_close_time_ny": {
+              "$ref": "#/$defs/iso_ny",
+              "description": "Close time of the decision bar. HG-25 compares primitive evidence times against this, not against the engine's free-form timestamp_ny."
+            },
+            "data_as_of_ny": {
+              "$ref": "#/$defs/iso_ny",
+              "description": "The latest market data the engine had access to when deciding. C-15 asserts data_as_of_ny <= bar_close_time_ny; in backtest this is the only field that can catch look-ahead, because every other timestamp in the record is authored by the engine."
+            },
+            "pre_filters_applied": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "filter_id",
+                  "rule_id"
+                ],
+                "properties": {
+                  "filter_id": {
+                    "type": "string"
+                  },
+                  "rule_id": {
+                    "$ref": "#/$defs/rule_id"
+                  },
+                  "candidates_dropped": {
+                    "type": "integer"
+                  }
+                }
+              },
+              "description": "Any narrowing the engine did before rule evaluation. EVERY entry MUST cite a registry rule id; an uncited pre-filter is undocumented logic by definition (C-13). An empty array is the clean state."
+            }
+          }
+        },
+        "decision_path": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/rule_id"
+          },
+          "description": "K-25. The ordered list of rule ids this evaluation actually walked, in evaluation order. `deciding_rule_id` MUST be the first entry whose verdict is FAIL (on SKIP/STAND_ASIDE). Without this, an engine that fails several gates may cite whichever one it prefers, and an engine that decides by undocumented logic may cite any gate that happens to have failed.",
+          "minItems": 1
+        },
+        "timestamp_ny": {
+          "$ref": "#/$defs/iso_ny",
+          "description": "The decision bar's time. All look-ahead tests compare primitive evidence times against this."
+        },
+        "engine": {
+          "$ref": "#/$defs/engine_identity"
+        },
+        "declared_parameters": {
+          "$ref": "#/$defs/declared_parameters"
+        },
+        "instrument": {
+          "type": "object",
+          "required": [
+            "symbol",
+            "instrument_class"
+          ],
+          "properties": {
+            "symbol": {
+              "type": "string"
+            },
+            "instrument_class": {
+              "type": "string",
+              "enum": [
+                "ALIGNED_MAJOR",
+                "ALTCOIN",
+                "FX",
+                "INDEX_FUTURE",
+                "OTHER"
+              ],
+              "description": "GRADE-019 — ALTCOIN must be refused, not interpolated, until the Risk Altcoin column is ruled."
+            },
+            "venue": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": {
+          "type": "object",
+          "required": [
+            "trading_mode",
+            "direction_mode"
+          ],
+          "properties": {
+            "trading_mode": {
+              "const": "DAY_TRADE",
+              "description": "GATE-019 — the swing branch is switched off; there is no user-selectable style."
+            },
+            "direction_mode": {
+              "type": "string",
+              "enum": [
+                "FORWARD",
+                "REVERSE"
+              ],
+              "description": "GATE-040 / GRADE-030 — ambiguity must resolve to FORWARD."
+            },
+            "direction_mode_reason": {
+              "type": "string"
+            },
+            "intended_side": {
+              "type": "string",
+              "enum": [
+                "LONG",
+                "SHORT"
+              ]
+            }
+          }
+        },
+        "timeframes": {
+          "type": "object",
+          "required": [
+            "signal_tf",
+            "alignment_tf",
+            "analysis_tfs_scanned"
+          ],
+          "properties": {
+            "signal_tf": {
+              "$ref": "#/$defs/timeframe",
+              "description": "GATE-017 — must be an execution TF; an HTF here is a hard violation."
+            },
+            "alignment_tf": {
+              "$ref": "#/$defs/timeframe",
+              "description": "GATE-007 — must equal signal_tf."
+            },
+            "analysis_tfs_scanned": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/timeframe"
+              },
+              "description": "TARGET-009 — records whether Monthly was actually scanned, since the source drops it from its own detection loop."
+            },
+            "setup_tfs_examined": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/timeframe"
+              }
+            }
+          }
+        },
+        "session": {
+          "type": "object",
+          "required": [
+            "ny_local_time",
+            "tz_offset_used",
+            "in_magic_zone",
+            "minutes_from_nyo"
+          ],
+          "properties": {
+            "ny_local_time": {
+              "type": "string"
+            },
+            "tz_offset_used": {
+              "type": "string",
+              "description": "GATE-023 — proves a DST-aware zone was used rather than a hardcoded offset."
+            },
+            "in_magic_zone": {
+              "type": "boolean",
+              "description": "GATE-020 — 08:30–11:30 NY."
+            },
+            "minutes_from_nyo": {
+              "type": "integer",
+              "description": "GATE-021 — signed offset from 09:30 NY. The learning loop tests whether engine fills cluster where the trader's do."
+            },
+            "asia_range": {
+              "type": "object",
+              "properties": {
+                "high": {
+                  "$ref": "#/$defs/price"
+                },
+                "low": {
+                  "$ref": "#/$defs/price"
+                }
+              }
+            },
+            "london_range": {
+              "type": "object",
+              "properties": {
+                "high": {
+                  "$ref": "#/$defs/price"
+                },
+                "low": {
+                  "$ref": "#/$defs/price"
+                }
+              }
+            }
+          }
+        },
+        "news_context": {
+          "type": "object",
+          "description": "GATE-012 to GATE-016. Required on every evaluation, not only on blocked ones, because is_red_folder_day is the field that will let the unreconciled day-vs-minutes gate (GATE-016) be tested against outcomes later. HG-04 can only RECOMPUTE the blackout if the event set is present, and `nearest_event` alone is engine-selected — an engine that omits the event it is about to trade through passes on self-attestation. `calendar_snapshot` and `events_considered` close that (C-14).",
+          "required": [
+            "is_red_folder_day",
+            "in_pre_window",
+            "in_post_window",
+            "exceptional_disable_active",
+            "calendar_snapshot",
+            "events_considered"
+          ],
+          "properties": {
+            "is_red_folder_day": {
+              "type": "boolean"
+            },
+            "calendar_snapshot": {
+              "type": "object",
+              "description": "C-14. Identifies the calendar the engine actually read. `snapshot_hash` must be identical across every record sharing (session_date, calendar_source) — an engine that suppresses events on bars where it wants to trade is then caught by a hash mismatch against its own other records.",
+              "required": [
+                "calendar_source",
+                "fetched_at_ny",
+                "session_date",
+                "snapshot_hash",
+                "tz_of_source"
+              ],
+              "properties": {
+                "calendar_source": {
+                  "type": "string"
+                },
+                "fetched_at_ny": {
+                  "$ref": "#/$defs/iso_ny"
+                },
+                "session_date": {
+                  "type": "string"
+                },
+                "snapshot_hash": {
+                  "type": "string"
+                },
+                "tz_of_source": {
+                  "type": "string",
+                  "description": "GATE-015 — must be the New York zone, not the feed's native zone."
+                },
+                "currency_scope": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "GATE-015 — the currency set the calendar was filtered to for THIS instrument (crypto: [\"USD\"], optional confluence EUR/GBP; FX: the pair's own currencies). Without it the record cannot show the engine watched the right calendar rather than a narrower one, and HG-04 silently passes an engine that simply never saw the event."
+                },
+                "impact_threshold": {
+                  "type": "string",
+                  "enum": [
+                    "RED",
+                    "ORANGE",
+                    "YELLOW"
+                  ],
+                  "description": "GATE-015 — the threshold `events_considered` was filtered at. The ruled value is RED."
+                }
+              }
+            },
+            "events_considered": {
+              "type": "array",
+              "description": "C-14 / HG-04. EVERY event on the session's calendar at or above the engine's impact threshold, not only the nearest. `nearest_event` must be the argmin over this array; the blackout windows must be recomputable over it without the engine.",
+              "items": {
+                "type": "object",
+                "required": [
+                  "event_id",
+                  "event_time_ny",
+                  "impact"
+                ],
+                "properties": {
+                  "event_id": {
+                    "type": "string"
+                  },
+                  "event_time_ny": {
+                    "$ref": "#/$defs/iso_ny"
+                  },
+                  "currency": {
+                    "type": "string"
+                  },
+                  "impact": {
+                    "type": "string",
+                    "enum": [
+                      "RED",
+                      "ORANGE",
+                      "YELLOW"
+                    ]
+                  },
+                  "taxonomy_class": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "nearest_event": {
+              "type": "object",
+              "properties": {
+                "event_id": {
+                  "type": "string"
+                },
+                "event_time_ny": {
+                  "$ref": "#/$defs/iso_ny"
+                },
+                "currency": {
+                  "type": "string"
+                },
+                "impact": {
+                  "type": "string",
+                  "enum": [
+                    "RED",
+                    "ORANGE",
+                    "YELLOW"
+                  ]
+                },
+                "taxonomy_class": {
+                  "type": "string"
+                }
+              }
+            },
+            "in_pre_window": {
+              "type": "boolean"
+            },
+            "in_post_window": {
+              "type": "boolean"
+            },
+            "first_permitted_entry_time": {
+              "$ref": "#/$defs/iso_ny"
+            },
+            "exceptional_disable_active": {
+              "type": "boolean"
+            },
+            "exceptional_resumption_authorised_by": {
+              "type": "string",
+              "description": "GATE-014 — the resumption condition is undefined, so the transition must be an explicit logged act with an author, never an inferred numeric test."
+            }
+          }
+        },
+        "primitives": {
+          "type": "object",
+          "description": "PRIM-001 to PRIM-006. Every primitive carries the price levels that define it, so an auditor can reconstruct the chart read without the engine.",
+          "required": [
+            "swing_points",
+            "structure_boxes",
+            "imbalances",
+            "liquidity_pools",
+            "sweeps",
+            "breaks"
+          ],
+          "properties": {
+            "swing_points": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/swing_point"
+              }
+            },
+            "structure_boxes": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/structure_box"
+              }
+            },
+            "imbalances": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/imbalance"
+              }
+            },
+            "liquidity_pools": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/liquidity_pool"
+              }
+            },
+            "sweeps": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/sweep_event"
+              }
+            },
+            "breaks": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/break_event"
+              }
+            },
+            "sr_flips": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/sr_flip"
+              }
+            },
+            "ranges": {
+              "type": "array",
+              "description": "GATE-044. Present ONLY when the engine emits a range/premium-discount object at all; GATE-044 is evaluated per entry in this array and is NOT_APPLICABLE when the array is absent or empty. Without this array HG-38's GATE-044 assertion references fields that do not exist anywhere in the record and can never run. NOTE GATE-037: a range may be recorded here as reading vocabulary but must never appear in an accept/reject path.",
+              "items": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "tf",
+                  "boundary_high",
+                  "boundary_low",
+                  "computed_eq",
+                  "eq_source"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "tf": {
+                    "$ref": "#/$defs/timeframe"
+                  },
+                  "boundary_high": {
+                    "$ref": "#/$defs/price"
+                  },
+                  "boundary_low": {
+                    "$ref": "#/$defs/price"
+                  },
+                  "computed_eq": {
+                    "$ref": "#/$defs/price",
+                    "description": "GATE-044 — MUST equal (boundary_high + boundary_low) / 2, computed from the boundaries. Never a read-off midline."
+                  },
+                  "eq_source": {
+                    "type": "string",
+                    "enum": [
+                      "COMPUTED_FROM_BOUNDARIES",
+                      "READ_FROM_DRAWN_LINE"
+                    ],
+                    "description": "GATE-044 — READ_FROM_DRAWN_LINE is a conformance failure and is enumerated only so it is detectable."
+                  },
+                  "drawn_midline_price": {
+                    "$ref": "#/$defs/price",
+                    "description": "Only present when the source frame carries a drawn midline (annotated-chart ingestion). Absent on live charts."
+                  },
+                  "midline_error_px": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "GATE-044 — |drawn midline − arithmetic midpoint| in pixels, for annotated-frame ingestion only. null on live charts, where no drawn line exists; the census bound (≤1 px, sole exception 0163 at 2.75 px) is corpus calibration and cannot be evaluated against live data."
+                  },
+                  "is_valid_range": {
+                    "type": "boolean",
+                    "description": "GATE-044 — false when a drawn midline misses the arithmetic midpoint, i.e. the object is not one of this deck's ranges."
+                  }
+                }
+              }
+            },
+            "amplifiers": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "description": "GATE-038 / ENTRY-004 — confidence only, never a trade creator.",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "KEY_LEVEL",
+                      "ROUND_NUMBER",
+                      "SR_FLIP",
+                      "VOLUME_PROFILE_HVN"
+                    ]
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "price": {
+                    "$ref": "#/$defs/price"
+                  },
+                  "distance_pct": {
+                    "type": "number"
+                  },
+                  "colliding": {
+                    "type": "boolean"
+                  },
+                  "measured_from": {
+                    "type": "string",
+                    "enum": [
+                      "ZONE_MIDPOINT",
+                      "NEAREST_EDGE",
+                      "POI_PRICE"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "target_selection": {
+          "type": "object",
+          "description": "TARGET-001 to TARGET-009.",
+          "properties": {
+            "institutional_destination": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "tf": {
+                  "$ref": "#/$defs/timeframe"
+                },
+                "price": {
+                  "$ref": "#/$defs/price"
+                }
+              }
+            },
+            "concerning_objective": {
+              "type": "object",
+              "required": [
+                "id",
+                "price",
+                "tf",
+                "why_selected"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "price": {
+                  "$ref": "#/$defs/price"
+                },
+                "tf": {
+                  "$ref": "#/$defs/timeframe"
+                },
+                "why_selected": {
+                  "type": "string",
+                  "description": "TARGET-001 — must name the institutional destination it supports. A justification that is only a distance is a conformance failure."
+                }
+              }
+            },
+            "ranked_candidates": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "strategic_priority": {
+                    "type": "string"
+                  },
+                  "tf_rank": {
+                    "type": "integer"
+                  },
+                  "direction_agrees": {
+                    "type": "boolean"
+                  },
+                  "distance": {
+                    "type": "number"
+                  },
+                  "selected": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "description": "TARGET-002 defect (c): the four criteria are unweighted with no tie-break. All four values must be recorded even though the ranking cannot be justified from them alone."
+            },
+            "stand_aside_reason": {
+              "type": "string",
+              "description": "GATE-036 — a first-class outcome, not the absence of a signal."
+            }
+          }
+        },
+        "stop_evaluation": {
+          "type": "object",
+          "description": "GATE-025 / GATE-026 / GATE-027 / GATE-028 ON THE REJECTION PATH. `trade_execution.stop_ladder` only exists for TAKEN trades, so without this object the single documented terminal skip — every rung below 2R (block_reason NO_CANDIDATE_REACHES_2R) — produces a record with no evidence, and HG-10 cannot run at all on the case it exists to catch. GATE-025's registry `output` (\"Full candidate table … required telemetry, since conformance is tested from it\") is satisfied here for skips and by `trade_execution.stop_ladder` for takes; the two MUST agree rung for rung when both exist.",
+          "required": [
+            "entry_reference_price",
+            "target_price",
+            "ladder",
+            "best_rr"
+          ],
+          "properties": {
+            "entry_reference_price": {
+              "$ref": "#/$defs/price",
+              "description": "The intended entry the RRs were computed against. Required because rr is not re-derivable from stop price and target alone."
+            },
+            "target_price": {
+              "$ref": "#/$defs/price",
+              "description": "TARGET-008 — the PREDEFINED target. MUST equal target_selection.concerning_objective.price; a divergence means the target moved to make a stop clear 2R."
+            },
+            "target_fixed_at": {
+              "$ref": "#/$defs/iso_ny",
+              "description": "TARGET-008 — must precede the earliest ladder evaluation time."
+            },
+            "ladder": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 5,
+              "items": {
+                "$ref": "#/$defs/stop_candidate"
+              },
+              "description": "GATE-027 — the full five-rung ladder in ruled order, including rejected and unlocatable rungs. Same object as trade_execution.stop_ladder."
+            },
+            "best_rr": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "description": "GATE-026 — max rr over locatable rungs. When this is < 2.0 the decision MUST be SKIP with block_reason NO_CANDIDATE_REACHES_2R. null is the correct value when NO rung was locatable at all: GATE-027 note (a) admits genuinely unlocatable rungs, so a maximum over an empty set must be representable rather than forced to a fabricated number. null is also a GATE-026 skip."
+            },
+            "selected_rung": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1,
+              "maximum": 5,
+              "description": "null on a skip."
+            },
+            "selection_rule_id": {
+              "type": "string",
+              "enum": [
+                "CLOSEST_TO_3R_TIES_TO_LARGER",
+                "LARGEST_ABOVE_2R"
+              ],
+              "description": "GATE-028 DEFECT — which reading shipped. Must equal declared_parameters.stop_selection_reading."
+            }
+          }
+        },
+        "correlates": {
+          "type": "object",
+          "required": [
+            "layout_size",
+            "disturbed_count",
+            "disturbance_grade",
+            "states"
+          ],
+          "properties": {
+            "layout_size": {
+              "type": "integer",
+              "description": "GATE-003 — logged with every grade so a future ratio ruling can be applied retroactively."
+            },
+            "disturbed_count": {
+              "type": "integer"
+            },
+            "main_asset_counted": {
+              "type": "boolean",
+              "description": "GATE-004."
+            },
+            "disturbance_grade": {
+              "type": "string",
+              "enum": [
+                "NONE",
+                "LIGHT",
+                "HEAVY"
+              ]
+            },
+            "states": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/correlate_state"
+              }
+            },
+            "magic_alignment_score_telemetry_only": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "description": "GATE-011 — if a 0–100 score is computed at all it is telemetry. It MUST NOT appear as a deciding_rule_id and MUST NOT gate. Recorded so its disagreement with the count rule is measurable."
+            }
+          }
+        },
+        "momentum": {
+          "type": "object",
+          "properties": {
+            "regime": {
+              "type": "string",
+              "enum": [
+                "BULLET_TRAIN",
+                "STRONG_MOMENTUM",
+                "SLOWED_MOMENTUM",
+                "UNCLEAR"
+              ],
+              "description": "GRADE-039 — qualitative only. No numeric band may be emitted while GRADE-033 stands."
+            },
+            "trend_tier": {
+              "type": "string",
+              "enum": [
+                "NONE",
+                "STRONG_TREND",
+                "STRONG_TREND_PLUS_MOMENTUM"
+              ],
+              "description": "GRADE-037."
+            },
+            "unmitigated_imbalance_count": {
+              "type": "integer"
+            },
+            "mitigated_imbalance_count": {
+              "type": "integer"
+            },
+            "forward_signs": {
+              "type": "object",
+              "properties": {
+                "unfilled_momentum_imbalances": {
+                  "type": "boolean"
+                },
+                "wide_liquidity_spacing": {
+                  "type": "boolean"
+                },
+                "using_own_imbalances_to_push": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "slowdown_signs": {
+              "type": "object",
+              "properties": {
+                "fewer_smaller_imbalances": {
+                  "type": "boolean"
+                },
+                "tightening_liquidity_spacing": {
+                  "type": "boolean"
+                },
+                "imbalances_failing_purpose": {
+                  "type": "boolean"
+                },
+                "opposite_side_momentum_imbalance": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "reverse_conditions": {
+              "type": "object",
+              "description": "GATE-041 / GRADE-029 — ALL SEVEN must be evaluated and recorded whatever quorum was applied, AND on EVERY evaluation, not only the ones that ended in a REVERSE. K-27: an engine that hardcodes direction_mode=FORWARD and never populates this object satisfies K-12 vacuously and never exercises the reverse branch at all; recording the seven booleans on forward decisions is what makes a dormant branch visible.",
+              "required": [
+                "c1_price_slows",
+                "c2_momentum_deteriorating",
+                "c3_imbalance_failures",
+                "c4_opposite_imbalances_forming",
+                "c5_failed_imbalances_flip",
+                "c6_opposite_imbalances_hold",
+                "c7_micro_msb_confirms",
+                "count_satisfied"
+              ],
+              "properties": {
+                "c1_price_slows": {
+                  "type": "boolean"
+                },
+                "c2_momentum_deteriorating": {
+                  "type": "boolean"
+                },
+                "c3_imbalance_failures": {
+                  "type": "boolean"
+                },
+                "c4_opposite_imbalances_forming": {
+                  "type": "boolean"
+                },
+                "c5_failed_imbalances_flip": {
+                  "type": "boolean"
+                },
+                "c6_opposite_imbalances_hold": {
+                  "type": "boolean"
+                },
+                "c7_micro_msb_confirms": {
+                  "type": "boolean"
+                },
+                "count_satisfied": {
+                  "type": "integer"
+                },
+                "quorum_applied": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                }
+              }
+            },
+            "cool_off": {
+              "type": "object",
+              "description": "GATE-040 / GRADE-035.",
+              "properties": {
+                "satisfied": {
+                  "type": "boolean"
+                },
+                "elapsed_hours": {
+                  "type": "number"
+                },
+                "consolidation_evidence": {
+                  "type": "string"
+                }
+              }
+            },
+            "bullet_train_diagnostic": {
+              "type": "object",
+              "description": "GRADE-032 — the six-item checklist that must be run before fading.",
+              "properties": {
+                "deeper_concerning_area": {
+                  "type": "boolean"
+                },
+                "deeper_liquidity": {
+                  "type": "boolean"
+                },
+                "unchecked_timeframe": {
+                  "type": "boolean"
+                },
+                "missed_institutional_level": {
+                  "type": "boolean"
+                },
+                "economic_release": {
+                  "type": "boolean"
+                },
+                "global_event": {
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        },
+        "entry_criteria": {
+          "type": "object",
+          "description": "GATE-010 — all five are REQUIRED; amplifiers are optional. An order opened with any of the five unrecorded is a conformance failure regardless of outcome.",
+          "required": [
+            "liquidity",
+            "imbalance_primary_poi",
+            "structure_and_momentum",
+            "forward_reverse_context",
+            "magic_alignment_confirmation"
+          ],
+          "properties": {
+            "liquidity": {
+              "type": "object",
+              "properties": {
+                "met": {
+                  "type": "boolean"
+                },
+                "object_id": {
+                  "type": "string"
+                }
+              }
+            },
+            "imbalance_primary_poi": {
+              "type": "object",
+              "properties": {
+                "met": {
+                  "type": "boolean"
+                },
+                "object_id": {
+                  "type": "string"
+                },
+                "poi_type": {
+                  "type": "string",
+                  "enum": [
+                    "SUPER_BPR",
+                    "BPR",
+                    "IMBALANCE",
+                    "GAP"
+                  ]
+                },
+                "colliding_blocks": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "OB",
+                      "BB",
+                      "MIB"
+                    ]
+                  }
+                }
+              }
+            },
+            "structure_and_momentum": {
+              "type": "object",
+              "properties": {
+                "met": {
+                  "type": "boolean"
+                },
+                "break_id": {
+                  "type": "string"
+                }
+              }
+            },
+            "forward_reverse_context": {
+              "type": "object",
+              "properties": {
+                "met": {
+                  "type": "boolean"
+                },
+                "mode": {
+                  "type": "string",
+                  "enum": [
+                    "FORWARD",
+                    "REVERSE"
+                  ]
+                }
+              }
+            },
+            "magic_alignment_confirmation": {
+              "type": "object",
+              "properties": {
+                "met": {
+                  "type": "boolean"
+                },
+                "alignment_forms": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "amplifiers_present": {
+              "type": "integer"
+            },
+            "location_relative_to_objective": {
+              "type": "string",
+              "enum": [
+                "BEFORE",
+                "AT",
+                "AFTER"
+              ],
+              "description": "ENTRY-002 Location Over Setup."
+            },
+            "questionnaire_steps": {
+              "type": "array",
+              "description": "ENTRY-006 — coverage of the trader's own eight-step checklist, measurable rather than assumed.",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "step": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 8
+                  },
+                  "evaluated": {
+                    "type": "boolean"
+                  },
+                  "verdict": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "risk_assessment": {
+          "type": "object",
+          "description": "Computed on EVERY evaluation, including skips, so that a skip caused by a heavy disturbance can be shown to have been graded before it was blocked.",
+          "properties": {
+            "box_grade": {
+              "type": "string",
+              "enum": [
+                "STANDARD",
+                "SUPER",
+                "MANIPULATED",
+                "NONE"
+              ]
+            },
+            "box_scope_used": {
+              "type": "string",
+              "enum": [
+                "ENTRY_BOX_EXEC_TF",
+                "DESTINATION_BOX"
+              ]
+            },
+            "matrix_cell": {
+              "type": "string",
+              "enum": [
+                "MANIPULATED_NONE",
+                "MANIPULATED_LIGHT",
+                "MANIPULATED_HEAVY",
+                "SUPER_NONE",
+                "SUPER_LIGHT",
+                "SUPER_HEAVY",
+                "STANDARD_NONE",
+                "STANDARD_LIGHT",
+                "STANDARD_HEAVY",
+                "NOT_APPLICABLE"
+              ],
+              "description": "GATE-032 — the cell id, not just the number, so a mis-sized trade can be attributed to a mis-graded box versus a mis-graded disturbance."
+            },
+            "risk_pct": {
+              "type": "number",
+              "description": "MUST be one of the nine matrix values. GATE-032 / GATE-033 / SIZE-004."
+            },
+            "sizer_implementation": {
+              "type": "string",
+              "enum": [
+                "LOOKUP_TABLE",
+                "MULTIPLICATIVE_MODIFIER",
+                "SUBTRACTIVE"
+              ],
+              "description": "GATE-033 DEFECT — MULTIPLICATIVE_MODIFIER is a hard conformance failure and is enumerated here only so it is detectable."
+            },
+            "case_verdict": {
+              "type": "string",
+              "enum": [
+                "LOW",
+                "HIGH",
+                "NOT_EVALUATED"
+              ],
+              "description": "GATE-047 / GRADE-020 — the third, unlinked overlay. Computed and recorded, never applied, until ruled."
+            },
+            "case_option": {
+              "type": "integer",
+              "enum": [
+                1,
+                2
+              ]
+            },
+            "case_implied_risk_pct": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "overlay_disagreement": {
+              "type": "boolean",
+              "description": "GRADE-025 — true when the matrix and the CASE overlay imply different sizing. The learning loop attributes outcomes to both."
+            }
+          }
+        },
+        "rule_evaluations": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/rule_evaluation"
+          },
+          "description": "Every rule the engine evaluated for this setup. Rules that were not applicable must still appear with verdict NOT_APPLICABLE — the difference between 'evaluated and inapplicable' and 'never implemented' is exactly what rule-coverage measures."
+        },
+        "decision": {
+          "type": "string",
+          "enum": [
+            "TAKE",
+            "SKIP",
+            "STAND_ASIDE"
+          ],
+          "description": "STAND_ASIDE is distinct from SKIP: SKIP means a candidate setup failed a gate; STAND_ASIDE means no setup was in play (GATE-036)."
+        },
+        "deciding_rule_id": {
+          "$ref": "#/$defs/rule_id",
+          "description": "On SKIP/STAND_ASIDE this MUST be a rule that FAILED in rule_evaluations (consistency check K-2). On TAKE it is the last gate that passed, i.e. the rule that authorised the entry."
+        },
+        "block_reason": {
+          "type": "string",
+          "enum": [
+            "HEAVY_DISTURBANCE",
+            "NEWS_PRE_WINDOW",
+            "NEWS_POST_WINDOW",
+            "NEWS_EXCEPTIONAL",
+            "NO_CANDIDATE_REACHES_2R",
+            "NO_BOX",
+            "NO_ALIGNMENT",
+            "ALTCOIN_UNRULED",
+            "PRICE_MID_RANGE_NO_CONCERN",
+            "ALL_TOTALS_CLEARED",
+            "OTHER"
+          ]
+        },
+        "flags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "OUT_OF_PREFERRED_WINDOW",
+              "TIGHTER_THAN_NECESSARY",
+              "RR_ABOVE_ACCEPTABLE_BAND",
+              "DEGENERATE_RUNNER",
+              "COUNTER_MOMENTUM_ENTRY",
+              "PRE_OBJECTIVE_ENTRY",
+              "MONTHLY_NOT_SCANNED",
+              "RUNNER_POLICY_UNRATIFIED",
+              "CIRCUIT_BREAKER_CANDIDATE",
+              "ALL_TOTALS_CLEARED",
+              "OVERLAY_DISAGREEMENT",
+              "SIGNAL_TF_OUTSIDE_RULED_SET"
+            ]
+          },
+          "description": "SOFT_PREFERENCE deviations and OPEN-rule notices. Flags never fail a record; they populate the deviation register."
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    },
+    "trade_execution": {
+      "type": "object",
+      "title": "trade_execution",
+      "description": "Emitted for taken trades only. Joins to its setup_evaluation; a trade_execution with no resolvable setup_evaluation_id is an orphan and a hard completeness failure (C-1).",
+      "required": [
+        "record_type",
+        "trade_id",
+        "setup_evaluation_id",
+        "timestamp_ny",
+        "engine",
+        "instrument",
+        "side",
+        "entry",
+        "stop",
+        "target",
+        "stop_ladder",
+        "sizing",
+        "exits",
+        "outcome"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "record_type": {
+          "const": "trade_execution"
+        },
+        "trade_id": {
+          "type": "string"
+        },
+        "setup_evaluation_id": {
+          "type": "string",
+          "description": "MUST resolve to an existing setup_evaluation.evaluation_id whose decision was TAKE."
+        },
+        "timestamp_ny": {
+          "$ref": "#/$defs/iso_ny",
+          "description": "Fill time."
+        },
+        "engine": {
+          "$ref": "#/$defs/engine_identity"
+        },
+        "instrument": {
+          "type": "object",
+          "properties": {
+            "symbol": {
+              "type": "string"
+            },
+            "venue": {
+              "type": "string"
+            },
+            "contract_spec": {
+              "type": "string"
+            }
+          }
+        },
+        "side": {
+          "type": "string",
+          "enum": [
+            "LONG",
+            "SHORT"
+          ]
+        },
+        "entry": {
+          "type": "object",
+          "required": [
+            "price",
+            "poi_object_id"
+          ],
+          "properties": {
+            "price": {
+              "$ref": "#/$defs/price"
+            },
+            "requested_price": {
+              "$ref": "#/$defs/price"
+            },
+            "slippage": {
+              "type": "number"
+            },
+            "order_type": {
+              "type": "string",
+              "enum": [
+                "LIMIT",
+                "MARKET",
+                "STOP",
+                "STOP_LIMIT"
+              ]
+            },
+            "poi_object_id": {
+              "type": "string",
+              "description": "ENTRY-001 — the inefficiency the entry was taken from. An entry naming an OB/BB with no imbalance at the same location is a violation."
+            },
+            "signal_tf": {
+              "$ref": "#/$defs/timeframe"
+            },
+            "minutes_from_nyo": {
+              "type": "integer"
+            }
+          }
+        },
+        "stop": {
+          "type": "object",
+          "required": [
+            "price",
+            "rung",
+            "anchor",
+            "anchor_object_id",
+            "selection_rule_id"
+          ],
+          "properties": {
+            "price": {
+              "$ref": "#/$defs/price"
+            },
+            "rung": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 5
+            },
+            "anchor": {
+              "type": "string",
+              "enum": [
+                "DEEPEST_SWING",
+                "MOMENTUM_IMBALANCE",
+                "LIQUIDITY_SWEEP_QML",
+                "ORDER_BLOCK",
+                "INNER_MSB"
+              ]
+            },
+            "anchor_object_id": {
+              "type": "string"
+            },
+            "selection_rule_id": {
+              "type": "string",
+              "enum": [
+                "CLOSEST_TO_3R_TIES_TO_LARGER",
+                "LARGEST_ABOVE_2R"
+              ],
+              "description": "GATE-028 DEFECT — which reading of the self-contradictory step 4 actually shipped. Logged per trade so the learning loop can attribute outcomes to the reading, and so a later trader ruling can partition the history."
+            },
+            "distance": {
+              "type": "number"
+            }
+          }
+        },
+        "target": {
+          "type": "object",
+          "required": [
+            "price",
+            "target_object_id",
+            "fixed_at"
+          ],
+          "properties": {
+            "price": {
+              "$ref": "#/$defs/price"
+            },
+            "target_object_id": {
+              "type": "string",
+              "description": "EXIT-004 — the liquidity point or unfilled imbalance the target sits on. Never a bare number."
+            },
+            "target_object_type": {
+              "type": "string",
+              "enum": [
+                "LIQUIDITY_POOL",
+                "UNFILLED_IMBALANCE",
+                "EQUAL_HIGHS_LOWS",
+                "INSTITUTIONAL_LEVEL",
+                "SESSION_LEVEL"
+              ]
+            },
+            "fixed_at": {
+              "$ref": "#/$defs/iso_ny",
+              "description": "TARGET-008 — must precede the stop_ladder evaluation, proving the target was predefined."
+            }
+          }
+        },
+        "stop_ladder": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 5,
+          "items": {
+            "$ref": "#/$defs/stop_candidate"
+          },
+          "description": "The full evaluated ladder including rejected and unlocatable rungs, with each rejection reason. This array is what makes GATE-025 / GATE-026 / GATE-027 / GATE-028 testable at all."
+        },
+        "computed_rr": {
+          "type": "object",
+          "required": [
+            "planned_rr"
+          ],
+          "properties": {
+            "planned_rr": {
+              "type": "number",
+              "description": "|target − entry| / |entry − stop| at fill."
+            },
+            "partial_level_price": {
+              "$ref": "#/$defs/price",
+              "description": "The 2R level. When it equals target price the runner is degenerate (GATE-031)."
+            },
+            "degenerate_runner": {
+              "type": "boolean"
+            }
+          }
+        },
+        "sizing": {
+          "type": "object",
+          "required": [
+            "risk_pct",
+            "matrix_cell",
+            "box_grade",
+            "disturbance_grade",
+            "virtual_account_size",
+            "risk_amount",
+            "quantity",
+            "sizer_implementation"
+          ],
+          "properties": {
+            "risk_pct": {
+              "type": "number"
+            },
+            "matrix_cell": {
+              "type": "string",
+              "description": "GATE-032 — box grade × disturbance, e.g. SUPER_LIGHT."
+            },
+            "box_grade": {
+              "type": "string",
+              "enum": [
+                "STANDARD",
+                "SUPER",
+                "MANIPULATED"
+              ]
+            },
+            "disturbance_grade": {
+              "type": "string",
+              "enum": [
+                "NONE",
+                "LIGHT",
+                "HEAVY"
+              ]
+            },
+            "virtual_account_size": {
+              "type": "number",
+              "description": "SIZE-001 — sizing base, deliberately smaller than the broker balance."
+            },
+            "actual_account_balance": {
+              "type": "number"
+            },
+            "risk_amount": {
+              "type": "number",
+              "description": "= virtual_account_size × risk_pct. This is 1R."
+            },
+            "quantity": {
+              "type": "number"
+            },
+            "sizer_implementation": {
+              "type": "string",
+              "enum": [
+                "LOOKUP_TABLE",
+                "MULTIPLICATIVE_MODIFIER",
+                "SUBTRACTIVE"
+              ]
+            },
+            "identity_check": {
+              "type": "object",
+              "description": "SIZE-002 — the arithmetic identity that makes risk conformance checkable from the record alone.",
+              "properties": {
+                "quantity_times_stop_distance": {
+                  "type": "number"
+                },
+                "expected_risk_amount": {
+                  "type": "number"
+                },
+                "abs_error": {
+                  "type": "number"
+                },
+                "within_tolerance": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "leverage": {
+              "type": "number",
+              "description": "SIZE-003 — neutral to intended risk, but relevant to realised risk via liquidation."
+            },
+            "margin_mode": {
+              "type": "string",
+              "enum": [
+                "ISOLATED",
+                "CROSS"
+              ]
+            }
+          }
+        },
+        "exits": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/exit_event"
+          },
+          "description": "EXIT-001 / EXIT-002 — at most one partial tranche plus one runner tranche in v1."
+        },
+        "runner": {
+          "type": "object",
+          "properties": {
+            "management_policy": {
+              "type": "string",
+              "description": "EXIT-003 — 'PASSIVE' is the only attributable value until 'the active trade management rules' are defined."
+            },
+            "stop_moved": {
+              "type": "boolean"
+            },
+            "stop_moves": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "timestamp_ny": {
+                    "$ref": "#/$defs/iso_ny"
+                  },
+                  "from": {
+                    "$ref": "#/$defs/price"
+                  },
+                  "to": {
+                    "$ref": "#/$defs/price"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "outcome": {
+          "type": "object",
+          "required": [
+            "result",
+            "realised_r",
+            "closed_at"
+          ],
+          "properties": {
+            "result": {
+              "type": "string",
+              "enum": [
+                "WIN",
+                "LOSS",
+                "BREAK_EVEN",
+                "PARTIAL",
+                "OPEN"
+              ]
+            },
+            "realised_r": {
+              "type": "number",
+              "description": "Weighted across tranches. Recorded separately from planned_rr so the doctrine-vs-practice gap (EXIT-005) is measurable rather than averaged away."
+            },
+            "pnl_quote": {
+              "type": "number"
+            },
+            "roi_pct": {
+              "type": "number"
+            },
+            "closed_at": {
+              "$ref": "#/$defs/iso_ny"
+            },
+            "max_adverse_excursion_r": {
+              "type": "number"
+            },
+            "max_favourable_excursion_r": {
+              "type": "number"
+            },
+            "attributed_rule_ids": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/rule_id"
+              },
+              "description": "THE LEARNING-LOOP JOIN KEY. The rule ids whose verdicts shaped this trade — at minimum the box grade rule, the disturbance rule, the matrix cell rule, the stop-anchor rule and the stop-selection reading. Outcomes attach here, to documented setups, rather than to a single P&L number."
+            }
+          }
+        },
+        "flags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    },
+    "scan_census": {
+      "type": "object",
+      "title": "scan_census",
+      "description": "THE POPULATION RECORD. One per (instrument, signal_tf, session_date). It exists because the conformance suite is a pure function of stored telemetry, which means the engine controls its own denominator: an engine that quietly discards candidates before writing a setup_evaluation emits a small, immaculate corpus and scores 100% fidelity while running mostly on undocumented logic. The census makes the denominator explicit — bars observed, evaluations emitted, and every gap accounted for by a cited rule. C-13 reconciles it.",
+      "required": [
+        "record_type",
+        "scan_id",
+        "engine",
+        "declared_parameters",
+        "instrument",
+        "signal_tf",
+        "session_date",
+        "window_from_ny",
+        "window_to_ny",
+        "bars_observed",
+        "evaluations_emitted",
+        "unemitted_bars"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "record_type": {
+          "const": "scan_census"
+        },
+        "scan_id": {
+          "type": "string"
+        },
+        "engine": {
+          "$ref": "#/$defs/engine_identity"
+        },
+        "declared_parameters": {
+          "$ref": "#/$defs/declared_parameters"
+        },
+        "instrument": {
+          "type": "object",
+          "required": [
+            "symbol",
+            "instrument_class"
+          ],
+          "properties": {
+            "symbol": {
+              "type": "string"
+            },
+            "instrument_class": {
+              "type": "string"
+            },
+            "venue": {
+              "type": "string"
+            }
+          }
+        },
+        "signal_tf": {
+          "$ref": "#/$defs/timeframe"
+        },
+        "session_date": {
+          "type": "string"
+        },
+        "window_from_ny": {
+          "$ref": "#/$defs/iso_ny"
+        },
+        "window_to_ny": {
+          "$ref": "#/$defs/iso_ny"
+        },
+        "bars_observed": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Completed bars on this TF inside the window. Independently checkable from the window length and the timeframe — which is why it cannot simply be understated."
+        },
+        "evaluations_emitted": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Count of setup_evaluation records carrying this scan_id."
+        },
+        "unemitted_bars": {
+          "type": "array",
+          "description": "Every observed bar that produced NO setup_evaluation, with the registry rule that authorises the omission. An entry with no rule_id, or with a rule_id absent from the registry, is undocumented logic (C-13, MAJOR). The honest zero-suppression case is an engine whose emission_policy_id is EVERY_CLOSED_BAR..., for which this array is empty and bars_observed == evaluations_emitted.",
+          "items": {
+            "type": "object",
+            "required": [
+              "bar_close_time_ny",
+              "rule_id",
+              "reason"
+            ],
+            "properties": {
+              "bar_close_time_ny": {
+                "$ref": "#/$defs/iso_ny"
+              },
+              "rule_id": {
+                "$ref": "#/$defs/rule_id"
+              },
+              "reason": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "data_gaps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "from_ny",
+              "to_ny",
+              "cause"
+            ],
+            "properties": {
+              "from_ny": {
+                "$ref": "#/$defs/iso_ny"
+              },
+              "to_ny": {
+                "$ref": "#/$defs/iso_ny"
+              },
+              "cause": {
+                "type": "string"
+              }
+            }
+          },
+          "description": "Feed outages. Bars missing to a data gap are excluded from bars_observed and must appear here, so an outage cannot be used to hide a suppression."
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}
