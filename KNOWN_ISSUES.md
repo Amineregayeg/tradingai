@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-04 (after D9 — nginx config changes apply themselves)
+Last updated: 2026-08-04 (after E3 — outages no longer render as empty results)
 
 ---
 
@@ -137,19 +137,21 @@ choice about where you want to be interrupted, not a code decision.
 **Fix:** pick a channel, then alert on `data-health.ok == false` and on repeated
 bridge failures. The detection already exists; only delivery is missing.
 
-### E3. A failed page load renders as "no data" on 7 of 9 pages
-**Found in:** Phase 1 audit
-**What it is:** every page swallows fetch errors and shows an empty state
-(`.catch(() => setX([]))`). An API outage is therefore indistinguishable from a
-genuinely quiet week. ReportPage was fixed — it now says outright that the load
-failed — and MorningBriefingPage already handled it, but Dashboard, Journal,
-WeeklyReview, Settings, Checklist, PropFirm and Engine still do not.
-**Why it matters:** it is the same silence-versus-health confusion the
-monitoring surfaces were built to avoid. Severity is lower than it sounds —
-most show "—" or an empty list rather than a wrong number — but "no trades this
-week" and "the backend is down" call for very different responses.
-**Fix:** a shared load-state hook, so the pattern is right by default rather
-than remembered per page.
+### E5. A failed ACTION is silently swallowed
+**Found in:** E3 (auditing the load paths turned these up)
+**What it is:** buttons still catch and discard their own failures —
+`api.engine.reset()`, `pause()`, `resume()`, `api.settings.update()`,
+`api.brokers.disconnect()`, and the journal's CSV export all end in
+`.catch(() => {})`.
+**Why it matters:** same family as E3, opposite direction. E3 was "the page
+claims something false about the data"; this is "you pressed a button, nothing
+happened, and nothing said so". Pausing the engine is the sharp one — you click
+Pause, the button does not visibly fail, and the engine keeps trading. The
+operator's belief and the system's state diverge with no signal.
+**Why it was not bundled into E3:** E3 is about rendering. These need a
+different treatment — a transient error next to the control, and for
+pause/resume a re-read of the real state afterwards so the UI reflects what the
+engine actually did rather than what was requested.
 
 ### E4. The economic calendar is dead — no FINNHUB_API_KEY
 **Found in:** Phase 1 audit
