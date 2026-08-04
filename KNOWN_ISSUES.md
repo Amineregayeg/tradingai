@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-04 (after 2.5 — run history)
+Last updated: 2026-08-04 (after 2.2 — Phase 2 complete)
 
 ---
 
@@ -92,17 +92,19 @@ attempted.
 already reported by `/status` on the bridge and flows through
 `/api/brokers/accounts`. Small piece of UI.
 
-### A5. PRICE_SOURCE=cft is built but not switched on
-**Found in:** 4.4
-**What it is:** the live loop still defaults to Binance. Switching is a
-deliberate env change, not automatic.
-**Why it matters:** until it is switched, live analysis still reads a different
-venue than it would trade on — the thing 4.4 exists to fix.
-**Why it was left off:** CFT bars come through the browser bridge, so the engine
-would gain a dependency on it; and CFT's short 1H history means a restart cannot
-rebuild as much context as Binance provides. Worth switching once the bridge has
-demonstrated a few days of uptime.
-**Fix:** set `PRICE_SOURCE=cft` on the api service.
+### A5. The engine still runs on Binance prices, not CFT's
+**Found in:** 4.4; **made switchable by 2.2**
+**What it is:** the live loop still reads Binance. CFT prices are now selectable
+from the New-run form on the engine page — no env change or redeploy — but
+nobody has selected them.
+**Why it matters:** until it is switched, live analysis reads a different venue
+than it would trade on. Measured: closes differ by a near-constant −0.0485%
+(harmless — structure is scale-invariant) but individual bar RANGES differ by up
+to 0.117%, which can create or erase the FVG an entry depends on.
+**The trade-off to weigh first:** CFT bars arrive through the browser bridge, so
+the engine gains a dependency on it, and CFT serves only ~125 days of 1H history
+against Binance's years — a restart rebuilds less context.
+**Fix:** choose "Crypto Fund Trader" as the price source when starting a run.
 
 ### A4. LTF-BOS gate is mildly non-causal
 **Found in:** inherited (residual #1)
