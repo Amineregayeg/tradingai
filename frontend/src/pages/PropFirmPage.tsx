@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react'
 import { api } from '@/services/api'
+import { useLoadState } from '@/hooks/useLoadState'
+import { LoadFailure } from '@/components/shared'
 import type { PropFirmProfile, PropFirmStatus } from '@/types/api'
 
 function RuleBar({ label, value, limit, color }: { label: string; value: number; limit: number | null; color: string }) {
@@ -137,15 +139,21 @@ export default function PropFirmPage() {
   const [profiles, setProfiles] = useState<PropFirmProfile[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
+  const { failed, track } = useLoadState()
 
   const load = async () => {
     setIsLoading(true)
-    const [s, p] = await Promise.allSettled([
-      api.propFirm.status(),
-      api.propFirm.profiles(),
+    // allSettled swallowed both rejections into empty arrays, so a dead API
+    // rendered as "No prop firm profiles yet" — on the page that reports
+    // whether you are inside the challenge's drawdown limits. Not knowing and
+    // being compliant must not look the same (E3). `track` returns the fallback
+    // rather than rejecting, so Promise.all is safe here.
+    const [s, p] = await Promise.all([
+      track('challenge status', api.propFirm.status(), [] as PropFirmStatus[]),
+      track('prop firm profiles', api.propFirm.profiles(), [] as PropFirmProfile[]),
     ])
-    setStatuses(s.status === 'fulfilled' && Array.isArray(s.value) ? s.value : [])
-    setProfiles(p.status === 'fulfilled' && Array.isArray(p.value) ? p.value : [])
+    setStatuses(Array.isArray(s) ? s : [])
+    setProfiles(Array.isArray(p) ? p : [])
     setIsLoading(false)
   }
 
@@ -171,9 +179,10 @@ export default function PropFirmPage() {
 
       {/* Content */}
       <div style={{ flex: 1, overflow: 'auto', padding: 24 }}>
+        <LoadFailure what={failed} />
         {isLoading ? (
           <div style={{ textAlign: 'center', color: '#55556a', padding: 40 }}>Loading…</div>
-        ) : statuses.length === 0 ? (
+        ) : statuses.length === 0 && failed.length === 0 ? (
           <div style={{
             maxWidth: 480, margin: '60px auto', textAlign: 'center',
             background: '#12121a', border: '1px solid #1e2035', borderRadius: 12, padding: '40px 32px',

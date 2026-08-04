@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react'
 import { api } from '@/services/api'
+import { useLoadState } from '@/hooks/useLoadState'
+import { LoadFailure } from '@/components/shared'
 import type { Trade, Outcome } from '@/types/api'
 import { formatPrice, formatDate } from '@/utils/format'
 
@@ -40,12 +42,13 @@ function StatCard({ label, value, sub, color }: { label: string; value: string; 
 export default function JournalPage() {
   const [trades, setTrades] = useState<Trade[]>([])
   const [isLoading, setIsLoading] = useState(false)
+  const { failed, track } = useLoadState()
   const [filters, setFilters] = useState<JournalFilters>({ pair: '', outcome: '', from: '', to: '' })
   const [selectedTrade, setSelectedTrade] = useState<Trade | null>(null)
 
   useEffect(() => {
     setIsLoading(true)
-    api.trades.list({
+    track('trades', api.trades.list({
       pair: filters.pair || undefined,
       outcome: (filters.outcome as Outcome) || undefined,
       from_dt: filters.from || undefined,
@@ -56,9 +59,8 @@ export default function JournalPage() {
       // visible here and carry their setup tag; what changed is that they no
       // longer leak into pages that compute returns.
       cohort: 'all',
-    })
+    }), [] as Trade[])
       .then((result) => setTrades(Array.isArray(result) ? result : []))
-      .catch(() => setTrades([]))
       .finally(() => setIsLoading(false))
   }, [filters])
 
@@ -84,7 +86,11 @@ export default function JournalPage() {
       }}>
         <div>
           <h1 style={{ fontSize: 18, fontWeight: 700, color: '#e8e8ef', marginBottom: 2 }}>Trade Journal</h1>
-          <span style={{ fontSize: 12, color: '#55556a' }}>{safeTrades.length} trades</span>
+          {/* The count is a claim about the ledger. Qualify it when the load
+              failed, rather than reporting a partial figure as the total. */}
+          <span style={{ fontSize: 12, color: '#55556a' }}>
+            {failed.length > 0 ? 'trade count unavailable' : `${safeTrades.length} trades`}
+          </span>
         </div>
         <button
           onClick={() => {
@@ -188,6 +194,7 @@ export default function JournalPage() {
 
       {/* Table */}
       <div style={{ flex: 1, overflow: 'auto' }}>
+        <div style={{ padding: '12px 24px 0' }}><LoadFailure what={failed} /></div>
         {/* Column headers */}
         <div style={{
           display: 'grid',
@@ -204,7 +211,8 @@ export default function JournalPage() {
 
         {isLoading ? (
           <div style={{ padding: '40px 24px', textAlign: 'center', color: '#55556a' }}>Loading...</div>
-        ) : safeTrades.length === 0 ? (
+        ) : /* Never claim "no trades found" over a failed request (E3). */
+        safeTrades.length === 0 && failed.length === 0 ? (
           <div style={{ padding: '40px 24px', textAlign: 'center' }}>
             <div style={{ fontSize: 13, color: '#55556a', marginBottom: 6 }}>No trades found</div>
             <div style={{ fontSize: 12, color: '#3a3a50' }}>Adjust your filters or connect a broker to start logging trades.</div>

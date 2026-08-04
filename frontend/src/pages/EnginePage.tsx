@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '@/services/api'
+import { useLoadState } from '@/hooks/useLoadState'
+import { LoadFailure } from '@/components/shared'
 import { RunHistoryPanel } from '@/components/dashboard/RunHistoryPanel'
 import { RunConfigForm } from '@/components/dashboard/RunConfigForm'
 
@@ -55,13 +57,18 @@ export default function EnginePage() {
   const [expanded, setExpanded] = useState<number | null>(null)
   const [feedback, setFeedback] = useState<Dict | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  const { failed, track } = useLoadState()
 
   const load = useCallback(() => {
     api.engine.status().then(setStatus).catch((e) => setErr(String(e?.detail || e?.title || 'engine offline')))
-    api.engine.sim().then(setSim).catch(() => setSim(null))
-    api.engine.decisions(50).then((d) => setDecisions(Array.isArray(d) ? d : [])).catch(() => setDecisions([]))
-    api.engine.feedback(30).then(setFeedback).catch(() => setFeedback(null))
-  }, [])
+    track('the challenge simulation', api.engine.sim(), null).then(setSim)
+    // The decision log is EVIDENCE, and an empty one is a real finding — it
+    // means the engine evaluated bars and took nothing. A failed fetch rendering
+    // as "no decisions recorded yet" turns an outage into that finding (E3).
+    track('the decision log', api.engine.decisions(50), [] as Dict[])
+      .then((d) => setDecisions(Array.isArray(d) ? d : []))
+    track('the feedback report', api.engine.feedback(30), null).then(setFeedback)
+  }, [track])
 
   useEffect(() => {
     load()
@@ -80,6 +87,7 @@ export default function EnginePage() {
 
   return (
     <div style={{ flex: 1, overflow: 'auto', background: '#0a0a0f' }}>
+      <div style={{ padding: '14px 28px 0' }}><LoadFailure what={failed} /></div>
       <div style={{ padding: '20px 28px 16px', borderBottom: '1px solid #1e2035', background: '#0d0d14', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <h1 style={{ fontSize: 20, fontWeight: 700, color: '#e8e8ef', margin: 0 }}>Engine</h1>
@@ -185,7 +193,9 @@ export default function EnginePage() {
         </Panel>
 
         <Panel title="Decision Log" right={<span style={{ fontSize: 11, color: MUTE }}>{decisions.length} recent</span>}>
-          {decisions.length === 0 ? (
+          {decisions.length === 0 && failed.length > 0 ? (
+            <div style={{ fontSize: 12, color: MUTE }}>Decision log unavailable — see the banner above. This is not the same as no decisions.</div>
+          ) : decisions.length === 0 ? (
             <div style={{ fontSize: 12, color: MUTE }}>No decisions recorded yet. Every evaluated bar appears here — taken trades with their expected and realized R, and refusals with the reason they were refused.</div>
           ) : (
             <div style={{ overflowX: 'auto' }}>

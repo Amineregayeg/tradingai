@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react'
 import { api } from '@/services/api'
+import { useLoadState } from '@/hooks/useLoadState'
+import { LoadFailure } from '@/components/shared'
 import type { Trade } from '@/types/api'
 import { formatDate } from '@/utils/format'
 
@@ -42,19 +44,22 @@ function getWeekBounds(offset = 0) {
 export default function WeeklyReviewPage() {
   const [trades, setTrades] = useState<Trade[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const { failed, track } = useLoadState()
   const [weekOffset, setWeekOffset] = useState(0) // 0 = current week, -1 = last week
 
   const { from, to } = getWeekBounds(weekOffset)
 
   useEffect(() => {
     setIsLoading(true)
-    api.trades.list({
+    // A failed fetch used to `setTrades([])`, making an outage render as a week
+    // with no trades — and "no trades this week" is a reading people accept
+    // without checking. See useLoadState.
+    track('this week’s trades', api.trades.list({
       from_dt: from.toISOString().split('T')[0],
       to_dt: to.toISOString().split('T')[0],
       page_size: 200,
-    })
+    }), [] as Trade[])
       .then((r) => setTrades(Array.isArray(r) ? r : []))
-      .catch(() => setTrades([]))
       .finally(() => setIsLoading(false))
   }, [weekOffset]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -100,9 +105,13 @@ export default function WeeklyReviewPage() {
 
       {/* Content */}
       <div style={{ flex: 1, overflow: 'auto', padding: 24 }}>
+        <LoadFailure what={failed} />
         {isLoading ? (
           <div style={{ textAlign: 'center', color: '#55556a', padding: 40 }}>Loading…</div>
-        ) : trades.length === 0 ? (
+        ) : /* Only assert an empty week when we actually know it is one. With a
+              failed load this said "No trades this week" over a hole in the
+              data, which is the whole defect (E3). */
+        trades.length === 0 && failed.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '60px 24px' }}>
             <div style={{ fontSize: 32, marginBottom: 16 }}>📊</div>
             <div style={{ fontSize: 15, fontWeight: 600, color: '#e8e8ef', marginBottom: 8 }}>No trades this week</div>

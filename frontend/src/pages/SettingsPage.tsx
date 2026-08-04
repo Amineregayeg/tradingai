@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { api } from '@/services/api'
+import { useLoadState } from '@/hooks/useLoadState'
+import { LoadFailure } from '@/components/shared'
 import type { Settings, BrokerConnection, BrokerConnectRequest } from '@/types/api'
 
 /**
@@ -107,6 +109,7 @@ export default function SettingsPage() {
   const settings = useSettingsStore((s) => s.settings)
   const setSettings = useSettingsStore((s) => s.setSettings)
   const [brokers, setBrokers] = useState<BrokerConnection[]>([])
+  const { failed, track } = useLoadState()
   const [showAddBroker, setShowAddBroker] = useState(false)
   const [brokerForm, setBrokerForm] = useState<BrokerConnectRequest>({
     // Defaults must be a combination that CAN succeed — see BROKER_CAPABILITIES.
@@ -122,7 +125,11 @@ export default function SettingsPage() {
   const [connectError, setConnectError] = useState('')
 
   useEffect(() => {
-    api.brokers.list().then((b) => setBrokers(Array.isArray(b) ? b : [])).catch(() => {})
+    // A swallowed failure here rendered as "No broker connections", which on
+    // this platform reads as "you are not connected to your funded account" —
+    // a statement about money, made without knowing (E3).
+    track('broker connections', api.brokers.list(), [] as BrokerConnection[])
+      .then((b) => setBrokers(Array.isArray(b) ? b : []))
     if (!settings) api.settings.get().then(setSettings).catch(() => {})
   }, [settings, setSettings])
 
@@ -183,7 +190,8 @@ export default function SettingsPage() {
 
         {activeSection === 'broker' && (
           <Section title="Broker Connections" description="Connect your trading accounts to sync positions and trades.">
-            {brokers.length === 0 ? (
+            <LoadFailure what={failed} />
+            {brokers.length === 0 && failed.length === 0 ? (
               <div style={{ padding: '32px 20px', textAlign: 'center' }}>
                 <div style={{ fontSize: 13, color: '#55556a', marginBottom: 16 }}>
                   No broker connections. Click "Add Broker" to connect your first account.

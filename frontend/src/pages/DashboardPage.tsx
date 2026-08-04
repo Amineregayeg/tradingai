@@ -3,6 +3,8 @@ import { useOutletContext } from 'react-router-dom'
 import { usePositionsStore } from '@/stores/positionsStore'
 import { useAlertsStore } from '@/stores/alertsStore'
 import { api } from '@/services/api'
+import { useLoadState } from '@/hooks/useLoadState'
+import { LoadFailure } from '@/components/shared'
 import { ChartArea } from '@/components/dashboard/ChartArea'
 import { PositionsPanel } from '@/components/dashboard/PositionsPanel'
 import { RightRail } from '@/components/dashboard/RightRail'
@@ -12,21 +14,26 @@ export default function DashboardPage() {
   const [timeframe, setTimeframe] = useState('1H')
   const [score, setScore] = useState<number | null>(null)
   const [aiBias, setAiBias] = useState<string | null>(null)
+  const { failed, track } = useLoadState()
 
   useEffect(() => {
     // Try live broker positions first; if empty, fall back to OPEN trades in the
     // journal so the demo + observe-only deployments still show a working panel.
-    const loadPositions = async () => {
-      try {
-        const p = await api.positions.list().catch(() => [])
-        if (Array.isArray(p) && p.length > 0) {
-          usePositionsStore.getState().setPositions(p)
-          return
-        }
-      } catch { /* fall through */ }
+    // Reported as ONE thing because that is how it is read. A live-positions
+    // failure alone is survivable — the trades fallback below still describes
+    // what is open. Only when BOTH fail does nobody know, and "no open
+    // positions" on a trading dashboard is the most dangerous empty state in
+    // the app: it is indistinguishable from a flat book (E3).
+    const loadPositions = () => track('open positions', (async () => {
+      const p = await api.positions.list().catch(() => null)
+      if (Array.isArray(p) && p.length > 0) {
+        usePositionsStore.getState().setPositions(p)
+        return
+      }
 
       // Fallback: synthesise positions from OPEN trades (demo / observe-only mode).
-      const trades = await api.trades.list({ page_size: 200 }).catch(() => [])
+      // Deliberately NOT caught — a failure here is the case worth reporting.
+      const trades = await api.trades.list({ page_size: 200 })
       const opens = (Array.isArray(trades) ? trades : []).filter(
         (t: any) => t.status === 'OPEN' || t.outcome === 'OPEN'
       )
@@ -51,12 +58,11 @@ export default function DashboardPage() {
         }
       })
       usePositionsStore.getState().setPositions(positions)
-    }
+    })(), undefined)
     loadPositions()
 
-    api.alerts.list({ status: 'PENDING', per_page: 100 })
+    track('alerts', api.alerts.list({ status: 'PENDING', per_page: 100 }), [])
       .then((alerts) => useAlertsStore.getState().loadPending(Array.isArray(alerts) ? alerts : []))
-      .catch(() => {})
   }, [])
 
   // Fetch latest AI analysis for this pair
@@ -83,6 +89,9 @@ export default function DashboardPage() {
     <div style={{ display: 'flex', flex: 1, overflow: 'hidden', minHeight: 0 }}>
       {/* Center: chart + positions */}
       <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden', minWidth: 0 }}>
+        {failed.length > 0 && (
+          <div style={{ padding: '10px 14px 0' }}><LoadFailure what={failed} /></div>
+        )}
         <ChartArea
           pair={activePair}
           timeframe={timeframe}
