@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-05 (after manual acceptance testing — A8 found)
+Last updated: 2026-08-05 (after manual acceptance testing — A8 found and fixed)
 
 ---
 
@@ -37,36 +37,6 @@ only grows becomes wallpaper.
 ---
 
 ## A. Wrong numbers — these can mislead a decision
-
-### A8. The chart is frozen on 27 June and presents it as now
-**Found in:** manual acceptance testing, 2026-08-05 — spotted from the x-axis
-jumping straight from `27 Jun '26` to today.
-**What it is:** `/api/candles` decides whether its cached rows are usable by
-**counting** them, never by checking their age:
-
-```python
-if candles and len(candles) >= limit // 2:
-    return ...            # 505 >= 250 — true forever
-```
-
-The table was filled once on 2026-06-27 and holds exactly 505 rows for every
-pair and timeframe. The condition has been true on every request since, so the
-Binance backfill underneath it has not run in 39 days and cannot ever run again.
-**Why it matters:** this is the single most visible surface on the platform and
-it is showing a 39-day-old price as the current one. Worse, it is *mixed with
-live data* on the same canvas — the price line, the "now" cursor and the trade
-markers are all current, so the 27 July BTC trade is drawn a month to the right
-of the last candle. A chart that is entirely stale is obvious; one that is
-stale in the candles and live in the overlays reads as real and is not.
-**What it does NOT affect:** the engine. `crypto_loop` fetches bars straight
-from `BinanceSource` and never touches this table, which is why decisions have
-kept arriving hourly on fresh data while the chart stood still. The numbers are
-right; the picture is not.
-**Fix:** gate the cache on the age of the newest row against the timeframe —
-a 1H series whose newest bar is older than ~2 bars is a miss — and fetch only
-the missing tail rather than re-pulling the whole window. The test that must
-bite: seed a full-count-but-stale table and assert the endpoint refuses to
-serve it.
 
 ### A3. Backtests still measure a different venue than they trade
 **Found in:** Phase 4 planning; **narrowed by 4.4**
