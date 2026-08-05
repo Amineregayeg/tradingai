@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-05 (after manual acceptance testing — A8 found and fixed)
+Last updated: 2026-08-05 (manual acceptance testing — A8 fixed, A9 found)
 
 ---
 
@@ -37,6 +37,34 @@ only grows becomes wallpaper.
 ---
 
 ## A. Wrong numbers — these can mislead a decision
+
+### A9. A restart silently reverts the engine to defaults, and the run record keeps claiming otherwise
+**Found in:** manual acceptance testing, 2026-08-05 — a run configured from the
+engine page at 19:07 (5m entry, CFT prices, $200) reported itself as 1H / paper /
+$50,000 after an api redeploy ten minutes later.
+**What it is:** on boot the loop adopts the ACTIVE run but reads only its id:
+
+```python
+self.run_id = active.id          # crypto_loop.py — active.config is never read
+```
+
+`apply_config` has exactly one caller, `reset_run`. Configuration therefore lives
+only in the loop's memory and in a `config` column nobody loads. Any api restart —
+a deploy, a crash, a reboot — brings the engine back on env defaults while it
+carries on writing trades and decisions into the same run.
+**Why it matters:** the run's `config` is the record of how its results were
+produced, and it is what makes a run reproducible. After a restart it is a false
+description: trades taken on 1H/paper/$50,000 accumulate under a row that says
+5m/CFT/$200. Nothing in the UI signals the change, and the divergence is
+invisible in exactly the direction that matters — the stored config looks like a
+deliberate answer, so it will be believed.
+**Also note:** starting balance reverting to $50,000 means prop-firm-scale runs
+silently become paper-scale ones, which changes every position size in the run.
+**Fix:** load `active.config` when adopting the run and `apply_config` it, so the
+engine comes back as the run says it is. Where the stored config cannot be
+applied (an unavailable price source, say), end the run and open a new one rather
+than running on settings the record contradicts. The test that must bite:
+configure a run, rebuild the loop from the DB, assert the config survives.
 
 ### A3. Backtests still measure a different venue than they trade
 **Found in:** Phase 4 planning; **narrowed by 4.4**
