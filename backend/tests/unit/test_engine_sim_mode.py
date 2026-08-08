@@ -7,8 +7,21 @@ from app.services.broker.paper import PaperBroker
 from app.services.live.crypto_loop import LiveCryptoLoop
 
 
-def test_paper_mode_is_default():
+def test_the_prop_firm_simulator_is_the_default():
+    """Plain paper was the default for as long as the engine page could switch
+    modes. With the settings frozen there is only one, and it is the one with
+    rules: a simulation you cannot fail teaches nothing about a challenge you
+    can."""
     loop = LiveCryptoLoop()
+    assert isinstance(loop.paper, SimPropFirmBroker)
+    assert loop.mode == "PROP_FIRM_SIM"
+    assert loop.sim_state() is not None
+
+
+def test_plain_paper_mode_still_works_when_asked_for():
+    """The mode is not deleted, only unselected. Tests and any future comparison
+    against a rule-free baseline still need it."""
+    loop = LiveCryptoLoop(broker_mode="paper")
     assert isinstance(loop.paper, PaperBroker)
     assert loop.mode == "PAPER"
     assert loop.sim_state() is None

@@ -4,7 +4,6 @@ import { useLoadState } from '@/hooks/useLoadState'
 import { LoadFailure, ActionError } from '@/components/shared'
 import { useAction } from '@/hooks/useAction'
 import { RunHistoryPanel } from '@/components/dashboard/RunHistoryPanel'
-import { RunConfigForm } from '@/components/dashboard/RunConfigForm'
 
 const GREEN = '#00d68f'
 const RED = '#ff3b5c'
@@ -78,6 +77,7 @@ export default function EnginePage() {
     return () => clearInterval(t)
   }, [load])
 
+  const running = !!status?.running
   const paused = !!status?.paused
   const mode = String(status?.mode ?? '—')
   const simOn = !!sim?.enabled
@@ -86,6 +86,8 @@ export default function EnginePage() {
   const eva = (feedback?.expected_vs_actual ?? {}) as Dict
   const corrections = (feedback?.corrections ?? []) as Dict[]
   const activity = (status?.activity ?? []) as Dict[]
+  const cfg = (status?.config ?? {}) as Dict
+  const cfgSymbols = (Array.isArray(cfg.symbols) ? cfg.symbols : []) as string[]
 
   return (
     <div style={{ flex: 1, overflow: 'auto', background: '#0a0a0f' }}>
@@ -98,24 +100,38 @@ export default function EnginePage() {
             <span style={{ color: simOn ? AMBER : GREEN, fontWeight: 600 }}>{mode}</span>
           </div>
         </div>
+        {/* Start / Pause / Stop. There is nothing to configure - the settings
+            are frozen in the backend (services/live/fixed_config.py) and shown
+            read-only below, so the page cannot describe a run the engine would
+            not actually perform. */}
         <div style={{ display: 'flex', gap: 8 }}>
-          <button
-            onClick={() => {
-              // A reset is NOT destructive — nothing is deleted and the previous
-              // run stays queryable — but it does zero the visible numbers, and
-              // an unexpected reset would look exactly like data loss.
-              if (!window.confirm(
-                'Start a new run?\n\n' +
-                'Metrics restart at zero and the balance returns to its starting value.\n' +
-                'Nothing is deleted \u2014 the current run is kept and stays viewable.'
-              )) return
-              void run('Reset run', () => api.engine.reset()).finally(load)
-            }}
-            style={{ padding: '8px 14px', border: '1px solid #5c3d00', borderRadius: 8, background: 'transparent', color: '#e3b341', fontSize: 12, cursor: 'pointer' }}>Reset run</button>
-          <button onClick={() => { void run('Pause', () => api.engine.pause()).finally(load) }} disabled={paused || pending !== null}
-            style={{ padding: '8px 14px', border: '1px solid #252540', borderRadius: 8, background: paused ? '#1a1a24' : 'transparent', color: paused ? '#55556a' : '#e8e8ef', fontSize: 12, cursor: paused ? 'default' : 'pointer' }}>Pause</button>
-          <button onClick={() => { void run('Resume', () => api.engine.resume()).finally(load) }} disabled={!paused || pending !== null}
-            style={{ padding: '8px 14px', border: '1px solid #252540', borderRadius: 8, background: !paused ? '#1a1a24' : 'transparent', color: !paused ? '#55556a' : '#e8e8ef', fontSize: 12, cursor: !paused ? 'default' : 'pointer' }}>Resume</button>
+          {!running ? (
+            <button onClick={() => { void run('Start', () => api.engine.start()).finally(load) }}
+              disabled={pending !== null}
+              style={{ padding: '8px 22px', border: 'none', borderRadius: 8, background: GREEN, color: '#0a0a0f', fontSize: 12, fontWeight: 700, cursor: pending ? 'default' : 'pointer' }}>Start</button>
+          ) : (
+            <>
+              <button onClick={() => { void run(paused ? 'Resume' : 'Pause', () => (paused ? api.engine.resume() : api.engine.pause())).finally(load) }}
+                disabled={pending !== null}
+                style={{ padding: '8px 14px', border: '1px solid #252540', borderRadius: 8, background: 'transparent', color: '#e8e8ef', fontSize: 12, cursor: 'pointer' }}>{paused ? 'Resume' : 'Pause'}</button>
+              <button
+                onClick={() => {
+                  // Stop ENDS the run - the one control here whose effect you
+                  // cannot undo by pressing it again. Nothing is deleted, but
+                  // the run closes and open positions are settled, which is
+                  // worth one sentence before it happens.
+                  if (!window.confirm(
+                    'Stop the engine?\n\n' +
+                    'The run ends and any open position is closed at the current price.\n' +
+                    'Nothing is deleted \u2014 the run stays in the history below.\n' +
+                    'Pressing Start afterwards begins a NEW run.'
+                  )) return
+                  void run('Stop', () => api.engine.stop()).finally(load)
+                }}
+                disabled={pending !== null}
+                style={{ padding: '8px 20px', border: '1px solid #5c1f2a', borderRadius: 8, background: 'transparent', color: '#ff8fa3', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Stop</button>
+            </>
+          )}
         </div>
         {/* Beside the controls, not at the top of the page: the failure being
             fixed is a button that appeared to work, so the correction belongs
@@ -133,7 +149,10 @@ export default function EnginePage() {
         {/* Engine status */}
         <Panel title="Status">
           <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-            <Stat label="State" value={paused ? 'Paused' : 'Running'} color={paused ? AMBER : GREEN} />
+            <Stat
+              label="State"
+              value={!running ? 'Stopped' : paused ? 'Paused' : 'Running'}
+              color={!running ? MUTE : paused ? AMBER : GREEN} />
             <Stat label="Balance" value={money(status?.balance)} />
             <Stat label="Equity" value={money(status?.equity)} />
             <Stat label="Win rate" value={pct(status?.win_rate)} color={AMBER} />
@@ -189,12 +208,30 @@ export default function EnginePage() {
           )}
         </Panel>
 
-        {/* Decision log */}
-        <Panel title="New run" right={<span style={{ fontSize: 11, color: MUTE }}>settings apply to a new run</span>}>
-          <RunConfigForm onApplied={() => window.location.reload()} />
+        {/* What the engine runs. Read-only, and served from the engine's own
+            module - a second copy of these numbers in the frontend is a second
+            thing that can be true while the first is not. */}
+        <Panel title="Configuration" right={<span style={{ fontSize: 11, color: MUTE }}>fixed - the same for every run</span>}>
+          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+            <Stat label="Instruments" value={cfgSymbols.length ? cfgSymbols.join(', ') : '\u2014'} />
+            <Stat label="Entry timeframe" value={String(cfg.entry_tf ?? '\u2014')} />
+            <Stat label="Bias timeframe" value={String(cfg.bias_tf ?? '\u2014')} />
+            <Stat label="Prices from" value={String(cfg.price_source ?? '\u2014')} />
+            <Stat label="Account" value={money(cfg.starting_balance)} />
+            <Stat label="Risk per trade" value={cfg.risk_pct != null ? `${((n(cfg.risk_pct) ?? 0) * 100).toFixed(0)}%` : '\u2014'} />
+          </div>
+          <div style={{ fontSize: 12, color: MUTE, marginTop: 12, lineHeight: 1.6 }}>
+            A run ends by breaching a limit or by you pressing Stop. Limits are percentages of the
+            starting account, not of what it is worth today:{' '}
+            <span style={{ color: '#b8b8c8' }}>{pct(cfg.daily_loss_limit_pct, 0)} daily loss</span>,{' '}
+            <span style={{ color: '#b8b8c8' }}>{pct(cfg.max_drawdown_pct, 0)} max drawdown</span>,{' '}
+            <span style={{ color: '#b8b8c8' }}>{pct(cfg.profit_target_pct, 0)} profit target</span>.
+            Changing any of this means a code change and a deploy — the trade for two runs always
+            being comparable.
+          </div>
         </Panel>
 
-        <Panel title="Runs" right={<span style={{ fontSize: 11, color: MUTE }}>reset starts a new one</span>}>
+        <Panel title="Runs" right={<span style={{ fontSize: 11, color: MUTE }}>each Start opens one, each Stop closes it</span>}>
           <RunHistoryPanel />
         </Panel>
 

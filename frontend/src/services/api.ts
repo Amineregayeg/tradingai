@@ -181,26 +181,26 @@ export const api = {
       request<Record<string, unknown>[]>('GET', `/engine/decisions${buildQuery({ limit })}`),
     feedback: (minEvidence = 30) =>
       request<Record<string, unknown>>('GET', `/engine/feedback${buildQuery({ min_evidence: minEvidence })}`),
+    /**
+     * POST /engine/start - open a new run and begin scanning.
+     *
+     * There is nothing to send. The settings live in the backend
+     * (services/live/fixed_config.py) and are identical for every run, which is
+     * what makes two runs comparable. Pressing Start twice is a no-op rather
+     * than a second run.
+     */
+    start: () => request<Record<string, unknown>>('POST', '/engine/start'),
+    /**
+     * POST /engine/stop - stop scanning and END the run.
+     *
+     * Open positions are closed at the current price first: a stopped engine
+     * marks no prices, so a position whose stop-loss will never be checked
+     * again is not still open, it is abandoned. Nothing is deleted.
+     */
+    stop: () => request<Record<string, unknown>>('POST', '/engine/stop'),
+    /** POST /engine/pause - stop taking new setups; the run stays open. */
     pause: () => request<Record<string, unknown>>('POST', '/engine/pause'),
     resume: () => request<Record<string, unknown>>('POST', '/engine/resume'),
-    /**
-     * POST /engine/reset — end the current run and start a clean one.
-     *
-     * Deletes NOTHING. The previous run's trades and decision records remain,
-     * scoped to their run_id; the slate is clean because metrics are scoped to
-     * the new run, not because history was removed.
-     */
-    /**
-     * POST /engine/reset — apply a configuration and start a new run.
-     *
-     * Deletes NOTHING: the previous run keeps its trades and decisions and
-     * stays viewable. An invalid setting is REFUSED with a reason rather than
-     * silently defaulted, so the stored config always describes what actually
-     * ran.
-     */
-    reset: (config?: Record<string, unknown>) =>
-      request<Record<string, unknown>>('POST', '/engine/reset', config ?? {}),
-    configOptions: () => request<Record<string, unknown>>('GET', '/engine/config-options'),
     runs: () => request<Record<string, unknown>[]>('GET', '/engine/runs'),
   },
 

@@ -60,7 +60,15 @@ function settingsLine(cfg: Record<string, unknown> | null): string {
   if (!cfg) return 'settings not recorded'
   const risk = typeof cfg.risk_pct === 'number' ? `${(cfg.risk_pct * 100).toFixed(0)}% risk` : ''
   const syms = Array.isArray(cfg.symbols) ? (cfg.symbols as string[]).join(' · ') : ''
-  return [syms, cfg.entry_tf, risk, cfg.mode, `prices: ${cfg.price_source ?? 'binance'}`]
+  // The account SIZE belongs on this line even though it never changes any more.
+  // The history spans the settings freeze: runs before it started from $50,000
+  // of plain paper, runs after from a $5,000 prop-firm challenge. Their dollar
+  // P&L is not comparable, and without the size on the line the two are
+  // indistinguishable — same symbols, same timeframe, same risk percentage.
+  const bal = typeof cfg.starting_balance === 'number'
+    ? `$${cfg.starting_balance.toLocaleString('en-US', { maximumFractionDigits: 0 })}`
+    : ''
+  return [syms, cfg.entry_tf, risk, bal, cfg.mode, `prices: ${cfg.price_source ?? 'binance'}`]
     .filter(Boolean)
     .join('  ·  ')
 }

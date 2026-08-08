@@ -18,6 +18,7 @@ from datetime import datetime, timedelta, timezone
 from app.core.logging import logger
 from app.services.broker.paper import PaperBroker
 from app.services.execution.service import ExecMode, ExecutionService
+from app.services.live import fixed_config as fixed
 from app.services.live.strategy_step import evaluate_latest_bar_traced
 from app.services.market_data.sources.binance import BinanceSource
 from app.services.ws.manager import ws_manager
@@ -43,25 +44,30 @@ class LiveCryptoLoop:
     def __init__(
         self,
         symbols: dict[str, str] | None = None,
-        entry_tf: str = "1H",
-        bias_tf: str = "D",
-        starting_balance: float = 50_000.0,
-        risk_pct: float = 0.01,   # pre-registered FIXED at 1% (not a tunable knob)
-        max_concurrent: int = 3,
-        poll_interval: float = 10.0,
+        entry_tf: str = fixed.ENTRY_TF,
+        bias_tf: str = fixed.BIAS_TF,
+        starting_balance: float = fixed.STARTING_BALANCE,
+        risk_pct: float = fixed.RISK_PCT,   # pre-registered FIXED (not a tunable knob)
+        max_concurrent: int = fixed.MAX_CONCURRENT,
+        poll_interval: float = fixed.POLL_INTERVAL,
         broker_mode: str | None = None,
     ) -> None:
-        self.symbols = symbols or dict(_DEFAULT_SYMBOLS)
+        # The defaults ARE the configuration (services/live/fixed_config.py).
+        # The arguments survive for tests, which need to build a loop with a
+        # deliberately odd shape; nothing in the application passes any of them.
+        self.symbols = symbols or dict(fixed.SYMBOLS)
         self.entry_tf = entry_tf
         self.bias_tf = bias_tf
         self.risk_pct = risk_pct
         self.max_concurrent = max_concurrent
         self.poll_interval = poll_interval
         # Broker: "paper" = plain simulation; "sim" = SimPropFirmBroker, which
-        # enforces the prop-firm challenge rules (daily loss / drawdown / target)
-        # — the mode Agent B assigns a strategy to and tests against. Both are
-        # is_simulation=True; no real order is ever possible from this loop.
-        self.broker_mode = (broker_mode or os.getenv("ENGINE_BROKER", "paper")).lower()
+        # enforces the prop-firm challenge rules (daily loss / drawdown / target).
+        # Both are is_simulation=True; no real order is ever possible from this
+        # loop. There is deliberately no ENGINE_BROKER environment override any
+        # more: an env var is a second place the configuration can live, and the
+        # whole point of fixed_config is that there is only one.
+        self.broker_mode = (broker_mode or fixed.BROKER_MODE).lower()
         self._marks: dict[str, float] = {}
         if self.broker_mode == "sim":
             from app.services.broker.cft_sim import PropFirmRules, SimPropFirmBroker
@@ -84,8 +90,9 @@ class LiveCryptoLoop:
 
         # PRICE SOURCE — analyse the venue you execute on.
         #
-        # With PRICE_SOURCE=cft the loop reads Crypto Fund Trader's own candles
-        # instead of Binance's. That matters because the strategy trades
+        # With fixed_config.PRICE_SOURCE = "cft" the loop reads Crypto Fund
+        # Trader's own candles instead of Binance's. That matters because the
+        # strategy trades
         # structure: measured over 300 matched 1H bars, CFT closes sit a
         # near-constant -0.0485% below Binance (a BID-side spread, harmless to
         # scale-invariant structure) but individual bar RANGES differ by up to
@@ -96,7 +103,7 @@ class LiveCryptoLoop:
         # 1H history against the ~470 the corrected backtest needs, and the CFT
         # path requires the browser bridge to be up. Switching is an explicit
         # decision, not something that changes underneath anyone.
-        source_name = (os.getenv("PRICE_SOURCE", "binance") or "binance").strip().lower()
+        source_name = fixed.PRICE_SOURCE
         if source_name == "cft":
             from app.services.market_data.sources.cft import CFTSource
 
@@ -112,6 +119,8 @@ class LiveCryptoLoop:
         self._open_decision: dict[str, str] = {}
         self._running = False
         self.paused = False
+        #: The scanning task, owned by start()/stop(). None when stopped.
+        self._task: "asyncio.Task | None" = None
         # The active run. Held in the DB rather than only in memory so
         # recreating the api container CONTINUES the same run instead of
         # silently resetting the dashboard's numbers on every deploy.
@@ -212,6 +221,10 @@ class LiveCryptoLoop:
             "total_pnl": round(equity - self.starting_balance, 2),
             "total_pnl_pct": round(100 * (equity / self.starting_balance - 1), 2),
             "activity": list(self.activity)[:40],
+            # The settings the engine is actually running, served from the same
+            # module the engine reads. The page can then display them without a
+            # second copy that can drift out of step with the first.
+            "config": fixed.as_dict(),
         }
 
     def sim_state(self) -> dict | None:
@@ -793,17 +806,120 @@ class LiveCryptoLoop:
                 f"{pair} {sig.direction.value} setup NOT taken — {reason}",
             )
 
-    async def run(self) -> None:
+    # ------------------------------------------------------------------
+    # Lifecycle — Start, Pause, Stop
+    # ------------------------------------------------------------------
+    async def start(self) -> dict:
+        """Open a fresh run and begin scanning. Idempotent while already running.
+
+        START ALWAYS OPENS A NEW RUN, and closes any run left open by a crash or
+        a killed container. It does not adopt one. Adopting is what produced
+        KNOWN_ISSUES A9: the loop picked up an open run and carried on writing
+        into it under whatever settings it happened to boot with, so the run's
+        stored config stopped describing the trades filed beneath it. One press,
+        one run, one configuration — and a run that was interrupted is closed
+        where it stopped rather than silently resumed hours later with a gap in
+        the middle that nothing records.
+
+        Nothing is deleted by this. The interrupted run keeps its trades and its
+        decisions; it simply ends.
+        """
+        if self._running:
+            return await self.status()
+
+        await self.reset_run(note="started from the engine page")
+        await self.paper.connect()
         self._running = True
         self.started_at = datetime.now(tz=timezone.utc)
-        await self.ensure_run()
-        await self.paper.connect()
-        logger.info("LiveCryptoLoop started", symbols=list(self.symbols))
+        self._task = asyncio.create_task(self._loop())
+        logger.info("LiveCryptoLoop started", symbols=list(self.symbols),
+                    run_id=str(self.run_id))
         await self._act(
             "engine",
-            f"Engine started — PAPER, {self.entry_tf} entries on {', '.join(self.symbols)} "
-            f"@ {self.risk_pct*100:.0f}% risk, ${self.starting_balance:,.0f} balance",
+            f"Engine started — {self.mode}, {self.entry_tf} entries on "
+            f"{', '.join(self.symbols)} @ {self.risk_pct*100:.0f}% risk, "
+            f"${self.starting_balance:,.0f} balance",
         )
+        return await self.status()
+
+    async def stop(self) -> dict:
+        """Stop scanning and END the run. Safe to call when already stopped.
+
+        OPEN POSITIONS ARE CLOSED, not abandoned. A stopped engine marks no
+        prices, so an open position's stop-loss and take-profit would never be
+        checked again — it would sit at whatever it was worth the moment the
+        engine stopped, and the run's result would be missing a trade that never
+        resolved. Closing them at the current mark goes through the normal settle
+        path, so each one is persisted against this run with its real P&L.
+
+        The run is ended AFTER that, so the closes land inside it.
+        """
+        was_running = self._running
+        self._running = False
+
+        task, self._task = self._task, None
+        if task is not None and not task.done():
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
+
+        if was_running:
+            try:
+                closed = await self.paper.close_all_positions()
+                if closed:
+                    await self._act(
+                        "engine",
+                        f"Engine stopping — closed {len(closed)} open position(s) at "
+                        "the current price so the run has no unresolved trades",
+                    )
+            except Exception as exc:  # noqa: BLE001 - stopping must not be blockable
+                logger.warning("Could not close positions on stop", error=str(exc))
+
+            await self._end_run()
+            await self._act("engine", "Engine STOPPED — run ended")
+            logger.info("LiveCryptoLoop stopped", run_id=str(self.run_id))
+
+        self.paused = False
+        return await self.status()
+
+    async def _end_run(self) -> None:
+        """Stamp the active run as finished. Never raises — a bookkeeping failure
+        must not leave the caller believing the engine is still running."""
+        try:
+            from datetime import datetime as _dt
+
+            from sqlalchemy import select
+
+            from app.db.session import async_session_maker
+            from app.models.engine_run import EngineRun
+
+            async with async_session_maker() as db:
+                for row in (
+                    await db.execute(select(EngineRun).where(EngineRun.ended_at.is_(None)))
+                ).scalars().all():
+                    row.ended_at = _dt.now(tz=timezone.utc)
+                    db.add(row)
+                await db.commit()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Could not close the engine run", error=str(exc))
+
+    async def run(self) -> None:
+        """Backwards-compatible entry point: start and block until stopped.
+
+        Kept because the loop body used to be the public surface. Nothing in the
+        application calls it now — `start()` owns the task.
+        """
+        await self.start()
+        task = self._task
+        if task is not None:
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+    async def _loop(self) -> None:
         while self._running:
             for pair, bsym in self.symbols.items():
                 try:
@@ -815,6 +931,3 @@ class LiveCryptoLoop:
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Live loop push error", error=str(exc))
             await asyncio.sleep(self.poll_interval)
-
-    async def stop(self) -> None:
-        self._running = False

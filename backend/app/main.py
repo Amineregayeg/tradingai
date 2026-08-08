@@ -217,19 +217,31 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as exc:
         logger.warning("Failed to load broker connections from DB", error=str(exc))
 
-    # Crypto-only: drive the app from a live Binance PAPER-trading loop instead
-    # of an OANDA/forex price stream. The loop owns a PaperBroker (registered
+    # Crypto-only: drive the app from a live Binance simulation loop instead of
+    # an OANDA/forex price stream. The loop owns its simulated broker (registered
     # into broker_manager so REST /positions + kill-switch see it) and executes
-    # the validated strategy in PAPER mode (nothing reaches a real broker).
-    import asyncio as _asyncio
-
+    # the validated strategy against it — nothing reaches a real broker.
+    #
+    # IT IS CONSTRUCTED HERE AND DELIBERATELY NOT STARTED.
+    # The engine used to begin scanning on every boot, which meant a deploy, a
+    # crash-restart or a 3am reboot resumed trading decisions with nobody
+    # watching and nobody having asked. It now waits for POST /engine/start. The
+    # cost is real and worth naming: if the container restarts mid-run, the
+    # engine comes back idle and the run stays ended until someone presses Start.
+    # That is the intended trade — an engine that only ever runs because a person
+    # started it.
     from app.services.live.crypto_loop import LiveCryptoLoop
 
     live_loop = LiveCryptoLoop()
     broker_manager.register_adapter("paper", live_loop.paper)
     app.state.live_loop = live_loop
-    app.state.live_task = _asyncio.create_task(live_loop.run())
-    logger.info("Live crypto paper-trading loop started", symbols=list(live_loop.symbols))
+    app.state.live_task = None
+    logger.info(
+        "Live crypto engine ready — idle until started",
+        symbols=list(live_loop.symbols),
+        mode=live_loop.mode,
+        starting_balance=live_loop.starting_balance,
+    )
 
     # ------------------------------------------------------------------
     # 11. APScheduler for periodic jobs
@@ -310,8 +322,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # ------------------------------------------------------------------
     logger.info("Trading AI Co-Pilot shutting down")
     try:
+        # Ends the run and settles anything open. The engine will not come back
+        # by itself, so a run left open here would claim to be in progress
+        # forever. If the process is killed outright this never runs — which is
+        # why start() closes any run it finds still open.
         await app.state.live_loop.stop()
-        app.state.live_task.cancel()
     except Exception as exc:
         logger.warning("Live loop stop error", error=str(exc))
     try:

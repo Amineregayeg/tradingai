@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, is_dataclass
 
-from fastapi import APIRouter, Body, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 from sqlalchemy import select
 
 from app.api.deps import CurrentUser, DBSession
@@ -60,9 +60,43 @@ async def engine_status(request: Request, user_id: CurrentUser) -> dict:
     return await _loop(request).status()
 
 
+@router.post("/start")
+async def engine_start(request: Request, user_id: CurrentUser) -> dict:
+    """Open a new run and begin scanning.
+
+    There is nothing to configure. The engine's settings live in
+    `services/live/fixed_config.py` and are the same for every run, which is what
+    makes two runs comparable at all. Pressing this twice is harmless — the
+    second press finds the engine already running and changes nothing, rather
+    than quietly abandoning the first run for a second one.
+    """
+    return await _loop(request).start()
+
+
+@router.post("/stop")
+async def engine_stop(request: Request, user_id: CurrentUser) -> dict:
+    """Stop scanning and end the run.
+
+    Open positions are closed at the current price first, so the run has no
+    trade left unresolved — a stopped engine marks no prices, and a position
+    whose stop-loss will never be checked again is not "still open", it is
+    abandoned. Nothing is deleted: the run keeps its trades and decisions and
+    stays in the history.
+    """
+    return await _loop(request).stop()
+
+
 @router.post("/pause")
 async def engine_pause(request: Request, user_id: CurrentUser) -> dict:
+    """Stop taking new setups. The run stays open and open positions are still
+    managed — this is the control for stepping away, not for finishing."""
     loop = _loop(request)
+    if not loop._running:  # noqa: SLF001
+        raise HTTPException(
+            status_code=409,
+            detail="The engine is stopped. Pause suspends a running engine; "
+                   "press Start to begin a run.",
+        )
     loop.paused = True
     await loop._act("engine", "Engine PAUSED — no new entries (open positions still managed)")
     return await loop.status()
@@ -71,62 +105,14 @@ async def engine_pause(request: Request, user_id: CurrentUser) -> dict:
 @router.post("/resume")
 async def engine_resume(request: Request, user_id: CurrentUser) -> dict:
     loop = _loop(request)
+    if not loop._running:  # noqa: SLF001
+        raise HTTPException(
+            status_code=409,
+            detail="The engine is stopped. Press Start to begin a new run.",
+        )
     loop.paused = False
     await loop._act("engine", "Engine RESUMED — taking new setups")
     return await loop.status()
-
-
-@router.get("/config-options")
-async def engine_config_options(user_id: CurrentUser) -> dict:
-    """What may be configured for a run, served from the backend.
-
-    The form is built from this so it can never offer a choice the backend would
-    refuse — the exact defect the broker connection form had, where three of
-    four brokers and one of two environments could only ever fail.
-
-    Includes `fixed`, which names what is deliberately NOT configurable and why.
-    """
-    from app.services.live.run_config import options
-
-    return options()
-
-
-@router.post("/reset")
-async def engine_reset(
-    request: Request, user_id: CurrentUser,
-    payload: dict | None = Body(default=None),
-    note: str | None = None, label: str | None = None,
-) -> dict:
-    """End the current run and start a clean one.
-
-    NOTHING IS DELETED. The previous run's trades and decision records remain,
-    still queryable by their run_id — they are the evidence of what the strategy
-    did, and a reset that destroyed them would undo the reason backups exist.
-    The slate is clean because metrics are scoped to the new run.
-
-    Until this existed, starting a clean run meant an SSH session and a
-    container restart, which meant in practice that runs were never restarted
-    and results accumulated across configuration changes.
-    """
-    from app.services.live.run_config import ConfigError, reject_forbidden, validate
-
-    # Refuse pre-registered fields BEFORE needing a running engine. Otherwise a
-    # request naming risk_pct gets "service unavailable" while the engine is
-    # down, which hides the far more important message.
-    try:
-        reject_forbidden(payload)
-    except ConfigError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    loop = _loop(request)
-    try:
-        cfg = validate(payload, loop)
-    except ConfigError as exc:
-        # 400 with the REASON. A refused setting must say why — silently
-        # substituting a default would start a run whose stored config does not
-        # describe what actually ran.
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return await loop.reset_run(note=note, label=label, config=cfg)
 
 
 @router.get("/runs")
