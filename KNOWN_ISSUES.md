@@ -327,16 +327,27 @@ choice about where you want to be interrupted, not a code decision.
 **Fix:** pick a channel, then alert on `data-health.ok == false` and on repeated
 bridge failures. The detection already exists; only delivery is missing.
 
-### E4. The economic calendar is dead — no FINNHUB_API_KEY
-**Found in:** Phase 1 audit
-**What it is:** `/api/calendar/today` returns 503 with
-"FINNHUB_API_KEY not configured". MorningBriefingPage handles it honestly and
-shows the error rather than pretending, so nothing is misleading — the feature
-simply does not work.
-**Why it matters:** only that a page of the app is permanently non-functional.
-**Fix:** set FINNHUB_API_KEY on the api service, or remove the calendar from the
-Morning Briefing so the page stops advertising something unavailable.
-
+### E4. The economic calendar is the wrong source, not merely unconfigured
+**Restated 2026-08-08** after checking GATE-015 in registry v1.2.0. The entry used
+to read "no FINNHUB_API_KEY". That understated it: a Finnhub key would produce a
+working integration that still fails the gate.
+**What it is:** GATE-015 (READY, HARD_GATE) names the source — **Forex Factory
+RED FOLDERS ONLY**, currencies USD (optionally EUR/GBP for crypto), and the
+calendar's timezone **set to New York local** so its timestamps and the chart's
+agree. We implemented Finnhub, which is a different provider with different
+impact classification and no red-folder concept.
+**Why it matters:** three HARD_GATEs depend on it — GATE-012 (no new entry within
+15 minutes BEFORE a red-folder event), GATE-013 (none for 30 minutes after, AND
+then wait for the first complete M15 candle to close — both conditions, not
+either), GATE-015 itself. Until the ruled source is wired, those three can only
+ever be NEVER_EVALUATED, which is readiness gate 5's blocking condition.
+**Worth carrying into the implementation:** GATE-012's note records that the
+15 / 30 / M15 constants appear in no workspace page and in none of the 1,258
+images — they are trader-authorised engine constants, not recovered doctrine, and
+should be emitted as declared parameters even though the rule is READY.
+**Fix:** a Forex Factory red-folder source with New York timestamps. Then delete
+the Finnhub client rather than leaving it as a selectable fallback — a second
+calendar is a second answer to "was there news", and the gates cannot cite two.
 
 ### B3. Deploys are identifiable but not reproducible
 **Found in:** I6. Narrowed after B3/I6 — the "nobody can tell" half is fixed and

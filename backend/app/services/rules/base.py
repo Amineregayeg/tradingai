@@ -84,16 +84,29 @@ class RuleImplementation:
         # caught at import rather than in an audit.
         contract.rule(rule_id)
 
-        existing = _IMPLEMENTATIONS.get(rule_id)
-        if existing is not None and existing.__qualname__ != cls.__qualname__:
-            if not (cls.ALLOW_SHARED_ID and existing.ALLOW_SHARED_ID):
-                raise DuplicateRuleImplementation(
-                    f"{rule_id} is already implemented by {existing.__module__}."
-                    f"{existing.__qualname__}; {cls.__module__}.{cls.__qualname__} claims it "
-                    "too. Two behaviours behind one id makes the attribution ledger "
-                    "ambiguous."
-                )
-        _IMPLEMENTATIONS[rule_id] = cls
+        # An alias id is the SAME rule under a second number, so implementing one is
+        # implementing both. Claiming the alias rather than the canonical would leave the
+        # canonical looking unimplemented while the alias looked covered — the coverage
+        # report would then be wrong in both directions at once.
+        canonical = contract.alias_target(rule_id)
+        if canonical is not None:
+            raise TypeError(
+                f"{cls.__qualname__} claims {rule_id}, which the registry marks "
+                f"alias_of {canonical}. Claim the canonical id — the alias is registered "
+                "automatically, so claiming it directly hides the rule it restates."
+            )
+
+        for claimed in (rule_id, *contract.aliases_of(rule_id)):
+            existing = _IMPLEMENTATIONS.get(claimed)
+            if existing is not None and existing.__qualname__ != cls.__qualname__:
+                if not (cls.ALLOW_SHARED_ID and existing.ALLOW_SHARED_ID):
+                    raise DuplicateRuleImplementation(
+                        f"{claimed} is already implemented by {existing.__module__}."
+                        f"{existing.__qualname__}; {cls.__module__}.{cls.__qualname__} claims "
+                        "it too. Two behaviours behind one id makes the attribution ledger "
+                        "ambiguous."
+                    )
+            _IMPLEMENTATIONS[claimed] = cls
 
     # -- helpers -------------------------------------------------------------------
     @classmethod

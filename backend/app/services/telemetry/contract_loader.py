@@ -141,6 +141,35 @@ def is_open(rule_id: str) -> bool:
     return rule(rule_id).get("status") == "OPEN"
 
 
+@lru_cache(maxsize=1)
+def _alias_index() -> dict[str, tuple[str, ...]]:
+    """canonical rule id -> the ids that restate it.
+
+    Thirteen GRADE ids carry `alias_of` because two extraction passes over the corpus
+    produced the same rule twice under different numbers. They are not duplicates to be
+    cleaned up — the id policy is STABLE and both ids may be cited by stored telemetry
+    forever — so the engine has to treat one implementation as satisfying both.
+    """
+    out: dict[str, list[str]] = {}
+    for rid, r in rules().items():
+        target = r.get("alias_of")
+        if isinstance(target, str) and target:
+            out.setdefault(target, []).append(rid)
+    return {k: tuple(sorted(v)) for k, v in out.items()}
+
+
+def aliases_of(rule_id: str) -> tuple[str, ...]:
+    """The alias ids that restate *rule_id*, or empty."""
+    rule(rule_id)
+    return _alias_index().get(rule_id, ())
+
+
+def alias_target(rule_id: str) -> str | None:
+    """The canonical id this one restates, or None if it is already canonical."""
+    target = rule(rule_id).get("alias_of")
+    return str(target) if isinstance(target, str) and target else None
+
+
 def banned_inputs(rule_id: str) -> tuple[str, ...]:
     """Input classes the trader specifically prohibited for this rule.
 

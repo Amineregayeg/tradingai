@@ -222,26 +222,110 @@ test that fails when a regenerated schema arrives. **Blocked on Salim.**
 
 ## 5. Decisions this needs
 
-Nothing here blocks starting; everything here changes what the result means.
+**Two of the three questions this document originally put to Malek are already
+answered in the package**, and were answered before it was asked. They were
+checked against `RULE_REGISTRY.json` v1.2.0 on 2026-08-08; both answers are
+HARD_GATE, so neither is a preference we get to weigh.
 
-**From Malek — before M9 Stage A**
-1. **Perpetuals or spot?** (§4.3) Recommended: perpetuals, and re-baseline.
-2. **Which execution timeframe** — 30M, 15M or 5M? (§4.4) Recommended: 30M, the
-   least noisy of the ruled options and the closest to the data we already hold.
-3. **Calendar source** for the news blackout — Finnhub key, or Forex Factory /
-   Crypto Craft to match the doctrine (E4). Three HARD_GATEs wait on this.
+### 5.1 The feed — ANSWERED. Perpetuals, and the tickers are named.
+**GATE-008** (READY, HARD_GATE) does not hint, it enumerates:
+
+> Canonical tickers: **BTCUSDT.P (Binance)**, **ETHUSDT.P (Binance)**,
+> TOTAL (CryptoCap), USDT.D (CryptoCap).
+
+So §4.3 is not a trade-off to weigh — running Binance spot is a hard-gate
+violation, and the 2.89% median bar-range divergence is the size of the error it
+introduces into every box grade. **Decision: move to perpetuals; re-baseline.**
+
+Two riders fall out of the same rule and neither was in the original plan:
+
+* **The correlate panels come from CryptoCap, not from us.** TOTAL and USDT.D are
+  named with a source. Our dominance collector is a different series with ~8 days
+  of history and point samples rather than OHLC (F1). Whether CryptoCap is
+  reachable programmatically is now an M4 dependency, and it belongs to the
+  parallel agent's track.
+* **The roster trades BTC. ETH is a *panel*, not an instrument.** The layout is
+  "main: BTC · positive: ETH and TOTAL · negative: USDT.D". We currently trade
+  BTC **and** ETH as equals — and the run reviewed today took its only trade on
+  ETH. GATE-008's note adds that altcoins cannot be magic-aligned at all, and Q1's
+  stated no-reply default is "we trade BTC only and refuse to size any altcoin".
+  **This needs settling before M9 Stage A** or the shadow window measures an
+  instrument the contract does not trade.
+
+### 5.2 The calendar — ANSWERED, and we built the wrong integration
+**GATE-015** (READY, HARD_GATE): the filter is **Forex Factory RED FOLDERS ONLY**
+— "growth, inflation, employment, central bank, business surveys and speeches";
+for crypto "USD is enough however for extra confluence i can use EUR, GBP and
+USD"; and the calendar timezone **must be New York local** so its timestamps and
+the chart's agree.
+
+We implemented **Finnhub**. E4 has therefore been mis-stated in the register since
+it was written: the problem is not a missing API key, it is that the ruled source
+is a different one. A Finnhub key would produce a working integration that still
+fails GATE-015.
+
+The two surrounding gates are specific and implementable today:
+* **GATE-012** — no new entry within **15 minutes before** a red-folder event.
+* **GATE-013** — no new entry for **30 minutes after**, *and then* additionally
+  wait for the first complete **M15** candle to close. Both conditions, not either.
+
+Worth carrying into the code comments: GATE-012's note says the 15/30/M15 constants
+appear in no workspace page and in none of the 1,258 images — they are
+**trader-authorised engine constants, not recovered doctrine**. They should be
+emitted as declared parameters even though the rules are READY.
+
+### 5.3 The execution timeframe — NOT answered, deliberately. And I was wrong.
+I recommended 30M. The package argues against it.
+
+* **GATE-018** (HARD_GATE) fixes the legal set at exactly **{30M, 15M, 5M}**.
+  Anything below 5M is a flagged extension emitting `LTF_BELOW_RULED_SET`.
+* **GATE-007** is explicit that the choice within that set is not the rule: "the
+  particular member of the set is hedged three times in the source ('usually',
+  'such as', 'sometimes 30-minute') — **the SAME-TF requirement is the hard part,
+  not the specific 5M/15M/30M list**." GRADE-010/012 say the same: alignment
+  timeframe equals execution timeframe, whatever it is.
+* **The trader's own behaviour excludes 30M.** `TRADER_QUESTIONS.md`: his
+  bracketed charts show **6 trades on 1M, 2 on 3M, and zero on 30M**.
+* **GATE-019** notes that document 022 classifies "day trading = TFs UNDER 30Min",
+  putting 30M on the *swing* side while the ruling calls it execution — a tension
+  the contract flags and does not resolve.
+
+**Revised recommendation: 5M.** It is the lowest legal member, the nearest legal
+neighbour to the 1M/3M he actually trades, and the only choice not contradicted by
+either his behaviour or 022. 15M is the defensible conservative alternative and
+has the incidental advantage that GATE-013's post-news wait and GATE-024's session
+backgrounds are both defined in M15 terms. 30M should be dropped from
+consideration: legal on paper, unused in practice, and disowned by one of his own
+documents.
+
+This is a **declared parameter**, not a doctrine value. Whichever we pick is
+stamped on every record as ours.
+
+Cost worth stating before choosing 5M: twelve times the evaluations of 1H, so
+twelve times the decision-record volume, and CFT's ~125-day history limit bites
+sooner on the lower timeframe if we ever move the feed there.
+
+### 5.4 Still genuinely open
+
+**From Malek**
+1. **Do we trade ETH, or is it only a panel?** (§5.1) The contract's stated default
+   is BTC only.
+2. **5M or 15M** as the execution timeframe (§5.3).
+3. **Forex Factory access** — a scraper, a paid feed, or an equivalent red-folder
+   source with NY timestamps (§5.2).
 
 **From Salim**
 1. Regenerate the v1.1.0 documents against registry v1.2.0 (§4.5).
-2. **Annotated charts** — the highest-value thing he can send (§4.2).
-3. The 10 rule ids the critic pass named as never adjudicated: in scope or not?
+2. **Annotated charts** — still the highest-value thing he can send (§4.2).
+3. Is CryptoCap TOTAL/USDT.D reachable programmatically, or do we substitute — and
+   if we substitute, does that break GATE-008?
+4. The 10 rule ids the critic pass named as never adjudicated: in scope or not?
 
 **From the trader**
-The six questions in `TRADER_QUESTIONS.md`, plus three one-word ratifications.
-Each has a no-reply default, so silence is a decision rather than a blocker — but
-each answer removes one declared parameter (§4.1).
-
----
+The six questions in `TRADER_QUESTIONS.md` plus three one-word ratifications. Each
+has a no-reply default, so silence is a decision rather than a blocker — but each
+answer removes one declared parameter (§4.1). Q1 (do altcoins trade at all) is now
+load-bearing for §5.1.
 
 ## 6. How we will know it worked
 
