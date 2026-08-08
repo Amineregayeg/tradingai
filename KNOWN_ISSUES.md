@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-08 (M3 — A10, B9 found; run 7d788ad6 reviewed — A11, B10 found)
+Last updated: 2026-08-08 (M4 — B11 found; timeframe review — B12 found)
 
 ---
 
@@ -267,11 +267,23 @@ risk matrix, so a bad TOTAL read does not produce a slightly wrong alignment —
 matrix cell and therefore the position size, or trips GATE-001's hard skip on a tradable
 setup. History is *not* the constraint here: ~12 days at 15M is ~1,150 bars, plenty for LTF
 structure. Sampling rate is.
-**Fix:** drop the collector's poll interval to ~15 s, which puts 20 samples in a 5M bar and
-60 in a 15M — the same fix F1 already proposes for 1m bars, now load-bearing rather than
-cosmetic. Until then, record the execution TF the alignment was actually read at, and refuse
-to grade a layout whose correlate bars are thinner than the declared minimum rather than
-grading it anyway.
+**Verified, because the collector's own docstring reads the other way:** it warns that
+CoinGecko `/global` refreshes only every ~602 s and that polling it per minute yields "nine
+identical samples and then a jump — FABRICATED STRUCTURE". That is a warning about a
+*different* construction. This collector does not take dominance from `/global`: it computes
+market cap = price × supply, where **supplies** come from CoinGecko once a day (slow by
+nature, fine) and **prices** come from Binance `/ticker/price`, real-time. So the intraday
+resolution is bounded by our poll rate and nothing upstream — raising the rate buys genuine
+structure, not duplicates. Anyone reading only the docstring would conclude the opposite.
+**Fix, in two parts:**
+1. **Refuse rather than fabricate.** A bar assembled from too few samples is not a low-quality
+   bar, it is not a bar; the engine must stand aside (GATE-036) rather than grade it. This is
+   the half that makes *any* execution-timeframe choice safe, and it is independent of which
+   one is chosen.
+2. **Then raise the sampling rate** to ~15 s, which puts 20 samples in a 5M bar and 60 in a
+   15M — the same change F1 proposes for 1m bars, load-bearing here rather than cosmetic.
+   Ordering matters: the guard first, so that a shadow window started before the collector
+   catches up refuses to grade instead of silently grading noise.
 
 ### B9. Four primitive sub-parts need numbers nobody has ruled on — BLOCKED ON THE TRADER
 **Found in:** M3 (implementing PRIM-002/003/004/006), 2026-08-08
@@ -303,7 +315,7 @@ implementation declares a `COVERAGE_NOTE` that `check_rule_coverage.py` now prin
 them blocks M4 — the graders do not read these classes — so this is a question to batch, not
 a gate to wait on.
 
-### B11. Nothing says HOW the execution timeframe is chosen, and the trader varies it
+### B12. Nothing says HOW the execution timeframe is chosen, and the trader varies it
 **Found in:** answering "should the timeframe be set or can it vary?", 2026-08-08.
 **What it is:** the contract fixes the legal *set* ({30M, 15M, 5M}, GATE-018) and
 requires that within one decision every panel uses the SAME timeframe

@@ -141,3 +141,114 @@ class AlignmentTimeframe(RuleImplementation):
         if not tfs:
             return False, "no panel reads supplied, so no alignment timeframe exists"
         return AlignmentTimeframe.check(tfs[0], signal_tf)
+
+
+#: Minimum raw observations behind a synthesised correlate bar before its high and low are
+#: treated as price action rather than sampling luck.
+#:
+#: AN ENGINE CHOICE, NOT DOCTRINE — the corpus fixes no number, so it is stamped as a
+#: declared parameter like any other. NOT a GATE-005 violation: that rule bans candle counts
+#: and time delays as inputs to the DISTURBANCE decision, and this is a precondition on
+#: whether a bar exists to read at all. The two are easy to confuse and worth separating
+#: out loud.
+#:
+#: At the collector's present 60-second sampling this admits 30M (30 samples) and rejects
+#: 5M (5). That is the intended behaviour and it is why the guard lands before the sampling
+#: rate changes, not after (KNOWN_ISSUES B11).
+MIN_SAMPLES_PER_SYNTHETIC_BAR = 20
+
+
+class LayoutReadability:
+    """Can this layout be read at all? Produces the evaluations GATE-036 folds.
+
+    Deliberately NOT a `RuleImplementation`: it invents no rule of its own. Each problem it
+    finds is reported as a failure of the rule that actually requires the thing — GATE-008
+    when the roster cannot be resolved, GATE-007 when the alignment is not available at the
+    execution timeframe — so `deciding_rule_id` always names a real registry rule rather than
+    a local invention.
+    """
+
+    @staticmethod
+    def evaluate(
+        reads: Any,
+        *,
+        signal_tf: str,
+        instrument: str = "BTC",
+        min_samples: int = MIN_SAMPLES_PER_SYNTHETIC_BAR,
+    ) -> tuple[list[Any], list[str]]:
+        """Return (rule evaluations in order, human-readable causes)."""
+        from app.services.telemetry.records import RuleEvaluation
+
+        evaluations: list[Any] = []
+        causes: list[str] = []
+
+        # -- GATE-008: does the roster resolve, and is every panel present? --------------
+        try:
+            panels = LayoutRoster.for_instrument(instrument)
+            present = {getattr(r, "asset", None) for r in reads}
+            missing = [p.asset for p in panels if p.asset not in present]
+            roster_ok = not missing
+            if missing:
+                causes.append(f"no read for {', '.join(missing)}")
+        except ValueError as exc:
+            panels, missing, roster_ok = (), [], False
+            causes.append(str(exc).split(".")[0])
+
+        evaluations.append(RuleEvaluation(
+            rule_id="GATE-008",
+            verdict="PASS" if roster_ok else "FAIL",
+            values={"instrument": instrument, "panels_missing": list(missing),
+                    "layout_size": len(panels)},
+            value_provenance={
+                "instrument": {"source": "RECORD_FIELD", "field": "instrument"},
+                "panels_missing": {"source": "DERIVED", "expression": "roster - reads"},
+                "layout_size": {"source": "REGISTRY_CONSTANT", "field": "GATE-008.values.panels"},
+            },
+        ))
+
+        # -- GATE-007: one timeframe, and it is the execution one -----------------------
+        tf_ok, tf_why = AlignmentTimeframe.check_all(reads, signal_tf)
+        if not tf_ok:
+            causes.append(tf_why)
+
+        # -- GATE-007 again: are the synthesised panels thick enough to carry structure? -
+        thin = [
+            (getattr(r, "asset", "?"), r.bar_sample_count)
+            for r in reads
+            if getattr(r, "bar_sample_count", None) is not None
+            and r.bar_sample_count < min_samples
+        ]
+        if thin:
+            tf_ok = False
+            causes.append(
+                "correlate bars too thin at "
+                f"{signal_tf}: " + ", ".join(f"{a} has {n} samples" for a, n in thin)
+                + f" (minimum {min_samples})"
+            )
+
+        evaluations.append(RuleEvaluation(
+            rule_id="GATE-007",
+            verdict="PASS" if tf_ok else "FAIL",
+            values={"alignment_tf": sorted({getattr(r, "tf", "?") for r in reads}),
+                    "signal_tf": signal_tf,
+                    "thin_panels": [a for a, _ in thin],
+                    "min_samples_per_synthetic_bar": min_samples},
+            value_provenance={
+                "alignment_tf": {"source": "CORRELATE_FIELD", "field": "tf"},
+                "signal_tf": {"source": "RECORD_FIELD", "field": "signal_tf"},
+                "thin_panels": {"source": "CORRELATE_FIELD", "field": "bar_sample_count"},
+                "min_samples_per_synthetic_bar": {
+                    "source": "DECLARED_PARAMETER", "field": "min_samples_per_synthetic_bar",
+                },
+            },
+            declared_parameter_used="min_samples_per_synthetic_bar",
+        ))
+        return evaluations, causes
+
+    @staticmethod
+    def readable(reads: Any, *, signal_tf: str, instrument: str = "BTC",
+                 min_samples: int = MIN_SAMPLES_PER_SYNTHETIC_BAR) -> bool:
+        evaluations, _ = LayoutReadability.evaluate(
+            reads, signal_tf=signal_tf, instrument=instrument, min_samples=min_samples
+        )
+        return all(e.verdict == "PASS" for e in evaluations)

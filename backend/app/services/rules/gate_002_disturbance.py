@@ -105,6 +105,14 @@ class CorrelateRead:
     reaction_out_of_step: bool | None = None
     #: GATE-009's six admissible forms need to know what this panel's structure did.
     break_state: Literal["MSB_IN_WINDOW", "ALREADY_MSB_CONTINUING_BOS", "NONE"] | None = None
+    #: How many raw observations the bars behind this read were assembled from.
+    #:
+    #: None for a real instrument: an exchange bar is a bar, and asking how many ticks made
+    #: it is meaningless. It matters only for TOTAL and USDT.D, which are CryptoCap indices
+    #: we SYNTHESISE by sampling — where a 5-minute "bar" at 60-second sampling holds five
+    #: observations and its high and low are sampling luck rather than price action
+    #: (KNOWN_ISSUES B11). Carried so the layout can refuse rather than grade noise.
+    bar_sample_count: int | None = None
 
 
 @dataclass

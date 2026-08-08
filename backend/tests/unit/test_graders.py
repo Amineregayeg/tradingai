@@ -32,8 +32,10 @@ from app.services.rules.gate_008_roster import (
     NEGATIVE,
     POSITIVE,
     AlignmentTimeframe,
+    LayoutReadability,
     LayoutRoster,
 )
+from app.services.rules.gate_036_stand_aside import StandAside
 from app.services.rules.grade_001_structure_box import BoxScopeDeclaration, StructureBoxes
 from app.services.rules.grade_002_box_grade import (
     LADDER,
@@ -47,6 +49,7 @@ from app.services.rules.grade_008_fake_msb import FakeMSBClassifier
 from app.services.rules.prim_001_swings import Bar, Swing
 from app.services.rules.prim_002_imbalances import Imbalance
 from app.services.rules.prim_005_breaks import BreakEvent
+from app.services.telemetry.records import RuleEvaluation
 
 T0 = datetime(2026, 8, 3, 14, 0, tzinfo=timezone.utc)
 TF = "15M"
@@ -476,3 +479,124 @@ def test_the_detector_names_the_shortcuts_it_is_forbidden_to_use():
         "reversal_within_n_candles", "max_candle_count", "fixed_time_delay"
     }
     assert check["present"] == []
+
+
+# ===========================================================================
+# GATE-036 — the engine must be able to refuse
+# ===========================================================================
+def ev(rule_id: str, verdict: str) -> RuleEvaluation:
+    return RuleEvaluation(
+        rule_id=rule_id, verdict=verdict,  # type: ignore[arg-type]
+        values={"x": 1},
+        value_provenance={"x": {"source": "DERIVED", "expression": "test"}},
+    )
+
+
+def test_stand_aside_and_skip_are_different_outcomes():
+    """"SKIP means a candidate setup failed a gate; STAND_ASIDE means no setup was in play."
+    Collapsing them makes "the strategy looked and declined" indistinguishable from "the
+    strategy could not look" — the most useful distinction in the whole record."""
+    evals = [ev("GATE-008", "PASS"), ev("GATE-007", "FAIL"), ev("GATE-002", "PASS")]
+
+    skipped = StandAside.decide(evals, setup_in_play=True)
+    stood = StandAside.decide(evals, setup_in_play=False)
+
+    assert skipped.decision == "SKIP"
+    assert stood.decision == "STAND_ASIDE"
+    assert skipped.deciding_rule_id == stood.deciding_rule_id == "GATE-007"
+
+
+def test_the_decider_is_the_first_failure_not_a_preferred_one():
+    """K-25: without deriving it, "an engine that fails several gates may cite whichever one
+    it prefers, and an engine that decides by undocumented logic may cite any gate"."""
+    evals = [ev("GATE-008", "PASS"), ev("GATE-007", "FAIL"), ev("GATE-002", "FAIL")]
+    d = StandAside.decide(evals, setup_in_play=True)
+
+    assert d.deciding_rule_id == "GATE-007", "cited a later failure"
+    assert d.decision_path == ["GATE-008", "GATE-007", "GATE-002"]
+
+
+def test_a_take_cites_the_last_gate_that_passed():
+    evals = [ev("GATE-008", "PASS"), ev("GATE-007", "PASS"), ev("GATE-002", "PASS")]
+    d = StandAside.decide(evals, setup_in_play=True)
+    assert d.decision == "TAKE"
+    assert d.deciding_rule_id == "GATE-002"
+
+
+def test_a_stand_aside_with_nothing_failing_cites_no_rule_rather_than_borrowing_one():
+    """There is no failing rule, so the record says so instead of citing an id that passed —
+    a borrowed decider is indistinguishable from a fabricated one after the fact."""
+    d = StandAside.decide([ev("GATE-008", "PASS")], setup_in_play=False)
+    assert d.decision == "STAND_ASIDE"
+    assert d.deciding_rule_id is None
+
+
+# ===========================================================================
+# B11 — the layout refuses rather than grading noise
+# ===========================================================================
+def test_a_layout_whose_synthesised_bars_are_too_thin_is_refused():
+    """KNOWN_ISSUES B11. At 60s sampling a 5-minute TOTAL bar holds five observations, and
+    its high and low are sampling luck rather than price action. Grading it produces a
+    disturbance grade, which keys the risk matrix, which sizes a real order."""
+    reads = [
+        read(MAIN, "BULLISH"),
+        read(POSITIVE[0], "BULLISH"),
+        read(POSITIVE[1], "BULLISH", bar_sample_count=5),    # TOTAL, synthesised
+        read(NEGATIVE[0], "BEARISH", bar_sample_count=5),    # USDT.D, synthesised
+    ]
+    evals, causes = LayoutReadability.evaluate(reads, signal_tf=TF)
+    decision = StandAside.unreadable(causes, evals)
+
+    assert decision.decision == "STAND_ASIDE"
+    assert decision.deciding_rule_id == "GATE-007"
+    assert any("too thin" in c for c in causes)
+    assert not LayoutReadability.readable(reads, signal_tf=TF)
+
+
+def test_the_same_panels_at_a_thicker_sampling_are_accepted():
+    """The guard is about observations per bar, not about the asset. 30 samples is what the
+    present 60s collector puts in a 30-minute bar."""
+    reads = [
+        read(MAIN, "BULLISH"),
+        read(POSITIVE[0], "BULLISH"),
+        read(POSITIVE[1], "BULLISH", bar_sample_count=30),
+        read(NEGATIVE[0], "BEARISH", bar_sample_count=30),
+    ]
+    assert LayoutReadability.readable(reads, signal_tf=TF)
+    decided = StandAside.decide(
+        LayoutReadability.evaluate(reads, signal_tf=TF)[0], setup_in_play=True
+    )
+    assert decided.decision == "TAKE"
+
+
+def test_a_real_instrument_is_never_judged_on_sample_count():
+    """An exchange bar is a bar; asking how many ticks made it is meaningless. Only the
+    CryptoCap panels we synthesise carry a count."""
+    reads = aligned_long_layout()
+    assert all(r.bar_sample_count is None for r in reads)
+    assert LayoutReadability.readable(reads, signal_tf=TF)
+
+
+def test_a_missing_panel_makes_the_layout_unreadable_and_cites_the_roster():
+    reads = [r for r in aligned_long_layout() if r.asset != "TOTAL"]
+    evals, causes = LayoutReadability.evaluate(reads, signal_tf=TF)
+    decision = StandAside.unreadable(causes, evals)
+
+    assert decision.decision == "STAND_ASIDE"
+    assert decision.deciding_rule_id == "GATE-008"
+    assert any("TOTAL" in c for c in causes)
+
+
+def test_an_unreadable_layout_never_reaches_the_disturbance_grader():
+    """The point of the whole exercise: refusing is what stops five samples becoming a
+    position size. The classifier would happily grade these reads NONE."""
+    reads = [
+        read(MAIN, "BULLISH"),
+        read(POSITIVE[0], "BULLISH"),
+        read(POSITIVE[1], "BULLISH", bar_sample_count=5),
+        read(NEGATIVE[0], "BEARISH", bar_sample_count=5),
+    ]
+    assert DisturbanceClassifier.classify(reads, direction="LONG").grade == "NONE"
+    assert not LayoutReadability.readable(reads, signal_tf=TF), (
+        "the grader is willing; the guard is what makes it safe"
+    )

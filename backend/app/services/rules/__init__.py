@@ -40,10 +40,12 @@ from app.services.rules.gate_002_disturbance import (  # noqa: F401
 )
 from app.services.rules.gate_008_roster import (  # noqa: F401
     AlignmentTimeframe,
+    LayoutReadability,
     LayoutRoster,
     Panel,
 )
 from app.services.rules.gate_023_timezone import NewYorkTimestamps  # noqa: F401
+from app.services.rules.gate_036_stand_aside import Decision, StandAside  # noqa: F401
 from app.services.rules.grade_001_structure_box import (  # noqa: F401
     BoxScopeDeclaration,
     StructureBox,
@@ -80,6 +82,7 @@ __all__ = [
     "BreakEvents",
     "CorrelateRead",
     "CorrelationIsSelectionOnly",
+    "Decision",
     "Disturbance",
     "DisturbanceClassifier",
     "DuplicateRuleImplementation",
@@ -89,6 +92,7 @@ __all__ = [
     "HeavyDisturbanceSkip",
     "Imbalance",
     "ImbalanceInventory",
+    "LayoutReadability",
     "LayoutRoster",
     "LiquidityPool",
     "LiquidityPools",
@@ -104,6 +108,7 @@ __all__ = [
     "RuleImplementation",
     "SRFlip",
     "SRFlipZones",
+    "StandAside",
     "StandardBoxGrade",
     "StructuralNotStatistical",
     "StructureBox",
