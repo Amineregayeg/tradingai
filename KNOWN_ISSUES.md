@@ -303,6 +303,31 @@ implementation declares a `COVERAGE_NOTE` that `check_rule_coverage.py` now prin
 them blocks M4 — the graders do not read these classes — so this is a question to batch, not
 a gate to wait on.
 
+### B11. Nothing says HOW the execution timeframe is chosen, and the trader varies it
+**Found in:** answering "should the timeframe be set or can it vary?", 2026-08-08.
+**What it is:** the contract fixes the legal *set* ({30M, 15M, 5M}, GATE-018) and
+requires that within one decision every panel uses the SAME timeframe
+(GATE-007, GRADE-010, HG-13: `alignment_tf` must equal `signal_tf`). It says
+nothing about whether that timeframe may differ from one trade to the next — and
+the telemetry schema stamps `signal_tf` on **every** `setup_evaluation`,
+`trade_execution` and `scan_census` record, which is only worth doing if it moves.
+The trader does move it: 6 bracketed trades on 1M, 2 on 3M.
+
+A search of all 117 rules found no rule governing the choice. It is also **not
+among the questions being put to him** — `TRADER_QUESTIONS.md` asks whether 1M/3M
+are legal, and answers that from behaviour, but never asks how he picks.
+**Why it matters:** if the engine varies the timeframe, the selection rule is ours
+and invented, and it sits **upstream of every gate** — box grades, alignment,
+stop ladder and therefore risk all read from whichever series we chose. That is
+the worst possible place for an undeclared input: nothing downstream can be
+audited past it, and a conformance score would be computed over a choice no rule
+justifies.
+**Fix, in order:** (1) keep it FIXED and declared for the first shadow window, so
+the fidelity measurement has one fewer moving part; (2) add "how do you decide
+which chart to drop to?" to the trader's question list — it is cheap and currently
+missing; (3) only make it variable once there is a ruled or declared selection
+rule, stamped on every record like any other declared parameter.
+
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
 **What it is:** `TELEMETRY_SCHEMA.json` hard-pins `engine.rule_registry_version` with
