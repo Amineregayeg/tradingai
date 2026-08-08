@@ -196,7 +196,11 @@ class OffConditionDetector(RuleImplementation):
     )
 
     @staticmethod
-    def fired(read: CorrelateRead, agreement: AgreementState, main: CorrelateRead | None) -> list[str]:
+    def fired(
+        read: CorrelateRead,
+        agreement: AgreementState,
+        main: CorrelateRead | None,
+    ) -> list[str]:
         """Which off-conditions this panel trips. Any one of them makes it disturbed."""
         out: list[str] = []
         if agreement == "DISTURBED":

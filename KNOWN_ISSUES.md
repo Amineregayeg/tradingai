@@ -50,15 +50,19 @@ The contract work that exists is real but **not connected to anything that trade
 
 | Built | Wired into the live path |
 |---|---|
-| `app/services/rules/` — 7 of 117 rules (GATE-023, PRIM-001…006) | no — only tests and `check_rule_coverage.py` import it |
+| `app/services/rules/` — 33 of 117 rules (GATE-023, PRIM-001…006, and M4's graders) | no — only tests and `check_rule_coverage.py` import it |
 | `app/services/telemetry/` — contract records, validation, append-only store | no — the loop writes `decision_records`, not the contract's three record types |
 
-So **7/117 rules implemented, 0/117 evaluated on any trade**, and 0/91 HARD_GATEs.
+So **33/117 rules implemented, 0/117 evaluated on any trade**, and 32/91 HARD_GATEs
+implemented but 0 evaluated.
 
-M3 completed the primitive layer on 2026-08-08 (PRIM-002/003/004/006 added). That moves
-coverage 3 → 7 and it does **not** narrow this entry: a primitive nothing calls changes no
-decision. What it does is unblock M4 — the graders read an imbalance inventory and a pool
-inventory, and until now neither existed.
+M3 and M4 both landed on 2026-08-08 — the primitive layer (PRIM-002/003/004/006) and then
+the graders (GRADE-001…009, GATE-001/002/003/004/005/006/007/008/009/048). Coverage moved
+3 → 7 → 33. **Neither narrows this entry**, and the gap between the two numbers above is now
+the whole problem: a grader nothing calls changes no decision, and building more of them
+does not close a gap that is architectural rather than volumetric. See
+`MAGIC_STRATEGY_EXECUTION_PLAN.md` — no milestone in the original M0–M8 map ever switches
+the live loop over.
 
 **Where the running engine actively contradicts a HARD_GATE:**
 
@@ -239,6 +243,35 @@ doing so shifts the baseline you compare against.
 ---
 
 ## B. Silent failure — things that break without telling anyone
+
+### B11. The disturbance grader cannot be run on real data — TOTAL and USDT.D have no credible execution-timeframe bars
+**Found in:** M4 (implementing GATE-002/007/008/048), 2026-08-08
+**What it is:** GATE-007 requires the layout to be confirmed at the **execution** timeframe,
+and GATE-017 makes 1H analysis-only — so the four panels must be read on 30M, 15M or 5M. Two
+of those four panels are CryptoCap indices we synthesise ourselves, and
+`collect_dominance.py` samples at **60 s**:
+
+| Execution TF | samples per bar | credible? |
+|---|---|---|
+| 30M | 30 | yes |
+| 15M | 15 | marginal |
+| 5M | 5 | no — see F1, the same defect one timeframe down |
+
+So `DisturbanceClassifier` is implemented and tested, and on live data today it can only be
+fed at 30M without inventing structure. Its inputs for TOTAL and USDT.D are `CorrelateRead`s
+whose `observed_order_flow` and `expected_break_confirmed` come from structure detection on
+those bars — and structure on a 5-observation bar is noise with an OHLC shape.
+**Why it matters:** this is not a missing feature, it is the difference between a grader that
+runs and one that produces a disturbance grade from fabricated geometry. The grade keys the
+risk matrix, so a bad TOTAL read does not produce a slightly wrong alignment — it moves the
+matrix cell and therefore the position size, or trips GATE-001's hard skip on a tradable
+setup. History is *not* the constraint here: ~12 days at 15M is ~1,150 bars, plenty for LTF
+structure. Sampling rate is.
+**Fix:** drop the collector's poll interval to ~15 s, which puts 20 samples in a 5M bar and
+60 in a 15M — the same fix F1 already proposes for 1m bars, now load-bearing rather than
+cosmetic. Until then, record the execution TF the alignment was actually read at, and refuse
+to grade a layout whose correlate bars are thinner than the declared minimum rather than
+grading it anyway.
 
 ### B9. Four primitive sub-parts need numbers nobody has ruled on — BLOCKED ON THE TRADER
 **Found in:** M3 (implementing PRIM-002/003/004/006), 2026-08-08

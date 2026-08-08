@@ -3,15 +3,20 @@
 Analysis of `MagicStrategy_EngineKnowledge` (delivered 2026-08-04) and the plan for
 building it into this platform.
 
-**Status (2026-08-08): M0–M3 shipped; M4–M8 not started.**
+**Status (2026-08-08): M0–M4 shipped; M5–M8 not started.**
 
 What that means concretely, because "shipped" is easy to over-read: the telemetry store, the
-contract loader, the coverage check and 7 of 117 rules (GATE-023 and the full primitive layer
-PRIM-001…006) exist and are tested against the delivered schema. **None of them is wired into
-the code that trades.** The live loop still runs the pre-contract ICT strategy and evaluates
-0 registry rules per decision. See `KNOWN_ISSUES` A10 for the audit, including the gates the
-running engine actively contradicts, and B9 for the primitive sub-parts left unbuilt because
-they need a number nobody has ruled on.
+contract loader, the coverage check and **33 of 117 rules** exist and are tested — the full
+primitive layer (PRIM-001…006), the structure-box grader (GRADE-001…009) and the correlate
+layout (GATE-001/002/003/004/005/006/007/008/009/048, plus six GRADE aliases). **None of it
+is wired into the code that trades.** The live loop still runs the pre-contract ICT strategy
+and evaluates 0 registry rules per decision.
+
+That second number is the one to watch, and finishing M5–M8 does not move it: no milestone
+in this map ever switches the engine over. See `MAGIC_STRATEGY_EXECUTION_PLAN.md` for the
+cutover that is missing, `KNOWN_ISSUES` A10 for the audit including the gates the running
+engine actively contradicts, B9 for primitive sub-parts left unbuilt for want of a ruling,
+and B11 for why the disturbance grader cannot yet be fed real data.
 
 ---
 

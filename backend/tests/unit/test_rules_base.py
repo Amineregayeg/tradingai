@@ -162,3 +162,60 @@ def test_the_registry_reports_what_is_actually_implemented():
     ids = rules_pkg.implemented_ids()
     assert "GATE-023" in ids
     assert ids <= contract.known_rule_ids(), "an implemented id is not in the registry"
+
+
+# ---------------------------------------------------------------------------
+# Alias ids (M4)
+# ---------------------------------------------------------------------------
+def test_implementing_a_rule_also_covers_the_ids_that_restate_it():
+    """Thirteen GRADE ids carry `alias_of` because two extraction passes produced the same
+    rule twice. They are not duplicates to clean up — the id policy is STABLE and stored
+    telemetry may cite either forever — so one implementation must satisfy both."""
+    from app.services.rules.gate_002_disturbance import (
+        DisturbanceClassifier,
+        HeavyDisturbanceSkip,
+    )
+    from app.services.rules.gate_008_roster import LayoutRoster
+
+    impls = rules_pkg.implementations()
+    assert impls["GRADE-010"] is DisturbanceClassifier, "GATE-002's alias"
+    assert impls["GRADE-011"] is HeavyDisturbanceSkip, "GATE-001's alias"
+    assert impls["GRADE-012"] is LayoutRoster, "GATE-008's alias"
+
+
+def test_an_alias_is_registered_the_moment_its_canonical_is():
+    """GATE-046 is not implemented, so this shows the registration itself rather than a
+    coincidence of M4's import order."""
+    assert "GRADE-023" not in rules_pkg.implemented_ids()
+
+    class HouseRatio(RuleImplementation):
+        RULE_ID = "GATE-046"
+
+    assert rules_pkg.implementations()["GRADE-023"] is HouseRatio
+
+
+def test_claiming_the_alias_instead_of_the_canonical_is_refused():
+    """Claiming GRADE-023 would leave GATE-046 looking unimplemented while GRADE-023 looked
+    covered — a coverage report wrong in both directions at once."""
+    with pytest.raises(TypeError, match="alias_of GATE-046"):
+        class Backwards(RuleImplementation):
+            RULE_ID = "GRADE-023"
+
+
+def test_a_second_class_cannot_claim_a_canonical_already_taken():
+    class First(RuleImplementation):
+        RULE_ID = "GATE-046"
+
+    with pytest.raises(DuplicateRuleImplementation):
+        class Second(RuleImplementation):
+            RULE_ID = "GATE-046"
+
+
+def test_every_alias_in_the_registry_points_at_a_real_rule():
+    for rule_id in contract.known_rule_ids():
+        target = contract.alias_target(rule_id)
+        if target is None:
+            continue
+        assert target in contract.known_rule_ids()
+        assert rule_id in contract.aliases_of(target)
+        assert contract.alias_target(target) is None, "an alias may not point at an alias"
