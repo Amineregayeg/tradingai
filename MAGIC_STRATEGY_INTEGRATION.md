@@ -3,7 +3,15 @@
 Analysis of `MagicStrategy_EngineKnowledge` (delivered 2026-08-04) and the plan for
 building it into this platform.
 
-**Status: proposal. Nothing below has been implemented.**
+**Status (2026-08-08): M0–M3 shipped; M4–M8 not started.**
+
+What that means concretely, because "shipped" is easy to over-read: the telemetry store, the
+contract loader, the coverage check and 7 of 117 rules (GATE-023 and the full primitive layer
+PRIM-001…006) exist and are tested against the delivered schema. **None of them is wired into
+the code that trades.** The live loop still runs the pre-contract ICT strategy and evaluates
+0 registry rules per decision. See `KNOWN_ISSUES` A10 for the audit, including the gates the
+running engine actively contradicts, and B9 for the primitive sub-parts left unbuilt because
+they need a number nobody has ruled on.
 
 ---
 

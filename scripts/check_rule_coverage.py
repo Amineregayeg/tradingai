@@ -53,6 +53,20 @@ def ok(title: str) -> None:
     print(f"ok    {title}")
 
 
+def _wrap(text: str, width: int) -> list[str]:
+    lines: list[str] = []
+    current = ""
+    for word in text.split():
+        if current and len(current) + 1 + len(word) > width:
+            lines.append(current)
+            current = word
+        else:
+            current = f"{current} {word}".strip()
+    if current:
+        lines.append(current)
+    return lines
+
+
 def main() -> int:
     registry_ids = contract.known_rule_ids()
     implemented = rules_pkg.implemented_ids()
@@ -119,6 +133,22 @@ def main() -> int:
           "   (each needs a declared parameter on every record)")
     if implemented:
         print("  implemented ids:     " + ", ".join(sorted(implemented)))
+
+    # -- 5. what "implemented" does NOT mean --------------------------------------------
+    # A rule id is a binary tick and several contract rules are not. Printing the notes here
+    # is what stops the line above from reading as "PRIM-003: done".
+    noted = sorted(
+        (rid, cls.COVERAGE_NOTE)
+        for rid, cls in rules_pkg.implementations().items()
+        if getattr(cls, "COVERAGE_NOTE", None)
+    )
+    if noted:
+        print("\n  Coverage notes — an implemented id is not always a finished rule:")
+        for rid, note in noted:
+            print(f"    {rid}")
+            for line in _wrap(note, 66):
+                print(f"      {line}")
+
     print("\n  Coverage is reported, not enforced: readiness gate 5 is what eventually")
     print("  requires every NEVER_EVALUATED hard gate to be explained or fixed.")
 

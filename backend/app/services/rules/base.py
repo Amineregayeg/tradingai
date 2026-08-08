@@ -57,6 +57,18 @@ class RuleImplementation:
     #: rather than a silent overwrite.
     ALLOW_SHARED_ID: ClassVar[bool] = False
 
+    #: What this implementation does and does NOT cover, in the implementer's own words.
+    #:
+    #: A rule id is binary in the coverage report — implemented or not — and several contract
+    #: rules are not. PRIM-003 names seven classes of liquidity pool and three of them rest on
+    #: numbers the trader explicitly declined to fix; an implementation of the other four is
+    #: real work and is also not PRIM-003. Without somewhere to say so, the honest choice is
+    #: between claiming a tick the code has not earned and shipping nothing.
+    #:
+    #: `check_rule_coverage.py` prints these. They are prose on purpose: the thing that
+    #: matters is why a gap exists, and that does not reduce to a percentage.
+    COVERAGE_NOTE: ClassVar[str | None] = None
+
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
 

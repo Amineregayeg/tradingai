@@ -55,11 +55,38 @@ DEFAULT_FRACTAL_WINDOW = 2
 
 @dataclass(frozen=True)
 class Bar:
-    """One completed candle. Deliberately minimal — a primitive should not need an engine."""
+    """One completed candle. Deliberately minimal — a primitive should not need an engine.
+
+    `open` and `close` default to None because swings and breaks are pure wick geometry and
+    genuinely do not need them. PRIM-002 does — the volume-imbalance/gap discriminator is
+    "the only difference is the wicks", which cannot be evaluated without bodies — so it
+    raises on a body-less bar rather than substituting the wick and quietly detecting a
+    different object.
+    """
 
     time: datetime
     high: float
     low: float
+    open: float | None = None
+    close: float | None = None
+
+    @property
+    def body_high(self) -> float:
+        if self.open is None or self.close is None:
+            raise ValueError(
+                f"bar at {self.time} carries no open/close, so it has no body. "
+                "PRIM-002 cannot separate a gap from a volume imbalance without one."
+            )
+        return max(self.open, self.close)
+
+    @property
+    def body_low(self) -> float:
+        if self.open is None or self.close is None:
+            raise ValueError(
+                f"bar at {self.time} carries no open/close, so it has no body. "
+                "PRIM-002 cannot separate a gap from a volume imbalance without one."
+            )
+        return min(self.open, self.close)
 
 
 @dataclass

@@ -38,6 +38,77 @@ only grows becomes wallpaper.
 
 ## A. Wrong numbers — these can mislead a decision
 
+### A10. The engine does not trade the Magic Strategy — it trades the pre-contract ICT strategy, and one of its gates is explicitly forbidden
+**Found in:** conformance audit of the live path against `RULE_REGISTRY.json` v1.2.0,
+2026-08-08, asked as "is the platform trading the delivered strategies?"
+**What it is:** the live loop's only entry decision is
+`crypto_loop._tick_symbol` → `strategy_step.evaluate_latest_bar_traced`. That function
+cites **zero** rule ids. It is the v1 ICT edge (daily-BOS bias → LTF BOS → FVG retrace),
+written before the package arrived and unchanged since.
+
+The contract work that exists is real but **not connected to anything that trades**:
+
+| Built | Wired into the live path |
+|---|---|
+| `app/services/rules/` — 7 of 117 rules (GATE-023, PRIM-001…006) | no — only tests and `check_rule_coverage.py` import it |
+| `app/services/telemetry/` — contract records, validation, append-only store | no — the loop writes `decision_records`, not the contract's three record types |
+
+So **7/117 rules implemented, 0/117 evaluated on any trade**, and 0/91 HARD_GATEs.
+
+M3 completed the primitive layer on 2026-08-08 (PRIM-002/003/004/006 added). That moves
+coverage 3 → 7 and it does **not** narrow this entry: a primitive nothing calls changes no
+decision. What it does is unblock M4 — the graders read an imbalance inventory and a pool
+inventory, and until now neither existed.
+
+**Where the running engine actively contradicts a HARD_GATE:**
+
+* **GATE-037** — "the bot should not use a premium/discount (equilibrium or OTE) entry
+  filter… it should not influence whether a trade is taken or rejected." `Params.use_premium_discount`
+  defaults `True`, and `strategy_step.py:164` and `:188` reject candidates on exactly that
+  test, writing the reason `"entry is in premium — longs only in discount"` into the
+  decision record. The conformance test for GATE-037 is that *no* decision record may cite
+  premium/discount/equilibrium/OTE. Ours cite it by name.
+* **GATE-032 / GRADE-017** — risk is the 9-cell `box_grade × disturbance` lookup
+  (1.50/0.75/0 · 1.25/0.50/0 · 1.00/0.25/0). We size every trade at a flat 1% —
+  `live/fixed_config.py` pre-registers `RISK_PCT` and deliberately makes it not a knob.
+  Neither grader exists, so the lookup has no inputs even if it were wired.
+* **GATE-001 / GATE-002** — heavy-disturbance hard skip and the disturbance classifier.
+  Not implemented; nothing blocks a trade on correlate disagreement.
+* **GATE-008** — roster is `BTCUSDT.P · ETHUSDT.P · TOTAL · USDT.D`. We trade `BTC/USD`
+  and `ETH/USD` off Binance **spot**, and read no correlate panel at decision time (this is
+  the A3 axis, restated as a rule violation).
+* **GATE-017 / GATE-019** — 1H is **analysis only**; ruled execution timeframes are
+  30M/15M/5M. The loop's default `entry_tf` is `1H`, so every entry it has ever taken was
+  triggered from an analysis-only series.
+* **EXIT-001 / GATE-022** — 70% at 2R, 30% runner, everything flat at 19:00 New York.
+  The live signal carries a single TP at `rr_partial`-R and there is no session close;
+  the 70/30 machinery exists only inside the backtester.
+* **GATE-025 / 026 / 027** — five-anchor stop ladder, 2R floor, no-trade if nothing
+  clears 2R. We use one anchor (swing or FVG edge, ATR-buffered) and never test an RR floor.
+
+**Why it matters:** the platform is producing paper trades, a win rate and an equity
+curve from a strategy that is not the one it was given, while the repo now contains a rule
+registry, a telemetry store and a coverage script — the furniture of conformance. Anyone
+reading the engine page, or `check_rule_coverage.py`'s "PASSED", can reasonably conclude
+the delivered strategy is what is being measured. It is not, and no runtime signal says so:
+the loop stamps `engine_version: "ict-v2-lookahead-fixed"` and nothing anywhere refuses to
+trade for want of a rule.
+
+**Also note:** `backtest/engine.py:378` applies a filter it names **"Magic Alignment
+(first-order)"** — agreement with BTC's own daily bias. That is invented machinery under a
+contract name; the real GATE-008/GATE-002 alignment is a four-panel roster with a
+disturbance count. It is backtest-only and never reaches the live path, but the name will
+be believed.
+
+**Fix:** this is M3–M8 of `MAGIC_STRATEGY_INTEGRATION.md`, not a patch — 88 further hard
+gates, and the graders in §2.4 that nothing can test automatically. Two things are worth
+doing before any of it: (1) drop the GATE-037 premium/discount filter, which is a
+default flip and removes an explicitly forbidden gate; (2) make the live path emit
+contract telemetry with `deciding_rule_id`, so "which rule stopped this trade" has an
+answer other than "none of them". Until the roster, the disturbance grader and the risk
+matrix exist, the engine cannot cite a rule for its position size, which is readiness
+gate 5's floor.
+
 ### A3. Backtests still measure a different venue than they trade
 **Found in:** Phase 4 planning; **narrowed by 4.4**
 **What it is:** the LIVE path can now read CFT's own candles
@@ -144,6 +215,36 @@ doing so shifts the baseline you compare against.
 ---
 
 ## B. Silent failure — things that break without telling anyone
+
+### B9. Four primitive sub-parts need numbers nobody has ruled on — BLOCKED ON THE TRADER
+**Found in:** M3 (implementing PRIM-002/003/004/006), 2026-08-08
+**What it is:** four documented objects rest on a threshold the corpus never states, so they
+are **not detected at all** rather than detected with a guessed number:
+
+| Object | The missing number | Rule |
+|---|---|---|
+| Parabolic / compressed liquidity | how tight is "very tight" | PRIM-003 class 3 |
+| Institutional levels (deep-V extremes) | what makes a V a deep V | PRIM-003 class 4, **TARGET-007 is OPEN** |
+| Diagonal / trendline pools | the staircase geometry, drawn by hand throughout | PRIM-003 |
+| Liquidity sweep FAIL | how close is "extremely close" without crossing | PRIM-004 (a) |
+| Engineered-liquidity build | cluster size, spacing, and candle shrinkage | PRIM-004 |
+| Momentum imbalance | how large is "large" | PRIM-002 `is_momentum_imbalance` |
+
+**Why it matters:** these are not cosmetic gaps, they are *destinations*. TARGET-001 picks
+the trade's objective out of the pool inventory and GATE-025's 2R floor is measured to it, so
+an invented threshold would not produce a slightly different target — it would produce
+targets the trader never marked, and every reward-to-risk computed against one would be
+fiction that validates perfectly. TARGET-007 says the quiet part outright: V-quality "should
+be used as a weight, not as a filter", and the printed 5-tier list must not be transcribed as
+an ordering because it contradicts itself at ranks 1–2.
+**What we did instead:** PRIM-002's momentum flag and PRIM-004's failed sweep are emitted
+only when the caller passes a declared parameter, and are left unset otherwise — the
+`fake_msb` precedent from PRIM-005. The other three classes are simply not emitted, and each
+implementation declares a `COVERAGE_NOTE` that `check_rule_coverage.py` now prints, so
+"PRIM-003 implemented" cannot be read as "PRIM-003 finished".
+**How it ends:** these belong on the same list as `OPEN_ITEMS/TRADER_QUESTIONS.md`. None of
+them blocks M4 — the graders do not read these classes — so this is a question to batch, not
+a gate to wait on.
 
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
