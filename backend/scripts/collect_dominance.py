@@ -5,7 +5,7 @@ Stdlib only, no dependencies, no API key. Designed to run unattended from cron
 every minute and to be readable by whoever inherits it at 3am.
 
     python3 collect_dominance.py --once      # one sample, then exit (cron mode)
-    python3 collect_dominance.py --loop 60   # sample every 60s (service mode)
+    python3 collect_dominance.py --loop 15   # sample every 15s (service mode)
     python3 collect_dominance.py --status    # what has been collected so far
 
 WHY THIS EXISTS
@@ -38,7 +38,15 @@ timescales, so they are fetched from different places at different rates:
     development — so it is called twice a day, not per minute.
 
   * prices: Binance /ticker/price, ONE request returning every symbol, polled
-    per minute. No key, generous limits, real-time.
+    every 15s in deployment. No key, generous limits, real-time.
+
+    THE POLL RATE IS THE INTRADAY RESOLUTION, and it is a strategy constraint
+    rather than a preference. These become RESAMPLED bars, so a bar carries
+    structure only if enough observations went into it: at 60s a 5-minute bar
+    holds five and its extremes are sampling luck. GATE-007 requires the
+    correlate panels at the EXECUTION timeframe (30M/15M/5M), and at 60s only
+    30M clears the engine's 20-sample minimum. See KNOWN_ISSUES B11 and
+    DominanceSource.timeframe_viability().
 
 This is the same construction TradingView uses for its CRYPTOCAP:* symbols, so
 the series should track the charts a trader actually looks at.

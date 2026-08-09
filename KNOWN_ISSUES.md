@@ -275,15 +275,35 @@ market cap = price × supply, where **supplies** come from CoinGecko once a day 
 nature, fine) and **prices** come from Binance `/ticker/price`, real-time. So the intraday
 resolution is bounded by our poll rate and nothing upstream — raising the rate buys genuine
 structure, not duplicates. Anyone reading only the docstring would conclude the opposite.
-**Fix, in two parts:**
-1. **Refuse rather than fabricate.** A bar assembled from too few samples is not a low-quality
-   bar, it is not a bar; the engine must stand aside (GATE-036) rather than grade it. This is
-   the half that makes *any* execution-timeframe choice safe, and it is independent of which
+**Both halves of the fix have landed; the entry stays open because the DATA has not caught
+up.**
+1. **Refuse rather than fabricate — done** (`ccdd4a4`). A bar assembled from too few samples
+   is not a low-quality bar, it is not a bar. `CorrelateRead.bar_sample_count` carries the
+   observation count, `LayoutReadability` fails GATE-007 when a panel is thinner than the
+   declared minimum, and GATE-036 turns that into a STAND_ASIDE that cites a real rule. This
+   half is what makes *any* execution-timeframe choice safe, and it is independent of which
    one is chosen.
-2. **Then raise the sampling rate** to ~15 s, which puts 20 samples in a 5M bar and 60 in a
-   15M — the same change F1 proposes for 1m bars, load-bearing here rather than cosmetic.
-   Ordering matters: the guard first, so that a shadow window started before the collector
-   catches up refuses to grade instead of silently grading noise.
+2. **Raise the sampling rate — done.** Both compose files now run `--loop 15`, and
+   `DominanceSource` reports what that buys:
+
+   | Execution TF | samples @60s | samples @15s |
+   |---|---|---|
+   | 5M | 5 | **20** |
+   | 15M | 15 | **60** |
+   | 30M | 30 | 120 |
+
+   So at 60 s only 30M cleared the 20-sample minimum; at 15 s all three ruled execution
+   timeframes do. Cost is 4 Binance requests/minute instead of 1; supplies are untouched.
+
+**What is still true, and why this is not deleted:** every sample collected before the rate
+change is still 60 s apart, so the *history* remains 30M-only. The engine will now refuse to
+grade 5M or 15M layouts rather than fabricate them — which is correct, and also means a
+shadow window started today at 5M would stand aside on almost every bar until enough 15 s
+history exists. **Close this entry when the collector has run at 15 s for long enough to
+cover the intended shadow window**, not when the code merged.
+**Also worth knowing:** the healthcheck's 600 s staleness threshold was left alone. It still
+catches a dead collector at either rate, and tightening it to match a 15 s cadence would
+trade a real signal for flapping.
 
 ### B9. Four primitive sub-parts need numbers nobody has ruled on — BLOCKED ON THE TRADER
 **Found in:** M3 (implementing PRIM-002/003/004/006), 2026-08-08

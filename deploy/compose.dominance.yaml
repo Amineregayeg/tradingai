@@ -53,7 +53,16 @@ services:
         fi
         # Stdlib only — nothing to pip install, which is why this container comes
         # up in seconds and cannot break on a dependency resolution.
-        exec python collect_dominance.py --loop 60
+        # 15s, not 60s. These bars are RESAMPLED point observations, so a bar carries
+        # structure only if enough observations went into it: at 60s a 5-minute bar holds
+        # five, and its high and low are sampling luck rather than price action
+        # (KNOWN_ISSUES B11). GATE-007 requires the correlate panels to be read at the
+        # EXECUTION timeframe and GATE-017 makes 1H analysis-only, so the ruled choices are
+        # 30M/15M/5M — and at 60s only 30M clears the engine's 20-sample minimum. At 15s all
+        # three do. Cost is 4 requests/minute to Binance instead of 1, against limits the
+        # collector header already calls generous; supplies are untouched (CoinGecko stays
+        # twice daily). History already collected at 60s stays valid, it is simply thinner.
+        exec python collect_dominance.py --loop 15
     restart: unless-stopped
     # The collector is the series. If it dies quietly, data stops and nobody
     # notices until someone goes looking months later — so make the container

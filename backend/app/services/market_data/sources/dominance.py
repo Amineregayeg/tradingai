@@ -56,6 +56,46 @@ SYMBOL_TO_COLUMN: dict[str, str] = {
 
 DOMINANCE_SYMBOLS: tuple[str, ...] = tuple(SYMBOL_TO_COLUMN)
 
+#: Engine timeframe -> length in seconds. Used to say how many samples a bar on that
+#: timeframe SHOULD hold at a given poll rate, which is what decides whether the timeframe
+#: is usable at all (KNOWN_ISSUES B11).
+_TF_SECONDS: dict[str, int] = {
+    "1m": 60, "5m": 300, "15m": 900, "30m": 1800,
+    "1H": 3600, "4H": 14400, "D": 86400, "W": 604800,
+}
+
+
+def expected_samples_per_bar(timeframe: str, poll_seconds: float) -> int:
+    """How many observations a complete bar on `timeframe` holds at `poll_seconds`.
+
+    This is the whole of B11 in one line of arithmetic. These are not exchange bars: they
+    are resampled point observations, so a bar's high and low are only price action if
+    enough observations went into it. At 60 s polling a 5m bar holds five, and its extremes
+    are sampling luck.
+    """
+    seconds = _TF_SECONDS.get(timeframe)
+    if seconds is None:
+        raise ValueError(
+            f"unsupported timeframe {timeframe!r}; expected one of {sorted(_TF_SECONDS)}"
+        )
+    if poll_seconds <= 0:
+        raise ValueError("poll_seconds must be positive")
+    return int(seconds // poll_seconds)
+
+
+def viable_timeframes(poll_seconds: float, min_samples: int) -> list[str]:
+    """Which timeframes can carry structure at this poll rate, shortest first.
+
+    `min_samples` is the engine's declared minimum and is NOT defaulted here on purpose —
+    the number belongs to the strategy layer (`gate_008_roster.MIN_SAMPLES_PER_SYNTHETIC_BAR`)
+    and duplicating it in the data layer is how two thresholds drift apart.
+    """
+    return [
+        tf for tf in sorted(_TF_SECONDS, key=lambda t: _TF_SECONDS[t])
+        if expected_samples_per_bar(tf, poll_seconds) >= min_samples
+    ]
+
+
 #: Engine timeframe -> pandas offset alias.
 _TF_TO_OFFSET: dict[str, str] = {
     "1m": "1min", "5m": "5min", "15m": "15min", "30m": "30min",
@@ -100,22 +140,22 @@ class DominanceSource(MarketDataSource):
         return df[~df.index.duplicated(keep="last")]
 
     # ------------------------------------------------------------------
-    def fetch_ohlcv(
+    def _bars_with_samples(
         self,
         symbol: str,
         timeframe: str,
         start: datetime,
         end: datetime,
         drop_partial: bool = True,
+        min_samples: int | None = None,
     ) -> pd.DataFrame:
-        """Bars for ``symbol`` in ``[start, end)``.
+        """OHLCV plus a ``samples`` column. The single implementation; both public
+        readers below are projections of it, so they cannot drift apart.
 
-        ``drop_partial`` (default True) removes a trailing bar whose period has
-        not finished yet. This matters for causality, not tidiness: a 15m bar
-        stamped 12:00 covers [12:00, 12:15) and is not knowable until 12:15. The
-        live loop drops the still-forming price bar for the same reason
-        (``crypto_loop._tick_symbol``); a strategy that reads a partial
-        dominance bar is reading the present as if it were closed history.
+        ``min_samples`` drops bars assembled from fewer than that many raw observations.
+        Left None by default so existing callers are unchanged; the strategy layer passes
+        its declared minimum (``gate_008_roster.MIN_SAMPLES_PER_SYNTHETIC_BAR``).
+
         """
         if symbol not in SYMBOL_TO_COLUMN:
             raise ValueError(
@@ -140,7 +180,13 @@ class DominanceSource(MarketDataSource):
         # [12:00, 12:15) and carries that timestamp. Any other convention lets a
         # bar include a sample from after its own label — a lookahead, and the
         # exact class of bug this repo has three regression tests for.
-        bars = series.resample(offset, label="left", closed="left").ohlc()
+        grouped = series.resample(offset, label="left", closed="left")
+        bars = grouped.ohlc()
+        # How many observations went into each bar. Carried because these are RESAMPLED
+        # point samples, not exchange bars: a bar's high and low mean something only if
+        # enough observations produced them, and a caller cannot tell a 60-sample bar from
+        # a 5-sample one by looking at it (KNOWN_ISSUES B11).
+        bars["samples"] = grouped.count().astype(int)
 
         # resample() emits a row for every period in the range, including ones
         # with no samples at all. Those are NOT bars — the collector was down, or
@@ -148,6 +194,15 @@ class DominanceSource(MarketDataSource):
         bars = bars.dropna(how="all")
         if bars.empty:
             return empty_ohlcv()
+
+        # A bar assembled from too few observations is not a low-quality bar, it is not a
+        # bar. Dropping it is the same judgement the line above makes about an empty period,
+        # for the same reason: a gap is the truth, and a thin bar is a shape that structure
+        # detection will read as order flow.
+        if min_samples is not None:
+            bars = bars[bars["samples"] >= int(min_samples)]
+            if bars.empty:
+                return empty_ohlcv()
 
         if drop_partial:
             last_sample = series.index[-1]
@@ -158,7 +213,7 @@ class DominanceSource(MarketDataSource):
         # Volume is structurally absent for dominance. Zero is the honest
         # placeholder; a fabricated number would be worse than none.
         bars["volume"] = 0.0
-        bars = bars[list(OHLCV_COLUMNS)]
+        bars = bars[[*OHLCV_COLUMNS, "samples"]]
 
         start_ts = pd.Timestamp(start)
         end_ts = pd.Timestamp(end)
@@ -173,6 +228,72 @@ class DominanceSource(MarketDataSource):
 
         bars.index.name = "time"
         return bars.astype(float)
+
+    # ------------------------------------------------------------------
+    def fetch_ohlcv(
+        self,
+        symbol: str,
+        timeframe: str,
+        start: datetime,
+        end: datetime,
+        drop_partial: bool = True,
+        min_samples: int | None = None,
+    ) -> pd.DataFrame:
+        """Bars for ``symbol`` in ``[start, end)``, in the public OHLCV contract.
+
+        ``samples`` is deliberately absent here — every other source would have to fake
+        it. Callers that need it use :meth:`fetch_ohlcv_with_samples`.
+
+        ``drop_partial`` (default True) removes a trailing bar whose period has not
+        finished yet. This matters for causality, not tidiness: a 15m bar stamped 12:00
+        covers [12:00, 12:15) and is not knowable until 12:15. The live loop drops the
+        still-forming price bar for the same reason (``crypto_loop._tick_symbol``); a
+        strategy that reads a partial dominance bar is reading the present as if it were
+        closed history.
+        """
+        bars = self._bars_with_samples(
+            symbol, timeframe, start, end,
+            drop_partial=drop_partial, min_samples=min_samples,
+        )
+        if bars.empty:
+            return bars
+        return bars[list(OHLCV_COLUMNS)]
+
+    def fetch_ohlcv_with_samples(
+        self,
+        symbol: str,
+        timeframe: str,
+        start: datetime,
+        end: datetime,
+        drop_partial: bool = True,
+        min_samples: int | None = None,
+    ) -> pd.DataFrame:
+        """``fetch_ohlcv`` plus a ``samples`` column: observations behind each bar.
+
+        This is what lets a correlate read carry ``bar_sample_count`` so the layout can
+        refuse to grade noise (GATE-036 / ``LayoutReadability``). Without it the guard has
+        no data source and is decorative.
+        """
+        return self._bars_with_samples(
+            symbol, timeframe, start, end,
+            drop_partial=drop_partial, min_samples=min_samples,
+        )
+
+    def timeframe_viability(self, poll_seconds: float, min_samples: int) -> dict:
+        """Which timeframes this collector's sampling rate can actually support.
+
+        Reported rather than assumed: the answer decides whether the execution timeframe
+        under discussion is measurable at all, and it changes the moment the collector's
+        poll interval does.
+        """
+        return {
+            "poll_seconds": poll_seconds,
+            "min_samples": min_samples,
+            "expected_samples": {
+                tf: expected_samples_per_bar(tf, poll_seconds) for tf in _TF_SECONDS
+            },
+            "viable": viable_timeframes(poll_seconds, min_samples),
+        }
 
     # ------------------------------------------------------------------
     def coverage(self) -> dict:

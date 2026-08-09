@@ -18,7 +18,10 @@ from app.services.market_data.sources.base import OHLCV_COLUMNS
 from app.services.market_data.sources.dominance import (
     DOMINANCE_SYMBOLS,
     DominanceSource,
+    expected_samples_per_bar,
+    viable_timeframes,
 )
+from app.services.rules.gate_008_roster import MIN_SAMPLES_PER_SYNTHETIC_BAR
 
 T0 = datetime(2026, 7, 27, 12, 0, tzinfo=timezone.utc)
 WIDE_END = T0 + timedelta(days=1)
@@ -212,3 +215,94 @@ def test_coverage_reports_honestly(raw_csv):
     assert cov["span_hours"] == pytest.approx(0.98, abs=0.02)
     assert cov["live_priced_pct_last"] == 94.5
     assert cov["supplies_age_h_last"] == 1.0
+
+
+# ---------------------------------------------------------------------------
+# Sample counts and timeframe viability (M4 / KNOWN_ISSUES B11)
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "timeframe, poll, expected",
+    [
+        ("5m", 60, 5), ("5m", 15, 20),
+        ("15m", 60, 15), ("15m", 15, 60),
+        ("30m", 60, 30), ("1H", 60, 60),
+    ],
+)
+def test_expected_samples_per_bar_is_the_whole_of_b11(timeframe, poll, expected):
+    """These are resampled point observations, not exchange bars. A bar's high and low are
+    price action only if enough observations produced them."""
+    assert expected_samples_per_bar(timeframe, poll) == expected
+
+
+def test_the_collectors_poll_rate_decides_which_execution_timeframes_exist():
+    """GATE-007 wants the correlate panels at the EXECUTION timeframe and GATE-017 makes 1H
+    analysis-only, so the ruled choices are 30M/15M/5M. At 60s only one of the three clears
+    the engine's declared minimum; at 15s all three do."""
+    at_60 = viable_timeframes(60, MIN_SAMPLES_PER_SYNTHETIC_BAR)
+    at_15 = viable_timeframes(15, MIN_SAMPLES_PER_SYNTHETIC_BAR)
+
+    assert "5m" not in at_60 and "15m" not in at_60
+    assert "30m" in at_60
+    assert {"5m", "15m", "30m"} <= set(at_15)
+
+
+@pytest.mark.parametrize("bad", [("7m", 60), ("5m", 0), ("5m", -1)])
+def test_viability_arithmetic_refuses_nonsense(bad):
+    with pytest.raises(ValueError):
+        expected_samples_per_bar(*bad)
+
+
+def test_bars_carry_the_number_of_observations_behind_them(raw_csv):
+    """Without this the layout guard has no data source and is decorative: a caller cannot
+    tell a 60-sample bar from a 5-sample one by looking at it."""
+    write_raw(raw_csv, [(T0 + timedelta(seconds=15 * i), 50.0 + i) for i in range(20)])
+    bars = DominanceSource(raw_csv).fetch_ohlcv_with_samples(
+        "BTC.D", "1m", T0, WIDE_END, drop_partial=False)
+
+    assert "samples" in bars.columns
+    assert int(bars["samples"].iloc[0]) == 4, "4 samples per 1m bar at 15s"
+
+
+def test_the_public_ohlcv_contract_does_not_leak_the_samples_column(raw_csv):
+    """Every other source would have to fake it. Callers that need it ask explicitly."""
+    write_raw(raw_csv, [(T0 + timedelta(seconds=15 * i), 50.0 + i) for i in range(20)])
+    bars = DominanceSource(raw_csv).fetch_ohlcv("BTC.D", "1m", T0, WIDE_END,
+                                                drop_partial=False)
+    assert list(bars.columns) == list(OHLCV_COLUMNS)
+
+
+def test_a_bar_too_thin_to_carry_structure_is_dropped_not_returned_weak(raw_csv):
+    """A thin bar is not a low-quality bar, it is not a bar — the same judgement the source
+    already makes about an empty period, for the same reason. Returning it anyway is how five
+    samples become a disturbance grade and then a position size."""
+    src = DominanceSource(raw_csv)
+    # Two 1m bars: the first holds 4 samples, the second only 1.
+    rows = [(T0 + timedelta(seconds=15 * i), 50.0 + i) for i in range(4)]
+    rows.append((T0 + timedelta(minutes=1), 60.0))
+    write_raw(raw_csv, rows)
+
+    unfiltered = src.fetch_ohlcv("BTC.D", "1m", T0, WIDE_END, drop_partial=False)
+    filtered = src.fetch_ohlcv("BTC.D", "1m", T0, WIDE_END, drop_partial=False,
+                               min_samples=4)
+
+    assert len(unfiltered) == 2
+    assert len(filtered) == 1, "the 1-sample bar survived"
+    assert filtered.index[0] == unfiltered.index[0]
+
+
+def test_an_empty_result_still_carries_the_samples_column(raw_csv):
+    """A "no data" branch that drops the column is how it quietly becomes a "zero samples,
+    looks fine" branch at the call site."""
+    write_raw(raw_csv, [(T0, 50.0)])
+    bars = DominanceSource(raw_csv).fetch_ohlcv_with_samples(
+        "BTC.D", "1m", T0, WIDE_END, drop_partial=False, min_samples=99)
+    assert bars.empty
+    assert "samples" in bars.columns
+
+
+def test_viability_is_reported_rather_than_assumed(raw_csv):
+    report = DominanceSource(raw_csv).timeframe_viability(
+        poll_seconds=60, min_samples=MIN_SAMPLES_PER_SYNTHETIC_BAR)
+    assert report["expected_samples"]["5m"] == 5
+    assert "5m" not in report["viable"]
+    assert report["min_samples"] == MIN_SAMPLES_PER_SYNTHETIC_BAR
