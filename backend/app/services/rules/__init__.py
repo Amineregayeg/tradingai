@@ -24,6 +24,12 @@ from app.services.rules.base import (  # noqa: F401
     implemented_ids,
     open_rule_requires_declared_parameter,
 )
+from app.services.rules.evaluator import (  # noqa: F401
+    LayoutEvaluation,
+    LayoutEvaluator,
+    build_correlate_reads,
+    evaluate_layout,
+)
 from app.services.rules.gate_002_disturbance import (  # noqa: F401
     AbsoluteCountNotRatio,
     AlignmentForms,
@@ -92,6 +98,8 @@ __all__ = [
     "HeavyDisturbanceSkip",
     "Imbalance",
     "ImbalanceInventory",
+    "LayoutEvaluation",
+    "LayoutEvaluator",
     "LayoutReadability",
     "LayoutRoster",
     "LiquidityPool",
@@ -118,6 +126,8 @@ __all__ = [
     "SwingPoints",
     "SweepEvent",
     "SweepEvents",
+    "build_correlate_reads",
+    "evaluate_layout",
     "grade_box",
     "implementations",
     "implemented_ids",
