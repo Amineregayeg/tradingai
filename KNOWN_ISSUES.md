@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-08 (M4 — B11 found; timeframe review — B12 found)
+Last updated: 2026-08-09 (GATE-037 removed; A11 and B10 fixed; B11, B12 open)
 
 ---
 
@@ -66,12 +66,14 @@ the live loop over.
 
 **Where the running engine actively contradicts a HARD_GATE:**
 
-* **GATE-037** — "the bot should not use a premium/discount (equilibrium or OTE) entry
-  filter… it should not influence whether a trade is taken or rejected." `Params.use_premium_discount`
-  defaults `True`, and `strategy_step.py:164` and `:188` reject candidates on exactly that
-  test, writing the reason `"entry is in premium — longs only in discount"` into the
-  decision record. The conformance test for GATE-037 is that *no* decision record may cite
-  premium/discount/equilibrium/OTE. Ours cite it by name.
+* **GATE-037** — ~~the premium/discount entry filter~~ **CLOSED 2026-08-09.** The
+  filter is deleted from `strategy_step.py` and `backtest/engine.py`, the equilibrium
+  midpoint is no longer computed on the decision path, and `use_premium_discount` is gone
+  from the feedback loop's tunable knobs. HG-16 now exists as
+  `tests/integration/test_conformance_gate_037.py` — the first of the 78 conformance
+  assertions to be a test. It checks the emitted records AND the source of the decision
+  path, because a filter that simply never fired on the sampled data would pass the first
+  check alone while waiting for the market that trips it.
 * **GATE-032 / GRADE-017** — risk is the 9-cell `box_grade × disturbance` lookup
   (1.50/0.75/0 · 1.25/0.50/0 · 1.00/0.25/0). We size every trade at a flat 1% —
   `live/fixed_config.py` pre-registers `RISK_PCT` and deliberately makes it not a knob.
@@ -106,36 +108,12 @@ be believed.
 
 **Fix:** this is M3–M8 of `MAGIC_STRATEGY_INTEGRATION.md`, not a patch — 88 further hard
 gates, and the graders in §2.4 that nothing can test automatically. Two things are worth
-doing before any of it: (1) drop the GATE-037 premium/discount filter, which is a
-default flip and removes an explicitly forbidden gate; (2) make the live path emit
+doing before any of it: ~~(1) drop the GATE-037 premium/discount filter~~ — done,
+2026-08-09; (2) make the live path emit
 contract telemetry with `deciding_rule_id`, so "which rule stopped this trade" has an
 answer other than "none of them". Until the roster, the disturbance grader and the risk
 matrix exist, the engine cannot cite a rule for its position size, which is readiness
 gate 5's floor.
-
-### A11. An open position dies with the container, and the run under-reports itself
-**Found in:** reviewing run `7d788ad6` on 2026-08-08.
-**What it is:** that run shows "0 trades". It took one. On 2026-08-08 06:00 it
-accepted an ETH/USD LONG at 1917.55 (SL 1890.31, TP 1968.58, 18.36 units). ETH
-then traded between 1914.00 and 1926.72 for twelve hours — it reached neither the
-stop nor the target — and at 18:31 the api container was recreated for a deploy.
-The simulated broker holds its positions in memory only, so the position simply
-ceased to exist. Its `DecisionRecord` is still `outcome = OPEN` and no `trades`
-row was ever written.
-**Why it matters:** the run's headline is wrong in the direction that flatters
-nothing and hides everything — it reads as a strategy that found no setups, when
-it found one and the platform lost it. Worse, an unresolved decision record never
-reaches the feedback loop, which only learns from closed outcomes. A restart
-therefore silently removes evidence from the learning path.
-**Partly addressed:** `stop()` now closes open positions, and shutdown calls it,
-so a GRACEFUL deploy settles them. Two holes remain: a `SIGKILL`, OOM or host
-reboot still loses whatever was open, and nothing ever repairs a `DecisionRecord`
-left at `OPEN` by an earlier crash — this one is still sitting there.
-**Fix:** persist open positions, or reconcile on boot — any decision record left
-`OPEN` with no matching trade and no live position should be resolved as
-`ABANDONED` with the reason, so it stops counting as "in progress" forever. The
-test that must bite: open a position, rebuild the loop from the database, assert
-the record does not stay `OPEN`.
 
 ### A3. Backtests still measure a different venue than they trade
 **Found in:** Phase 4 planning; **narrowed by 4.4**
@@ -378,27 +356,6 @@ exactly the two version `const`s and nothing else, and
 `test_the_delivered_artefacts_are_mutually_incompatible_and_we_say_so` FAILS at that point
 — deliberately — which is the prompt to delete the relaxation in `validate.py`.
 
-
-### B10. A decision with no candidates does not say why it declined
-**Found in:** reviewing run `7d788ad6` on 2026-08-08 — 5 of its 137 declines
-(3.6%) give no reason at all. The record ends after the last `PASS` line.
-**What it is:** `DecisionTrace.reasons()` only mentions candidates when there are
-some:
-
-```python
-if self.candidates:                       # empty list -> nothing is written
-    out.append(f"candidates: {len(...)} considered, {accepted} accepted")
-```
-
-So a bar that passed every gate and then found no fair-value gap produces a
-record that looks truncated rather than complete.
-**Why it matters:** the same docstring three lines above says every gate is
-recorded passed or failed, precisely so a reader can tell "nothing found" from
-"never checked". That reasoning stops at the candidate stage, which is the one
-place it is hardest to reconstruct afterwards — and it is the difference between
-"the strategy looked and there was nothing" and "the detector broke".
-**Fix:** emit `candidates: 0 considered` unconditionally. One line, and it turns
-five silent records into five that state a finding.
 
 ### B1. Failures are visible but nothing tells you unprompted
 **Found in:** I4 / 4.1; **narrowed by B1's monitoring work**

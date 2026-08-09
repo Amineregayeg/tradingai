@@ -111,7 +111,19 @@ class DecisionTrace:
         health surfaces avoid.
         """
         out = [f"{'PASS' if g.passed else 'FAIL'} {g.name}: {g.detail}" for g in self.gates]
-        if self.candidates:
+
+        # The census line is UNCONDITIONAL. It used to be written only when there
+        # were candidates, so a bar that passed every gate and then found no
+        # fair-value gap produced a record ending after the last PASS — it read as
+        # truncated, and 5 of the 137 declines in run 7d788ad6 were exactly that
+        # (KNOWN_ISSUES B10). "0 considered" is a finding; silence is an
+        # ambiguity, and it is the same "nothing found vs never checked"
+        # distinction the gates above are listed pass-or-fail to preserve.
+        #
+        # Only emitted once the evaluation actually reached the candidate stage.
+        # A run stopped by a gate never looked, and claiming it considered zero
+        # would be a different falsehood.
+        if self.blocked_by is None:
             accepted = sum(1 for c in self.candidates if c["accepted"])
             out.append(
                 f"candidates: {len(self.candidates)} considered, {accepted} accepted"

@@ -50,7 +50,6 @@ FIXTURE_PARAMS = Params(
     fvg_lookback=20,
     min_fvg_atr=0.0,
     require_ltf_bos=False,
-    use_premium_discount=False,
     one_per_day=False,
     max_hold_bars=6,
     runner_max_hold=6,

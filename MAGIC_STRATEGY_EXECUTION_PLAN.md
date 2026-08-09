@@ -305,7 +305,26 @@ Cost worth stating before choosing 5M: twelve times the evaluations of 1H, so
 twelve times the decision-record volume, and CFT's ~125-day history limit bites
 sooner on the lower timeframe if we ever move the feed there.
 
-### 5.4 Still genuinely open
+### 5.4 DECIDED by Malek, 2026-08-09
+
+* **Instruments: BTC *and* ETH.** Noted against §5.1: GATE-008's layout makes ETH
+  a *positive panel* for a BTC trade, not an instrument in its own right, and the
+  contract defines no four-panel layout with ETH as the main. Trading it is
+  therefore a deviation we carry knowingly — every ETH decision must be stamped
+  as one, and the deviation register will show a steady population rather than a
+  surprise. Revisit if Q1 comes back from the trader.
+* **Execution timeframe: 5M**, with **1M as a second shadow run** to compare
+  against it. 5M is inside the ruled set; 1M sits below it and will emit
+  `SIGNAL_TF_OUTSIDE_RULED_SET` on every record, which is a DEVIATION and not a
+  failure — the contract is explicit that ten deviations are ten deviations, not
+  one non-conformance.
+* **Not yet applied to the live engine.** These configure M9 Stage A. The running
+  ICT engine stays on 1H because its parameters were tuned there and it is the
+  strategy being replaced; moving it now would invalidate the only baseline we
+  have and buy nothing. It remains an HG-12 violation until the cutover, which is
+  what A10 already records.
+
+### 5.5 Still genuinely open
 
 **From Malek**
 1. **Do we trade ETH, or is it only a panel?** (§5.1) The contract's stated default

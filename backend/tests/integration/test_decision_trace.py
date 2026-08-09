@@ -108,8 +108,8 @@ def test_passed_gates_are_recorded_not_only_failures():
 # Candidate-level detail: the part that answers "is it running the strategy?"
 # ---------------------------------------------------------------------------
 def test_rejected_candidates_record_the_values_compared():
-    """'Rejected by premium/discount' is an assertion; 'entry 62150 vs
-    equilibrium 61980' is something you can check."""
+    """'Rejected by the ATR filter' is an assertion; 'gap 41.2 vs required 58.0'
+    is something you can check."""
     seen = []
     for seed in range(1, 25):
         _sig, trace = evaluate_latest_bar_traced("BTC/USD", bars(seed=seed), daily(seed=seed))
@@ -174,3 +174,41 @@ def test_trace_serialises_for_storage_and_ui():
     import json
     json.dumps(d)  # must survive JSON storage
     assert all(isinstance(r, str) for r in trace.reasons)
+
+
+def test_a_decision_with_no_candidates_still_states_that_in_the_RECORD():
+    """KNOWN_ISSUES B10. `summary` already said "no FVG candidates in range", but
+    `reasons` is what gets persisted, and it used to omit the census line entirely
+    when the candidate list was empty — so the stored row ended after the last
+    PASS and read as truncated. Five of the 137 declines in run 7d788ad6 were
+    exactly that: a decision that declined and did not say why.
+
+    "0 considered" is a finding. Silence is the "nothing found vs never checked"
+    ambiguity that the gates above are listed pass-or-fail to avoid.
+    """
+    from app.services.live.decision_trace import DecisionTrace
+
+    trace = DecisionTrace(symbol="BTC/USD", timeframe="1H")
+    trace.gate("history", True, "324 bars available, 60 required")
+    trace.gate("daily_bias", True, "daily bias is LONG")
+    trace.gate("ltf_bos", True, "lower-timeframe break is LONG, needs to match bias LONG")
+
+    reasons = trace.reasons
+    assert any("candidates: 0 considered" in r for r in reasons), (
+        f"a decision that reached scoring and found nothing said nothing: {reasons}"
+    )
+
+
+def test_a_decision_stopped_by_a_gate_does_not_claim_it_considered_zero():
+    """The opposite error. A run blocked at ltf_bos never reached the candidate
+    stage, and "0 considered" would report that it looked and found nothing —
+    a different falsehood from the one B10 fixed."""
+    from app.services.live.decision_trace import DecisionTrace
+
+    trace = DecisionTrace(symbol="BTC/USD", timeframe="1H")
+    trace.gate("history", True, "324 bars available, 60 required")
+    trace.gate("daily_bias", True, "daily bias is SHORT")
+    trace.gate("ltf_bos", False, "lower-timeframe break is LONG, needs to match bias SHORT")
+
+    assert not any("considered" in r for r in trace.reasons)
+    assert trace.blocked_by == "ltf_bos"

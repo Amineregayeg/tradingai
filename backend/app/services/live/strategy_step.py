@@ -125,7 +125,12 @@ def evaluate_latest_bar_traced(
                 elif hl[k] == 1:
                     hh = lvl[k]
         last_low, last_high = ll, hh
-    eq = (last_low + last_high) / 2 if not (np.isnan(last_low) or np.isnan(last_high)) else None
+    # GATE-037 removed the equilibrium midpoint from this function entirely.
+    # "The bot should not use a premium/discount (equilibrium or OTE) entry filter…
+    # it should not influence whether a trade is taken or rejected." The geometry
+    # survives as READING VOCABULARY — it may be recorded under primitives.ranges —
+    # but it may never be computed on an accept/reject path, which is where it was.
+    # Deleted rather than defaulted off, so no config flip can bring it back.
 
     for idx, f in enumerate(fvgs):
         born = int(f["candle_index"])
@@ -161,10 +166,6 @@ def evaluate_latest_bar_traced(
                                 bar_close=round(cl, 2), gap_bottom=round(pl, 2))
                 continue
             entry = ph
-            if p.use_premium_discount and eq is not None and entry > eq:
-                trace.candidate(idx, fdir, False, "entry is in premium — longs only in discount",
-                                entry=round(entry, 2), equilibrium=round(eq, 2))
-                continue
             base = last_low if (p.sl_mode == "swing" and not np.isnan(last_low) and last_low < entry) else pl
             sl = base - p.sl_buffer_atr * a
             risk = entry - sl
@@ -185,10 +186,6 @@ def evaluate_latest_bar_traced(
                                 bar_close=round(cl, 2), gap_top=round(ph, 2))
                 continue
             entry = pl
-            if p.use_premium_discount and eq is not None and entry < eq:
-                trace.candidate(idx, fdir, False, "entry is in discount — shorts only in premium",
-                                entry=round(entry, 2), equilibrium=round(eq, 2))
-                continue
             base = last_high if (p.sl_mode == "swing" and not np.isnan(last_high) and last_high > entry) else ph
             sl = base + p.sl_buffer_atr * a
             risk = sl - entry

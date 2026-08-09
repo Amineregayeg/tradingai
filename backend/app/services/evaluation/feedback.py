@@ -44,7 +44,6 @@ INDEPENDENT_KNOBS: tuple[str, ...] = (
     "rr_partial",
     "require_ltf_bos",
     "min_fvg_atr",
-    "use_premium_discount",
     "max_hold_bars",
     "runner_trail_atr",
 )
@@ -60,7 +59,6 @@ _KNOB_DEFAULTS: dict[str, Any] = {
     "rr_partial": 2.0,
     "require_ltf_bos": True,
     "min_fvg_atr": 0.05,
-    "use_premium_discount": True,
     "max_hold_bars": 10,
     "runner_trail_atr": 2.5,
 }
@@ -89,6 +87,11 @@ _LOSS_TOKENS = {"loss", "lose"}
 _BREAKEVEN_TOKENS = {"be", "breakeven", "break_even", "scratch"}
 _OPEN_TOKENS = {"open", ""}
 _ABSTAIN_TOKENS = {"abstained", "abstain"}
+#: The position existed; the process holding it died before it closed. Excluded
+#: from the learning population for a different reason than "open" — not "not yet"
+#: but "never observed". Folding it into breakeven would feed the loop a zero that
+#: nobody measured (KNOWN_ISSUES A11).
+_ABANDONED_TOKENS = {"abandoned"}
 
 
 class RiskPctTuningRefused(ValueError):
@@ -172,7 +175,7 @@ def _first(rec: dict, *keys: str) -> Any:
 # ---------------------------------------------------------------------------
 
 def _classify_outcome(rec: dict, realized_r: float | None) -> str:
-    """Return one of 'win' | 'loss' | 'be' | 'open' | 'abstained'.
+    """Return one of 'win' | 'loss' | 'be' | 'open' | 'abstained' | 'abandoned'.
 
     Prefers an explicit ``outcome`` token (case-insensitive, both vocabularies);
     falls back to the sign of ``realized_r`` when no token is present.
@@ -190,6 +193,8 @@ def _classify_outcome(rec: dict, realized_r: float | None) -> str:
             return "abstained"
         if tok in _OPEN_TOKENS:
             return "open"
+        if tok in _ABANDONED_TOKENS:
+            return "abandoned"
     # An explicit abstained flag also means "no trade".
     if bool(rec.get("abstained")):
         return "abstained"
@@ -272,7 +277,7 @@ def _closed_views(records: list[dict]) -> list[_RecordView]:
         realized_r = _to_float(_first(rec, "realized_r", "r_multiple", "r"))
 
         outcome = _classify_outcome(rec, realized_r)
-        if outcome in ("open", "abstained"):
+        if outcome in ("open", "abstained", "abandoned"):
             continue
         if realized_r is None:
             # Resolved but no numeric R to learn from — nothing to measure.

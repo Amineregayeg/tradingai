@@ -32,6 +32,7 @@ _CHAIN = [
     ("0003", "0003_decision_fill_price.py", "0002"),
     ("0004", "0004_engine_runs.py", "0003"),
     ("0005", "0005_telemetry_records.py", "0004"),
+    ("0006", "0006_decision_outcome_abandoned.py", "0005"),
 ]
 
 
@@ -88,6 +89,23 @@ class _RecordingOp:
 
     def drop_table(self, name, **kw):
         self.other_tables.discard(name)
+
+    # A CHECK constraint can be REPLACED after the table exists — migration 0006
+    # widens the outcome vocabulary that way. Replaying only create_table would
+    # leave the harness asserting the original constraint while production runs
+    # the replacement, which is the exact drift this file exists to catch.
+    def drop_constraint(self, name, table_name=None, **kw):
+        if table_name == "decision_records":
+            self.checks.pop(name, None)
+
+    def create_check_constraint(self, name, table_name, condition, **kw):
+        if table_name == "decision_records":
+            self.checks[name] = sa.CheckConstraint(condition, name=name)
+
+    def execute(self, *_args, **_kw):
+        """Data statements change no schema. Recorded as a no-op so a migration
+        that repairs rows alongside its DDL still replays."""
+        return None
 
     def get_bind(self):
         """A bind that swallows data statements.

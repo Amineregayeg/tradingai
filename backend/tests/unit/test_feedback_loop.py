@@ -40,7 +40,6 @@ def _params(**overrides) -> dict:
         "rr_partial": 2.0,
         "require_ltf_bos": True,
         "min_fvg_atr": 0.05,
-        "use_premium_discount": True,
         "max_hold_bars": 10,
         "runner_trail_atr": 2.5,
     }

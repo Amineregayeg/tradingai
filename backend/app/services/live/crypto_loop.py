@@ -827,6 +827,11 @@ class LiveCryptoLoop:
         if self._running:
             return await self.status()
 
+        # Close the books on anything a previous process left dangling BEFORE
+        # opening a new run, so the abandoned records belong to the run that
+        # created them rather than to this one.
+        await self.reconcile_abandoned_decisions()
+
         await self.reset_run(note="started from the engine page")
         await self.paper.connect()
         self._running = True
@@ -883,6 +888,76 @@ class LiveCryptoLoop:
 
         self.paused = False
         return await self.status()
+
+    async def reconcile_abandoned_decisions(self) -> int:
+        """Resolve decisions the process died holding. Returns how many.
+
+        THE FAILURE THIS EXISTS FOR (KNOWN_ISSUES A11)
+        The simulated broker keeps its positions in memory. On 2026-08-08 a run
+        opened an ETH long at 06:00; twelve hours later the container was
+        recreated for a deploy and the position ceased to exist without ever
+        being closed. Its decision record still read `outcome = OPEN`, no trade
+        row was ever written, and the run reported "0 trades" when it had taken
+        one. Every restart could do that, and nothing noticed.
+
+        WHY `OPEN` HAD TO STOP MEANING TWO THINGS
+        `OPEN` claims a position is still running. For a record whose process is
+        gone that is not merely stale, it is false — and it is false in the
+        direction that keeps the record out of the feedback loop forever, since
+        the loop only reads closed outcomes. `ABANDONED` says the trade happened
+        and its result is unknowable, which is the true thing.
+
+        WHAT COUNTS AS ABANDONED
+        Only records the CURRENT process is not tracking. A record this loop
+        holds in `_open_decision` belongs to a live position and is left alone —
+        that is what makes this safe to run at Start rather than only at boot.
+
+        Never raises: a bookkeeping failure must not stop the engine starting.
+        """
+        try:
+            from sqlalchemy import select
+
+            from app.db.session import async_session_maker
+            from app.models.decision_record import (
+                OUTCOME_ABANDONED, OUTCOME_OPEN, DecisionRecord,
+            )
+
+            live = {str(v) for v in self._open_decision.values()}
+            async with async_session_maker() as db:
+                rows = (
+                    await db.execute(
+                        select(DecisionRecord).where(DecisionRecord.outcome == OUTCOME_OPEN)
+                    )
+                ).scalars().all()
+                stranded = [r for r in rows if str(r.id) not in live]
+                for rec in stranded:
+                    rec.outcome = OUTCOME_ABANDONED
+                    reasons = list(rec.reasons or [])
+                    # Say it in the record itself. Someone reading this row later
+                    # should not have to know that ABANDONED implies a restart.
+                    reasons.append(
+                        "ABANDONED: the engine stopped while this position was open, "
+                        "so its result was never observed. Not a loss — an absence."
+                    )
+                    rec.reasons = reasons
+                    db.add(rec)
+                if stranded:
+                    await db.commit()
+
+            if stranded:
+                logger.warning(
+                    "Resolved decisions abandoned by an earlier process",
+                    count=len(stranded),
+                )
+                await self._act(
+                    "engine",
+                    f"{len(stranded)} decision(s) from an earlier session were left open "
+                    "by a restart — recorded as ABANDONED, not as results",
+                )
+            return len(stranded)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Could not reconcile abandoned decisions", error=str(exc))
+            return 0
 
     async def _end_run(self) -> None:
         """Stamp the active run as finished. Never raises — a bookkeeping failure

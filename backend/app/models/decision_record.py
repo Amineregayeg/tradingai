@@ -40,12 +40,25 @@ OUTCOME_LOSS = "LOSS"
 OUTCOME_BREAKEVEN = "BE"
 OUTCOME_OPEN = "OPEN"
 OUTCOME_ABSTAINED = "ABSTAINED"
+#: The position existed and its result is unknowable — the process that held it
+#: died before it closed. NOT a synonym for a loss, and not a fifth kind of
+#: result: it is the absence of one, recorded so it stops being counted as still
+#: in progress. Added for KNOWN_ISSUES A11, where an ETH long opened at 06:00 and
+#: was annihilated by a container recreate twelve hours later, leaving a record
+#: reading OPEN for good and a run reporting "0 trades" when it had taken one.
+#:
+#: It is deliberately its own value rather than BE. Folding it into breakeven
+#: would put a fabricated zero into the feedback loop's realized-R population;
+#: ABANDONED is excluded from that population instead, which is the honest
+#: treatment of a number nobody ever observed.
+OUTCOME_ABANDONED = "ABANDONED"
 DECISION_OUTCOMES: tuple[str, ...] = (
     OUTCOME_WIN,
     OUTCOME_LOSS,
     OUTCOME_BREAKEVEN,
     OUTCOME_OPEN,
     OUTCOME_ABSTAINED,
+    OUTCOME_ABANDONED,
 )
 
 # cohort ------------------------------------------------------------------

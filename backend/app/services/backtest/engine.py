@@ -44,7 +44,6 @@ class Params:
     one_per_day: bool = True        # at most one new entry per UTC day
     atr_period: int = 14
     sl_mode: str = "swing"          # "swing" (cushion, beyond structure) | "fvg"
-    use_premium_discount: bool = True  # longs only in discount, shorts in premium
     fee_pct_per_side: float = 0.0006  # taker fee per leg (entry/partial/exit)
     slip_r: float = 0.04            # avg slippage haircut per trade, in R
     # --- randomized-entry CONTROL (falsification test): keep bias + all exit/
@@ -406,14 +405,13 @@ def run_backtest(
                 if p.require_ltf_bos and bos_dir_upto[i] != bias:
                     continue
                 lo_sw, hi_sw = last_low[i], last_high[i]
-                eq = (lo_sw + hi_sw) / 2 if not (np.isnan(lo_sw) or np.isnan(hi_sw)) else None
+                # No equilibrium here either — GATE-037. Removing it from the live
+                # path alone would recreate the live/backtest divergence that
+                # causal_bias_now exists to prevent.
                 if bias == "LONG":
                     # retrace down into the bullish FVG
                     if lo <= c["ph"] and cl > c["pl"]:
                         entry = c["ph"]
-                        # premium/discount: longs only in discount (below equilibrium)
-                        if p.use_premium_discount and eq is not None and entry > eq:
-                            continue
                         # cushion SL beyond the protected swing low (fallback to FVG)
                         base = lo_sw if (p.sl_mode == "swing" and not np.isnan(lo_sw) and lo_sw < entry) else c["pl"]
                         sl = base - p.sl_buffer_atr * a
@@ -428,8 +426,6 @@ def run_backtest(
                 else:
                     if hi >= c["pl"] and cl < c["ph"]:
                         entry = c["pl"]
-                        if p.use_premium_discount and eq is not None and entry < eq:
-                            continue
                         base = hi_sw if (p.sl_mode == "swing" and not np.isnan(hi_sw) and hi_sw > entry) else c["ph"]
                         sl = base + p.sl_buffer_atr * a
                         risk = sl - entry
