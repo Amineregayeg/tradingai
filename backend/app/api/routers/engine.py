@@ -244,3 +244,74 @@ async def engine_feedback(
         asdict(c) if is_dataclass(c) else c for c in result.get("corrections", [])
     ]
     return result
+
+
+@router.get("/shadow")
+async def engine_shadow(user_id: CurrentUser, db: DBSession, limit: int = 50) -> dict:
+    """M9 Stage A — what the CONTRACT engine made of the same bars.
+
+    This is the answer to "is the platform running Salim's strategy yet". It is
+    not, and this endpoint is how you watch the distance close: every record here
+    was produced by the rule layer on live data and acted on by nobody.
+
+    `blocked` is the part worth reading first. It counts, per rule, how often a
+    rule that IS implemented could not be evaluated — today that is the whole
+    roster layer, because the correlate panels are not wired. A rule appearing
+    there is not a bug in the rule; it is a dependency that has not been built,
+    counted from production rather than estimated.
+    """
+    from collections import Counter
+
+    from app.models.telemetry_record import TelemetryRecord
+
+    rows = (
+        await db.execute(
+            select(TelemetryRecord)
+            .where(TelemetryRecord.record_type == "setup_evaluation")
+            .order_by(TelemetryRecord.created_at.desc())
+            .limit(limit)
+        )
+    ).scalars().all()
+
+    decisions: Counter[str] = Counter()
+    deciders: Counter[str] = Counter()
+    blocked: Counter[str] = Counter()
+    evaluated: Counter[str] = Counter()
+
+    recent: list[dict] = []
+    for row in rows:
+        payload = row.payload or {}
+        decisions[str(payload.get("decision", "?"))] += 1
+        deciders[str(payload.get("deciding_rule_id", "?"))] += 1
+        for ev in payload.get("rule_evaluations", []):
+            rule_id = str(ev.get("rule_id"))
+            if ev.get("verdict") == "NOT_APPLICABLE":
+                blocked[rule_id] += 1
+            else:
+                evaluated[rule_id] += 1
+        recent.append({
+            "id": payload.get("evaluation_id"),
+            "at": payload.get("timestamp_ny"),
+            "symbol": (payload.get("instrument") or {}).get("symbol"),
+            "signal_tf": (payload.get("timeframes") or {}).get("signal_tf"),
+            "decision": payload.get("decision"),
+            "deciding_rule_id": payload.get("deciding_rule_id"),
+            "block_reason": payload.get("block_reason"),
+            "why": payload.get("notes"),
+            "flags": payload.get("flags", []),
+            "decision_path": payload.get("decision_path", []),
+            "primitive_counts": {
+                k: len(v) for k, v in (payload.get("primitives") or {}).items()
+            },
+        })
+
+    return {
+        # Stated on the response so no caller can mistake this for live behaviour.
+        "stage": "M9 Stage A — shadow. These decisions were recorded and acted on by nobody.",
+        "n": len(rows),
+        "decisions": dict(decisions),
+        "deciding_rules": dict(deciders),
+        "rules_evaluated": dict(evaluated),
+        "rules_blocked": dict(blocked),
+        "recent": recent,
+    }

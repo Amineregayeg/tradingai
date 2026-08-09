@@ -121,6 +121,8 @@ class LiveCryptoLoop:
         self.paused = False
         #: The scanning task, owned by start()/stop(). None when stopped.
         self._task: "asyncio.Task | None" = None
+        #: Sequence number for shadow (M9 Stage A) telemetry within this scan.
+        self._shadow_seq = 0
         # The active run. Held in the DB rather than only in memory so
         # recreating the api container CONTINUES the same run instead of
         # silently resetting the dashboard's numbers on every deploy.
@@ -612,6 +614,40 @@ class LiveCryptoLoop:
         except Exception as exc:  # noqa: BLE001
             logger.warning("Broker reset failed", error=str(exc))
 
+    async def _shadow_evaluate(self, pair: str, entry_df) -> None:
+        """Emit one contract `setup_evaluation` for this bar. Never raises.
+
+        THE SHADOW MAY NOT AFFECT THE TRADE, EVER. That is the whole safety
+        property of Stage A, and it is why the body is one try/except with no
+        return value the caller can act on: there is no code path by which a bad
+        record, a broken rule or a dead database changes what the engine does.
+
+        The counter is per-process and resets on restart. `sequence_no` is
+        scoped to a scan, and the scan id is the run — so a restart legitimately
+        begins a new scan rather than continuing one with a hole in it.
+        """
+        try:
+            from app.db.session import async_session_maker
+            from app.services.live import shadow
+            from app.services.telemetry import store as telemetry_store
+
+            self._shadow_seq += 1
+            record = shadow.evaluate(
+                pair,
+                entry_df,
+                signal_tf=self.entry_tf,
+                declared=shadow.declared_parameters(),
+                sequence_no=self._shadow_seq,
+                scan_id=f"scan-{self.run_id}",
+            )
+            if record is None:
+                return
+            async with async_session_maker() as db:
+                await telemetry_store.store(db, record, run_id=self.run_id)
+                await db.commit()
+        except Exception as exc:  # noqa: BLE001 - a shadow may never reach the trader
+            logger.warning("Shadow evaluation not recorded", pair=pair, error=str(exc))
+
     async def _record_abstention(self, pair: str, entry_df, trace) -> None:
         """Persist WHY no trade was taken.
 
@@ -770,6 +806,14 @@ class LiveCryptoLoop:
             await self._act(kind, f"{pair} {self.entry_tf} bar closed — {block}, skipped")
             return
         bias = await self._fetch_bars(bsym, self.bias_tf, 220)
+
+        # M9 STAGE A — the contract engine sees the same bars and decides nothing.
+        # Placed BEFORE the ICT evaluation so that if it ever did have a side
+        # effect, the failure would show up as a shadow record disagreeing with a
+        # trade rather than as a trade that quietly changed. It cannot raise; see
+        # services/live/shadow.py.
+        await self._shadow_evaluate(pair, entry)
+
         sig, trace = evaluate_latest_bar_traced(pair, entry, bias, risk_pct=self.risk_pct)
         if sig is None:
             # Record WHY, not just that nothing happened. DecisionRecord has

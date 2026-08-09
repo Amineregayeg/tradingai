@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-09 (GATE-037 removed; A11 and B10 fixed; B11, B12 open)
+Last updated: 2026-08-09 (M9 Stage A — shadow mode live; B13 found)
 
 ---
 
@@ -337,6 +337,27 @@ the fidelity measurement has one fewer moving part; (2) add "how do you decide
 which chart to drop to?" to the trader's question list — it is cheap and currently
 missing; (3) only make it variable once there is a ruled or declared selection
 rule, stamped on every record like any other declared parameter.
+
+### B13. The telemetry schema cannot say "the layout was never read"
+**Found in:** M9 Stage A, 2026-08-09.
+**What it is:** `correlates.disturbance_grade` is an enum of `NONE | LIGHT |
+HEAVY`. There is no value for *not evaluated*. The shadow engine has no correlate
+panels at all (B11), so it must write one of the three, and `NONE` is the only
+one that is not an outright claim — but read alone it says "checked, and nothing
+was disturbed", which is the opposite of what happened.
+**Why it matters:** C-04 is the contract's own principle that silence is not a
+pass, and the schema enforces it everywhere else — `rule_evaluation.verdict` has
+`NOT_APPLICABLE` and `UNIMPLEMENTABLE` precisely so an unaskable rule cannot be
+recorded as a passing one. `disturbance_grade` is the one place that distinction
+is unavailable, and it is a grade the risk matrix reads.
+**How we handle it meanwhile:** every other field on the record contradicts the
+optimistic reading — `layout_size` is 0, `states` is empty, GATE-008 and GATE-002
+are `NOT_APPLICABLE` with their reasons, the decision is `STAND_ASIDE` and
+`block_reason` is `NO_ALIGNMENT`. A reader who looks at only the one field can
+still be misled.
+**Fix:** ask Salim to add `NOT_EVALUATED` (or a sibling `layout_readable`
+boolean) when he regenerates the schema against registry v1.2.0 — B8 is already
+open for that regeneration, so this rides along with it.
 
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
