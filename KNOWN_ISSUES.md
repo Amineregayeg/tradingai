@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-10 (three-agent working loop; B14, B15 found)
+Last updated: 2026-08-10 (three-agent working loop; A11, B14, B15 found)
 
 ---
 
@@ -37,6 +37,48 @@ only grows becomes wallpaper.
 ---
 
 ## A. Wrong numbers — these can mislead a decision
+
+### A11. `main` is red, and one of the two failures is the dominance source inventing bars across a collector outage
+**Found in:** taking a clean test baseline before handing the tree to the new
+three-agent loop, 2026-08-10.
+**What it is:** `cd backend && ~/.venvs/tradingai/bin/python -m pytest -q` reports
+**2 failed, 838 passed** on `main` with a clean working tree. Both are in
+`tests/unit/test_dominance_source.py`, both were added by commit `56518f8`
+("Dominance: bars carry their sample count…"), and nothing has touched
+`app/services/market_data/sources/dominance.py` or that test file since — so the
+commit that introduced the tests is the commit that left them failing.
+
+* `test_gaps_produce_no_bars` — **the serious one.** The test writes samples at
+  12:00, 12:05, then a deliberate hole to 13:00. `DominanceSource.fetch_ohlcv`
+  returns bars at 12:10, 12:15, 12:20 … anyway. The test's own docstring states
+  the requirement: *"a collector outage must leave a hole, not flat synthetic
+  candles."*
+* `test_an_empty_result_still_carries_the_samples_column` — the no-data branch of
+  `fetch_ohlcv_with_samples` returns a frame whose columns are
+  `[open, high, low, close, volume]`, dropping `samples`. Its docstring names the
+  consequence: a caller reading `samples` cannot tell "no data" from "zero
+  samples, looks fine".
+
+**Why it matters:** these are not stale tests describing an old design — they are
+this commit's own statement of what the code should do, and the code does not do
+it. The first defect fabricates market data. B11 exists because the disturbance
+grader has no credible correlate bars; a source that silently manufactures flat
+candles across an outage does not fix that, it makes it undetectable, and
+GATE-002's grade would then be computed from bars that no collector ever
+observed. The second defect is the same class of failure the register already
+records at B13 — a "not measured" state that renders as a plausible number.
+
+**What it could break, concretely:** every consumer of BTC.D / USDT.D bars —
+which is the entire correlate layer the cutover is waiting on. It also means the
+new Execute agent inherits a red baseline, so its Review agent cannot distinguish
+"this change broke something" from "this was already broken", which is exactly
+the confusion the baseline in each prompt's Step 4 exists to prevent.
+
+**Not fixed here** because it belongs to the correlate work (B11) and is a
+natural first task for the new loop, not a drive-by patch from the session that
+found it. **The 838/2 split is the recorded baseline** — until this is fixed, a
+run reporting 838 passed and 2 failed in these two tests is unchanged, and any
+third failure is new.
 
 ### A10. The engine does not trade the Magic Strategy — it trades the pre-contract ICT strategy, and one of its gates is explicitly forbidden
 **Found in:** conformance audit of the live path against `RULE_REGISTRY.json` v1.2.0,
