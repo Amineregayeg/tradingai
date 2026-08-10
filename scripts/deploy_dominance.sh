@@ -31,10 +31,10 @@
 # and recreated by no documented command. A grep for "dominance" or "collector"
 # across agents/PROMPT_EXECUTE.md and the deploy runbook returned nothing.
 #
-# The result was predictable and it happened: `--loop 15` was committed on
-# 2026-08-06, KNOWN_ISSUES B11 recorded the sampling-rate fix as DONE, and the
-# container went on sampling at 60s for six more days because nothing ever copied
-# the file or recreated the container. Nobody was careless. There was no step to skip.
+# The result was predictable and it happened: `--loop 15` was committed on 2026-08-09
+# (56518f8), KNOWN_ISSUES B11 recorded the sampling-rate fix as DONE the same day, and
+# the container went on sampling at 60s — it had been up since 2026-08-04 and nothing
+# ever copied the file or recreated it. Nobody was careless. There was no step to skip.
 #
 # So: one committed command, which copies the repo's compose to the server, recreates
 # only the collector, and then proves the result with check_deploy_drift.py rather

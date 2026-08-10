@@ -305,10 +305,13 @@ because the DATA has not caught up.**
    one is chosen.
 2. **Raise the sampling rate — reached production 2026-08-10 at `--loop 10`, not 15** (T-0001).
 
-   **This entry said "done" for four days while it was not, and that is the more useful
-   half of the story.** `--loop 15` was committed on 2026-08-06 and this text recorded the
-   sampling-rate fix as complete. The server was never updated: its own compose said
-   `--loop 60`, and `tradingai-dominance-collector-1` ran six days on the old cadence.
+   **This entry said "done" while it was not, and that is the more useful half of the
+   story.** `--loop 15` was committed on 2026-08-09 (`56518f8`) and this text recorded the
+   sampling-rate fix as complete the same day. The server was never updated: its own
+   compose said `--loop 60`, and `tradingai-dominance-collector-1` ran six days on the old
+   cadence — the container was created 2026-08-04, so it predates the commit by five days
+   and outlived it by one. Those are two different clocks and conflating them is easy:
+   the container's six days is not six days of a false register entry.
    `check_deploy_drift.py` reported it the whole time and exited 1, and nobody read the
    exit code. The cause was structural, not careless — the collector is compose project
    `tradingai-dominance` under `/home/deploy/`, outside every documented deploy path, and
@@ -344,7 +347,7 @@ which is correct and also means a 5M shadow window run over that history stands 
 every bar. **Close this entry when the collector has run at 10 s for long enough to cover
 the intended shadow window** — 20 trading days or 300 evaluations per symbol, whichever is
 later (`MAGIC_STRATEGY_EXECUTION_PLAN.md` M9 Stage A) — not when the code merged, and not
-now that the deploy has happened. The clock starts 2026-08-10, not 2026-08-06.
+now that the deploy has happened. The clock starts 2026-08-10, not 2026-08-09.
 **Also note this task did not wire the correlate panels.** `/api/engine/shadow` still shows
 every record blocked on GATE-008 with "roster panels TOTAL and USDT.D are unavailable". The
 series is now capable of being read; nothing reads it yet.

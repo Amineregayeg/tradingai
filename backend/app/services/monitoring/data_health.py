@@ -85,9 +85,10 @@ BACKUP_STALE_HOURS = 48.0
 #: only needs the recent past.
 #:
 #: The size has to cover the density window with room to spare, so check it when the
-#: cadence changes: rows are ~70 bytes, so 96 KB is ~1,400 samples — nearly 4 hours
-#: at 10s against a 1-hour window. It was ~23 hours of headroom at 60s; still ample,
-#: but no longer so large that it can be assumed without arithmetic.
+#: cadence changes. Measured on the live file (2,047,434 bytes / 20,246 rows): rows are
+#: **101 bytes**, so 96 KiB is ~970 samples — **2.7 hours** at 10s against a 1-hour
+#: window. It was ~16 hours of headroom at 60s. Still ample, but no longer so large
+#: that it can be assumed without arithmetic.
 TAIL_BYTES = 96 * 1024
 
 

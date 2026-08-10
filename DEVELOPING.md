@@ -76,12 +76,12 @@ any deploy, and after changing anything in `deploy/`.
 their committed description. Any drift it reports is therefore new, and worth
 stopping for rather than explaining away.
 
-That sentence was **false from 2026-08-06 to 2026-08-10** and nobody noticed, which
-is worth more than the fix. `--loop 15` was committed for the collector, recorded in
-`KNOWN_ISSUES` B11 as done, and never copied to the server — so the check exited 1
-for four days while this file told each new reader that any drift they saw was
-damage they had just caused. A baseline that lies costs more than no baseline. If you
-find this sentence disagreeing with the script again, the script is right.
+That sentence was **false from 2026-08-09 to 2026-08-10** and nobody noticed, which
+is worth more than the fix. `--loop 15` was committed for the collector (`56518f8`),
+recorded in `KNOWN_ISSUES` B11 as done, and never copied to the server — so the check
+exited 1 while this file told each new reader that any drift they saw was damage they
+had just caused. A baseline that lies costs more than no baseline. If you find this
+sentence disagreeing with the script again, the script is right.
 
 The collector was drifting because it had no deploy path — see
 `scripts/deploy_dominance.sh` in the table above, which now exists for exactly that
