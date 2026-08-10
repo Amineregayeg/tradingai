@@ -511,10 +511,15 @@ both are fixed in this repo, because neither ships with the collector's compose 
   container and this task deliberately did not redeploy the api — recreating it kills the
   live engine mid-run and abandons open positions (B14). Production still computes
   `min(100.0, 100.0 * recent / 60.0)`.
-* **`collect_dominance.py --status`.** The fix is committed, but the collector container
-  `git clone`s `backend/scripts/` from GitHub **main** at startup, so it runs whatever main
-  holds. Until this branch lands there, `--status` reports density against a per-minute
-  expectation and prints ~600%.
+* **`collect_dominance.py --status`.** The fix is **on `main` as of 2026-08-10**, but the
+  collector container `git clone`s `backend/scripts/` from GitHub main **at startup** and
+  is guarded by an `/app/.ready` flag, so the running container still holds the code it
+  cloned when it was recreated at 18:23 UTC. The fix is armed, not applied: it lands at the
+  collector's **next recreate** (`./scripts/deploy_dominance.sh --force`), and until then
+  `--status` in production reports density against a per-minute expectation and prints
+  ~600%. Nobody needs to recreate the collector for this alone — a needless recreate puts a
+  real gap in a series that cannot be backfilled, and this is a CLI readout, not the health
+  signal. It will correct itself the next time the collector is deployed for any reason.
 
 **Why it matters — the density figure is not merely wrong, it is saturated.** At 10 s a
 healthy hour is ~360 samples; against a 60-sample expectation that is 600%, clamped to
@@ -546,8 +551,8 @@ r=[dt.datetime.fromisoformat(l.split(',')[0]) for l in sys.stdin if l[:2]=='20']
 print('median gap', statistics.median((b-a).total_seconds() for a,b in zip(r,r[1:])))"
 ```
 
-**Fix:** an api deploy carries `data_health.py`; merging this branch to main and recreating
-the collector carries `--status`. The api deploy is the one with a cost — it requires
+**Fix:** an api deploy carries `data_health.py`; the merge to main is **done**, so the next
+collector recreate carries `--status`. The api deploy is the one with a cost — it requires
 stopping the live run first (B14), so it should ride along with the next api change rather
 than being done for this alone. **Close this before M9 Stage A's shadow window is treated as
 meaningful**, not merely "at the next api deploy": the window is exactly when a silently
