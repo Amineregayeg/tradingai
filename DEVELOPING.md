@@ -26,15 +26,24 @@ packages, and checks that the strategy-critical versions match production.
 
 | What | Command | From |
 |---|---|---|
-| Backend suite (632 tests, ~2 min) | `~/.venvs/tradingai/bin/python -m pytest` | `backend/` |
+| Backend suite (852 tests, ~2 min) | `~/.venvs/tradingai/bin/python -m pytest` | `backend/` |
 | One file | `~/.venvs/tradingai/bin/python -m pytest tests/unit/test_build_info.py` | `backend/` |
-| Frontend tests (153 tests, ~1 min) | `pnpm exec vitest run` | `frontend/` |
+| Frontend tests (171 tests, ~1 min) | `pnpm exec vitest run` | `frontend/` |
 | Frontend typecheck | `pnpm tsc` | `frontend/` |
 | Lookahead guards (Tier 0.2) | `PYTHON=~/.venvs/tradingai/bin/python ./scripts/verify_guards.sh` | `backend/` |
 | Dependency single-source | `python3 scripts/check_dependency_sources.py` | repo root |
 | Deploy drift (needs ssh) | `~/.venvs/tradingai/bin/python scripts/check_deploy_drift.py` | repo root |
+| Deploy the dominance collector (needs ssh) | `./scripts/deploy_dominance.sh` (`--check` to report only) | repo root |
 
 **`pnpm test` is bare `vitest`, which watches forever.** Use `vitest run`.
+
+**The backend suite is RED, and 852 does not mean 852 passing.** It currently reports
+**850 passed, 2 failed**. Both failures are
+`tests/unit/test_dominance_source.py::test_gaps_produce_no_bars` and
+`::test_an_empty_result_still_carries_the_samples_column`, they are pre-existing, and
+they are recorded as `KNOWN_ISSUES` A11. **A third failure is new and yours.** This is
+here because a bare test count reads as a pass count, and someone arriving at a red
+suite with no warning cannot tell what they broke from what was already broken.
 
 ### About `verify_guards.sh`
 
@@ -66,6 +75,17 @@ any deploy, and after changing anything in `deploy/`.
 **It currently exits 0** — all seven services across the three projects match
 their committed description. Any drift it reports is therefore new, and worth
 stopping for rather than explaining away.
+
+That sentence was **false from 2026-08-06 to 2026-08-10** and nobody noticed, which
+is worth more than the fix. `--loop 15` was committed for the collector, recorded in
+`KNOWN_ISSUES` B11 as done, and never copied to the server — so the check exited 1
+for four days while this file told each new reader that any drift they saw was
+damage they had just caused. A baseline that lies costs more than no baseline. If you
+find this sentence disagreeing with the script again, the script is right.
+
+The collector was drifting because it had no deploy path — see
+`scripts/deploy_dominance.sh` in the table above, which now exists for exactly that
+reason and re-runs this check itself.
 
 It compares parsed YAML with shell comments stripped, because a raw diff of
 these files is ~91 lines of comment noise. Secret **values** are never compared

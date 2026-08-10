@@ -5,8 +5,19 @@ Stdlib only, no dependencies, no API key. Designed to run unattended from cron
 every minute and to be readable by whoever inherits it at 3am.
 
     python3 collect_dominance.py --once      # one sample, then exit (cron mode)
-    python3 collect_dominance.py --loop 15   # sample every 15s (service mode)
+    python3 collect_dominance.py --loop 10   # sample every 10s (service mode)
     python3 collect_dominance.py --status    # what has been collected so far
+    python3 collect_dominance.py --status --interval 10   # ...against a declared cadence
+
+WHY 10 SECONDS AND NOT 60
+-------------------------
+These bars are resampled point observations, so a bar carries structure only if
+enough observations went into it. The engine declares that minimum —
+`gate_008_roster.MIN_SAMPLES_PER_SYNTHETIC_BAR = 20` — and refuses to grade a
+panel thinner than it. At the 5M execution timeframe: 60s gives 5 samples and
+fails outright, 15s gives exactly 20 and clears it with no margin at all, 10s
+gives 30. 10 is also the floor `--loop` enforces below. See the comment in
+`deploy/compose.dominance.yaml`, which is where the deployed value lives.
 
 WHY THIS EXISTS
 ---------------
@@ -328,25 +339,70 @@ def sample_once() -> dict | None:
     return row
 
 
-def status() -> int:
-    if not RAW_CSV.exists():
-        print(f"no data yet at {RAW_CSV}")
+def observed_interval_seconds(times: list[datetime]) -> float | None:
+    """The cadence this series is actually running at, read from its own timestamps.
+
+    MEDIAN, not mean. One collector outage puts a single enormous gap in the series
+    (the live file has one of 415 s in fourteen days), and a mean would let that one
+    gap drag the denominator and flatter the density it feeds. The median is the
+    typical spacing, which is what "how often is this thing sampling" means.
+
+    None when there is nothing to measure — one sample has no spacing.
+    """
+    if len(times) < 2:
+        return None
+    gaps = sorted((b - a).total_seconds() for a, b in zip(times, times[1:]))
+    mid = len(gaps) // 2
+    median = gaps[mid] if len(gaps) % 2 else (gaps[mid - 1] + gaps[mid]) / 2.0
+    return median or None
+
+
+def status(interval: float | None = None, path: Path | None = None) -> int:
+    """Summarise what has been collected.
+
+    `interval` is the cadence the density figure is measured against, in seconds.
+    It used to be hardcoded at one sample per minute, which was true of the
+    collector for as long as it ran at `--loop 60` and became a lie the moment it
+    did not: at `--loop 10` that denominator reports ~600% density, and a health
+    readout that prints an impossible number precisely when the collector is
+    finally correct is worse than one that prints nothing.
+
+    So the denominator is either DECLARED by the caller (`--interval`) or INFERRED
+    from the series' own spacing, and the printed line says which. Those two answer
+    different questions and both are worth having: declared tells you whether the
+    collector is keeping up with the cadence it was configured for, inferred tells
+    you how much of the series is missing relative to the cadence it actually ran
+    at — which is the only one available when nobody remembers the configuration.
+    """
+    csv_path = path or RAW_CSV
+    if not csv_path.exists():
+        print(f"no data yet at {csv_path}")
         return 1
-    with open(RAW_CSV) as f:
+    with open(csv_path) as f:
         rows = list(csv.DictReader(f))
     if not rows:
-        print(f"{RAW_CSV} exists but has no rows")
+        print(f"{csv_path} exists but has no rows")
         return 1
     first, last = rows[0], rows[-1]
     t0 = datetime.fromisoformat(first["ts_utc"])
     t1 = datetime.fromisoformat(last["ts_utc"])
-    span_min = (t1 - t0).total_seconds() / 60.0
-    expected = int(span_min) + 1
-    print(f"file      {RAW_CSV}")
+    span_sec = (t1 - t0).total_seconds()
+
+    times = [datetime.fromisoformat(r["ts_utc"]) for r in rows if r.get("ts_utc")]
+    inferred = observed_interval_seconds(times)
+    cadence = interval or inferred
+    source = "declared" if interval else "inferred from the series"
+
+    print(f"file      {csv_path}")
     print(f"samples   {len(rows)}")
-    print(f"span      {t0.isoformat()} -> {t1.isoformat()}  ({span_min/60:.2f}h)")
-    if expected > 0:
-        print(f"density   {100*len(rows)/expected:.1f}% of once-per-minute")
+    print(f"span      {t0.isoformat()} -> {t1.isoformat()}  ({span_sec/3600:.2f}h)")
+    if cadence:
+        print(f"cadence   {cadence:g}s ({source})")
+        expected = int(span_sec / cadence) + 1
+        if expected > 0:
+            print(f"density   {100*len(rows)/expected:.1f}% of one sample per {cadence:g}s")
+    else:
+        print("cadence   unknown — too few samples to infer, and none declared")
     print(f"latest    TOTAL={float(last['TOTAL']):,.0f}  BTC.D={last['BTC_D']}  "
           f"USDT.D={last['USDT_D']}  coverage={last['coverage_pct']}%  "
           f"supplies_age={last['supplies_age_h']}h")
@@ -360,10 +416,16 @@ def main() -> int:
     g.add_argument("--loop", type=int, metavar="SEC", help="sample every SEC seconds")
     g.add_argument("--status", action="store_true", help="summarize what has been collected")
     g.add_argument("--refresh-supplies", action="store_true", help="force a supply refresh")
+    ap.add_argument(
+        "--interval", type=float, metavar="SEC",
+        help="with --status: measure density against this cadence instead of the one "
+             "inferred from the series. Pass the --loop value the collector is "
+             "configured with to see whether it is keeping up with it.",
+    )
     args = ap.parse_args()
 
     if args.status:
-        return status()
+        return status(interval=args.interval)
 
     if args.refresh_supplies:
         snap = refresh_supplies()

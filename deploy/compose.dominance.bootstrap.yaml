@@ -45,16 +45,28 @@ services:
       - /opt/dominance:/data
     # Stdlib only: nothing to install, so the container is up in seconds and
     # cannot fail on dependency resolution.
-    # 15s, not 60s. These bars are RESAMPLED point observations, so a bar carries
-    # structure only if enough observations went into it: at 60s a 5-minute bar holds
-    # five, and its high and low are sampling luck rather than price action
-    # (KNOWN_ISSUES B11). GATE-007 requires the correlate panels to be read at the
-    # EXECUTION timeframe and GATE-017 makes 1H analysis-only, so the ruled choices are
-    # 30M/15M/5M — and at 60s only 30M clears the engine's 20-sample minimum. At 15s all
-    # three do. Cost is 4 requests/minute to Binance instead of 1, against limits the
-    # collector header already calls generous; supplies are untouched (CoinGecko stays
-    # twice daily). History already collected at 60s stays valid, it is simply thinner.
-    command: ["python", "collect_dominance.py", "--loop", "15"]
+    # 10s. THE NUMBER THAT DECIDES THIS IS 20, AND IT LIVES IN THE ENGINE.
+    # These bars are RESAMPLED point observations, not exchange bars, so a bar carries
+    # structure only if enough observations went into it.
+    # `gate_008_roster.MIN_SAMPLES_PER_SYNTHETIC_BAR = 20` is the engine's declared
+    # minimum, and `LayoutReadability` fails GATE-007 for any panel thinner than it.
+    # The execution timeframe is 5M (MAGIC_STRATEGY_EXECUTION_PLAN.md §5.4), so the only
+    # question this line answers is how many samples a 5-minute bar holds:
+    #
+    #     60s -> 5 samples   fails the minimum outright; sampling luck, not price action
+    #     15s -> 20 samples  clears it with EXACTLY ZERO margin
+    #     10s -> 30 samples  clears it with 50% headroom
+    #
+    # 15s is why this file said 15 before, and it is not enough — one missed or late poll
+    # lands the bar on 19 and it is refused, and refresh_supplies() guarantees an overrun
+    # twice a day (a hard 6-second sleep inside a normal tick, against a cadence controller
+    # that never makes up a deficit).
+    #
+    # KEEP THIS IN STEP WITH deploy/compose.dominance.yaml. The cadence appears in both
+    # files in DIFFERENT SYNTAX — a list here, `exec python …` there — so a grep for one
+    # form silently misses the other, and a stale value here quietly reintroduces the old
+    # cadence the next time the collector is bootstrapped from scratch.
+    command: ["python", "collect_dominance.py", "--loop", "10"]
     restart: unless-stopped
     healthcheck:
       test:

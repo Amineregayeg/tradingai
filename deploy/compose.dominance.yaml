@@ -53,16 +53,31 @@ services:
         fi
         # Stdlib only — nothing to pip install, which is why this container comes
         # up in seconds and cannot break on a dependency resolution.
-        # 15s, not 60s. These bars are RESAMPLED point observations, so a bar carries
-        # structure only if enough observations went into it: at 60s a 5-minute bar holds
-        # five, and its high and low are sampling luck rather than price action
-        # (KNOWN_ISSUES B11). GATE-007 requires the correlate panels to be read at the
-        # EXECUTION timeframe and GATE-017 makes 1H analysis-only, so the ruled choices are
-        # 30M/15M/5M — and at 60s only 30M clears the engine's 20-sample minimum. At 15s all
-        # three do. Cost is 4 requests/minute to Binance instead of 1, against limits the
-        # collector header already calls generous; supplies are untouched (CoinGecko stays
-        # twice daily). History already collected at 60s stays valid, it is simply thinner.
-        exec python collect_dominance.py --loop 15
+        #
+        # 10s. THE NUMBER THAT DECIDES THIS IS 20, AND IT LIVES IN THE ENGINE.
+        # These bars are RESAMPLED point observations, not exchange bars, so a bar
+        # carries structure only if enough observations went into it.
+        # `gate_008_roster.MIN_SAMPLES_PER_SYNTHETIC_BAR = 20` is the engine's declared
+        # minimum, and `LayoutReadability` fails GATE-007 for any panel thinner than it.
+        # The execution timeframe is 5M (MAGIC_STRATEGY_EXECUTION_PLAN.md §5.4), so the
+        # only question this line answers is how many samples a 5-minute bar holds:
+        #
+        #     60s -> 5 samples   fails the minimum outright; sampling luck, not price action
+        #     15s -> 20 samples  clears it with EXACTLY ZERO margin
+        #     10s -> 30 samples  clears it with 50% headroom
+        #
+        # 15s is why this file said 15 before, and it is not enough. A bar needs only one
+        # missed or late poll to land on 19 and be refused, and there is a guaranteed
+        # overrun twice a day: refresh_supplies() runs inside a normal tick and contains a
+        # hard 6-second sleep between its two CoinGecko calls, while the cadence controller
+        # sleeps `max(1.0, interval - elapsed)` and so never makes up a deficit.
+        #
+        # 10 is also the floor collect_dominance.py itself enforces (`max(10, args.loop)`),
+        # so it is the most headroom obtainable without changing the script. Cost is 6
+        # Binance requests/minute against limits the collector's own header calls generous;
+        # supplies are untouched (CoinGecko stays twice daily). History already collected at
+        # 60s stays valid, it is simply too thin for anything below 30M.
+        exec python collect_dominance.py --loop 10
     restart: unless-stopped
     # The collector is the series. If it dies quietly, data stops and nobody
     # notices until someone goes looking months later — so make the container

@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-10 (three-agent working loop; A11, B14, B15 found)
+Last updated: 2026-08-10 (T-0001, collector to `--loop 10`; B11 corrected, B16 and B17 found)
 
 ---
 
@@ -295,35 +295,63 @@ market cap = price × supply, where **supplies** come from CoinGecko once a day 
 nature, fine) and **prices** come from Binance `/ticker/price`, real-time. So the intraday
 resolution is bounded by our poll rate and nothing upstream — raising the rate buys genuine
 structure, not duplicates. Anyone reading only the docstring would conclude the opposite.
-**Both halves of the fix have landed; the entry stays open because the DATA has not caught
-up.**
+**Both halves of the fix have landed IN PRODUCTION as of 2026-08-10; the entry stays open
+because the DATA has not caught up.**
 1. **Refuse rather than fabricate — done** (`ccdd4a4`). A bar assembled from too few samples
    is not a low-quality bar, it is not a bar. `CorrelateRead.bar_sample_count` carries the
    observation count, `LayoutReadability` fails GATE-007 when a panel is thinner than the
    declared minimum, and GATE-036 turns that into a STAND_ASIDE that cites a real rule. This
    half is what makes *any* execution-timeframe choice safe, and it is independent of which
    one is chosen.
-2. **Raise the sampling rate — done.** Both compose files now run `--loop 15`, and
-   `DominanceSource` reports what that buys:
+2. **Raise the sampling rate — reached production 2026-08-10 at `--loop 10`, not 15** (T-0001).
 
-   | Execution TF | samples @60s | samples @15s |
-   |---|---|---|
-   | 5M | 5 | **20** |
-   | 15M | 15 | **60** |
-   | 30M | 30 | 120 |
+   **This entry said "done" for four days while it was not, and that is the more useful
+   half of the story.** `--loop 15` was committed on 2026-08-06 and this text recorded the
+   sampling-rate fix as complete. The server was never updated: its own compose said
+   `--loop 60`, and `tradingai-dominance-collector-1` ran six days on the old cadence.
+   `check_deploy_drift.py` reported it the whole time and exited 1, and nobody read the
+   exit code. The cause was structural, not careless — the collector is compose project
+   `tradingai-dominance` under `/home/deploy/`, outside every documented deploy path, and
+   a grep for "dominance" or "collector" across the runbook and the agent prompts returned
+   nothing. There was no step to skip. `scripts/deploy_dominance.sh` now exists so there is
+   one, and it re-runs the drift check itself rather than announcing success.
 
-   So at 60 s only 30M cleared the 20-sample minimum; at 15 s all three ruled execution
-   timeframes do. Cost is 4 Binance requests/minute instead of 1; supplies are untouched.
+   **The cadence is 10 s, not the 15 s this entry used to name.** 15 s was chosen when the
+   question was which timeframes clear the minimum at all; it does not survive contact with
+   jitter. `MIN_SAMPLES_PER_SYNTHETIC_BAR = 20` and 15 s gives a 5M bar **exactly 20** —
+   one missed or late poll lands it on 19 and GATE-007 refuses the panel. There is a
+   guaranteed overrun twice a day: `refresh_supplies()` runs inside a normal tick and holds
+   a hard `time.sleep(6)` between its two CoinGecko calls, while the cadence controller
+   sleeps `max(1.0, interval - elapsed)` and never makes up a deficit.
 
-**What is still true, and why this is not deleted:** every sample collected before the rate
-change is still 60 s apart, so the *history* remains 30M-only. The engine will now refuse to
-grade 5M or 15M layouts rather than fabricate them — which is correct, and also means a
-shadow window started today at 5M would stand aside on almost every bar until enough 15 s
-history exists. **Close this entry when the collector has run at 15 s for long enough to
-cover the intended shadow window**, not when the code merged.
+   | Execution TF | samples @60s | samples @15s | samples @10s |
+   |---|---|---|---|
+   | 5M | 5 | 20 — zero margin | **30** |
+   | 15M | 15 | 60 | **90** |
+   | 30M | 30 | 120 | **180** |
+   | 1M | 1 | 1 | 6 — still fails, see B16 |
+
+   Cost is 6 Binance requests/minute instead of 1, against limits the collector's own header
+   calls generous; supplies are untouched. 10 s is also the floor `collect_dominance.py`
+   enforces (`interval = max(10, int(args.loop))`).
+
+**What is still true, and why this is not deleted:** every sample collected before
+2026-08-10 18:23 UTC is 60 s apart, so **the existing ~14 days of history remain 30M-only
+and always will** — it cannot be backfilled. Measured on the full pre-change series: 4,013
+completed 5M bars, median 5 samples each, **0.0% clearing the 20-sample minimum** for TOTAL
+and USDT.D alike. The engine refuses to grade those layouts rather than fabricating them,
+which is correct and also means a 5M shadow window run over that history stands aside on
+every bar. **Close this entry when the collector has run at 10 s for long enough to cover
+the intended shadow window** — 20 trading days or 300 evaluations per symbol, whichever is
+later (`MAGIC_STRATEGY_EXECUTION_PLAN.md` M9 Stage A) — not when the code merged, and not
+now that the deploy has happened. The clock starts 2026-08-10, not 2026-08-06.
+**Also note this task did not wire the correlate panels.** `/api/engine/shadow` still shows
+every record blocked on GATE-008 with "roster panels TOTAL and USDT.D are unavailable". The
+series is now capable of being read; nothing reads it yet.
 **Also worth knowing:** the healthcheck's 600 s staleness threshold was left alone. It still
-catches a dead collector at either rate, and tightening it to match a 15 s cadence would
-trade a real signal for flapping.
+catches a dead collector at either rate, and tightening it to match a 10 s cadence would
+trade a real signal for flapping. `COLLECTOR_STALE_MIN`/`COLLECTOR_DOWN_MIN` in
+`data_health.py` were left alone for the same reason.
 
 ### B9. Four primitive sub-parts need numbers nobody has ruled on — BLOCKED ON THE TRADER
 **Found in:** M3 (implementing PRIM-002/003/004/006), 2026-08-08
@@ -444,6 +472,83 @@ task is visible if you look. Re-running the handshake corrects the registry.
 **Fix:** have each agent re-run `ListAgents` before sending and refuse to ring a
 doorbell whose name is absent from the live peer list — that turns a silent stall
 into a loud one, which is the whole difference.
+
+### B16. The 1M second shadow run can never have readable correlate panels — a decision collides with a guard
+**Found in:** T-0001, raising the collector to `--loop 10`, 2026-08-10.
+**What it is:** `MAGIC_STRATEGY_EXECUTION_PLAN.md` §5.4 records Malek's decision of
+**5M execution timeframe, with 1M as a second shadow run to compare against it**. At the
+new 10 s cadence a 1M bar holds **6 samples** against `MIN_SAMPLES_PER_SYNTHETIC_BAR = 20`.
+Clearing 20 on a 1M bar needs a poll every 3 s — and `collect_dominance.py` reads
+`interval = max(10, int(args.loop))`, so **the script enforces a 10 s floor**. 3 s is not
+merely undesirable, it is unreachable without changing that line, and changing it means 20
+Binance requests a minute against a free endpoint.
+**Why it matters:** the 1M run will `STAND_ASIDE` on GATE-007 for every single bar, citing
+GATE-036, exactly as the 5M run does on the 60 s history today. So the 5M-vs-1M comparison
+the decision exists to produce **cannot be produced as specified** — the 1M arm yields no
+gradeable layouts at all, not merely worse ones. Reading its output as "1M performs poorly"
+would be reading the guard, not the market.
+**What it could break, concretely:** M9 Stage A's shadow window is the evidence base for
+Stage B, the cutover. If half that window is an arm that structurally cannot grade anything,
+the window is smaller than it appears and the comparison it was designed around is absent.
+Worse, the 1M records will look like ordinary abstentions — the same `STAND_ASIDE` /
+GATE-036 shape a genuine market refusal produces — so nothing in the telemetry distinguishes
+"the layout was unreadable by construction" from "the layout was read and refused".
+**Not fixed here:** T-0001 changed the collector's cadence, not the decision. This is for
+Malek: either drop the 1M arm, or accept it as a null arm and say so in the record, or
+re-open the 3 s question with its cost attached. **Settle it before Stage A's window is
+treated as meaningful**, because afterwards it is 20 days of data with a hole in it.
+
+### B17. Production's collector diagnostics are stale-by-design after T-0001, and one of them is now blind
+**Found in:** T-0001, 2026-08-10.
+**What it is:** two readouts keep a once-per-minute denominator in production even though
+both are fixed in this repo, because neither ships with the collector's compose file:
+
+* **`/api/system/data-health` → `recent_density_pct`.** The fix is in
+  `data_health.py` (`EXPECTED_POLL_SECONDS`), but `data_health.py` runs in the **api**
+  container and this task deliberately did not redeploy the api — recreating it kills the
+  live engine mid-run and abandons open positions (B14). Production still computes
+  `min(100.0, 100.0 * recent / 60.0)`.
+* **`collect_dominance.py --status`.** The fix is committed, but the collector container
+  `git clone`s `backend/scripts/` from GitHub **main** at startup, so it runs whatever main
+  holds. Until this branch lands there, `--status` reports density against a per-minute
+  expectation and prints ~600%.
+
+**Why it matters — the density figure is not merely wrong, it is saturated.** At 10 s a
+healthy hour is ~360 samples; against a 60-sample expectation that is 600%, clamped to
+exactly **100.0**. A collector degrading all the way back to 60 samples/hour — a sixfold
+loss on data that cannot be backfilled — still reads **100.0% healthy**. Measured either
+side of the cadence change, nine minutes apart:
+
+| | 18:26:13Z (60 s) | 18:35:21Z (10 s) |
+|---|---|---|
+| `recent_density_pct` | 100.0 | 100.0 |
+| `samples_in_tail` | 971 | 971 |
+
+Two identical readouts across a 6× change in the underlying rate.
+**And there is no second field that would reveal it.** `samples_in_tail` looks like a raw
+count and is not a signal: `_read_tail` seeks `size - TAIL_BYTES` and parses a fixed 96 KiB
+window, so it returns ~970 rows at any cadence and any level of degradation. Do not record
+this as a weak signal; the panel has **none**.
+**What still works, so the blind band is bounded:** `status` is driven by `age_min` against
+`COLLECTOR_STALE_MIN = 5.0` and `COLLECTOR_DOWN_MIN = 30.0`, not by density. A **dead**
+collector is still caught within five minutes at either cadence. What is invisible is
+**partial** degradation between 1× and 6× — which is precisely the range a struggling
+Binance endpoint or a slow container would produce.
+**The replacement check until it is fixed** — no ssh, no token, over the public CSV:
+
+```
+curl -s http://31.97.183.142:8097/dominance_intraday_raw.csv | tail -400 | \
+  python3 -c "import sys,csv,datetime as dt,statistics; \
+r=[dt.datetime.fromisoformat(l.split(',')[0]) for l in sys.stdin if l[:2]=='20']; \
+print('median gap', statistics.median((b-a).total_seconds() for a,b in zip(r,r[1:])))"
+```
+
+**Fix:** an api deploy carries `data_health.py`; merging this branch to main and recreating
+the collector carries `--status`. The api deploy is the one with a cost — it requires
+stopping the live run first (B14), so it should ride along with the next api change rather
+than being done for this alone. **Close this before M9 Stage A's shadow window is treated as
+meaningful**, not merely "at the next api deploy": the window is exactly when a silently
+degrading collector would do the most damage and be least visible.
 
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
