@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-09 (M9 Stage A — shadow mode live; B13 found)
+Last updated: 2026-08-10 (three-agent working loop; B14, B15 found)
 
 ---
 
@@ -358,6 +358,50 @@ still be misled.
 **Fix:** ask Salim to add `NOT_EVALUATED` (or a sibling `layout_readable`
 boolean) when he regenerates the schema against registry v1.2.0 — B8 is already
 open for that regeneration, so this rides along with it.
+
+### B14. Nothing enforces stopping the engine before a deploy — it is a documented habit, not a guard
+**Found in:** setting up the three-agent working loop, 2026-08-10.
+**What it is:** recreating the `api` container kills the live engine mid-run.
+Positions opened by that run keep existing as rows, but no process will ever
+check their stop-loss again — they are not "still open", they are abandoned.
+`POST /api/engine/stop` closes them at the current price and ends the run
+cleanly, so the correct sequence is stop → deploy → verify → start. That sequence
+is written in `agents/PROMPT_EXECUTE.md` and in the deploy runbook. **Nothing in
+the code refuses a deploy that skips it.**
+**Why it matters now specifically:** Malek granted the Execute agent authority to
+deploy unattended (2026-08-10). Until now every deploy had a human at the
+keyboard who could notice an open position; from now on some will not. This is
+exactly how the ETH LONG of 2026-08-08 06:00 was destroyed twelve hours in — the
+only trade the platform had taken at the time.
+**What it could break:** a silent loss of a real position, and a run whose
+recorded result is wrong in a direction nobody can reconstruct afterwards,
+because the trade shows as open forever rather than as closed at a price.
+**Fix:** make it structural rather than procedural. Either the api refuses to
+shut down cleanly with an open run without closing it (a shutdown hook already
+calls `stop()` — verify it survives `--force-recreate`, which is a SIGKILL path,
+because a hook that only runs on SIGTERM is not a guard here), or a preflight
+script that a deploy must pass. Until then this is a habit, and habits are what
+the register exists to distrust.
+
+### B15. The agent message bus goes silently deaf when a session restarts
+**Found in:** setting up the three-agent working loop, 2026-08-10.
+**What it is:** the three agents wake each other with `SendMessage`, addressed by
+the session name recorded in `agents/registry.json` during the HELLO handshake.
+Those names (`tradingai-02`, …) are assigned per session and change when a
+session is restarted or compacted into a new one. The message file is still
+written to the right inbox — that half is durable — but the doorbell goes to a
+name that no longer exists.
+**What it could break:** the loop stalls with no error anywhere. Execute finishes,
+sends WORK, and Review never wakes; Malek sees a task that has been "REVIEWING"
+for hours and no indication that anything is wrong. Worse: if the stale name has
+since been reassigned, the wake-up goes to an unrelated session working on
+something else.
+**How we handle it meanwhile:** `bus.py send` warns when the recipient role is
+unregistered, and `bus.py tasks` shows each task's state and cycle, so a stalled
+task is visible if you look. Re-running the handshake corrects the registry.
+**Fix:** have each agent re-run `ListAgents` before sending and refuse to ring a
+doorbell whose name is absent from the live peer list — that turns a silent stall
+into a loud one, which is the whole difference.
 
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
