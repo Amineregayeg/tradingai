@@ -42,7 +42,8 @@ only grows becomes wallpaper.
 **Found in:** taking a clean test baseline before handing the tree to the new
 three-agent loop, 2026-08-10.
 **What it is:** `cd backend && ~/.venvs/tradingai/bin/python -m pytest -q` reports
-**2 failed, 838 passed** on `main` with a clean working tree. Both are in
+**2 failed, 838 passed** on `main` with a clean working tree — *838 as of
+2026-08-10; the current figure is 850, see the baseline paragraph below.* Both are in
 `tests/unit/test_dominance_source.py`, both were added by commit `56518f8`
 ("Dominance: bars carry their sample count…"), and nothing has touched
 `app/services/market_data/sources/dominance.py` or that test file since — so the
