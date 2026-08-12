@@ -300,6 +300,102 @@ def test_an_empty_result_still_carries_the_samples_column(raw_csv):
     assert "samples" in bars.columns
 
 
+# ---------------------------------------------------------------------------
+# Every no-data route out of _bars_with_samples, one test each
+#
+# The test above drives ONE of them (the min_samples branch). Fixing that branch
+# alone satisfies "the empty frame carries samples" while the other routes still
+# return a frame without the column — so each route gets its own case naming the
+# line it exercises. Line numbers drift; the guard CONDITION in each id is what
+# identifies the branch, and the numbers were re-derived with grep -n at the time
+# of writing (KNOWN_ISSUES B19 — cite from output that emits the number).
+# ---------------------------------------------------------------------------
+
+def _empty_via_no_raw_rows(tmp_path):
+    """:192 — `raw.empty or column not in raw.columns`."""
+    p = tmp_path / "dominance_intraday_raw.csv"
+    p.write_text(HEADER)                      # header only, zero samples
+    return DominanceSource(p), dict(timeframe="5m", start=T0, end=WIDE_END)
+
+
+def _empty_via_non_numeric_column(tmp_path):
+    """:196 — `series.empty` after `to_numeric(errors="coerce").dropna()`."""
+    p = tmp_path / "dominance_intraday_raw.csv"
+    p.write_text(HEADER + f"{T0.isoformat()},2e12,9e11,7e11,not-a-number,10.0,8.0,94.5,1.0\n")
+    return DominanceSource(p), dict(timeframe="5m", start=T0, end=WIDE_END)
+
+
+def _empty_via_min_samples(tmp_path):
+    """:234 — every bar filtered out by `min_samples`."""
+    p = tmp_path / "dominance_intraday_raw.csv"
+    write_raw(p, [(T0, 50.0)])
+    return DominanceSource(p), dict(timeframe="1m", start=T0, end=WIDE_END, min_samples=99)
+
+
+def _empty_via_window(tmp_path):
+    """:256 — every bar outside the requested `[start, end)`."""
+    p = tmp_path / "dominance_intraday_raw.csv"
+    write_raw(p, [(T0, 50.0), (T0 + timedelta(minutes=5), 51.0)])
+    return DominanceSource(p), dict(
+        timeframe="5m", start=T0 + timedelta(days=5), end=T0 + timedelta(days=6))
+
+
+@pytest.mark.parametrize("build", [
+    pytest.param(_empty_via_no_raw_rows,        id="line-192-no-raw-rows"),
+    pytest.param(_empty_via_non_numeric_column, id="line-196-series-empty"),
+    pytest.param(_empty_via_min_samples,        id="line-234-min-samples"),
+    pytest.param(_empty_via_window,             id="line-256-window-excludes-all"),
+])
+def test_every_no_data_route_still_carries_the_samples_column(build, tmp_path):
+    """Each early return from `_bars_with_samples` must honour its own contract.
+
+    A caller doing `bars["samples"]` gets a KeyError on a route that drops the
+    column and a plausible 0 on one that does not — the two failure modes do not
+    even look alike, which is why this is a test per route and not one test.
+    """
+    src, kw = build(tmp_path)
+    bars = src.fetch_ohlcv_with_samples("BTC.D", drop_partial=False, **kw)
+    assert bars.empty, "fixture is meant to drive a no-data route"
+    assert "samples" in bars.columns
+    assert list(bars.columns) == [*OHLCV_COLUMNS, "samples"]
+
+
+def test_a_non_empty_series_always_produces_at_least_one_bar(raw_csv):
+    """The fifth early return — post-`dropna`, `:225` — is unreachable, and this pins why.
+
+    `:195` guarantees the series is non-empty, `load_raw` drops NaT timestamps, and
+    `ohlc()` on a non-empty series yields at least one period whose OHLC are all
+    non-NaN. So `dropna(subset=price_cols, how="all")` can never empty the frame.
+    Traced across eight adversarial inputs (single sample, duplicate timestamps,
+    unparseable timestamps, missing column, …) and that line was never executed.
+
+    Written as the invariant rather than as a test of the branch, because a test
+    that claimed to drive an unreachable line would be the same lie this task is
+    about. If this ever fails, `:225` has become live and needs its own case.
+    """
+    write_raw(raw_csv, [(T0, 50.0)])
+    bars = DominanceSource(raw_csv).fetch_ohlcv_with_samples(
+        "BTC.D", "5m", T0, WIDE_END, drop_partial=False)
+    assert not bars.empty
+    assert not bars[list(OHLCV_COLUMNS)].isna().all(axis=1).any()
+
+
+def test_fetch_ohlcv_never_leaks_the_samples_column_on_a_no_data_read(raw_csv):
+    """`fetch_ohlcv`'s docstring says `samples` is deliberately absent. That has to hold
+    on the empty path too — which is the one path no test covered, and the one the
+    empty-frame fix above would otherwise have broken silently."""
+    write_raw(raw_csv, [(T0, 50.0)])
+    src = DominanceSource(raw_csv)
+    bars = src.fetch_ohlcv("BTC.D", "1m", T0, WIDE_END, drop_partial=False, min_samples=99)
+    assert bars.empty
+    assert "samples" not in bars.columns
+    assert list(bars.columns) == list(OHLCV_COLUMNS)
+    # and the same on a populated read, so this is a contract and not an artefact
+    populated = src.fetch_ohlcv("BTC.D", "5m", T0, WIDE_END, drop_partial=False)
+    assert not populated.empty
+    assert "samples" not in populated.columns
+
+
 def test_viability_is_reported_rather_than_assumed(raw_csv):
     report = DominanceSource(raw_csv).timeframe_viability(
         poll_seconds=60, min_samples=MIN_SAMPLES_PER_SYNTHETIC_BAR)

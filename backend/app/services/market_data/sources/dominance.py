@@ -103,6 +103,25 @@ _TF_TO_OFFSET: dict[str, str] = {
 }
 
 
+def _empty_with_samples() -> pd.DataFrame:
+    """An empty frame in the ``_bars_with_samples`` contract: OHLCV **plus** ``samples``.
+
+    Deliberately local to this source rather than a change to
+    :func:`~app.services.market_data.sources.base.empty_ohlcv`. That helper is shared
+    with ``binance.py`` and ``cft.py``, and adding ``samples`` there would give every
+    source a column it cannot populate — the "fake it" this module's docstrings
+    already refuse.
+
+    It exists because a no-data branch that silently drops the column is how "no
+    data" becomes "zero samples, looks fine" at the call site: a reader doing
+    ``bars["samples"]`` gets a KeyError on the empty path and a plausible 0 on the
+    populated one, so the two failure modes do not even look alike (KNOWN_ISSUES A11).
+    """
+    df = empty_ohlcv()
+    df["samples"] = pd.Series(dtype="int64")
+    return df
+
+
 class DominanceSource(MarketDataSource):
     """OHLCV bars for the dominance symbols, resampled from raw samples."""
 
@@ -170,11 +189,11 @@ class DominanceSource(MarketDataSource):
         raw = self.load_raw()
         column = SYMBOL_TO_COLUMN[symbol]
         if raw.empty or column not in raw.columns:
-            return empty_ohlcv()
+            return _empty_with_samples()
 
         series = pd.to_numeric(raw[column], errors="coerce").dropna()
         if series.empty:
-            return empty_ohlcv()
+            return _empty_with_samples()
 
         # closed="left", label="left": a bar stamped 12:00 aggregates samples in
         # [12:00, 12:15) and carries that timestamp. Any other convention lets a
@@ -191,9 +210,19 @@ class DominanceSource(MarketDataSource):
         # resample() emits a row for every period in the range, including ones
         # with no samples at all. Those are NOT bars — the collector was down, or
         # had not started. Dropping them keeps gaps as gaps.
-        bars = bars.dropna(how="all")
+        #
+        # SUBSET IS LOAD-BEARING: only the price columns decide whether a period is
+        # empty. An empty period gets NaN for open/high/low/close but `samples` = 0,
+        # and 0 is not NaN — so a bare `how="all"` has to agree across a column that
+        # is never NaN, matches no row, and drops nothing. That is not hypothetical:
+        # assigning `samples` above silently disabled this line the day it was added,
+        # and this comment went on describing behaviour the code had stopped having
+        # (KNOWN_ISSUES A11 — bars were invented across every collector outage).
+        # Any column added above must be excluded here for the same reason.
+        price_cols = ["open", "high", "low", "close"]
+        bars = bars.dropna(subset=price_cols, how="all")
         if bars.empty:
-            return empty_ohlcv()
+            return _empty_with_samples()
 
         # A bar assembled from too few observations is not a low-quality bar, it is not a
         # bar. Dropping it is the same judgement the line above makes about an empty period,
@@ -202,7 +231,7 @@ class DominanceSource(MarketDataSource):
         if min_samples is not None:
             bars = bars[bars["samples"] >= int(min_samples)]
             if bars.empty:
-                return empty_ohlcv()
+                return _empty_with_samples()
 
         if drop_partial:
             last_sample = series.index[-1]
@@ -224,7 +253,7 @@ class DominanceSource(MarketDataSource):
         bars = bars[(bars.index >= start_ts) & (bars.index < end_ts)]
 
         if bars.empty:
-            return empty_ohlcv()
+            return _empty_with_samples()
 
         bars.index.name = "time"
         return bars.astype(float)
@@ -255,8 +284,13 @@ class DominanceSource(MarketDataSource):
             symbol, timeframe, start, end,
             drop_partial=drop_partial, min_samples=min_samples,
         )
-        if bars.empty:
-            return bars
+        # PROJECT UNCONDITIONALLY. This used to short-circuit on an empty frame and
+        # return it unprojected, which was invisible only because the empty frame had
+        # no `samples` column to leak. Now that `_bars_with_samples` honours its own
+        # contract on every path, that short-circuit would hand `samples` back out of
+        # `fetch_ohlcv` — contradicting the docstring above on exactly the branch
+        # nobody tests. Selecting columns from an empty frame is well-defined and
+        # costs nothing, so there is no reason for the empty path to be special.
         return bars[list(OHLCV_COLUMNS)]
 
     def fetch_ohlcv_with_samples(

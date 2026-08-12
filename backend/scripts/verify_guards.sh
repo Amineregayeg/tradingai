@@ -211,8 +211,12 @@ probe "dominance partial trailing bar dropped" "$DOMINANCE" \
       "tests/unit/test_dominance_source.py" \
       "confirming an entry against a still-forming dominance bar"
 
+      # The pattern tracks the line's TEXT, which changed when A11 was fixed: the
+      # drop is now scoped with `subset=price_cols`, because `samples` is 0 rather
+      # than NaN for an empty period and a bare `how="all"` therefore matched
+      # nothing. The line this probe targets never moved; only its spelling did.
 probe "dominance gaps stay gaps" "$DOMINANCE" \
-      's/bars = bars.dropna(how="all")/bars = bars.ffill()/' \
+      's/bars = bars.dropna(subset=price_cols, how="all")/bars = bars.ffill()/' \
       "tests/unit/test_dominance_source.py" \
       "flat synthetic candles across a collector outage, which read as real structure"
 
