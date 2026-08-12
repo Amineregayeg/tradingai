@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-12 (A11 consequence for the Tier 0.2 harness; B18 and B19 found; A11 baseline count and F1 corrected)
+Last updated: 2026-08-12 (A11 consequence for the Tier 0.2 harness; B18, B19, B20 found; A11 baseline count and F1 corrected)
 
 ---
 
@@ -752,11 +752,17 @@ Four distinct mechanisms were observed in a single session:
 | off-by-one from a range read | `sed -n '78,100p'` where **line 78 is blank**: the first *visible* line reads as 78, and every citation from that read shifts by one |
 | inheritance through a message | a number republished by an agent that verified the surrounding code but not the number — it gains apparent confirmation from each repetition |
 
-**The split is mechanical, not a matter of care.** In both audits, independently:
-**every correct citation came from `grep -n`; every wrong one came from a range
-read or from another agent's message.** No exceptions in either sample. So this
-is not fixable by looking harder — it is fixed by reading from output that emits
-the line number instead of output that requires you to infer it.
+**The split is mechanical, not a matter of care** — but it runs in one direction
+only, and an earlier draft of this entry overstated it. What both audits show is
+that **every wrong citation came from a range read or from another agent's
+message, and `grep -n` never produced a wrong one.** The converse does not hold:
+a third audit, of A11's and F1's citations, found seven correct — four from
+`grep -n`, and **three from range reads that happened to start on a non-blank
+line**. So a range read is not reliably wrong; it is *unverifiable without
+recounting*, which is worse, because it produces right answers often enough to
+feel safe. "I checked them and they were fine" is not evidence the method works.
+This is not fixable by looking harder. It is fixed by reading from output that
+emits the line number instead of output that requires you to infer it.
 
 **Why it matters:** a wrong citation does not fail, it misleads — and it misleads
 the reader who is *acting* on the entry, six weeks later, with no cheap way to
@@ -781,6 +787,51 @@ citations it audits. Pairs naturally with a check on constants the register
 quotes and the code owns (`MIN_SAMPLES_PER_SYNTHETIC_BAR`, the collector
 cadence, suite counts, `TAIL_BYTES`) — see A11 and F1, both of which stated
 figures that had gone stale without anything noticing.
+
+### B20. CI on `main` is advisory — nothing blocks on a red check and nothing reports one
+**Found in:** 2026-08-12, chasing why a job configured to block had not blocked.
+**What it is:** `main` has **no branch protection and no rulesets**. Verified
+against the GitHub API:
+
+```
+GET /repos/Amineregayeg/tradingai/branches/main/protection  -> 404 Not Found
+GET /repos/Amineregayeg/tradingai/branches/main             -> "protected": false
+GET /repos/Amineregayeg/tradingai/rulesets                  -> 0 rulesets
+```
+
+So every CI job on this repo is advisory. `Tier 0.2 - lookahead guards must bite`
+carries no `continue-on-error` and fails the job on exit 2 — it is written to
+block, and there is nothing for it to block. Nothing rejects a push to a red
+`main`, and nothing requires a PR, a review or a green check to get there.
+
+**Why it matters:** this is the missing half of A11's finding. It was already
+recorded there that nothing *routes* a red `main` to a human; this is that
+nothing *stops* one either. Together they mean CI is a machine that observes
+correctly, reports honestly to a page nobody opens, and is wired to no
+consequence. `main` has been red for four consecutive runs since 2026-08-09
+including `946ca1c`, which is the sha production runs — and it got there by
+ordinary `git push`, not by anyone overriding anything.
+
+**What it could break, concretely:** the guarantee everyone in this project has
+been reasoning from — that `main` is releasable — is not enforced anywhere. A
+lookahead regression reintroduced tomorrow would turn `Tier 0.2` red, and that
+red would neither stop the merge nor reach anyone. Note also that runtime
+containers `git clone` `main` at startup, so an unreleasable `main` is not a
+staging concern: it is what the next container recreate ships.
+
+**How we handle it meanwhile:** check CI by hand after every push to `main` —
+`gh`-less, so via the API. This is a habit, and habits are what B15, B19 and this
+entry all say do not hold.
+
+**Fix:** require the four CI checks on `main` via a ruleset. That is the fix, but
+it is **a decision, not a task** — it changes how everyone lands code, and with
+`main` currently red it would block all merges until A11 is fixed, so the order
+matters: fix A11 first, then protect. Malek's call, not an agent's. **Recording
+this is not a recommendation to switch it on today.**
+
+**Deliberately its own entry rather than part of A11.** A11 is deleted when its
+two tests go green; this survives that deletion, because the trigger recurs with
+any future red check and A11 is incidental to it.
 
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
