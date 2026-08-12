@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-12 (T-0003: A11 and B18 fixed and deleted; B21-B25 found; B20 made standalone; B15 annotated)
+Last updated: 2026-08-13 (T-0004: dominance fix DEPLOYED — B24 closed, B17 narrowed to the collector half, B14 gains the first observed proof the safe stop sequence settles; B20 open and closable only by the repo owner)
 
 ---
 
@@ -407,6 +407,34 @@ only trade the platform had taken at the time.
 **What it could break:** a silent loss of a real position, and a run whose
 recorded result is wrong in a direction nobody can reconstruct afterwards,
 because the trade shows as open forever rather than as closed at a price.
+**THE SAFE SEQUENCE IS NOW OBSERVED TO WORK — which narrows this entry to what it
+always actually was: the absence of enforcement, not doubt about the procedure.**
+On 2026-08-12 (T-0004) the stop-then-deploy path was deliberately driven with
+**two open positions** live, and measured either side. This had never been done
+on purpose before; the docstring at `crypto_loop.py:894-905` promising that
+`stop()` *closes* rather than abandons had been asserted since 2026-08-08 and
+never once verified.
+
+```
+pre-stop     OPEN 2   realized_r populated 0   gap_r populated 0
+post-stop    OPEN 0 · LOSS 2 (both fields populated) · WIN 1 (both populated)
+post-START   ABANDONED in that run  0        (the reconciler runs at run start)
+             ABANDONED repo-wide    5        unchanged from pre-deploy
+```
+
+The last line is what makes this evidence rather than an absence:
+`reconcile_abandoned_decisions` was present, it ran when the new run started, and
+it converted nothing — while five `ABANDONED` rows from earlier runs sat
+untouched beside it. **Both positions settled through the normal path with real
+P&L.** Timing note for anyone repeating this: an unsettled position reads `OPEN`
+immediately after a stop and only becomes `ABANDONED` once the next run starts,
+so a single reading at stop time cannot detect the failure. Take both.
+
+**This does not close the entry.** What was verified is that the procedure works
+*when followed*. Nothing still refuses a deploy that skips it, which is the whole
+of this entry — and the risk grew rather than shrank, because the sequence now
+has a successful precedent that makes it feel routine.
+
 **Fix:** make it structural rather than procedural. Either the api refuses to
 shut down cleanly with an open run without closing it (a shutdown hook already
 calls `stop()` — verify it survives `--force-recreate`, which is a SIGKILL path,
@@ -474,16 +502,43 @@ Malek: either drop the 1M arm, or accept it as a null arm and say so in the reco
 re-open the 3 s question with its cost attached. **Settle it before Stage A's window is
 treated as meaningful**, because afterwards it is 20 days of data with a hole in it.
 
-### B17. Production's collector diagnostics are stale-by-design after T-0001, and one of them is now blind
-**Found in:** T-0001, 2026-08-10.
-**What it is:** two readouts keep a once-per-minute denominator in production even though
-both are fixed in this repo, because neither ships with the collector's compose file:
+### B17. The collector's `--status` readout still uses a per-minute denominator — NARROWED, the api half is fixed
+**Found in:** T-0001, 2026-08-10. **Api half closed 2026-08-12 (T-0004).**
+**What it is:** two readouts kept a once-per-minute denominator in production. **One is now
+fixed; one remains.**
 
-* **`/api/system/data-health` → `recent_density_pct`.** The fix is in
-  `data_health.py` (`EXPECTED_POLL_SECONDS`), but `data_health.py` runs in the **api**
-  container and this task deliberately did not redeploy the api — recreating it kills the
-  live engine mid-run and abandons open positions (B14). Production still computes
-  `min(100.0, 100.0 * recent / 60.0)`.
+* ~~**`/api/system/data-health` → `recent_density_pct`**~~ — **CLOSED 2026-08-12.** The api
+  was redeployed in T-0004 at merge sha `71feb556b3e`, after stopping the engine cleanly so
+  no position was abandoned (B14). Verified in the running container:
+  `data_health.py:77 EXPECTED_POLL_SECONDS = 10.0`, and the payload now carries
+  `expected_poll_seconds` so a reader can check the denominator instead of trusting it.
+
+  **A SUB-100 READING IS THE FIX WORKING, NOT DEGRADATION. Do not raise an alarm on it.**
+  The old denominator was `min(100.0, 100.0 * recent / 60.0)`; at a 10 s cadence the
+  collector puts ~360 samples in the hour, so it computed `100*360/60 = 600` and clamped to
+  exactly **100.0**. It was arithmetically *incapable* of printing below 100 unless polling
+  fell slower than 60 s. The new denominator is `3600/10 = 360`, so **any value under 100 is
+  reachable only under the fixed code.** Review observed **99.7** (≈359 samples) shortly
+  after the deploy — that reading is the discriminator, and it is proof in a way the field
+  itself never was before.
+
+  **But most of the time it still reads 100.0, and that is not a failure.** Three readings
+  taken by me minutes later, eight seconds apart, all returned `100.0` with
+  `expected_poll_seconds: 10.0`. Both observations are correct: the field only falls below
+  100 when the hour happens to miss a sample or two. **A future reader who checks, sees
+  100.0, and concludes the fix did not land would be wrong** — the discriminator is
+  `expected_poll_seconds` being present in the payload at all, since that field did not
+  exist before.
+
+  Attribution, because it matters for what is evidence and what is inference: the 99.7 was
+  Review's reading, not mine. I verified the arithmetic that makes it impossible under the
+  old formula, and I observed only 100.0.
+
+  This is today's recurring shape for the third time: **an output that does not discriminate
+  between working and broken.** Eight `ok` lines with or without `restore()`; the one-step
+  and two-step `curl` returning identical shas; a density that reads 100.0 either way. In
+  every case the fix was to find the reading that *can* differ, not to trust the one that
+  usually does not.
 * **`collect_dominance.py --status`.** The fix is **on `main` as of 2026-08-10**, but the
   collector container `git clone`s `backend/scripts/` from GitHub main **at startup** and
   is guarded by an `/app/.ready` flag, so the running container still holds the code it
@@ -494,11 +549,12 @@ both are fixed in this repo, because neither ships with the collector's compose 
   real gap in a series that cannot be backfilled, and this is a CLI readout, not the health
   signal. It will correct itself the next time the collector is deployed for any reason.
 
-**Why it matters — the density figure is not merely wrong, it is saturated.** At 10 s a
-healthy hour is ~360 samples; against a 60-sample expectation that is 600%, clamped to
-exactly **100.0**. A collector degrading all the way back to 60 samples/hour — a sixfold
-loss on data that cannot be backfilled — still reads **100.0% healthy**. Measured either
-side of the cadence change, nine minutes apart:
+**Why it mattered, and why the remaining half is the same disease.** At 10 s a healthy hour
+is ~360 samples; against a 60-sample expectation that is 600%, clamped to exactly **100.0**.
+A collector degrading all the way back to 60 samples/hour — a sixfold loss on data that
+cannot be backfilled — still read **100.0% healthy**. *(This paragraph now describes
+`--status` only; `data-health` was fixed 2026-08-12.)* Measured either side of the cadence
+change, nine minutes apart, on the api's readout before the fix:
 
 | | 18:26:13Z (60 s) | 18:35:21Z (10 s) |
 |---|---|---|
@@ -639,6 +695,41 @@ staging concern: it is what the next container recreate ships.
 `gh`-less, so via the API. This is a habit, and habits are what B15, B19 and this
 entry all say do not hold.
 
+**NO AGENT IN THIS PROJECT CAN CLOSE THIS. Established 2026-08-12 (T-0004).**
+Branch protection is an admin-only endpoint, and the token every agent pushes
+with is not an admin:
+
+```
+login       : Docz2868
+repo        : Amineregayeg/tradingai        (owner: Amineregayeg)
+permissions : admin False · maintain False · push True · triage True · pull True
+GET /branches/main/protection -> 404        (GitHub reports admin-required as "Not Found")
+```
+
+So this is not a token to rotate or a call to retry. **Only the repo owner can
+enable it** — by running `ENFORCE_ADMINS=false ./scripts/enable_branch_protection.sh`
+with an admin token, by using the web UI, or by granting `Docz2868` admin. An
+agent attempting it gets a 404 that reads like a missing endpoint rather than a
+permission denial, which is why this needs writing down: the failure does not
+announce its own cause.
+
+**`enforce_admins=false` is the recorded decision, and it is not the script's
+default.** `scripts/enable_branch_protection.sh:55` defaults to `true` and its
+header argues for it — *"false leaves a silent hole … the badge says protected
+while the property does not hold."* That reasoning assumes the bypasser and the
+gated party are the same actor. Here they are not: the agents are non-admin, so
+they are bound either way, and B20's whole purpose — stopping an agent loop
+merging past a red check — survives `false` intact. What `false` buys is that the
+one human on the project can still push a fix at 2am without dismantling the
+gate. **This was checked rather than assumed:** had the agents' token carried
+admin, `false` would have voided the entry and `true` would have been correct.
+
+**The name-exactness risk is already retired**, whoever runs it. The script derives
+reported job names from a real workflow run and `grep -Fxq`s each required check
+against them, so it cannot produce the failure that looks like success — a
+required context CI never emits, which blocks every future PR forever. All four
+names verified string-identical to what CI reported on `71feb55`.
+
 **Fix:** require the four CI checks on `main` via a ruleset, and route a red
 `main` somewhere a human reads. The first is **a decision, not a task** — it
 changes how everyone lands code, and it is Malek's call, not an agent's.
@@ -756,35 +847,6 @@ and that assumption is currently unchecked.
 **Fix:** no cheap one. The nearest thing is a coverage assertion — require each
 mutated line to be executed by the probe's own test — which catches "dead line"
 but not "live line with no effect". Worth a plan rather than a ride-along.
-
-### B24. The dominance gap fix is merged but not deployed
-**Found in:** T-0003, 2026-08-12.
-**What it is:** the fix that stops `DominanceSource` inventing bars across a
-collector outage is on `main` and **not on the api**. Runtime containers clone
-`main` at startup, so it reaches production only on the next api recreate.
-
-**Why it was not deployed with the fix:** an api recreate requires stopping the
-live engine first (**B14** — `--force-recreate` abandons open positions), and
-that is a live-run risk taken for a change that currently decides nothing.
-Checked rather than assumed (T-0003 criterion 8): **`DominanceSource` has zero
-consumers in `backend/app/` or `backend/scripts/`.** Its only non-test
-instantiation is inside a docstring example, `fetch_ohlcv_with_samples` has no
-call sites at all, `datasets.py` defaults to `BinanceSource`, and
-`scripts/verify_baseline.py` reads Binance symbols. So no live decision has ever
-consumed a dominance bar, phantom or otherwise — consistent with **B11**, where
-the shadow engine `STAND_ASIDE`s on 100% of bars citing GATE-036.
-
-**What it could break:** nothing today, and that is precisely the condition that
-expires. The moment the correlate layer is wired (B11), production would be
-reading the *old* fabricating code unless this has shipped first.
-
-**Closing condition:** ships with the next api deploy, and should be **batched
-with B17's api half**, which is waiting on the same stop → deploy → verify →
-start. **Deploy this before wiring the correlate layer**, not merely "eventually".
-
-Recorded rather than left implicit because T-0001's lesson was that undeployed
-work goes invisible: a value committed, believed live, and running at its old
-setting for days.
 
 ### B25. Three agents share one working tree, and `verify_guards.sh` rewrites tracked files in it
 **Found in:** T-0003, 2026-08-12 — raised by the Manager, which declined to run
