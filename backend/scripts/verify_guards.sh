@@ -211,10 +211,11 @@ probe "dominance partial trailing bar dropped" "$DOMINANCE" \
       "tests/unit/test_dominance_source.py" \
       "confirming an entry against a still-forming dominance bar"
 
-      # The pattern tracks the line's TEXT, which changed when A11 was fixed: the
-      # drop is now scoped with `subset=price_cols`, because `samples` is 0 rather
-      # than NaN for an empty period and a bare `how="all"` therefore matched
-      # nothing. The line this probe targets never moved; only its spelling did.
+# The pattern tracks the line's TEXT, which changed when the gap bug was fixed: the
+# drop is now scoped with `subset=price_cols`, because `samples` is 0 rather than
+# NaN for an empty period, so a bare `how="all"` matched nothing and this probe was
+# mutating a line that did nothing. The line it targets never moved; only its
+# spelling did. See KNOWN_ISSUES B23 — nothing detects the inert case.
 probe "dominance gaps stay gaps" "$DOMINANCE" \
       's/bars = bars.dropna(subset=price_cols, how="all")/bars = bars.ffill()/' \
       "tests/unit/test_dominance_source.py" \
