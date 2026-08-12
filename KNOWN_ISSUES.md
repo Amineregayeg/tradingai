@@ -659,9 +659,9 @@ degrading collector would do the most damage and be least visible.
 independently before filing.
 **What it is:** the script guards against clobbering your work — and then clobbers
 it, in the same breath, with no trace. `trap restore EXIT INT TERM` is armed at
-`backend/scripts/verify_guards.sh:81`. The uncommitted-changes check runs *after*
-that, at `:93-97`, and ends in `exit 1`. That exit fires the trap, and
-`restore()` is `git checkout -- "${GUARDED_FILES[@]}"` (`:78`). So the refusal
+`backend/scripts/verify_guards.sh:82`. The uncommitted-changes check runs *after*
+that, at `:94-98`, and ends in `exit 1` (`:97`). That exit fires the trap, and
+`restore()` is `git checkout -- "${GUARDED_FILES[@]}"` (`:79`). So the refusal
 path performs exactly the destruction it is refusing to perform. Demonstrated on
 a clean tree at `976b30e`:
 
@@ -681,7 +681,7 @@ stash, no reflog entry — `git checkout --` of an uncommitted change leaves
 nothing to recover from. And the message actively misleads: a developer reads
 "commit or stash them first" as evidence they were protected, so the one person
 positioned to notice is the one told not to look. The untracked-file branch at
-`:88-92` has the same shape but is harmless, because `git checkout` cannot touch
+`:88-93` has the same shape but is harmless, because `git checkout` cannot touch
 an untracked file — which is likely why this was never noticed.
 
 **What it could break, concretely:** the four `GUARDED_FILES` (`:32`) are
@@ -695,12 +695,12 @@ mistake.
 **How we handle it meanwhile:** commit before **every** run of this script,
 including re-runs, and do not treat the error message as protection. Note that
 test files are not `GUARDED_FILES`, so a neutered assertion in a test neither
-trips the `:93` check nor gets restored by `restore()` — that one is yours to
+trips the `:94` check nor gets restored by `restore()` — that one is yours to
 undo by hand, and `git status --porcelain` is what catches it.
 
 **Fix:** have `restore()` no-op until a mutation has actually been applied. That
 makes the guarantee "restore only what I changed" rather than "restore on any
-exit", which is what the comment at `:79-80` already claims. The alternative —
+exit", which is what the comment at `:80-81` already claims. The alternative —
 arming the trap *below* the pre-flight checks — also works, but it depends on
 line order holding forever, which is exactly how this bug arrived.
 
@@ -720,11 +720,21 @@ sitting in a cache is not. Setting the flag before a `sed` that then matches
 nothing is harmless, because `git checkout` of an unmodified file is a no-op.
 
 Checked rather than assumed, since the fix depends on it: `probe()` calls
-`restore` at `:116` immediately *before* its own `sed` at `:117`, and again at
-`:142` on the way out. Under the flag the `:116` call is a no-op on the first
-probe and a real restore on every later one, which is the existing behaviour
-preserved. Mutations are cleaned at both ends of each probe, so the flag never
-has to survive across probes.
+`restore` at `:117` immediately *before* its own `sed` at `:118`, and again at
+`:142` on the way out (plus `:129` on the mutation-matched-nothing path). Under
+the flag the `:117` call is a no-op on the first probe and a real restore on
+every later one, which is the existing behaviour preserved. Mutations are
+cleaned at both ends of each probe, so the flag never has to survive across
+probes.
+
+**Every line number above was wrong by one in this entry's first two commits,
+and the cause is worth more than the correction.** They were read off a single
+`sed -n '78,100p'`, whose first output line is **blank** — line 78 is empty — so
+the first *visible* line was taken for 78 when it is 79, and every citation
+derived from that one read inherited the shift. Verified afterwards with `grep
+-n`, `awk`, `nl` and `sed -n '79p'` in agreement. A range read whose first line
+is blank will do this again to the next person; cite from `grep -n` output,
+which carries its own numbers, rather than counting from a range.
 
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
