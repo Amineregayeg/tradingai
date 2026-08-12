@@ -795,20 +795,46 @@ mutates four tracked source files with `sed -i` and restores them with
 `git checkout`. Nothing coordinates that. Two sessions running it at once, or one
 running it while another edits, interleave inside the same files.
 
-**It is worse than "a concurrent run interferes", and this is the part to notice:**
-`restore()` is `git checkout -- "${GUARDED_FILES[@]}"` — **all four files, not the
-one being probed.** So a session that legitimately runs the script destroys any
-other session's uncommitted work in `strategy_step.py`, `dominance.py`,
-`execution.py` or `resolve.py`, whether or not the probe touched that file.
-**B18's fix does not help here**: B18 stopped the *pre-flight refusal* from
-destroying work, but a genuine probe run still checks out all four by design, and
-must, because that is how it undoes its own mutation.
+**The destructive half is already gone, and it went as a second-order consequence
+of the B18 fix (`a4367ad`) that nobody predicted.** Before that fix: session A is
+mid-probe with a mutation in place, session B starts, B's pre-flight sees the
+dirty file and `exit 1`s, the trap fires `restore()` unconditionally, and B's
+`git checkout` wipes **A's** in-flight mutation from another session — leaving A
+to finish probing against restored files and report a verdict it did not earn.
+After the fix, B's `MUTATED` is 0, `restore()` returns early, and A is untouched.
+Worth stating plainly because it is the only thing in this whole task that turned
+out *better* than expected.
 
-**What it could break:** a probe reporting `ok` or `FAIL` for reasons belonging to
-another session's run — and that verdict is **unfalsifiable from either
-transcript**, because neither session can see the other's writes. On a task whose
-subject is an instrument reporting outcomes it did not earn, an unfalsifiable
-`ok` is the worst available failure. The uncommitted-work loss is the smaller half.
+**Two windows remain, and the second is far more reachable than "two agents start
+at the same instant" suggests.**
+
+*Losing uncommitted work* is now a race rather than the norm. Pre-flight checks
+**all four** guarded files against the shared tree, so a session already holding
+edits in any of them refuses the other before it mutates anything — an earlier
+draft of this entry said one session routinely destroys another's work, and that
+was wrong. What is left is an edit that lands *after* a run cleared pre-flight:
+that run then checks out all four by design, and must, because that is how it
+undoes its own mutation. The window is the length of a run — minutes, since every
+probe invokes pytest — not an instant.
+
+*Two concurrent runs* is the reachable one. `probe()` restores at **both** ends
+(`:117` and `:142`), so the tree is momentarily clean **between every pair of
+probes** — seven such boundaries in one run. A second session starting at any of
+them clears pre-flight honestly and begins mutating the same four files. Neither
+is doing anything wrong and neither can see the other.
+
+**What survives is observational, not destructive, and that is the worse kind.** A
+result can be attributed to the wrong run: both sessions clear pre-flight before
+either mutates, or one runs `pytest` while the other is mid-`sed`. The verdict is
+then **unfalsifiable from either transcript** — each session's log is internally
+consistent and neither carries the other's timestamps. On a task whose subject is
+an instrument reporting outcomes it did not earn, an unattributable `ok` is the
+worst failure available.
+
+**The diagnostic, which is the useful part** (Review's): *an unexplained `exit 1`
+on a tree you believe is clean means someone else is running.* The pre-flight
+check plus the B18 fix make a spurious **refusal** far more likely than a spurious
+**pass** — that asymmetry is what you can actually act on.
 
 **How we handle it meanwhile:** one session runs `verify_guards.sh` at a time, and
 says so on the bus before starting. That is a habit, and B15, B19 and B21 all say
