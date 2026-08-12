@@ -92,8 +92,25 @@ on the same instrument within a second:
 | BTC/USD 2026-08-11 05:00:06.388 | SHORT | 05:00:06.149 | STAND_ASIDE | GATE-036 |
 | ETH/USD 2026-08-12 13:00:06.032 | LONG | 13:00:05.764 | STAND_ASIDE | GATE-036 |
 
-**3 of 3.** Every live trade taken since the contract engine started running is a
-trade Salim's engine declined.
+**3 of 3 — and read the reason before quoting the number.** Each was declined
+citing **GATE-036: the engine could not see.** Not a judgement on the setup. It
+declined **98 of 98** bars on the same grounds, whether the ICT path entered or
+not, so "3 of 3" is a subset of a 100% rate and discriminates nothing. The three
+were not singled out.
+
+**So the finding is not "Salim's strategy would have refused every trade the
+platform took."** That would require the contract engine to have evaluated the
+setups, and it never has. The finding is worse:
+
+> **Nobody knows what Salim's strategy would have done on any bar this platform
+> has ever traded, because the engine implementing it has never been able to
+> see.** GATE-008 and GATE-002 were blocked on all 98 evaluations — the correlate
+> panels are unwired (**B11**) — so the comparison the shadow exists to provide
+> does not yet exist.
+
+The shadow proves the contract engine *runs*. It does not yet produce a second
+opinion, and no conformance number can be computed from it until the panels are
+wired.
 
 **The agreement rate is 94/97 (96.9%) and it means nothing.** Within the shadow
 window the ICT path declined 94 times and the contract engine declined all 98 —
@@ -190,6 +207,30 @@ Every exit lands on a recorded boundary to the cent, or provably on neither.
 Corroborated independently by a second signature: `gap_r ≈ 0` occurs on exactly
 the two take-profits (`0.0000` and `-0.0838`) and nowhere else, because
 `realized_r` can equal `expected_r` only when a trade reaches its target.
+
+**The join is the weak part, so name it precisely.** The values are recorded
+facts; the *linkage* is a five-second temporal join, because **there is no
+foreign key between `decision_records` and `trades`** — the only FKs into
+`trades` come from `screenshots`, `checklists` and `orders`. It resolved 1:1 on
+this corpus (7 trades, 7 rows, no duplicates, no misses, verified), so the result
+stands. The exact evidence class is **recorded values, joined by temporal
+proximity, verified unique on this corpus** — not a recorded fact about the
+close, and not inference either. This is what breaks first at higher trade
+frequency, and this report is written to be re-run.
+
+**A trap that will mislead the next auditor, because it misled one of us.**
+The seven live trades carry **no `sl` and no `tp` on their `trades` rows at all**:
+
+```sql
+SELECT setup_tag, count(*), count(sl) AS with_sl, count(tp) AS with_tp FROM trades GROUP BY setup_tag;
+--  ICT (live)       |   7 | 0 | 0
+--  Backtest replay  | 245 | 245 | 0
+```
+
+So anyone reconstructing close-cause from `trades` alone finds nothing and
+concludes the information does not exist. **It does — it is on
+`decision_records`.** Note also that *no* row in `trades`, live or replay, has
+ever carried a `tp`.
 
 **The finding is the missing label, not missing information.** The data
 determines what closed every position; **the schema declines to say so.** No

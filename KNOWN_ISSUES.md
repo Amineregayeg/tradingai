@@ -1189,9 +1189,24 @@ the schema says so.
 *"the engine stopped while this position was open… Not a loss — an absence."* The
 only close this platform explains is the one that should never happen.
 
+**Two things that make the reconstruction fragile, not just tedious:**
+
+* **There is no foreign key between `decision_records` and `trades`.** The only
+  FKs into `trades` are from `screenshots`, `checklists` and `orders`. So the
+  linkage is a temporal join — five seconds, in this audit — which resolved 1:1
+  on a 7-trade corpus and is the first thing to break at higher trade frequency.
+  The schema declines to express the relationship as well as the reason.
+* **The seven live trades carry no `sl` and no `tp` on their `trades` rows** (0 of
+  7; the 245 replay rows have `sl`, and *no* row anywhere has ever had a `tp`).
+  Anyone reconstructing from `trades` alone finds nothing and concludes the
+  information does not exist. It does — on `decision_records`. Both an auditor and
+  a reviewer reached the wrong conclusion here before checking the other table.
+
 **Fix:** a `close_reason` on the close write, set where the close is decided
-rather than inferred afterwards. Cheap now, and it retires a reconstruction that
-currently has to be re-derived by every reader.
+rather than inferred afterwards, and a real key between the decision and the
+trade it produced. Cheap now, and it retires a reconstruction that currently has
+to be re-derived by every reader — correctly, from two tables, with a join that
+happens to be unique today.
 
 ### F3. Decision-record commit-window race
 **Found in:** inherited (residual #5). A manual/kill close during the ~ms commit
