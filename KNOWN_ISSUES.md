@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-13 (T-0004: dominance fix DEPLOYED — B24 closed, B17 narrowed to the collector half, B14 gains the first observed proof the safe stop sequence settles; B20 open and closable only by the repo owner)
+Last updated: 2026-08-13 (T-0002 conformance audit: A10 re-verified from production and understated; F6 found — no close is labelled; F2 confirmed exactly)
 
 ---
 
@@ -41,6 +41,35 @@ only grows becomes wallpaper.
 ### A10. The engine does not trade the Magic Strategy — it trades the pre-contract ICT strategy, and one of its gates is explicitly forbidden
 **Found in:** conformance audit of the live path against `RULE_REGISTRY.json` v1.2.0,
 2026-08-08, asked as "is the platform trading the delivered strategies?"
+
+**RE-VERIFIED END TO END 2026-08-13 (T-0002). A10 was understated, not overstated
+— see `docs/CONFORMANCE_AUDIT_2026-08.md`, which is re-runnable.** This entry was
+written by reading the source; the audit measured it from production records and
+reached the same verdict by a second route, plus three things this entry did not
+say:
+
+* **`scripts/audit_live_conformance.py` prints the number.** 392 decisions, 12
+  ever acted on, and **0 registry rule ids cited on any of them** — mutation-proven
+  with `--self-test` before the zero was trusted. The claim is now a command
+  rather than a paragraph.
+* **The live path could not cite a rule even if it evaluated one.**
+  `decision_records` has no rule-id column; `telemetry_records` has
+  `deciding_rule_id` as a first-class column. The gap is in the schema, not only
+  in the wiring.
+* **Every live trade since the shadow began was one Salim's engine refused.**
+  3 of 3, matched sub-second on the same instrument, the contract engine ruling
+  `STAND_ASIDE` citing GATE-036 each time. And **12 of 12 entries in the
+  platform's history were triggered from 1H**, an analysis-only timeframe under
+  GATE-017/019 — measured from records, not from `ENTRY_TF`.
+
+**Do not cite the 96.9% agreement between the two engines as conformance.** They
+agree only because both declined, for unrelated reasons: the contract engine is
+blocked by GATE-036 on 100% of bars because the correlate panels are unwired
+(B11). It is not judging the setups; it cannot see them.
+
+**GATE-001 / GATE-002 are the entry's own argument in one line:** implemented,
+tested, counted in the 35/117 — and violated on every bar, because nothing calls
+them.
 **What it is:** the live loop's only entry decision is
 `crypto_loop._tick_symbol` → `strategy_step.evaluate_latest_bar_traced`. That function
 cites **zero** rule ids. It is the v1 ICT edge (daily-BOS bias → LTF BOS → FVG retrace),
@@ -1126,6 +1155,43 @@ number is how these diverged.
 **Found in:** I5. Now excluded from performance views and labelled in the
 Journal, but they average +0.081R from the discredited lookahead engine. Leave,
 regenerate, or delete — a data decision.
+**Confirmed exactly 2026-08-13 (T-0002):** `setup_tag = 'Backtest replay'`, **245
+rows, avg `0.0807R`** — the entry's figure holds to three decimals two weeks on,
+which is worth recording in a register that produced five stale numbers this
+week. They are cleanly separable by `setup_tag`, and the genuine live population
+beside them is **7 trades**.
+
+### F6. No close is labelled — every consumer must reconstruct it from price
+**Found in:** T-0002, 2026-08-13.
+**What it is:** nothing records *why* a position closed. `_persist_and_resolve`
+writes only `realized_r`, `gap_r` and `outcome`, and `outcome` is derived purely
+from the sign of pnl — `WIN if pnl > 1e-9 else LOSS if pnl < -1e-9 else
+BREAKEVEN`. A take-profit, a stop-out and an operator close produce **three
+identical records**.
+
+**The information is not missing — the label is.** All seven live trades were
+reconstructed unambiguously by matching `trades.exit_price` against the
+`signal_sl` / `signal_tp` on the matching decision: three landed on the stop to
+the cent, two on the target, two on neither (both at the T-0004 operator stop).
+Corroborated by a second signature — `gap_r ≈ 0` occurs on exactly the two
+take-profits and nowhere else, because `realized_r` can equal `expected_r` only
+at target.
+
+**What it could break:** every consumer must perform that reconstruction or be
+wrong, and none of them documents doing it — including the feedback loop, which
+reads `gap_r` and cannot distinguish "missed its target" from "a human stopped
+the engine". Two of the seven trades are operator closes, so **28% of the live
+corpus is not evidence about the strategy in either direction**, and nothing in
+the schema says so.
+
+**And the failure path is better instrumented than the success path:**
+`reconcile_abandoned_decisions` writes a sentence for an abandoned position —
+*"the engine stopped while this position was open… Not a loss — an absence."* The
+only close this platform explains is the one that should never happen.
+
+**Fix:** a `close_reason` on the close write, set where the close is decided
+rather than inferred afterwards. Cheap now, and it retires a reconstruction that
+currently has to be re-derived by every reader.
 
 ### F3. Decision-record commit-window race
 **Found in:** inherited (residual #5). A manual/kill close during the ~ms commit
