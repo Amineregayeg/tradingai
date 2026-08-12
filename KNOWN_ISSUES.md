@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-12 (A11 consequence for the Tier 0.2 harness; B18, B19, B20 found; A11 baseline count and F1 corrected)
+Last updated: 2026-08-12 (T-0003: A11 and B18 fixed and deleted; B21, B22, B23, B24 found; B20 made standalone; B15 annotated)
 
 ---
 
@@ -37,145 +37,6 @@ only grows becomes wallpaper.
 ---
 
 ## A. Wrong numbers — these can mislead a decision
-
-### A11. `main` is red, and one of the two failures is the dominance source inventing bars across a collector outage
-**Found in:** taking a clean test baseline before handing the tree to the new
-three-agent loop, 2026-08-10.
-**What it is:** `cd backend && ~/.venvs/tradingai/bin/python -m pytest -q` reports
-**2 failed, 838 passed** on `main` with a clean working tree — *838 as of
-2026-08-10; the current figure is 850, see the baseline paragraph below.* Both are in
-`tests/unit/test_dominance_source.py`, both were added by commit `56518f8`
-("Dominance: bars carry their sample count…"), and nothing has touched
-`app/services/market_data/sources/dominance.py` or that test file since — so the
-commit that introduced the tests is the commit that left them failing.
-
-* `test_gaps_produce_no_bars` — **the serious one.** The test writes samples at
-  12:00, 12:05, then a deliberate hole to 13:00. `DominanceSource.fetch_ohlcv`
-  returns bars at 12:10, 12:15, 12:20 … anyway. The test's own docstring states
-  the requirement: *"a collector outage must leave a hole, not flat synthetic
-  candles."*
-* `test_an_empty_result_still_carries_the_samples_column` — the no-data branch of
-  `fetch_ohlcv_with_samples` returns a frame whose columns are
-  `[open, high, low, close, volume]`, dropping `samples`. Its docstring names the
-  consequence: a caller reading `samples` cannot tell "no data" from "zero
-  samples, looks fine".
-
-**Why it matters:** these are not stale tests describing an old design — they are
-this commit's own statement of what the code should do, and the code does not do
-it. The first defect fabricates market data. B11 exists because the disturbance
-grader has no credible correlate bars; a source that silently manufactures flat
-candles across an outage does not fix that, it makes it undetectable, and
-GATE-002's grade would then be computed from bars that no collector ever
-observed. The second defect is the same class of failure the register already
-records at B13 — a "not measured" state that renders as a plausible number.
-
-**What it could break, concretely:** every consumer of BTC.D / USDT.D bars —
-which is the entire correlate layer the cutover is waiting on. It also means the
-new Execute agent inherits a red baseline, so its Review agent cannot distinguish
-"this change broke something" from "this was already broken", which is exactly
-the confusion the baseline in each prompt's Step 4 exists to prevent.
-
-**Not fixed here** because it belongs to the correlate work (B11) and is a
-natural first task for the new loop, not a drive-by patch from the session that
-found it. **The recorded baseline is now 850 passed / 2 failed**, observed
-2026-08-12 at `946ca1c` — it was 838/2 when this entry was written, and T-0001
-added twelve tests. Until this is fixed, a run reporting 850 passed and these
-same 2 failed is unchanged, and any third failure is new.
-
-**ADDED 2026-08-12, found in T-0001 and verified from three sides: this red
-baseline has silently disarmed the Tier 0.2 mutation harness, and `main` has
-been red in CI for four consecutive runs.**
-
-`backend/scripts/verify_guards.sh` is the script that proves the lookahead
-guards are load-bearing, by mutating each guard back to its known-buggy form and
-requiring the suite to go red. Its `BASELINE_TESTS` (`:71-77`) lists every test
-path any probe uses, and `tests/unit/test_dominance_source.py` — **this entry's
-file** — is one of them, at `:75`. The script refuses to mutate against a red
-baseline, so it exits before running a single probe:
-
-```
-$ cd backend && PYTHON=~/.venvs/tradingai/bin/python ./scripts/verify_guards.sh
-baseline: /home/docz/.venvs/tradingai/bin/python pytest 9.1.1
-ERROR: the probed tests are RED before any mutation.
-verify_guards exit=2
-```
-
-**The script is not broken and is not rotting — it is refusing, loudly, exactly
-as designed.** That refusal was added deliberately in `bd0e2a0` (2026-08-04) with
-the reasoning "there is no useful partial result once the instrument is
-untrustworthy". The defect is not the script's. It is that **a red test in one
-area disarms mutation verification for the whole project, and the correct
-refusal is indistinguishable from nobody having run it.**
-
-*Do not describe this as a second instance of a guard harness reporting success
-it did not earn.* `bd0e2a0` fixed such an instance — on a machine with no
-`python` on PATH, every probe took the ok branch and the script printed `TIER 0.2
-PASSED` without running a test. That was a vacuous **PASS**; this is a correct
-**refusal**. They are opposite failure modes, and this one is *caused by the fix
-for that one*. The earlier one also never reached CI (`setup-python` always
-provides `python`), which is precisely why it went unnoticed locally — and why
-this one, which does reach CI, is the more instructive of the two.
-
-**It was never silent. Nobody looked.** `.github/workflows/ci.yml:157` runs the
-script in the `Tier 0.2 - lookahead guards must bite` job with no
-`continue-on-error` (the `continue-on-error: true` at `:201` belongs to the
-frontend lint step), so exit 2 fails the job. Queried from the GitHub API on
-2026-08-12:
-
-```
-2026-08-10T19:56Z  failure  946ca1c  <-- current main, and what is DEPLOYED
-2026-08-10T17:23Z  failure  3402adb
-2026-08-09T21:19Z  failure  b3264d6
-2026-08-09T18:43Z  failure  7f51836
-2026-08-08T21:55Z  success  8d30278  <-- last green
-```
-
-So the harness has been inert since **2026-08-09**, across the whole of T-0001
-and a production deploy, and `946ca1c` — the sha in production — is red. The gap
-is not instrumentation. **Nothing routes a red `main` to a human**, so a check
-that fails in the direction nobody investigates fails permanently.
-
-**One probe is aimed at a line that currently does nothing.** Probe 5
-(`backend/scripts/verify_guards.sh:183-186`) mutates
-`bars = bars.dropna(how="all")` to `bars.ffill()`, to catch "flat synthetic
-candles across a collector outage". But that `dropna` drops nothing, because
-`bars["samples"] = grouped.count().astype(int)`
-(`backend/app/services/market_data/sources/dominance.py:189`) runs **before** it
-(`:194`), and an empty period gets `NaN` OHLC with `samples = 0` — and `0` is not
-`NaN`, so `how="all"` never matches. Reproduced in isolation, 5-minute bars over
-a 15-minute hole:
-
-```
-periods emitted by resample():                5
-samples assigned BEFORE dropna -> rows kept:  5   (what the code does)
-dropna BEFORE samples assigned -> rows kept:  2   (what :191-193 claims)
-```
-
-**This is the mechanism of `test_gaps_produce_no_bars`, and it is an ordering
-bug, not a resample convention**: adding the sample count silently disabled the
-line above it, and the comment at `:191-193` still describes what the code
-stopped doing. The probe is aimed at the right line; the line is inert; so the
-probe guards a guard that is not guarding.
-
-**What a fix has to prove, beyond a green suite.** "The A11 pair goes green" is
-satisfiable by fixing only the schema hole (`empty_ohlcv()`,
-`backend/app/services/market_data/sources/base.py:40-44`, has no `samples`
-column) and leaving the fabrication bug in place. The two failures are different
-in kind and both must be named. And a green suite does not make the prober bite:
-exit 0 with zero probes executed is indistinguishable from exit 0 with probes
-that ran, so the harness must be **observed exiting 1** — naming a probe — at
-least once. This script's failure path has never been seen to run. A guard is
-not proven until you have made it fail, and that applies to the prober itself.
-
-**Beware when this entry is deleted.** The register's rule is that a fixed
-issue's entry goes in the same commit as its fix. Deleting A11 removes the only
-written record that lookahead-guard verification was switched off for three
-days. That history must survive the deletion — in the fix's commit message at
-minimum, and better as its own entry about unrouted red CI, which is the part
-that will recur with a different trigger.
-
-**Until it is fixed, `verify_guards.sh` is not evidence.** No work report should
-cite it, in either direction.
 
 ### A10. The engine does not trade the Magic Strategy — it trades the pre-contract ICT strategy, and one of its gates is explicitly forbidden
 **Found in:** conformance audit of the live path against `RULE_REGISTRY.json` v1.2.0,
@@ -573,6 +434,21 @@ task is visible if you look. Re-running the handshake corrects the registry.
 doorbell whose name is absent from the live peer list — that turns a silent stall
 into a loud one, which is the whole difference.
 
+**Note added 2026-08-12: the fix above is written down and we keep doing it by
+hand instead.** Three sessions opened T-0003 by re-deriving the peer table
+through set arithmetic across each other's `ListAgents` output — because no
+session can see its own row, two peer lists are needed to identify either one.
+That handshake is a manual substitute for the fix in the paragraph above, which
+needs no coordination and cannot go stale. Same shape as B19 and B21: **a habit
+that must be performed, standing in for a check that would fail on its own.**
+
+Two corrections to how this entry has been *described* in passing, both wrong and
+both tested rather than argued: **bare names DO resolve** — a message addressed to
+`tradingai-4c` with no `[ref]` arrived — so "a bare name does not resolve" is not
+the mechanism here and never was. The entry above is accurate: names change on
+restart, and the doorbell goes to a name that no longer exists. The `[ref]` is
+only needed to disambiguate.
+
 ### B16. The 1M second shadow run can never have readable correlate panels — a decision collides with a guard
 **Found in:** T-0001, raising the collector to `--loop 10`, 2026-08-10.
 **What it is:** `MAGIC_STRATEGY_EXECUTION_PLAN.md` §5.4 records Malek's decision of
@@ -655,92 +531,10 @@ than being done for this alone. **Close this before M9 Stage A's shadow window i
 meaningful**, not merely "at the next api deploy": the window is exactly when a silently
 degrading collector would do the most damage and be least visible.
 
-### B18. `verify_guards.sh` deletes the uncommitted work it refuses to overwrite
-**Found in:** pre-review of T-0003 by the Review agent, 2026-08-12; reproduced
-independently before filing.
-**What it is:** the script guards against clobbering your work — and then clobbers
-it, in the same breath, with no trace. `trap restore EXIT INT TERM` is armed at
-`backend/scripts/verify_guards.sh:82`. The uncommitted-changes check runs *after*
-that, at `:94-98`, and ends in `exit 1` (`:97`). That exit fires the trap, and
-`restore()` is `git checkout -- "${GUARDED_FILES[@]}"` (`:79`). So the refusal
-path performs exactly the destruction it is refusing to perform. Demonstrated on
-a clean tree at `976b30e`:
-
-```
-marker present before run: 1
-git sees it dirty:         1 file(s)
-ERROR: app/services/market_data/sources/dominance.py has uncommitted changes. Commit or
-       stash them first — this script overwrites that file and would destroy your work.
-exit=1
-marker present after run:  0
-git status:                ''
-```
-
-**Why it matters more than an ordinary bug:** the loss is *silent and
-indistinguishable from never having made the edit*. There is no dirty file, no
-stash, no reflog entry — `git checkout --` of an uncommitted change leaves
-nothing to recover from. And the message actively misleads: a developer reads
-"commit or stash them first" as evidence they were protected, so the one person
-positioned to notice is the one told not to look. The untracked-file branch at
-`:88-93` has the same shape but is harmless, because `git checkout` cannot touch
-an untracked file — which is likely why this was never noticed.
-
-**What it could break, concretely:** the four `GUARDED_FILES` (`:32`) are
-`strategy_step.py`, `dominance.py`, `execution.py` and `resolve.py` — the live
-decision, correlate, sizing and settlement paths. Anyone fixing one of those and
-then running the guard script to check their work loses the fix. That is the
-exact sequence any dominance or lookahead task will follow, and running the
-verifier *after* editing a guarded file is the natural order to work in, not a
-mistake.
-
-**How we handle it meanwhile:** commit before **every** run of this script,
-including re-runs, and do not treat the error message as protection. Note that
-test files are not `GUARDED_FILES`, so a neutered assertion in a test neither
-trips the `:94` check nor gets restored by `restore()` — that one is yours to
-undo by hand, and `git status --porcelain` is what catches it.
-
-**Fix:** have `restore()` no-op until a mutation has actually been applied. That
-makes the guarantee "restore only what I changed" rather than "restore on any
-exit", which is what the comment at `:80-81` already claims. The alternative —
-arming the trap *below* the pre-flight checks — also works, but it depends on
-line order holding forever, which is exactly how this bug arrived.
-
-**Getting the flag order wrong is worse than the bug it fixes.** The flag must
-be set *before* the `sed`, never after:
-
-```sh
-MUTATED=1
-sed -i "$expr" "$file"
-```
-
-Backwards, a kill between the `sed` and the flag-set leaves a mutated source
-file with restore disabled — a mutation persisting silently in a working tree or
-a CI cache, which is the precise catastrophe the trap was written for. A
-destroyed edit is visible the moment you look for it; a mutated `dominance.py`
-sitting in a cache is not. Setting the flag before a `sed` that then matches
-nothing is harmless, because `git checkout` of an unmodified file is a no-op.
-
-Checked rather than assumed, since the fix depends on it: `probe()` calls
-`restore` at `:117` immediately *before* its own `sed` at `:118`, and again at
-`:142` on the way out (plus `:129` on the mutation-matched-nothing path). Under
-the flag the `:117` call is a no-op on the first probe and a real restore on
-every later one, which is the existing behaviour preserved. Mutations are
-cleaned at both ends of each probe, so the flag never has to survive across
-probes.
-
-**Every line number above was wrong by one in this entry's first two commits,
-and the cause is worth more than the correction.** They were read off a single
-`sed -n '78,100p'`, whose first output line is **blank** — line 78 is empty — so
-the first *visible* line was taken for 78 when it is 79, and every citation
-derived from that one read inherited the shift. Verified afterwards with `grep
--n`, `awk`, `nl` and `sed -n '79p'` in agreement. A range read whose first line
-is blank will do this again to the next person; cite from `grep -n` output,
-which carries its own numbers, rather than counting from a range.
-
 ### B19. Nothing checks a `file:line` citation, and this register is made of them
 **Found in:** 2026-08-12. Two agents independently audited their own citations
-after one off-by-one surfaced: **12 wrong out of ~40 checked** — 7 in B18's first
-two commits, 5 in T-0003's pre-review.
+after one off-by-one surfaced: **12 wrong out of ~40 checked** — 7 in the first
+two commits of a register entry, 5 in T-0003's pre-review.
 **What it is:** every entry here, and every work report and plan, points at code
 by `file:line`. Nothing verifies those, and they rot or arrive wrong silently.
 Four distinct mechanisms were observed in a single session:
@@ -756,7 +550,7 @@ Four distinct mechanisms were observed in a single session:
 only, and an earlier draft of this entry overstated it. What both audits show is
 that **every wrong citation came from a range read or from another agent's
 message, and `grep -n` never produced a wrong one.** The converse does not hold:
-a third audit, of A11's and F1's citations, found seven correct — four from
+a third audit, of two further entries' citations, found seven correct — four from
 `grep -n`, and **three from range reads that happened to start on a non-blank
 line**. So a range read is not reliably wrong; it is *unverifiable without
 recounting*, which is worse, because it produces right answers often enough to
@@ -783,10 +577,8 @@ does not exist or no longer contains what the entry claims. It would have caught
 all 12 in about a second. Note the property that matters: it **fails**, rather
 than being a review step someone performs — the same distinction as B15's
 unrun fix. A sweep performed once by a diligent reader rots exactly like the
-citations it audits. Pairs naturally with a check on constants the register
-quotes and the code owns (`MIN_SAMPLES_PER_SYNTHETIC_BAR`, the collector
-cadence, suite counts, `TAIL_BYTES`) — see A11 and F1, both of which stated
-figures that had gone stale without anything noticing.
+citations it audits. Pairs naturally with **B21**, which is the same disease in
+the register's numbers rather than its line references.
 
 ### B20. CI on `main` is advisory — nothing blocks on a red check and nothing reports one
 **Found in:** 2026-08-12, chasing why a job configured to block had not blocked.
@@ -804,13 +596,37 @@ carries no `continue-on-error` and fails the job on exit 2 — it is written to
 block, and there is nothing for it to block. Nothing rejects a push to a red
 `main`, and nothing requires a PR, a review or a green check to get there.
 
-**Why it matters:** this is the missing half of A11's finding. It was already
-recorded there that nothing *routes* a red `main` to a human; this is that
-nothing *stops* one either. Together they mean CI is a machine that observes
-correctly, reports honestly to a page nobody opens, and is wired to no
-consequence. `main` has been red for four consecutive runs since 2026-08-09
-including `946ca1c`, which is the sha production runs — and it got there by
-ordinary `git push`, not by anyone overriding anything.
+**Why it matters — and this is the part that already cost three days.** Nothing
+*routes* a red `main` to a human, and nothing *stops* one either. CI is a machine
+that observes correctly, reports honestly to a page nobody opens, and is wired to
+no consequence.
+
+That is not hypothetical. It has already happened, and the incident is recorded
+here because the entry that used to hold it (A11) was deleted when its tests were
+fixed on 2026-08-12:
+
+```
+2026-08-10T19:56Z  failure  946ca1c   <- was main, and what production ran
+2026-08-10T17:23Z  failure  3402adb
+2026-08-09T21:19Z  failure  b3264d6
+2026-08-09T18:43Z  failure  7f51836
+2026-08-08T21:55Z  success  8d30278   <- last green
+```
+
+Two checks were red across those four commits. One of them,
+`Tier 0.2 - lookahead guards must bite`, meant **the project's mutation-testing
+harness ran zero probes from 2026-08-09 to 2026-08-12** — all eight, including
+five with no connection to the test that was failing. Nobody noticed for three
+days, across a full task and a production deploy, and `946ca1c` reached
+production by ordinary `git push`. **Nothing was overridden, because there was
+nothing to override.**
+
+The reason it went unnoticed is the reason to keep this entry: a script exiting
+non-zero with a loud, accurate error reads as a broken environment rather than as
+a disabled guard, and a red check that has been red for a while stops looking
+like news. Compare the 2026-08-04 incident (`bd0e2a0`), where the same script
+printed `TIER 0.2 PASSED` having run no tests: that failure was **invisible**, as
+it never reached CI. This one was **visible and ignored**, which is worse.
 
 **What it could break, concretely:** the guarantee everyone in this project has
 been reasoning from — that `main` is releasable — is not enforced anywhere. A
@@ -823,15 +639,123 @@ staging concern: it is what the next container recreate ships.
 `gh`-less, so via the API. This is a habit, and habits are what B15, B19 and this
 entry all say do not hold.
 
-**Fix:** require the four CI checks on `main` via a ruleset. That is the fix, but
-it is **a decision, not a task** — it changes how everyone lands code, and with
-`main` currently red it would block all merges until A11 is fixed, so the order
-matters: fix A11 first, then protect. Malek's call, not an agent's. **Recording
-this is not a recommendation to switch it on today.**
+**Fix:** require the four CI checks on `main` via a ruleset, and route a red
+`main` somewhere a human reads. The first is **a decision, not a task** — it
+changes how everyone lands code, and it is Malek's call, not an agent's.
+**Recording this is not a recommendation to switch it on today.** As of
+2026-08-12 `main` is green again, so the objection that protection would block
+all merges no longer applies; that was true only while the red was outstanding.
 
-**Deliberately its own entry rather than part of A11.** A11 is deleted when its
-two tests go green; this survives that deletion, because the trigger recurs with
-any future red check and A11 is incidental to it.
+**This entry outlives the incident that produced it, deliberately.** The red test
+was incidental — the next one will be a different test, and the routing gap will
+be identical. Do not close this because the four runs above went green.
+
+### B21. The register quotes numbers the code owns, and nothing checks them
+**Found in:** T-0003, 2026-08-12, after four stale figures surfaced from four
+directions inside one hour.
+**What it is:** entries here state figures that were true when written — suite
+counts, poll cadences, thresholds, dates — and nothing re-reads them when a later
+task makes them false. Four instances from one task:
+
+* the A11 baseline `838 passed / 2 failed`, invalidated by T-0001 adding twelve
+  tests (found by Review; the entry's own headline and its correction paragraph
+  then disagreed with each other about the same number);
+* **F1**'s "at 60 s polling a 1m bar holds one observation" and "drop `--loop` to
+  ~15 s", both invalidated when the collector went to 10 s on 2026-08-10 — the
+  advice became a *slowdown* while the entry's conclusion stayed correct;
+* section **C**'s "Empty as of 2026-08-04", which reads as continuous drift-free
+  state through a period when the drift check was in fact exiting 1;
+* `DEVELOPING.md` was updated correctly for one of these and the register was
+  not, so two documents disagreed about the same figure.
+
+**Why it matters more here than in a doc:** `KNOWN_ISSUES.md` is where every
+prompt's Step 4 sends an agent for its baseline. A stale figure here is
+*load-bearing* — an agent that trusts `838` concludes that T-0001's twelve new
+tests are twelve new failures, and spends its cycle chasing them. F1 shows the
+worse shape: **right for the wrong reason**, so nobody rechecks it and every
+detail a reader would act on is false.
+
+**How we handle it meanwhile:** date-stamp a figure rather than overwriting it,
+so a reader can order two numbers; and when a task invalidates an entry, correct
+that entry in the same commit.
+
+**Fix:** a check that reads both sides and fails when they disagree — the
+register's quoted constants against the code that owns them
+(`MIN_SAMPLES_PER_SYNTHETIC_BAR`, the collector cadence in
+`deploy/compose.dominance.yaml`, suite counts, `TAIL_BYTES`). Same property as
+B19's linter and B15's unrun fix: it **fails**, rather than being a sweep someone
+performs. A sweep rots exactly like the figures it audits.
+
+### B22. One red test disables all eight lookahead probes
+**Found in:** T-0003, 2026-08-12 — the mechanism behind the three-day outage in
+B20.
+**What it is:** `backend/scripts/verify_guards.sh` checks `BASELINE_TESTS` as a
+single block (`:148-156`) and refuses to mutate anything if any of them is red.
+That refusal is correct and deliberate (`bd0e2a0`): a test that already fails
+cannot demonstrate that removing a guard is what broke it. But the granularity is
+wrong — the five baseline files back eight probes, so **one red file stops all
+eight**, including the FVG probe, the daily-bias probe, both execution probes and
+the resolve probe, none of which have anything to do with the file that is red.
+
+That is exactly what happened: two failing dominance tests switched off lookahead
+verification for the entire project for three days.
+
+**What it could break:** the blast radius of any red test is the whole harness,
+and the failure is silent in the way that matters — the script exits 2 with an
+accurate, loud message, which reads as a broken environment rather than as
+disabled guards.
+
+**Fix:** baseline only the tests each probe actually uses, so a red dominance test
+costs the three dominance probes and leaves the other five running. Deliberately
+**not** done in T-0003: it changes the harness's design while that harness is the
+instrument verifying the change, which is the wrong order.
+
+### B23. A probe cannot tell that the line it mutates does nothing
+**Found in:** T-0003, 2026-08-12. This is how A11 hid for as long as it did.
+**What it is:** `probe()` guards two ways a probe can rot — a sed expression that
+matches nothing (`:123-131`) and a test path missing from `BASELINE_TESTS`
+(`:107-115`). Neither can see the third: **a sed that matches a line which has no
+effect.** Probe 5 mutated `bars = bars.dropna(how="all")` for months while that
+line dropped zero rows, so the probe guarding against fabricated bars across a
+collector outage was pointed at dead code.
+
+**Why it survives T-0003's fix:** the dominance line is live again, but nothing
+was added that would detect the next occurrence. It applies to all eight probes.
+A probe is only as good as the assumption that its target line does something,
+and that assumption is currently unchecked.
+
+**Fix:** no cheap one. The nearest thing is a coverage assertion — require each
+mutated line to be executed by the probe's own test — which catches "dead line"
+but not "live line with no effect". Worth a plan rather than a ride-along.
+
+### B24. The dominance gap fix is merged but not deployed
+**Found in:** T-0003, 2026-08-12.
+**What it is:** the fix that stops `DominanceSource` inventing bars across a
+collector outage is on `main` and **not on the api**. Runtime containers clone
+`main` at startup, so it reaches production only on the next api recreate.
+
+**Why it was not deployed with the fix:** an api recreate requires stopping the
+live engine first (**B14** — `--force-recreate` abandons open positions), and
+that is a live-run risk taken for a change that currently decides nothing.
+Checked rather than assumed (T-0003 criterion 8): **`DominanceSource` has zero
+consumers in `backend/app/` or `backend/scripts/`.** Its only non-test
+instantiation is inside a docstring example, `fetch_ohlcv_with_samples` has no
+call sites at all, `datasets.py` defaults to `BinanceSource`, and
+`scripts/verify_baseline.py` reads Binance symbols. So no live decision has ever
+consumed a dominance bar, phantom or otherwise — consistent with **B11**, where
+the shadow engine `STAND_ASIDE`s on 100% of bars citing GATE-036.
+
+**What it could break:** nothing today, and that is precisely the condition that
+expires. The moment the correlate layer is wired (B11), production would be
+reading the *old* fabricating code unless this has shipped first.
+
+**Closing condition:** ships with the next api deploy, and should be **batched
+with B17's api half**, which is waiting on the same stop → deploy → verify →
+start. **Deploy this before wiring the correlate layer**, not merely "eventually".
+
+Recorded rather than left implicit because T-0001's lesson was that undeployed
+work goes invisible: a value committed, believed live, and running at its old
+setting for days.
 
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)

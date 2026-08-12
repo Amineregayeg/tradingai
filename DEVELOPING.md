@@ -26,7 +26,7 @@ packages, and checks that the strategy-critical versions match production.
 
 | What | Command | From |
 |---|---|---|
-| Backend suite (852 tests, ~2 min) | `~/.venvs/tradingai/bin/python -m pytest` | `backend/` |
+| Backend suite (858 tests, ~2 min) | `~/.venvs/tradingai/bin/python -m pytest` | `backend/` |
 | One file | `~/.venvs/tradingai/bin/python -m pytest tests/unit/test_build_info.py` | `backend/` |
 | Frontend tests (171 tests, ~1 min) | `pnpm exec vitest run` | `frontend/` |
 | Frontend typecheck | `pnpm tsc` | `frontend/` |
@@ -37,19 +37,37 @@ packages, and checks that the strategy-critical versions match production.
 
 **`pnpm test` is bare `vitest`, which watches forever.** Use `vitest run`.
 
-**The backend suite is RED, and 852 does not mean 852 passing.** It currently reports
-**850 passed, 2 failed**. Both failures are
-`tests/unit/test_dominance_source.py::test_gaps_produce_no_bars` and
-`::test_an_empty_result_still_carries_the_samples_column`, they are pre-existing, and
-they are recorded as `KNOWN_ISSUES` A11. **A third failure is new and yours.** This is
-here because a bare test count reads as a pass count, and someone arriving at a red
-suite with no warning cannot tell what they broke from what was already broken.
+**The backend suite is GREEN as of 2026-08-12 (T-0003): 858 passed, 0 failed.**
+**Any** failure is new and yours.
+
+It was red from 2026-08-09 to 2026-08-12 with two known failures in
+`tests/unit/test_dominance_source.py`, and this paragraph used to tell you to
+expect them and treat a third as new. That tripwire is now retired — leaving it
+would have been calibrated to a state that no longer exists, telling you to
+ignore exactly two failures that can no longer occur. If you find yourself
+editing a "known failures" note like this one, delete it rather than adjust it;
+a stale allowance is worse than none, because it reads as permission.
 
 ### About `verify_guards.sh`
 
 It refuses to run with uncommitted or untracked files in the paths it mutates —
 it edits real source to prove the guards bite, and must be able to restore
 exactly what was there. Commit first.
+
+Until 2026-08-12 that refusal **destroyed the work it refused to overwrite**: the
+EXIT trap was armed above the check, so the `exit 1` fired `git checkout` over
+your uncommitted changes, with no dirty file, no stash and no reflog to recover
+from. Fixed — `restore()` now no-ops until a mutation has actually been applied.
+Commit first anyway; the refusal is still there and is still correct.
+
+**Two things that survive the fix, and both bite in normal use:**
+
+* `restore()` covers only the four source files the probes mutate. A test file
+  you edited — including one you neutered deliberately to check a probe — is
+  **not** restored. Check `git status --porcelain` after every run.
+* Exit 0 with eight `ok` lines and exit 0 having silently restored nothing look
+  identical from outside. An empty `git status --porcelain` afterwards is the
+  only thing that distinguishes them.
 
 It needs a python that has pytest. It looks for `python` then `python3`, so on a
 machine where neither has pytest installed you must point it at the venv with
