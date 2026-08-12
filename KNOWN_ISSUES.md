@@ -698,10 +698,33 @@ test files are not `GUARDED_FILES`, so a neutered assertion in a test neither
 trips the `:93` check nor gets restored by `restore()` — that one is yours to
 undo by hand, and `git status --porcelain` is what catches it.
 
-**Fix:** arm the trap *after* the pre-flight checks, or have `restore()` no-op
-until the first mutation is actually applied. The second is better: it makes the
-guarantee "restore only what I changed" rather than "restore on any exit", which
-is what the comment at `:79-80` already claims it does.
+**Fix:** have `restore()` no-op until a mutation has actually been applied. That
+makes the guarantee "restore only what I changed" rather than "restore on any
+exit", which is what the comment at `:79-80` already claims. The alternative —
+arming the trap *below* the pre-flight checks — also works, but it depends on
+line order holding forever, which is exactly how this bug arrived.
+
+**Getting the flag order wrong is worse than the bug it fixes.** The flag must
+be set *before* the `sed`, never after:
+
+```sh
+MUTATED=1
+sed -i "$expr" "$file"
+```
+
+Backwards, a kill between the `sed` and the flag-set leaves a mutated source
+file with restore disabled — a mutation persisting silently in a working tree or
+a CI cache, which is the precise catastrophe the trap was written for. A
+destroyed edit is visible the moment you look for it; a mutated `dominance.py`
+sitting in a cache is not. Setting the flag before a `sed` that then matches
+nothing is harmless, because `git checkout` of an unmodified file is a no-op.
+
+Checked rather than assumed, since the fix depends on it: `probe()` calls
+`restore` at `:116` immediately *before* its own `sed` at `:117`, and again at
+`:142` on the way out. Under the flag the `:116` call is a no-op on the first
+probe and a real restore on every later one, which is the existing behaviour
+preserved. Mutations are cleaned at both ends of each probe, so the flag never
+has to survive across probes.
 
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
