@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-12 (A11's consequence for the Tier 0.2 harness recorded; B18 found; A11's baseline count and F1 corrected)
+Last updated: 2026-08-12 (A11 consequence for the Tier 0.2 harness; B18 and B19 found; A11 baseline count and F1 corrected)
 
 ---
 
@@ -735,6 +735,51 @@ derived from that one read inherited the shift. Verified afterwards with `grep
 -n`, `awk`, `nl` and `sed -n '79p'` in agreement. A range read whose first line
 is blank will do this again to the next person; cite from `grep -n` output,
 which carries its own numbers, rather than counting from a range.
+
+### B19. Nothing checks a `file:line` citation, and this register is made of them
+**Found in:** 2026-08-12. Two agents independently audited their own citations
+after one off-by-one surfaced: **12 wrong out of ~40 checked** — 7 in B18's first
+two commits, 5 in T-0003's pre-review.
+**What it is:** every entry here, and every work report and plan, points at code
+by `file:line`. Nothing verifies those, and they rot or arrive wrong silently.
+Four distinct mechanisms were observed in a single session:
+
+| mechanism | example |
+|---|---|
+| wrong cwd | `scripts/verify_guards.sh` is `backend/scripts/…` from the root; the bare form is correct only inside `backend/`, and CI uses it because the job sets `working-directory: backend` |
+| wrong referent | `:71` (array opens) vs `:75` (the line meant) — both defensible, neither stated |
+| off-by-one from a range read | `sed -n '78,100p'` where **line 78 is blank**: the first *visible* line reads as 78, and every citation from that read shifts by one |
+| inheritance through a message | a number republished by an agent that verified the surrounding code but not the number — it gains apparent confirmation from each repetition |
+
+**The split is mechanical, not a matter of care.** In both audits, independently:
+**every correct citation came from `grep -n`; every wrong one came from a range
+read or from another agent's message.** No exceptions in either sample. So this
+is not fixable by looking harder — it is fixed by reading from output that emits
+the line number instead of output that requires you to infer it.
+
+**Why it matters:** a wrong citation does not fail, it misleads — and it misleads
+the reader who is *acting* on the entry, six weeks later, with no cheap way to
+tell. It also degrades the register's whole purpose: entries here exist to be
+trusted without re-derivation. Worst is the confidence marker — both audits found
+wrong numbers sitting under phrases like "checked, not reasoned" and "things I
+verified, so nobody re-verifies them". **The signal of confidence and the act of
+checking had become the same gesture**, so the sentence that should have carried
+a check instead discouraged one.
+
+**How we handle it meanwhile:** cite from `grep -n`, never from a counted range;
+never republish a line number from another agent's message without re-deriving
+it; say which referent a number means when a block has several.
+
+**Fix:** a linter that resolves every `file:line` in `KNOWN_ISSUES.md`,
+`agents/tasks/**` and the runbooks against the repo and fails when the target
+does not exist or no longer contains what the entry claims. It would have caught
+all 12 in about a second. Note the property that matters: it **fails**, rather
+than being a review step someone performs — the same distinction as B15's
+unrun fix. A sweep performed once by a diligent reader rots exactly like the
+citations it audits. Pairs naturally with a check on constants the register
+quotes and the code owns (`MIN_SAMPLES_PER_SYNTHETIC_BAR`, the collector
+cadence, suite counts, `TAIL_BYTES`) — see A11 and F1, both of which stated
+figures that had gone stale without anything noticing.
 
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
