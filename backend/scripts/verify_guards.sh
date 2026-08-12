@@ -76,9 +76,33 @@ BASELINE_TESTS=(
   "tests/unit/test_execution_fill_sizing.py"
 )
 
-restore() { git checkout -- "${GUARDED_FILES[@]}" 2>/dev/null || true; }
-# Restore on ANY exit path, including Ctrl-C or an unexpected failure, so a
-# mutated file can never be left behind in a working tree or a CI cache.
+# RESTORE ONLY WHAT THIS RUN CHANGED. The promise used to be wider, and the width
+# was the bug (KNOWN_ISSUES B18).
+#
+# `restore` is a git checkout of the guarded files, which destroys any uncommitted
+# work in them. It ran on EVERY exit path — including the pre-flight refusals
+# below, whose entire purpose is to protect uncommitted work. So the script
+# printed "would destroy your work" and then destroyed it, in the same breath,
+# leaving no dirty file, no stash and no reflog entry to recover from. The message
+# was the dangerous part: it reads as proof you were protected, so the one person
+# able to notice is the one being told not to look.
+#
+# A plain global, deliberately: the EXIT trap runs in the shell's own context and
+# must see it. Never `local`, never assigned inside a subshell or a pipeline — a
+# flag the trap cannot see makes restore a permanent no-op, mutations then stack
+# across probes, and the inert-sed check at :123 defeats itself because the file
+# already differs from HEAD. That failure prints eight `ok` lines and exits 0,
+# byte-identical to a real pass. `git status --porcelain` after a run is the only
+# thing that tells the two apart.
+MUTATED=0
+restore() {
+  [[ "$MUTATED" -eq 1 ]] || return 0
+  git checkout -- "${GUARDED_FILES[@]}" 2>/dev/null || true
+}
+# Still restores on ANY exit path once a mutation exists — including Ctrl-C or an
+# unexpected failure — so a mutated file can never be left behind in a working
+# tree or a CI cache. What changed is that exits taken BEFORE the first mutation
+# now have nothing to undo, which is what this comment always claimed.
 trap restore EXIT INT TERM
 
 for f in "${GUARDED_FILES[@]}"; do
@@ -115,6 +139,13 @@ probe() {
   fi
 
   restore
+  # BEFORE the sed, never after. A kill between the two would otherwise leave a
+  # mutated source file with restore disabled — a mutation persisting silently
+  # into a working tree or a CI cache, which is the exact catastrophe this trap
+  # exists for and strictly worse than the data loss B18 describes. Setting it
+  # ahead of a sed that then matches nothing costs nothing: `git checkout` of an
+  # unmodified file is a no-op.
+  MUTATED=1
   sed -i "$expr" "$file"
 
   # If the mutation did not change the file, the guard has been refactored or
