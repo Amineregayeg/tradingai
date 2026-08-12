@@ -642,9 +642,24 @@ entry all say do not hold.
 **Fix:** require the four CI checks on `main` via a ruleset, and route a red
 `main` somewhere a human reads. The first is **a decision, not a task** — it
 changes how everyone lands code, and it is Malek's call, not an agent's.
-**Recording this is not a recommendation to switch it on today.** As of
-2026-08-12 `main` is green again, so the objection that protection would block
-all merges no longer applies; that was true only while the red was outstanding.
+**Recording this is not a recommendation to switch it on today.**
+
+**One live precondition, stated as a check rather than a claim.** Turning
+protection on while `main` is red would block every merge until it is green, so
+the order matters. Do not take this paragraph's word for the current state —
+**resolve it**:
+
+```
+gh-less:  curl -sH "Authorization: token $TOKEN" \
+            .../repos/Amineregayeg/tradingai/commits/main/check-runs
+```
+
+All four checks must read `success`. Last measured 2026-08-12 at `a4f3b08`:
+`Backend suite` **failure**, `Tier 0.2` **failure** — red, with the fix for both
+sitting on an unmerged branch. An earlier draft of this entry asserted `main` was
+already green; it was not, and that would have told Malek the blocker was gone
+while it was still there. It would also have been the fifth stale figure of the
+day, one paragraph above B21, which exists because of the other four.
 
 **This entry outlives the incident that produced it, deliberately.** The red test
 was incidental — the next one will be a different test, and the routing gap will
