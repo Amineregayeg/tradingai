@@ -76,9 +76,105 @@ the confusion the baseline in each prompt's Step 4 exists to prevent.
 
 **Not fixed here** because it belongs to the correlate work (B11) and is a
 natural first task for the new loop, not a drive-by patch from the session that
-found it. **The 838/2 split is the recorded baseline** — until this is fixed, a
-run reporting 838 passed and 2 failed in these two tests is unchanged, and any
-third failure is new.
+found it. **The recorded baseline is now 850 passed / 2 failed**, observed
+2026-08-12 at `946ca1c` — it was 838/2 when this entry was written, and T-0001
+added twelve tests. Until this is fixed, a run reporting 850 passed and these
+same 2 failed is unchanged, and any third failure is new.
+
+**ADDED 2026-08-12, found in T-0001 and verified from three sides: this red
+baseline has silently disarmed the Tier 0.2 mutation harness, and `main` has
+been red in CI for four consecutive runs.**
+
+`backend/scripts/verify_guards.sh` is the script that proves the lookahead
+guards are load-bearing, by mutating each guard back to its known-buggy form and
+requiring the suite to go red. Its `BASELINE_TESTS` (`:71-77`) lists every test
+path any probe uses, and `tests/unit/test_dominance_source.py` — **this entry's
+file** — is one of them, at `:75`. The script refuses to mutate against a red
+baseline, so it exits before running a single probe:
+
+```
+$ cd backend && PYTHON=~/.venvs/tradingai/bin/python ./scripts/verify_guards.sh
+baseline: /home/docz/.venvs/tradingai/bin/python pytest 9.1.1
+ERROR: the probed tests are RED before any mutation.
+verify_guards exit=2
+```
+
+**The script is not broken and is not rotting — it is refusing, loudly, exactly
+as designed.** That refusal was added deliberately in `bd0e2a0` (2026-08-04) with
+the reasoning "there is no useful partial result once the instrument is
+untrustworthy". The defect is not the script's. It is that **a red test in one
+area disarms mutation verification for the whole project, and the correct
+refusal is indistinguishable from nobody having run it.**
+
+*Do not describe this as a second instance of a guard harness reporting success
+it did not earn.* `bd0e2a0` fixed such an instance — on a machine with no
+`python` on PATH, every probe took the ok branch and the script printed `TIER 0.2
+PASSED` without running a test. That was a vacuous **PASS**; this is a correct
+**refusal**. They are opposite failure modes, and this one is *caused by the fix
+for that one*. The earlier one also never reached CI (`setup-python` always
+provides `python`), which is precisely why it went unnoticed locally — and why
+this one, which does reach CI, is the more instructive of the two.
+
+**It was never silent. Nobody looked.** `.github/workflows/ci.yml:157` runs the
+script in the `Tier 0.2 - lookahead guards must bite` job with no
+`continue-on-error` (the `continue-on-error: true` at `:201` belongs to the
+frontend lint step), so exit 2 fails the job. Queried from the GitHub API on
+2026-08-12:
+
+```
+2026-08-10T19:56Z  failure  946ca1c  <-- current main, and what is DEPLOYED
+2026-08-10T17:23Z  failure  3402adb
+2026-08-09T21:19Z  failure  b3264d6
+2026-08-09T18:43Z  failure  7f51836
+2026-08-08T21:55Z  success  8d30278  <-- last green
+```
+
+So the harness has been inert since **2026-08-09**, across the whole of T-0001
+and a production deploy, and `946ca1c` — the sha in production — is red. The gap
+is not instrumentation. **Nothing routes a red `main` to a human**, so a check
+that fails in the direction nobody investigates fails permanently.
+
+**One probe is aimed at a line that currently does nothing.** Probe 5
+(`backend/scripts/verify_guards.sh:183-186`) mutates
+`bars = bars.dropna(how="all")` to `bars.ffill()`, to catch "flat synthetic
+candles across a collector outage". But that `dropna` drops nothing, because
+`bars["samples"] = grouped.count().astype(int)`
+(`backend/app/services/market_data/sources/dominance.py:189`) runs **before** it
+(`:194`), and an empty period gets `NaN` OHLC with `samples = 0` — and `0` is not
+`NaN`, so `how="all"` never matches. Reproduced in isolation, 5-minute bars over
+a 15-minute hole:
+
+```
+periods emitted by resample():                5
+samples assigned BEFORE dropna -> rows kept:  5   (what the code does)
+dropna BEFORE samples assigned -> rows kept:  2   (what :191-193 claims)
+```
+
+**This is the mechanism of `test_gaps_produce_no_bars`, and it is an ordering
+bug, not a resample convention**: adding the sample count silently disabled the
+line above it, and the comment at `:191-193` still describes what the code
+stopped doing. The probe is aimed at the right line; the line is inert; so the
+probe guards a guard that is not guarding.
+
+**What a fix has to prove, beyond a green suite.** "The A11 pair goes green" is
+satisfiable by fixing only the schema hole (`empty_ohlcv()`,
+`backend/app/services/market_data/sources/base.py:40-44`, has no `samples`
+column) and leaving the fabrication bug in place. The two failures are different
+in kind and both must be named. And a green suite does not make the prober bite:
+exit 0 with zero probes executed is indistinguishable from exit 0 with probes
+that ran, so the harness must be **observed exiting 1** — naming a probe — at
+least once. This script's failure path has never been seen to run. A guard is
+not proven until you have made it fail, and that applies to the prober itself.
+
+**Beware when this entry is deleted.** The register's rule is that a fixed
+issue's entry goes in the same commit as its fix. Deleting A11 removes the only
+written record that lookahead-guard verification was switched off for three
+days. That history must survive the deletion — in the fix's commit message at
+minimum, and better as its own entry about unrouted red CI, which is the part
+that will recur with a different trigger.
+
+**Until it is fixed, `verify_guards.sh` is not evidence.** No work report should
+cite it, in either direction.
 
 ### A10. The engine does not trade the Magic Strategy — it trades the pre-contract ICT strategy, and one of its gates is explicitly forbidden
 **Found in:** conformance audit of the live path against `RULE_REGISTRY.json` v1.2.0,
