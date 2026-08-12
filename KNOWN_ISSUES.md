@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-10 (T-0001, collector to `--loop 10`; B11 corrected, B16 and B17 found)
+Last updated: 2026-08-12 (A11's consequence for the Tier 0.2 harness recorded; B18 found; A11's baseline count and F1 corrected)
 
 ---
 
@@ -654,6 +654,55 @@ than being done for this alone. **Close this before M9 Stage A's shadow window i
 meaningful**, not merely "at the next api deploy": the window is exactly when a silently
 degrading collector would do the most damage and be least visible.
 
+### B18. `verify_guards.sh` deletes the uncommitted work it refuses to overwrite
+**Found in:** pre-review of T-0003 by the Review agent, 2026-08-12; reproduced
+independently before filing.
+**What it is:** the script guards against clobbering your work — and then clobbers
+it, in the same breath, with no trace. `trap restore EXIT INT TERM` is armed at
+`backend/scripts/verify_guards.sh:81`. The uncommitted-changes check runs *after*
+that, at `:93-97`, and ends in `exit 1`. That exit fires the trap, and
+`restore()` is `git checkout -- "${GUARDED_FILES[@]}"` (`:78`). So the refusal
+path performs exactly the destruction it is refusing to perform. Demonstrated on
+a clean tree at `976b30e`:
+
+```
+marker present before run: 1
+git sees it dirty:         1 file(s)
+ERROR: app/services/market_data/sources/dominance.py has uncommitted changes. Commit or
+       stash them first — this script overwrites that file and would destroy your work.
+exit=1
+marker present after run:  0
+git status:                ''
+```
+
+**Why it matters more than an ordinary bug:** the loss is *silent and
+indistinguishable from never having made the edit*. There is no dirty file, no
+stash, no reflog entry — `git checkout --` of an uncommitted change leaves
+nothing to recover from. And the message actively misleads: a developer reads
+"commit or stash them first" as evidence they were protected, so the one person
+positioned to notice is the one told not to look. The untracked-file branch at
+`:88-92` has the same shape but is harmless, because `git checkout` cannot touch
+an untracked file — which is likely why this was never noticed.
+
+**What it could break, concretely:** the four `GUARDED_FILES` (`:32`) are
+`strategy_step.py`, `dominance.py`, `execution.py` and `resolve.py` — the live
+decision, correlate, sizing and settlement paths. Anyone fixing one of those and
+then running the guard script to check their work loses the fix. That is the
+exact sequence any dominance or lookahead task will follow, and running the
+verifier *after* editing a guarded file is the natural order to work in, not a
+mistake.
+
+**How we handle it meanwhile:** commit before **every** run of this script,
+including re-runs, and do not treat the error message as protection. Note that
+test files are not `GUARDED_FILES`, so a neutered assertion in a test neither
+trips the `:93` check nor gets restored by `restore()` — that one is yours to
+undo by hand, and `git status --porcelain` is what catches it.
+
+**Fix:** arm the trap *after* the pre-flight checks, or have `restore()` no-op
+until the first mutation is actually applied. The second is better: it makes the
+guarantee "restore only what I changed" rather than "restore on any exit", which
+is what the comment at `:79-80` already claims it does.
+
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
 **What it is:** `TELEMETRY_SCHEMA.json` hard-pins `engine.rule_registry_version` with
@@ -848,10 +897,26 @@ so explicitly, so the risk is someone trusting a local build anyway.
 **Fix:** install node 20 (nvm/fnm) for parity, or leave it and keep treating CI
 as the authority on `pnpm build`. Low impact either way.
 
-### F1. 1-minute dominance bars are degenerate
-**Found in:** I4. At 60s polling a 1m bar holds one observation, so O=H=L=C. 5m
-and above carry real structure. Drop `--loop` to ~15s if 1m bars are ever
-wanted.
+### F1. 1-minute dominance bars are degenerate — **see B16, which supersedes this**
+**Found in:** I4. **Corrected 2026-08-12:** both of this entry's stated reasons
+were still describing 60 s polling, which production left on 2026-08-10.
+
+It read: "At 60s polling a 1m bar holds one observation, so O=H=L=C … Drop
+`--loop` to ~15s if 1m bars are ever wanted." At the deployed `--loop 10`
+(`deploy/compose.dominance.yaml`) a 1m bar holds **6** observations, not one, so
+it is no longer O=H=L=C — and "drop to ~15s" is now a **slowdown** that would
+make it 4. The remedy was also never sufficient: the binding threshold is
+`MIN_SAMPLES_PER_SYNTHETIC_BAR = 20` (`gate_008_roster.py:158`), which 15 s never
+reached either. Clearing 20 on a 1m bar needs 3 s polling, and
+`collect_dominance.py:453` is `interval = max(10, int(args.loop))` — a hard 10 s
+floor, so it is unreachable without changing that line.
+
+**The conclusion still holds; every reason given for it was false.** That is the
+worst state for a register entry — correct, so nobody rechecks it, and wrong in
+each detail a reader would act on. Kept rather than deleted because the
+degeneracy is real, but the live arithmetic and the decision it collides with
+now live in **B16**, and only there. Do not restate them here; two copies of a
+number is how these diverged.
 
 ### F2. 245 pre-fix replay rows remain in the production database
 **Found in:** I5. Now excluded from performance views and labelled in the
