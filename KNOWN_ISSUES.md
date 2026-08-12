@@ -647,14 +647,26 @@ changes how everyone lands code, and it is Malek's call, not an agent's.
 **One live precondition, stated as a check rather than a claim.** Turning
 protection on while `main` is red would block every merge until it is green, so
 the order matters. Do not take this paragraph's word for the current state —
-**resolve it**:
+**resolve it, in two steps**:
 
-```
-gh-less:  curl -sH "Authorization: token $TOKEN" \
-            .../repos/Amineregayeg/tradingai/commits/main/check-runs
+```bash
+# 1. Resolve the sha DIRECTLY. Never the commits/main endpoint: it has served a
+#    stale cached ref on this repo before, and it fails convincingly — four green
+#    checks belonging to a commit that is not the tip.
+SHA=$(git ls-remote https://github.com/Amineregayeg/tradingai.git main | cut -f1)
+
+# 2. Ask about THAT sha, not about a name.
+curl -sH "Authorization: token $TOKEN" \
+     "https://api.github.com/repos/Amineregayeg/tradingai/commits/$SHA/check-runs"
 ```
 
-All four checks must read `success`. Last measured 2026-08-12 at `a4f3b08`:
+All four checks must read `success`. The two-step form is not pedantry: a cached
+`main` is how T-0001 nearly reported a successful push as failed, and a reader
+deciding whether to enable branch protection is the last person who can afford a
+green answer about the wrong commit. An earlier draft of this very paragraph used
+the one-step form.
+
+Last measured 2026-08-12 at `a4f3b08`:
 `Backend suite` **failure**, `Tier 0.2` **failure** — red, with the fix for both
 sitting on an unmerged branch. An earlier draft of this entry asserted `main` was
 already green; it was not, and that would have told Malek the blocker was gone
