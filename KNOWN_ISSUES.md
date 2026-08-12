@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-12 (T-0003: A11 and B18 fixed and deleted; B21, B22, B23, B24 found; B20 made standalone; B15 annotated)
+Last updated: 2026-08-12 (T-0003: A11 and B18 fixed and deleted; B21-B25 found; B20 made standalone; B15 annotated)
 
 ---
 
@@ -743,8 +743,10 @@ instrument verifying the change, which is the wrong order.
 matches nothing (`:123-131`) and a test path missing from `BASELINE_TESTS`
 (`:107-115`). Neither can see the third: **a sed that matches a line which has no
 effect.** Probe 5 mutated `bars = bars.dropna(how="all")` for months while that
-line dropped zero rows, so the probe guarding against fabricated bars across a
-collector outage was pointed at dead code.
+line dropped zero rows — the `samples` column had been assigned above it and is
+`0`, never `NaN`, for an empty period, so `how="all"` could never match. The probe
+guarding against fabricated bars across a collector outage was pointed at dead
+code, and every guard it reported on was a guard it had not tested.
 
 **Why it survives T-0003's fix:** the dominance line is live again, but nothing
 was added that would detect the next occurrence. It applies to all eight probes.
@@ -783,6 +785,39 @@ start. **Deploy this before wiring the correlate layer**, not merely "eventually
 Recorded rather than left implicit because T-0001's lesson was that undeployed
 work goes invisible: a value committed, believed live, and running at its old
 setting for days.
+
+### B25. Three agents share one working tree, and `verify_guards.sh` rewrites tracked files in it
+**Found in:** T-0003, 2026-08-12 — raised by the Manager, which declined to run
+the script while Review was mid-verification for exactly this reason.
+**What it is:** manager, execute and review all operate in the same checkout at
+`/mnt/c/Users/malek/TradingAI/tradingai`. `backend/scripts/verify_guards.sh`
+mutates four tracked source files with `sed -i` and restores them with
+`git checkout`. Nothing coordinates that. Two sessions running it at once, or one
+running it while another edits, interleave inside the same files.
+
+**It is worse than "a concurrent run interferes", and this is the part to notice:**
+`restore()` is `git checkout -- "${GUARDED_FILES[@]}"` — **all four files, not the
+one being probed.** So a session that legitimately runs the script destroys any
+other session's uncommitted work in `strategy_step.py`, `dominance.py`,
+`execution.py` or `resolve.py`, whether or not the probe touched that file.
+**B18's fix does not help here**: B18 stopped the *pre-flight refusal* from
+destroying work, but a genuine probe run still checks out all four by design, and
+must, because that is how it undoes its own mutation.
+
+**What it could break:** a probe reporting `ok` or `FAIL` for reasons belonging to
+another session's run — and that verdict is **unfalsifiable from either
+transcript**, because neither session can see the other's writes. On a task whose
+subject is an instrument reporting outcomes it did not earn, an unfalsifiable
+`ok` is the worst available failure. The uncommitted-work loss is the smaller half.
+
+**How we handle it meanwhile:** one session runs `verify_guards.sh` at a time, and
+says so on the bus before starting. That is a habit, and B15, B19 and B21 all say
+habits do not hold — recorded as such rather than as a solution.
+
+**Fix:** either a lock (refuse to start if another run holds it) or, better, have
+the script operate in a `git worktree` of its own, so its mutations cannot reach
+anyone else's checkout at all. The second removes the shared resource instead of
+scheduling access to it.
 
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
