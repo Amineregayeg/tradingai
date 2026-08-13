@@ -374,11 +374,25 @@ def _evaluate_layout(
             evaluations.append(rec.RuleEvaluation(
                 rule_id="GATE-002",
                 verdict="PASS",
+                # THE GRADE ALONE IS NOT VERIFIABLE, SO THE DENOMINATOR SHIPS WITH IT.
+                # GATE-003 freezes the layout at four panels, which is what makes
+                # "2 or more disturbed -> HEAVY" mean 2-of-3 correlates and nothing
+                # else. A NONE computed over 2 correlates and one computed over 3 are
+                # different facts and only one is the rule — and this number keys the
+                # risk matrix. A reader given only the label cannot tell them apart.
                 values={"grade": getattr(grade, "grade", str(grade)),
+                        "disturbed_count": int(getattr(grade, "disturbed_count", 0)),
+                        "layout_size": int(getattr(grade, "layout_size", 0)),
+                        "correlate_denominator": max(
+                            0, int(getattr(grade, "layout_size", 0)) - 1),
                         "direction_graded": direction,
                         "panels_read": sorted(panel_bars)},
                 value_provenance={
                     "grade": rec.derived("GATE-002 over the four-panel layout"),
+                    "disturbed_count": rec.derived("GATE-002 panel verdicts"),
+                    "layout_size": rec.derived("GATE-008 roster size"),
+                    "correlate_denominator": rec.derived(
+                        "layout size minus the main panel (GATE-004 declared choice)"),
                     "direction_graded": rec.derived("main panel observed order flow"),
                     "panels_read": rec.derived("panel reads actually obtained"),
                 },

@@ -114,11 +114,31 @@ wired.
 
 **The agreement rate is 94/97 (96.9%) and it means nothing.** Within the shadow
 window the ICT path declined 94 times and the contract engine declined all 98 —
-but they decline for unrelated reasons. The contract engine is not saying *"this
-setup is poor"*; it is saying **GATE-036: I cannot see.** GATE-008 and GATE-002
-were blocked on all 98 evaluations because the correlate panels are unwired
-(**B11**). A conformance number computed from that agreement would be measuring
-one engine's opinion against another engine's blindness.
+but they decline for unrelated reasons. GATE-008 and GATE-002 were blocked on all
+98 evaluations because the correlate panels were unwired (**B11**), so a
+conformance number computed from that agreement would be measuring one engine's
+opinion against another engine's blindness.
+
+> **CORRECTED 2026-08-13.** This paragraph originally said the contract engine
+> *"is saying GATE-036: I cannot see."* **That attributed a meaning to GATE-036
+> that it does not carry, and the error inverted within hours.**
+>
+> `shadow.py:486` is `deciding = decision.deciding_rule_id or "GATE-036"` —
+> **GATE-036 is the fallback used when no rule decided**, not a rule that fired.
+> `rule_id="GATE-036"` appears **zero** times as a rule evaluation, and no shipped
+> record carries one. Its own docstring reads *"STAND_ASIDE means no setup was in
+> play."*
+>
+> So the same label means opposite things either side of T-0006. **Before:** the
+> engine was blind, and GATE-036 appeared because GATE-008/GATE-002 were hardcoded
+> blocked. **After:** all four gates PASS on a real four-panel read and GATE-036
+> appears because **no setup was in play** — the rule's actual meaning, and a market
+> judgement rather than a data one. Nothing in the record distinguishes the two
+> cases, which is filed as its own defect (**B31**).
+>
+> The blindness this paragraph describes was real at the time of the audit. What
+> was wrong was reading it off the `deciding_rule_id`, which could not have told
+> you either way.
 
 ### HARD_GATEs the running engine violates
 

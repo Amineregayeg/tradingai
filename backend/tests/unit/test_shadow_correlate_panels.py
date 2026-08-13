@@ -369,3 +369,43 @@ def test_the_correlates_block_reports_the_measured_grade_not_a_constant():
     ungraded = shadow._correlates_block(None)
     assert ungraded["layout_size"] == 0
     assert ungraded["states"] == []
+
+
+def test_the_four_panel_pass_can_be_made_to_fail_by_dropping_a_panel():
+    """Review's rejection condition: a PASS that cannot be made to FAIL proves nothing.
+
+    `test_dropping_usdt_d_is_noticed_and_named` drops a panel from the *fixture* path.
+    This drops one from the SAME path that produces the PASS — real wiring, real perp
+    source — so the two results differ by exactly one panel and nothing else.
+    """
+    passing, _, grade = shadow._evaluate_layout(
+        _ramp(), signal_tf=TF, panel_source=_FakeDominance(), perp_source=_FakePerp())
+    assert _verdicts(passing)["GATE-008"] == "PASS"
+    assert grade is not None and grade.layout_size == 4
+
+    # One panel withdrawn from the dominance side; everything else identical.
+    failing, _, grade_none = shadow._evaluate_layout(
+        _ramp(), signal_tf=TF,
+        panel_source=_FakeDominance(available=("TOTAL",)), perp_source=_FakePerp())
+    assert _verdicts(failing)["GATE-008"] == "FAIL"
+    assert _values(failing, "GATE-008")["panels_missing"] == ["USDT.D"]
+    assert grade_none is None, "a layout missing a panel must not produce a grade"
+
+
+def test_the_grade_carries_its_denominator_not_just_its_label():
+    """GATE-003 freezes the layout at four, so HEAVY means 2-of-3 correlates.
+
+    A `LIGHT` computed over 2 correlates and one computed over 3 are different facts
+    and only one is the rule. The block must therefore carry `disturbed_count` and
+    `layout_size`, because the grade alone cannot show which denominator produced it —
+    and that number keys the risk matrix.
+    """
+    grade = DisturbanceClassifier.classify(
+        _reads_for_a_clean_btc_long(), direction="LONG",
+        instrument="BTC", main_asset_counts=False)
+    block = shadow._correlates_block(grade)
+    assert block["layout_size"] == 4, "GATE-003 freezes the layout at four panels"
+    assert "disturbed_count" in block
+    # 4 panels, main excluded by the declared GATE-004 choice -> 3 correlates.
+    correlates = [s for s in block["states"] if s["role"] != "MAIN"]
+    assert len(correlates) == 3, f"denominator must be 3, got {len(correlates)}"

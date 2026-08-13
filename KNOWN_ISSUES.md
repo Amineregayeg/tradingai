@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-13 (T-0006: correlate panels wired and deployed — B11 narrowed to the missing perpetual feeds; B26/B27/B28 found, all three by criterion 4c or its fallout; B29 — work passing review unshipped)
+Last updated: 2026-08-13 (T-0008: the four-panel layout grades in production — B11 CLOSED; B30 and B31 found; the conformance audit's GATE-036 sentence corrected)
 
 ---
 
@@ -251,36 +251,39 @@ doing so shifts the baseline you compare against.
 
 ## B. Silent failure — things that break without telling anyone
 
-### B11. The disturbance grader still cannot run — NARROWED: the panels are wired, two of four instruments do not exist
+### B11. The disturbance grader now runs on real data — and its grade still decides nothing
 **Found in:** M4 (implementing GATE-002/007/008/048), 2026-08-08
-**NARROWED 2026-08-13 (T-0006).** The correlate panels are now genuinely read and
-GATE-008/GATE-002 have left `shadow.BLOCKED_ON_CORRELATES`, which is empty. What
-remains is not a synthesis problem — it is that **two of the four roster panels are
-instruments this platform cannot fetch**. GATE-008's roster is fixed by name to
-`BTCUSDT.P · ETHUSDT.P · TOTAL · USDT.D`, and the first two are Binance PERPETUALS
-(`gate_008_roster.py:38-42`, deliberate and commented). `BinanceSource` reaches only
-spot; nothing in the repo calls `fapi.binance.com`.
+**THE DATA HALF IS FIXED, 2026-08-13 (T-0008); THE ENTRY STAYS FOR THE HALF THAT IS NOT.**
+This entry said the grader "cannot run", that the two
+perpetual panels "are instruments this platform cannot fetch", and that GATE-008 "FAILs
+naming the two that are absent". **Every one of those clauses is now false**, and they
+went false within hours of being written — which is why this is rewritten rather than
+annotated: it was the largest open blocker in the register, so a stale B11 misleads in
+the most expensive direction available.
 
-So the layout is read with two panels and **GATE-008 FAILs naming the two that are
-absent** — a precise, one-line requirement instead of a blanket refusal. Production,
-post-deploy, on every record:
+Production, on a real four-panel read:
 
 ```
-GATE-008 FAIL  panels_missing ['BTCUSDT.P','ETHUSDT.P']
+GATE-008 PASS  panels_missing []
 GATE-007 PASS  alignment_tf ['1H']   thin_panels []
-GATE-002 NOT_APPLICABLE  "layout unreadable: no read for BTCUSDT.P, ETHUSDT.P"
+GATE-002 PASS  grade NONE
+notes: "BTCUSDT.P: 720 bars from https://fapi.binance.com (PERPETUAL, symbol BTCUSDT)"
 ```
 
-**Spot was not substituted for perpetual**, deliberately: it would make GATE-008 emit
-PASS over a layout whose panels are instruments the rule does not name, and that grade
-feeds GATE-002's 2-of-3 count, which keys the risk matrix. **A3** measures venue
-divergence here as large enough to create or erase an FVG.
+`BinancePerpetualSource` supplies the two perpetuals from `fapi.binance.com`, the
+collector supplies TOTAL and USDT.D, and **GATE-002 appears in `rules_evaluated` for
+the first time in this project's history.** Spot was never substituted for perpetual —
+the panel identity is carried on the read, so a source aimed at spot reports SPOT and
+its panel is refused rather than accepted.
 
-**The sampling half of this entry is closed.** At 10 s polling a 1H bar holds **360
-samples against a minimum of 20**, and `viable_timeframes(10.0, 20)` returns
-`['5m','15m','30m','1H','4H','D','W']`. 1m holds 6 and stays refused (**B16**).
+**What is NOT closed, and it is the whole of the remaining gap:** the grade is
+**shadow-only**. `_tick_symbol` still calls the ICT path and reads none of this. A
+disturbance grade that decides nothing is the same furniture A10 describes — see
+**A10**, which this does not narrow.
 
-**Closing condition:** a perpetuals source (T-0008). Nothing else blocks it.
+**The sampling half stays closed:** 1H holds 360 samples against a minimum of 20, and
+1m holds 6 and stays refused (**B16**).
+
 
 **What it is:** GATE-007 requires the layout to be confirmed at the **execution** timeframe,
 and GATE-017 makes 1H analysis-only — so the four panels must be read on 30M, 15M or 5M. Two
@@ -1118,6 +1121,38 @@ disbelieved.
 
 **Fix:** assert every required check reads `success` explicitly. **Never infer from the
 absence of `failure`.**
+
+### B31. `deciding_rule_id` can name a rule that was never evaluated
+**Found in:** T-0008, 2026-08-13, by Review's staleness audit. **Load-bearing, because
+it has already inverted a committed document.**
+**What it is:** `shadow.py:486` is `deciding = decision.deciding_rule_id or "GATE-036"`.
+So **GATE-036 is the fallback when no rule decided**, not a rule that fired.
+`rule_id="GATE-036"` appears **zero** times as a rule evaluation anywhere in the source,
+and **no shipped record carries one**. A record can therefore assert that GATE-036
+decided while containing no evidence that it did, and a reader cannot distinguish
+*"GATE-036 fired"* from *"nothing decided, this is the default."*
+
+**The same label now means opposite things.** Before the panels were wired, GATE-036
+appeared because GATE-008 and GATE-002 were hardcoded blocked — genuine blindness.
+Now it appears because all four gates PASS and **no setup was in play**, which is the
+rule's actual meaning (`gate_036_stand_aside.py`: *"STAND_ASIDE means no setup was in
+play"*) and a market judgement rather than a data one. **Nothing in the record separates
+those two cases**, and both have been read off the same field within a day —
+`docs/CONFORMANCE_AUDIT_2026-08.md` built its central sentence on the first reading and
+is corrected in place.
+
+**What it could break — and this is why it ranks above the document error.** **Stage B's
+gate 2 is "every abstention cites a rule id", and that gate is currently satisfiable by
+the default.** An abstention citing a fallback is not an abstention citing a rule, so
+the cutover's readiness criterion can be passed without ever being met. Same shape as
+every criterion defect this week: a check whose success is indistinguishable from its
+absence.
+
+**Fix:** emit a real `GATE-036` rule evaluation when it is the decision — with its
+reason, as every other rule does — or make the fallback explicit in the record
+(`deciding_rule_id: null` plus a `no_rule_decided` marker). Either removes the
+ambiguity; the second is honest about what happened and the first is more useful. Do
+**not** rely on the label alone until one of them exists.
 
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
