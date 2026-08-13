@@ -132,3 +132,63 @@ def test_an_unsupported_timeframe_raises_rather_than_guessing():
     src = BinancePerpetualSource()
     with pytest.raises(ValueError):
         src.fetch_ohlcv("BTCUSDT.P", "7m", T0, T0 + timedelta(days=1))
+
+
+# ---------------------------------------------------------------------------
+# The still-forming bar — the lookahead class, on the MAIN panel
+# ---------------------------------------------------------------------------
+
+def _klines(n, step_ms, first_open_ms):
+    """Binance-shaped kline rows: [openTime, o, h, l, c, v, ...]."""
+    return [[first_open_ms + i * step_ms, "1", "2", "0.5", "1.5", "10"] for i in range(n)]
+
+
+def test_the_still_forming_bar_is_dropped(monkeypatch):
+    """A 1H bar stamped 22:00 covers [22:00, 23:00) and is not knowable until 23:00.
+
+    `BTCUSDT.P` is GATE-008's MAIN panel: its order flow anchors the layout and the
+    grade derived from it keys the risk matrix. Including the forming bar reads the
+    present as closed history — the lookahead class this repo has three regression
+    tests for on the entry path, arriving on the correlate path instead.
+
+    It also put the four panels one bar out of step, because the dominance side drops
+    its partial and this side did not. **Every check passed while that was true:**
+    `panels_missing` empty, `alignment_tf` `['1H']` — the label matches even when the
+    last bars do not — and `thin_panels` empty, since exchange bars carry no sample
+    count and the thinness check skips them by design.
+    """
+    HOUR = 3_600_000
+    now = datetime(2026, 8, 13, 22, 30, tzinfo=timezone.utc)
+    start = now - timedelta(hours=5)
+    # Bars opening 18:00..22:00; the 22:00 one closes at 23:00 and is still forming.
+    first = int(datetime(2026, 8, 13, 18, tzinfo=timezone.utc).timestamp() * 1000)
+
+    src = BinancePerpetualSource()
+    monkeypatch.setattr(src, "_get", lambda params: _klines(5, HOUR, first))
+
+    kept = src.fetch_ohlcv("BTCUSDT.P", "1H", start, now, drop_partial=True)
+    assert kept.index[-1] == pd.Timestamp("2026-08-13 21:00", tz="UTC"), (
+        f"the forming 22:00 bar survived: newest is {kept.index[-1]}"
+    )
+
+    # MUTATION: without the drop, the forming bar is fed straight into the layout.
+    unfiltered = src.fetch_ohlcv("BTCUSDT.P", "1H", start, now, drop_partial=False)
+    assert unfiltered.index[-1] == pd.Timestamp("2026-08-13 22:00", tz="UTC")
+    assert len(unfiltered) == len(kept) + 1, (
+        "drop_partial changed nothing — the guard is not load-bearing"
+    )
+
+
+def test_a_complete_final_bar_is_not_dropped(monkeypatch):
+    """The drop must be conditional. Removing a closed bar would be its own defect."""
+    HOUR = 3_600_000
+    # `now` exactly on a boundary: the 21:00 bar closed at 22:00 and is complete.
+    now = datetime(2026, 8, 13, 22, tzinfo=timezone.utc)
+    first = int(datetime(2026, 8, 13, 18, tzinfo=timezone.utc).timestamp() * 1000)
+
+    src = BinancePerpetualSource()
+    monkeypatch.setattr(src, "_get", lambda params: _klines(5, HOUR, first))
+
+    kept = src.fetch_ohlcv("BTCUSDT.P", "1H", start=now - timedelta(hours=5),
+                           end=now, drop_partial=True)
+    assert kept.index[-1] == pd.Timestamp("2026-08-13 21:00", tz="UTC")

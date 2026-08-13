@@ -164,7 +164,11 @@ def _read_panels(
 
         psrc = perp_source if perp_source is not None else BinancePerpetualSource()
         for roster_name in PERPETUAL_PANELS:
-            frame, identity = psrc.fetch_with_identity(roster_name, signal_tf, start, end)
+            # drop_partial explicit, matching the dominance call above. Left implicit
+            # it was still True by default — but the defect was that nobody could see
+            # the two paths agreed, and one of them did not.
+            frame, identity = psrc.fetch_with_identity(
+                roster_name, signal_tf, start, end, drop_partial=True)
             if frame.empty:
                 notes.append(f"{roster_name}: no bars from {identity.venue}")
                 continue

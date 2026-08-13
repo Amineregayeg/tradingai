@@ -148,8 +148,24 @@ class BinancePerpetualSource(MarketDataSource):
 
     # ------------------------------------------------------------------
     def fetch_ohlcv(
-        self, symbol: str, timeframe: str, start: datetime, end: datetime
+        self, symbol: str, timeframe: str, start: datetime, end: datetime,
+        drop_partial: bool = True,
     ) -> pd.DataFrame:
+        """Closed bars in ``[start, end)``.
+
+        ``drop_partial`` defaults **True** and removes the still-forming bar, matching
+        `DominanceSource`. This is not tidiness: a 1H bar stamped 22:00 covers
+        [22:00, 23:00) and is not knowable until 23:00, so including it feeds the
+        present into a series read as closed history — the lookahead class this repo
+        has three regression tests for on the entry path.
+
+        It mattered here because `BTCUSDT.P` is the **MAIN** panel of GATE-008's
+        layout: its order flow anchors the alignment, and the grade derived from it
+        keys the risk matrix. The dominance panels dropped their forming bar while
+        these did not, so the four panels ran **one bar out of step** — and every
+        check passed, because `alignment_tf` compares the timeframe LABEL and nothing
+        compares the last bar.
+        """
         if timeframe not in _INTERVAL:
             raise ValueError(f"Unsupported timeframe {timeframe!r}")
         sym = self.to_symbol(symbol)
@@ -178,17 +194,28 @@ class BinancePerpetualSource(MarketDataSource):
         df = pd.DataFrame(rows, columns=["time", *OHLCV_COLUMNS])
         df["time"] = pd.to_datetime(df["time"], unit="ms", utc=True)
         df = df.drop_duplicates("time").set_index("time").sort_index()
-        return df[df.index < pd.Timestamp(end_ms, unit="ms", tz="UTC")]
+        df = df[df.index < pd.Timestamp(end_ms, unit="ms", tz="UTC")]
+
+        if drop_partial and len(df):
+            # A bar OPENS at its label and CLOSES one interval later. The window filter
+            # above keeps any bar that opened before `end`, which is precisely the
+            # still-forming one — so the drop has to be on the CLOSE time, not the open.
+            closes_at = df.index[-1] + pd.Timedelta(milliseconds=step)
+            if closes_at > pd.Timestamp(end_ms, unit="ms", tz="UTC"):
+                df = df.iloc[:-1]
+        return df
 
     def fetch_with_identity(
-        self, roster_name: str, timeframe: str, start: datetime, end: datetime
+        self, roster_name: str, timeframe: str, start: datetime, end: datetime,
+        drop_partial: bool = True,
     ) -> tuple[pd.DataFrame, PanelIdentity]:
         """Bars plus the identity of whatever actually served them.
 
         The pair is the unit callers should use. Returning the frame alone would let a
         caller record `BTCUSDT.P` beside data this source never claimed was perpetual.
         """
-        return self.fetch_ohlcv(roster_name, timeframe, start, end), self.identity_for(roster_name)
+        return (self.fetch_ohlcv(roster_name, timeframe, start, end, drop_partial),
+                self.identity_for(roster_name))
 
     def _get(self, params: dict) -> list:
         """UNREACHABLE MEANS EMPTY, NEVER A FALLBACK AND NEVER A RAISE.
