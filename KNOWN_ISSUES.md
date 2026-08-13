@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-14 (T-0007: ENTRY_TF 1H -> 5m, the first live behaviour change. B37 CLOSED — the lookahead is out of production. B33 gained the instance it predicted: every legal execution timeframe would have broken the shadow; GATE-017 closed on the live path; B38 — GATE-018 stays OPEN)
+Last updated: 2026-08-14 (T-0007: ENTRY_TF 1H -> 5m, the first live behaviour change. B37 CLOSED — the lookahead is out of production. B33 gained the instance it predicted: every legal execution timeframe would have broken the shadow; GATE-017 closed on the live path; B38 — GATE-018 stays OPEN; B39 — a conditional edit that matches nothing succeeds)
 
 ---
 
@@ -1507,6 +1507,39 @@ about that.
 that the declared set won. It is not evidence — it is the consequence of a sampling
 floor in a collector nobody chose for this purpose. **Do not let duration launder a
 constraint into a ruling.**
+
+### B39. A conditional edit that matches nothing succeeds, and the claim survives it
+**Found in:** T-0007, 2026-08-14. **The one instance of this family fixable by tool
+choice rather than by attention.**
+**What it is:** an edit guarded by `if old in s:` — or any `sed`-style substitution —
+**succeeds vacuously when its target is absent.** The file is unchanged, the exit code
+is 0, and nothing distinguishes "replaced" from "found nothing to replace".
+
+It happened: an edit meant to close A10's GATE-017 row targeted a string that lives in
+`docs/CONFORMANCE_AUDIT_2026-08.md`, not in `KNOWN_ISSUES.md`. The guard skipped, the
+commit landed, and **the commit message asserted "A10's GATE-017 row is CLOSED"** — of
+a row still reading `violated`. It was then **reported as done to both peers.**
+
+**That is worse than a silent failure staying silent: it is a silent failure being
+actively converted into a positive claim, twice.** "It no-oped" undersells it.
+
+**Why this one is cheap to close.** Every other instance this week required a
+*different reading* to discriminate — `git status` versus `git log origin/main..main`,
+bar time versus write time, `correlate_denominator` versus `disturbed_count`, the
+schema versus a key list. **This one requires no new reading at all**, only an edit
+primitive that raises when its target is absent. `assert old in s` before every
+replacement; an editing tool that errors on a missing match is safe by construction.
+
+**The read side is the same defect and is NOT closed by that fix.** A `grep` or
+`sed -n` that matches nothing also exits successfully and prints nothing, and an empty
+result has been read as a finding at least three times this week — a column that did
+not exist, a schema set typed from memory rather than read, and a bar treated as
+missing when it was not yet due. **On the write side an empty match changes nothing
+and claims something; on the read side it returns nothing and is believed.**
+
+**Fix:** assert-then-replace on every scripted edit, and for reads, distinguish "the
+pattern is absent" from "the file/table/window is absent" before drawing a conclusion
+from an empty result.
 
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
