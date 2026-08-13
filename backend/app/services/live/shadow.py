@@ -316,6 +316,38 @@ def _blocked_evaluations() -> list[rec.RuleEvaluation]:
     ]
 
 
+#: THE ONE TRANSLATION POINT for timeframes, which B33 said this boundary needed.
+#:
+#: The data layer keys on lowercase minutes — `"5m"` in `dominance._TF_TO_OFFSET` and
+#: `binance._INTERVAL`, where `"5M"` raises. The telemetry schema's `timeframe` enum is
+#: UPPERCASE — `['1M','3M','5M','15M','30M','1H',…]`, where `"5m"` is invalid.
+#:
+#: **`1H` is the only value where the two conventions coincide**, which is why this was
+#: invisible for the platform's entire history: it ran on 1H, so every record validated
+#: by accident. The first bar evaluated on 5m failed the schema on `correlates/states/*`
+#: AND `primitives/*`, and `_shadow_evaluate` swallowed it — the shadow went dark again,
+#: for the third time, on the third distinct vocabulary mismatch at this boundary.
+#:
+#: Fetching uses the data-layer form; anything written into a record uses this. Both
+#: forms are needed in the same function, so a single canonical rename would only move
+#: the failure.
+_SCHEMA_TF: dict[str, str] = {
+    "1m": "1M", "3m": "3M", "5m": "5M", "15m": "15M", "30m": "30M",
+    "1h": "1H", "2h": "2H", "4h": "4H", "1d": "1D", "d": "1D",
+    "1w": "1W", "w": "1W", "1mo": "1MO",
+}
+
+
+def schema_tf(tf: str) -> str:
+    """A timeframe in the form the telemetry schema accepts.
+
+    Unknown values pass through unchanged rather than raising: this runs inside the
+    shadow, which may never break the engine, and an unmapped timeframe should fail
+    loudly at validation with the real value visible rather than silently here.
+    """
+    return _SCHEMA_TF.get(tf.strip().lower(), tf)
+
+
 def _correlates_block(grade: Any, signal_tf: str = "") -> dict:
     """The disturbance summary, from the grader when it ran and honestly empty when not.
 
@@ -364,7 +396,7 @@ def _correlates_block(grade: Any, signal_tf: str = "") -> dict:
         states.append({
             **panel,
             "symbol": panel.pop("asset", panel.get("symbol")),
-            "tf": signal_tf,
+            "tf": schema_tf(signal_tf),
             "observed_order_flow": _FLOW.get(flow, flow),
         })
     return {
@@ -500,13 +532,13 @@ def evaluate(
         now = bars[-1].time
 
         # -- primitives, in dependency order --------------------------------
-        swings = SwingPoints.detect(bars, tf=signal_tf)
-        breaks = BreakEvents.detect(bars, swings, tf=signal_tf)
+        swings = SwingPoints.detect(bars, tf=schema_tf(signal_tf))
+        breaks = BreakEvents.detect(bars, swings, tf=schema_tf(signal_tf))
         SwingPoints.classify_strength(swings, breaks)
-        imbalances = ImbalanceInventory.detect(bars, tf=signal_tf)
-        pools = LiquidityPools.detect(bars, swings, tf=signal_tf)
-        sweeps = SweepEvents.detect(pools, bars, breaks, tf=signal_tf)
-        flips = SRFlipZones.detect(bars, swings, breaks, imbalances, tf=signal_tf)
+        imbalances = ImbalanceInventory.detect(bars, tf=schema_tf(signal_tf))
+        pools = LiquidityPools.detect(bars, swings, tf=schema_tf(signal_tf))
+        sweeps = SweepEvents.detect(pools, bars, breaks, tf=schema_tf(signal_tf))
+        flips = SRFlipZones.detect(bars, swings, breaks, imbalances, tf=schema_tf(signal_tf))
 
         # -- rules that CAN be evaluated from bars ---------------------------
         evaluations: list[rec.RuleEvaluation] = [NewYorkTimestamps.evaluate(now)]
@@ -574,10 +606,14 @@ def evaluate(
                 "venue": "BINANCE_SPOT",
             },
             mode={"trading_mode": "DAY_TRADE", "direction_mode": "FORWARD"},
+            # Schema form, like every other tf written into a record. These three were
+            # the second half of the same defect: fixing `correlates` and `primitives`
+            # left these failing, and only the parametrised timeframe test found them.
+            # "Found one at a time" is B33's own description of this boundary.
             timeframes={
-                "signal_tf": signal_tf,
-                "alignment_tf": signal_tf,
-                "analysis_tfs_scanned": [signal_tf],
+                "signal_tf": schema_tf(signal_tf),
+                "alignment_tf": schema_tf(signal_tf),
+                "analysis_tfs_scanned": [schema_tf(signal_tf)],
             },
             session={
                 "ny_local_time": iso_ny(now),

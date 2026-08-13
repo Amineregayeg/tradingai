@@ -606,3 +606,41 @@ def test_mutation_2_a_thin_DECISION_bar_still_fails_gate_007_and_names_the_panel
     thin = _values(evaluations, "GATE-007")["thin_panels"]
     assert "TOTAL" in thin and "USDT.D" in thin, f"the thin panels were not named: {thin}"
     assert grade is None, "an unreadable layout must not produce a disturbance grade"
+
+
+@pytest.mark.parametrize("tf", ["5m", "15m", "30m", "1H"])
+def test_the_record_validates_on_every_ruled_execution_timeframe(tf, monkeypatch):
+    """The state space includes the TIMEFRAME, and that dimension was never covered.
+
+    `1H` is the only value where the data layer's lowercase keys and the schema's
+    uppercase `timeframe` enum coincide. So every record validated by accident for the
+    platform's entire history, and the first bar evaluated on `5m` failed on
+    `correlates/states/*/tf` AND `primitives/*/tf` — silently, because
+    `_shadow_evaluate` swallows.
+
+    The nine-state guard added earlier varied panels, grades and directions and held
+    the timeframe fixed at `1H`, which is exactly the value that cannot fail. Parametry
+    over the ruled set instead.
+    """
+    from app.services.telemetry import validate as tvalidate
+
+    monkeypatch.setattr(
+        shadow, "_read_panels",
+        lambda signal_tf, **kw: (
+            {"BTCUSDT.P": _ramp(), "ETHUSDT.P": _ramp(),
+             "TOTAL": _ramp(), "USDT.D": _ramp(rising=False)},
+            {"BTCUSDT.P": None, "ETHUSDT.P": None, "TOTAL": 360, "USDT.D": 360},
+            [],
+        ),
+    )
+    idx = pd.DatetimeIndex([T0 + timedelta(hours=k) for k in range(80)], tz="UTC")
+    base = [100.0 + k for k in range(80)]
+    df = pd.DataFrame({"open": base, "high": [b + 1 for b in base],
+                       "low": [b - 1 for b in base], "close": [b + 0.5 for b in base],
+                       "volume": [1.0] * 80}, index=idx)
+
+    record = shadow.evaluate("BTC/USD", df, signal_tf=tf,
+                             declared=shadow.declared_parameters(),
+                             sequence_no=1, scan_id=f"tf-{tf}")
+    assert record is not None, f"{tf}: no record produced"
+    tvalidate.assert_valid(record)
