@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-14 (T-0007: ENTRY_TF 1H -> 5m, the first live behaviour change. B37 CLOSED — the lookahead is out of production. B33 gained the instance it predicted: every legal execution timeframe would have broken the shadow; GATE-017 closed on the live path; B38 — GATE-018 stays OPEN; B39 — a conditional edit that matches nothing succeeds)
+Last updated: 2026-08-14 (T-0007: ENTRY_TF 1H -> 5m, the first live behaviour change. B37 CLOSED — the lookahead is out of production. B33 gained the instance it predicted: every legal execution timeframe would have broken the shadow; GATE-017 closed on the live path; B38 — GATE-018 stays OPEN; B39 — a conditional edit that matches nothing succeeds; B40 — the correlate margin is now 1.5x and nothing reports it shrinking)
 
 ---
 
@@ -1540,6 +1540,35 @@ and claims something; on the read side it returns nothing and is believed.**
 **Fix:** assert-then-replace on every scripted edit, and for reads, distinguish "the
 pattern is absent" from "the file/table/window is absent" before drawing a conclusion
 from an empty result.
+
+### B40. The correlate margin fell from 18x to 1.5x, and nothing fails when it shrinks
+**Found in:** T-0007, 2026-08-14, by Review, carried into the verdict because no other
+artifact would hold it. **A consequence of a correct change, not a defect in it.**
+**What it is:** at 1H a correlate bar held **360 samples** against
+`MIN_SAMPLES_PER_SYNTHETIC_BAR = 20` — **18x margin**. At 5m it holds **30**. That is
+**1.5x**, and it is the operating margin from now on.
+
+**Losing a third of a bar's samples makes the layout ungradeable.** At 10 s polling a
+5m bar needs 20 of its 30 ticks; ten missed polls in five minutes takes GATE-007 to
+FAIL. At 1H the equivalent required losing 340 of 360.
+
+**Why it needs writing down: nothing fails when the margin shrinks.** There is no
+alarm, no threshold, no degraded state. The layout simply stops grading — GATE-007
+FAILs, GATE-002 goes NOT_APPLICABLE, the engine stands aside — and **that is
+indistinguishable from a market with no setup.** It fails **later, intermittently, and
+looking like a market condition**, which is the hardest shape to attribute.
+
+**What changed beyond the number:** collector reliability was a comfort and is now a
+**precondition**. Before T-0007 a collector hiccup cost nothing observable; now it
+silently removes the correlate layer for that bar. **B32's liveness signal watches
+whether the shadow is *recording*; nothing watches whether the panels are *thick
+enough*** — and B35 records that GATE-007 asserts alignment by label, so it will not
+tell you either.
+
+**Fix:** report the margin as a number rather than discovering it as a verdict — the
+per-panel sample counts already exist in the record (`thin_panels` is derived from
+them). Surfacing "30 of 20 required" beside the grade turns a cliff into a gauge.
+Related: **B34** means a thin bar on a blocked bar is invisible twice over.
 
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
