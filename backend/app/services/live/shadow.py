@@ -87,8 +87,17 @@ BLOCKED_ON_CORRELATES: dict[str, str] = {}
 #: existence — if the key is not the roster's, `LayoutReadability` counts it missing.
 SOURCEABLE_PANELS: dict[str, str] = {"TOTAL": "TOTAL", "USDT.D": "USDT.D"}
 
+#: The other two, from a different host and a different instrument family (T-0008).
+#: Kept as a separate dict rather than merged, because they come from a separate source
+#: on purpose: GATE-008 names the Binance PERPETUALS and `BinanceSource` serves spot.
+#: Merging them would put "which market is this" back into a symbol string, which is the
+#: one thing that cannot carry it — Binance names the perpetual `BTCUSDT` too.
+PERPETUAL_PANELS: tuple[str, ...] = ("BTCUSDT.P", "ETHUSDT.P")
 
-def _read_panels(signal_tf: str, *, source: Any = None) -> tuple[dict, dict, list[str]]:
+
+def _read_panels(
+    signal_tf: str, *, source: Any = None, perp_source: Any = None
+) -> tuple[dict, dict, list[str]]:
     """The roster panels we can source, as bars, on ONE timeframe.
 
     Returns `(panel_bars, sample_counts, notes)`. Never raises: a panel that cannot be
@@ -139,6 +148,46 @@ def _read_panels(signal_tf: str, *, source: Any = None) -> tuple[dict, dict, lis
             sample_counts[roster_name] = int(frame["samples"].iloc[-1])
         except Exception as exc:  # noqa: BLE001 - a shadow may never break the engine
             notes.append(f"{roster_name}: unreadable ({type(exc).__name__})")
+
+    # -- the two perpetual panels, from the OTHER host ---------------------------
+    # Separate source, separate failure mode: if fapi is unreachable these panels are
+    # simply absent and GATE-008 fails naming them. Never a spot fallback — that is the
+    # substitution `binance_perp` exists to make impossible — and never a raise, because
+    # a shadow that can break the engine is worse than no shadow.
+    #
+    # `bar_sample_count` stays None for these. They are EXCHANGE bars, not resampled
+    # point observations, so there is no sample count to carry and GATE-007's thinness
+    # check does not apply — `LayoutReadability` skips panels whose count is None, which
+    # is the correct distinction rather than a special case: a real candle is a candle.
+    try:
+        from app.services.market_data.sources.binance_perp import BinancePerpetualSource
+
+        psrc = perp_source if perp_source is not None else BinancePerpetualSource()
+        for roster_name in PERPETUAL_PANELS:
+            frame, identity = psrc.fetch_with_identity(roster_name, signal_tf, start, end)
+            if frame.empty:
+                notes.append(f"{roster_name}: no bars from {identity.venue}")
+                continue
+            if identity.instrument_family != "PERPETUAL":
+                # Refuse rather than accept the wrong market under the right name. This
+                # is the runtime half of the mutation in test_binance_perp_identity.
+                notes.append(
+                    f"{roster_name}: source served {identity.instrument_family}, not "
+                    f"PERPETUAL — panel refused rather than substituted"
+                )
+                continue
+            panel_bars[roster_name] = [
+                Bar(time=idx.to_pydatetime(), open=float(r.open), high=float(r.high),
+                    low=float(r.low), close=float(r.close))
+                for idx, r in frame.iterrows()
+            ]
+            sample_counts[roster_name] = None
+            notes.append(
+                f"{roster_name}: {len(frame)} bars from {identity.venue} "
+                f"({identity.instrument_family}, symbol {identity.symbol_requested})"
+            )
+    except Exception as exc:  # noqa: BLE001 - never break the engine
+        notes.append(f"perpetual panels unreadable ({type(exc).__name__})")
 
     return panel_bars, sample_counts, notes
 
@@ -247,7 +296,7 @@ def _blocked_evaluations() -> list[rec.RuleEvaluation]:
 
 def _evaluate_layout(
     main_bars: Sequence[Bar], *, signal_tf: str, panel_source: Any = None,
-    extra_panels: dict | None = None,
+    perp_source: Any = None, extra_panels: dict | None = None,
 ) -> tuple[list[rec.RuleEvaluation], list[str]]:
     """GATE-008, GATE-007 and GATE-002 against real panel reads.
 
@@ -265,7 +314,8 @@ def _evaluate_layout(
 
     causes: list[str] = []
     try:
-        panel_bars, sample_counts, notes = _read_panels(signal_tf, source=panel_source)
+        panel_bars, sample_counts, notes = _read_panels(
+            signal_tf, source=panel_source, perp_source=perp_source)
         if extra_panels:
             for asset, series in extra_panels.items():
                 panel_bars[asset] = series

@@ -1090,6 +1090,35 @@ about a *correct* answer to a question adjacent to the one being asked. No linte
 catches it: every command ran, every output was accurate, and the inference from it
 was not.
 
+### B30. A `cancelled` check reads as green — the only CI state that asserts nothing
+**Found in:** T-0006, 2026-08-13, closing a verdict against `main`'s tip. Review's
+finding and largely its wording.
+**What it is:** on `30e70d2` the check-runs read `success`, `success`, `success`,
+**`cancelled`** — the cancelled one being `Backend suite (production pins)`, which had
+run three minutes before stopping. **A scan for red finds none.** `cancelled` is
+neither `success` nor `failure`: it occupies the slot where an assertion would be and
+makes none.
+
+**Why it is worse than the other non-discriminating outputs in this register.** Every
+other instance — eight `ok` lines with or without `restore()`, the one-step curl,
+`recent_density_pct` at 100.0, `panels_missing` as a list of absences — was a wrong or
+truncated *value*. This is a **third state**, and the shapes we have learned to
+distrust are all binary. A reader asking "is anything red" is asking the wrong question
+of a tri-state field.
+
+**And no other check substitutes for it.** `Tier 0.2` passing proves the **five** files
+in `verify_guards.sh`'s `BASELINE_TESTS` are green and says nothing about the other 860.
+The test added in that same commit was not one of the five — so it had been verified by
+CI, by Tier 0.2, and by the reviewer's own suite run **none of them**.
+
+**Cause not asserted.** A later push almost certainly superseded the in-flight run, and
+that was not verified. The entry stands on the observed state and needs no theory of
+why — a guessed mechanism in a register entry is the thing that gets checked once and
+disbelieved.
+
+**Fix:** assert every required check reads `success` explicitly. **Never infer from the
+absence of `failure`.**
+
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
 **What it is:** `TELEMETRY_SCHEMA.json` hard-pins `engine.rule_registry_version` with

@@ -79,6 +79,33 @@ class _FakeDominance:
         )
 
 
+class _FakePerp:
+    """Stands in for the network, not for the source's logic.
+
+    `_evaluate_layout` still calls the real identity check, so a fake claiming SPOT is
+    refused exactly as a misaimed real source would be. That is the difference between
+    this and 4a's `extra_panels`: 4a bypassed the wiring, this exercises it.
+    """
+
+    def __init__(self, family="PERPETUAL", empty=False):
+        self.family, self.empty = family, empty
+
+    def fetch_with_identity(self, roster_name, timeframe, start, end):
+        from app.services.market_data.sources.binance_perp import PanelIdentity
+        ident = PanelIdentity(roster_name=roster_name,
+                              venue="https://fapi.binance.com",
+                              instrument_family=self.family,
+                              symbol_requested=roster_name.removesuffix(".P"))
+        if self.empty:
+            return pd.DataFrame(), ident
+        n = 60
+        idx = pd.DatetimeIndex([T0 + timedelta(hours=i) for i in range(n)], tz="UTC")
+        base = [100.0 + i for i in range(n)]
+        return pd.DataFrame({"open": base, "high": [b + 1 for b in base],
+                             "low": [b - 1 for b in base], "close": [b + 0.5 for b in base],
+                             "volume": [0.0] * n}, index=idx), ident
+
+
 def _verdicts(evaluations) -> dict[str, str]:
     return {e.rule_id: e.verdict for e in evaluations}
 
@@ -99,7 +126,8 @@ def test_all_four_panels_present_makes_gate_008_pass_and_grades_the_layout():
     """
     perps = {"BTCUSDT.P": _ramp(), "ETHUSDT.P": _ramp()}
     evaluations, _causes = shadow._evaluate_layout(
-        _ramp(), signal_tf=TF, panel_source=_FakeDominance(), extra_panels=perps
+        _ramp(), signal_tf=TF, panel_source=_FakeDominance(), extra_panels=perps,
+        perp_source=_FakePerp(empty=True),
     )
     verdicts = _verdicts(evaluations)
 
@@ -115,10 +143,19 @@ def test_all_four_panels_present_makes_gate_008_pass_and_grades_the_layout():
     assert sorted(gate_002["panels_read"]) == ["BTCUSDT.P", "ETHUSDT.P", "TOTAL", "USDT.D"]
 
 
-def test_production_reality_fails_naming_exactly_the_two_perpetual_panels():
-    """Two of four. The verdict must name what is absent, not merely refuse."""
+def test_with_no_perpetual_feed_the_two_perpetual_panels_are_named():
+    """Two of four. The verdict must name what is absent, not merely refuse.
+
+    Until T-0008 this was production's steady state and the test relied on the default
+    perpetual source being unavailable. It no longer is — `_read_panels` now builds a
+    real `BinancePerpetualSource`, so leaving it to the default made this test reach
+    `fapi.binance.com` and pass four panels. **A unit test that silently acquires a
+    network dependency is a unit test that will fail on a plane**, so the unavailable
+    feed is now injected explicitly rather than assumed.
+    """
     evaluations, _ = shadow._evaluate_layout(
-        _ramp(), signal_tf=TF, panel_source=_FakeDominance()
+        _ramp(), signal_tf=TF, panel_source=_FakeDominance(),
+        perp_source=_FakePerp(empty=True),
     )
     verdicts = _verdicts(evaluations)
 
@@ -157,6 +194,7 @@ def test_a_thin_panel_is_refused_rather_than_graded():
         _ramp(), signal_tf="1m",
         panel_source=_FakeDominance(samples=6),  # 1m at 10s polling = 6 samples
         extra_panels=perps,
+        perp_source=_FakePerp(empty=True),
     )
     assert _verdicts(evaluations)["GATE-007"] == "FAIL"
     assert _values(evaluations, "GATE-007")["thin_panels"]
@@ -251,7 +289,9 @@ def test_panels_are_read_with_the_forming_bar_dropped():
     it is pinned here instead of described in a comment.
     """
     src = _RecordingDominance()
-    shadow._evaluate_layout(_ramp(), signal_tf=TF, panel_source=src)
+    shadow._evaluate_layout(_ramp(), signal_tf=TF, panel_source=src,
+        perp_source=_FakePerp(empty=True),
+    )
 
     assert src.calls, "no panel was read at all"
     for call in src.calls:
@@ -259,3 +299,45 @@ def test_panels_are_read_with_the_forming_bar_dropped():
             f"{call['symbol']} was read with drop_partial={call.get('drop_partial')!r}; "
             "the last bar is then still forming and `iloc[-1]` is not the decision bar"
         )
+
+
+# ---------------------------------------------------------------------------
+# T-0008 — the four-panel read through the REAL wiring, not a fixture
+# ---------------------------------------------------------------------------
+
+def test_four_panels_through_the_real_wiring_pass_gate_008():
+    """The criterion the whole programme has walked toward, via the wiring itself."""
+    evaluations, _ = shadow._evaluate_layout(
+        _ramp(), signal_tf=TF,
+        panel_source=_FakeDominance(), perp_source=_FakePerp(),
+    )
+    v = _verdicts(evaluations)
+    assert v["GATE-008"] == "PASS", _values(evaluations, "GATE-008")
+    assert _values(evaluations, "GATE-008")["panels_missing"] == []
+    assert v["GATE-007"] == "PASS"
+    assert v["GATE-002"] == "PASS"
+    assert sorted(_values(evaluations, "GATE-002")["panels_read"]) == [
+        "BTCUSDT.P", "ETHUSDT.P", "TOTAL", "USDT.D"]
+
+
+def test_a_perpetual_source_serving_spot_is_refused_not_substituted():
+    """RUNTIME half of the identity mutation. A wrong-market panel is absent, not used."""
+    evaluations, causes = shadow._evaluate_layout(
+        _ramp(), signal_tf=TF,
+        panel_source=_FakeDominance(), perp_source=_FakePerp(family="SPOT"),
+    )
+    assert _verdicts(evaluations)["GATE-008"] == "FAIL"
+    assert sorted(_values(evaluations, "GATE-008")["panels_missing"]) == [
+        "BTCUSDT.P", "ETHUSDT.P"]
+    assert any("not\nPERPETUAL" in c or "not PERPETUAL" in c for c in causes), causes
+
+
+def test_unreachable_perpetual_host_fails_naming_the_panels():
+    """Criterion 6: absent, not stale and not a spot fallback."""
+    evaluations, _ = shadow._evaluate_layout(
+        _ramp(), signal_tf=TF,
+        panel_source=_FakeDominance(), perp_source=_FakePerp(empty=True),
+    )
+    assert _verdicts(evaluations)["GATE-008"] == "FAIL"
+    assert sorted(_values(evaluations, "GATE-008")["panels_missing"]) == [
+        "BTCUSDT.P", "ETHUSDT.P"]
