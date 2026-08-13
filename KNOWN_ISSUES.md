@@ -67,9 +67,12 @@ say:
   in the wiring.
 * **Every live trade since the shadow began was one Salim's engine refused.**
   3 of 3, matched sub-second on the same instrument, the contract engine ruling
-  `STAND_ASIDE` citing GATE-036 each time. And **12 of 12 entries in the
-  platform's history were triggered from 1H**, an analysis-only timeframe under
-  GATE-017/019 — measured from records, not from `ENTRY_TF`.
+  `STAND_ASIDE` citing GATE-036 each time. And **all 22 entries taken before
+  2026-08-13 23:05:30Z were triggered from 1H**, an analysis-only timeframe under
+  GATE-017/019 — measured from records, not from `ENTRY_TF`. **That number is final:
+  the set is closed by the switch to 5m, so no 23rd can join it.** (Reported as 12 at
+  audit time and 20 an hour before the switch; both were true when written, which is
+  why this one is pinned to a boundary rather than a date.)
 
 **Do not cite the 96.9% agreement between the two engines as conformance.** They
 agree only because both declined, for unrelated reasons: the contract engine is
@@ -121,9 +124,13 @@ the live loop over.
 * **GATE-008** — roster is `BTCUSDT.P · ETHUSDT.P · TOTAL · USDT.D`. We trade `BTC/USD`
   and `ETH/USD` off Binance **spot**, and read no correlate panel at decision time (this is
   the A3 axis, restated as a rule violation).
-* **GATE-017 / GATE-019** — 1H is **analysis only**; ruled execution timeframes are
-  30M/15M/5M. The loop's default `entry_tf` is `1H`, so every entry it has ever taken was
-  triggered from an analysis-only series.
+* ~~**GATE-017 / GATE-019** — 1H is analysis only~~ — **CLOSED 2026-08-14 (T-0007).**
+  `ENTRY_TF` is now `"5m"`, and the guard that never existed exists:
+  `test_fixed_config_timeframes.py` fails if it is ever set to an HTF, and fails
+  separately if `BIAS_TF` stops being higher. GATE-017 is a HARD_GATE and **nothing had
+  ever enforced it** — the only prior `tests/` hit was a docstring mention, rationale
+  rather than coverage. The violation is historical, and **every one of the 22 entries
+  in the corpus still carries it.**
 * **EXIT-001 / GATE-022** — 70% at 2R, 30% runner, everything flat at 19:00 New York.
   The live signal carries a single TP at `rr_partial`-R and there is no session close;
   the 70/30 machinery exists only inside the backtester.
