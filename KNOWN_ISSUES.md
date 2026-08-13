@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-13 (T-0002 conformance audit: A10 re-verified from production and understated; F6 found — no close is labelled; F2 confirmed exactly)
+Last updated: 2026-08-13 (T-0006: correlate panels wired and deployed — B11 narrowed to the missing perpetual feeds; B26/B27/B28 found, all three by criterion 4c or its fallout)
 
 ---
 
@@ -251,8 +251,37 @@ doing so shifts the baseline you compare against.
 
 ## B. Silent failure — things that break without telling anyone
 
-### B11. The disturbance grader cannot be run on real data — TOTAL and USDT.D have no credible execution-timeframe bars
+### B11. The disturbance grader still cannot run — NARROWED: the panels are wired, two of four instruments do not exist
 **Found in:** M4 (implementing GATE-002/007/008/048), 2026-08-08
+**NARROWED 2026-08-13 (T-0006).** The correlate panels are now genuinely read and
+GATE-008/GATE-002 have left `shadow.BLOCKED_ON_CORRELATES`, which is empty. What
+remains is not a synthesis problem — it is that **two of the four roster panels are
+instruments this platform cannot fetch**. GATE-008's roster is fixed by name to
+`BTCUSDT.P · ETHUSDT.P · TOTAL · USDT.D`, and the first two are Binance PERPETUALS
+(`gate_008_roster.py:38-42`, deliberate and commented). `BinanceSource` reaches only
+spot; nothing in the repo calls `fapi.binance.com`.
+
+So the layout is read with two panels and **GATE-008 FAILs naming the two that are
+absent** — a precise, one-line requirement instead of a blanket refusal. Production,
+post-deploy, on every record:
+
+```
+GATE-008 FAIL  panels_missing ['BTCUSDT.P','ETHUSDT.P']
+GATE-007 PASS  alignment_tf ['1H']   thin_panels []
+GATE-002 NOT_APPLICABLE  "layout unreadable: no read for BTCUSDT.P, ETHUSDT.P"
+```
+
+**Spot was not substituted for perpetual**, deliberately: it would make GATE-008 emit
+PASS over a layout whose panels are instruments the rule does not name, and that grade
+feeds GATE-002's 2-of-3 count, which keys the risk matrix. **A3** measures venue
+divergence here as large enough to create or erase an FVG.
+
+**The sampling half of this entry is closed.** At 10 s polling a 1H bar holds **360
+samples against a minimum of 20**, and `viable_timeframes(10.0, 20)` returns
+`['5m','15m','30m','1H','4H','D','W']`. 1m holds 6 and stays refused (**B16**).
+
+**Closing condition:** a perpetuals source (T-0008). Nothing else blocks it.
+
 **What it is:** GATE-007 requires the layout to be confirmed at the **execution** timeframe,
 and GATE-017 makes 1H analysis-only — so the four panels must be read on 30M, 15M or 5M. Two
 of those four panels are CryptoCap indices we synthesise ourselves, and
@@ -935,6 +964,84 @@ habits do not hold — recorded as such rather than as a solution.
 the script operate in a `git worktree` of its own, so its mutations cannot reach
 anyone else's checkout at all. The second removes the shared resource instead of
 scheduling access to it.
+
+### B26. Two services disagreed about the name of one variable, and the api read no dominance data at all
+**Found in:** T-0006, 2026-08-13, by criterion 4c. **Live for as long as the api has
+had the mount.** Fixed in the source; the durable half is owner-only.
+**What it is:** `deploy/compose.vps.yaml:110` set **`DOMINANCE_DATA_DIR`** and mounted
+`/opt/dominance` to `/data/dominance:ro`. `DominanceSource.__init__` read
+**`DOMINANCE_DIR`**. So the api fell through to the `/opt/dominance` default — a path
+that does not exist inside that container — and **every dominance read from the api
+returned nothing**. The collector's own compose sets `DOMINANCE_DIR`, so the two
+services disagreed about the name of the same thing and only one matched the code.
+
+The mount was right. The value was right. The variable name was never read. The data
+was present throughout: `/data/dominance/dominance_intraday_raw.csv`, 4.6 MB, written
+minutes before it was found missing.
+
+**Why nothing caught it:** no consumer failed loudly. `load_raw` returns an empty frame
+for a missing file **by design** — the engine's contract is to abstain when an input is
+absent, not to crash — so an unreadable path is indistinguishable from a collector that
+has not written yet. Both are silence, and only one is a bug.
+
+**How it was caught, because the mechanism is the point.** Criterion 4c required the
+shadow record to show `GATE-008 panels_missing` == *exactly* the two panels we cannot
+source, **and** `GATE-007 alignment_tf` non-empty. It came back with **all four missing
+and an empty `alignment_tf`** — which is what "read nothing at all" looks like, as
+opposed to "read the two we have". **Criterion 3 on its own passed**: the decision mix
+had changed, GATE-008 was deciding instead of GATE-036, and the wiring was doing
+nothing. A list of absences says nothing about the presences.
+
+**Fixed where an agent can:** `DominanceSource` now accepts either name, preferring
+`DOMINANCE_DIR`. **The durable fix is renaming it in the compose, and no agent can do
+it** — `/docker/tradingai/docker-compose.yml` is root-owned, the deploy user has no
+write access and no passwordless sudo, and root ssh is key-refused. Same owner-only
+class as **B20**. Until then the repo's `compose.vps.yaml` deliberately still says
+`DOMINANCE_DATA_DIR`, because that file is *the record of what runs* and editing it to
+the correct name would make the record describe a deployment that does not exist.
+
+### B27. `GATE-007` was judging a boundary artefact, not the bar being confirmed
+**Found in:** T-0006, 2026-08-13, by criterion 4c again, immediately after B26 was
+fixed. **Fixed in `850fc6b`.**
+**What it is:** the panel read reported `frame["samples"].min()` over a 30-day window as
+the bar's sample count. The thinnest bar in that window is the collector's **first
+partial hour on 2026-08-04** — so a boundary artefact from the day collection started
+decided whether today's layout was readable. GATE-007 failed with
+`thin_panels: ['TOTAL','USDT.D']` at 1H, where a complete bar holds **360 samples
+against a minimum of 20**: an 18× margin reported as too thin.
+
+**The reasoning that produced it was internally coherent and wrong**, which is why it
+survived review of its own comment: it argued from *"any panel under the minimum
+fails"* to *"use the minimum across all time"*, and that does not follow. A mean would
+have been wrong in the other direction. **GATE-007 asks whether the layout is readable
+for THIS confirmation**, so the only bar whose thickness matters is the one being
+confirmed on — the last complete bar, `drop_partial` having removed the still-forming
+one.
+
+**Kept as an entry although it is fixed**, because the class recurs: a windowed
+aggregate answering a question about a single bar. Any future panel, timeframe or
+quality metric that summarises a range is exposed to it.
+
+### B28. Endpoint defaults truncate, and a truncated count reads as a measurement
+**Found in:** T-0006, 2026-08-13.
+**What it is:** `/api/engine/shadow` defaults to `limit=50`. A caller who omits the
+parameter gets `n: 50` and a rule-count distribution that sums to exactly 50 —
+indistinguishable from a population of 50. Measured the same instant:
+
+```
+limit=50   n=50   deciding {'GATE-008': 14, 'GATE-036': 36}
+limit=500  n=124  deciding {'GATE-008': 14, 'GATE-036': 110}
+```
+
+The GATE-008 count is identical and the GATE-036 count is not, so **which conclusions
+survive the truncation depends on where the cut falls** — the very thing a reader
+cannot see. This is the same family as the register's other truncation findings and it
+arrives through a default rather than through a pipe.
+
+**How we handle it meanwhile:** pass `limit` explicitly whenever a count is being
+reported, and state it beside the number.
+**Fix:** have the endpoint return the true total alongside the returned slice, so `n`
+cannot be read as the population.
 
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
