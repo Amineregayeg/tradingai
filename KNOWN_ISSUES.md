@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-13 (T-0008: four-panel layout grades in production with its denominator; B27's remedy corrected — it broke the guard; B14 gains restart duplication; B30/B31/B32 found; B33 — two vocabularies, no translation point; B34 — the shadow skips blocked bars, so the emission policy is false and the sample biased)
+Last updated: 2026-08-13 (T-0008: four-panel layout grades in production with its denominator; B27's remedy corrected — it broke the guard; B14 gains restart duplication; B30/B31/B32 found; B33 — two vocabularies, no translation point; B34 — the shadow skips blocked bars, so the emission policy is false and the sample biased; B35 — GATE-007 compares labels, not times)
 
 ---
 
@@ -1329,6 +1329,49 @@ marking. The comment at `:808-812` already argues the shadow belongs before the 
 evaluation for side-effect safety; the same reasoning puts it before the gates. **One
 line — and it changes what is recorded on live bars, so it is a plan and not a
 drive-by.**
+
+### B35. GATE-007 asserts "same timeframe" by comparing LABELS, never times
+**Found in:** T-0008, 2026-08-13, under the partial-bar defect. **This is the hole
+that defect fell through, and it predicts the next one.**
+**What it is:** `gate_008_roster.py:133-140` is `tfs = sorted({r.tf for r in reads})`
+and fails only if more than one distinct **string** appears. `check()` at `:124-125`
+is `alignment_tf == signal_tf`. Both are label comparisons, and **nothing anywhere
+compares the panels' last-bar timestamps.**
+
+So four panels labelled `1H` with last bars at **22:00, 22:00, 21:00, 21:00** pass
+GATE-007 while being an hour out of step in content. That is not hypothetical — it is
+what production ran until `drop_partial` was added to the perpetual source: the
+dominance panels dropped their still-forming bar and the perpetuals did not.
+
+**Why it is worse than the defect it hid.** The missing `drop_partial` was one
+source's convention. **This is the rule that was supposed to catch any such
+divergence and cannot.** Any future panel source with a different partial-bar
+convention — a venue stamping bars at close rather than open, a feed with a reporting
+lag — diverges again, silently, and GATE-007 reports the layout aligned.
+
+**And it defeated the one check designed to be discriminating.** Criterion 4c —
+three rounds of design between two agents, explicitly *"the reading that can differ"*
+— asks **which** panels, **what** label, and **how thick**. It never asks **which
+bar**:
+
+```
+panels_missing []      correct
+alignment_tf   ['1H']  correct — the label matches
+thin_panels    []      correct — exchange bars carry no sample count, so the check skips them
+```
+
+Green, over a lookahead in the **MAIN** panel. Lookahead is the single defect class
+this project exists to prevent, with three regression tests for it on the entry path
+and none on the correlate path.
+
+**Fix:** a GATE-007 successor comparing last-bar **times** — the shape being all four
+panels ending on the same closed bar. That is a rule change and needs a plan, not a
+patch.
+
+**Related asymmetry, recorded so it is not mistaken for an absence:** `data_health`
+monitors recency for TOTAL and USDT.D via `COLLECTOR_STALE_MIN`/`age_minutes`. The two
+perpetual panels added in T-0008 have **no recency monitoring at all**. Two of four
+panels are watched. Fold into whichever task next touches `data_health`.
 
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)

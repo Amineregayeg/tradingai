@@ -190,6 +190,14 @@ def _read_panels(
                 f"{roster_name}: {len(frame)} bars from {identity.venue} "
                 f"({identity.instrument_family}, symbol {identity.symbol_requested})"
             )
+    except TypeError as exc:  # noqa: BLE001
+        # A TypeError here is a PROGRAMMING error — a signature that has drifted —
+        # not an availability problem, and the broad handler below reported it as
+        # "perpetual panels unreadable", which is what a dead host looks like. It
+        # cost a red suite that read as a network flake. Still swallowed, because a
+        # shadow may never break the engine, but named for what it is.
+        logger.warning("perpetual panel signature mismatch", error=str(exc))
+        notes.append(f"perpetual panels: interface error, not availability ({exc})")
     except Exception as exc:  # noqa: BLE001 - never break the engine
         notes.append(f"perpetual panels unreadable ({type(exc).__name__})")
 

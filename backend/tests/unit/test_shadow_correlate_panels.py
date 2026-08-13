@@ -90,7 +90,7 @@ class _FakePerp:
     def __init__(self, family="PERPETUAL", empty=False):
         self.family, self.empty = family, empty
 
-    def fetch_with_identity(self, roster_name, timeframe, start, end):
+    def fetch_with_identity(self, roster_name, timeframe, start, end, drop_partial=True):
         from app.services.market_data.sources.binance_perp import PanelIdentity
         ident = PanelIdentity(roster_name=roster_name,
                               venue="https://fapi.binance.com",
