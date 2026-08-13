@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-13 (T-0008: four-panel layout grades in production with its denominator; B27's remedy corrected — it broke the guard; B14 gains restart duplication; B30/B31/B32 found; B33 — two vocabularies, no translation point; B34 — the shadow skips blocked bars, so the emission policy is false and the sample biased; B35 — GATE-007 compares labels, not times; B36 — broad handlers disguise bugs as outages; B20/B22/B29 gain dated instances)
+Last updated: 2026-08-13 (T-0008: four-panel layout grades in production with its denominator; B27's remedy corrected — it broke the guard; B14 gains restart duplication; B30/B31/B32 found; B33 — two vocabularies, no translation point; B34 — the shadow skips blocked bars, so the emission policy is false and the sample biased; B35 — GATE-007 compares labels, not times; B36 — broad handlers disguise bugs as outages; B20/B22/B29 gain dated instances; B37 — the lookahead fix is merged, not deployed)
 
 ---
 
@@ -1422,6 +1422,34 @@ though they may never raise into the trading path.
 
 **Related:** B32 proposes a liveness signal for the shadow going silent. This is the
 other half — the shadow **speaking**, and saying the wrong thing about why.
+
+### B37. The lookahead fix is merged and not deployed — the recorded grade used a forming bar
+**Found in:** T-0008, 2026-08-13, at close. **Merged in `37f17fb`, deployed api is
+`237ba48`.**
+**What it is:** the perpetual panels fed the **still-forming bar** into the layout
+(B35's mechanism). `drop_partial` fixes it and is on `main`; production has not
+recreated since. Verified live at 22:44: perpetual newest bar `22:00`, closing
+`23:00`, still forming.
+
+**What this does and does not invalidate.** GATE-008's `PASS` stands — it tests panel
+**presence**, and all four were present. **The `NONE` disturbance grade on record does
+not**: it was computed with a lookahead on `BTCUSDT.P`, the MAIN panel that anchors the
+layout. **Do not cite the recorded grade as evidence about the correlate layer until
+the fix ships.** The four-panel *wiring* is demonstrated; the *grade* is not yet
+trustworthy.
+
+**Why it was not force-deployed**, recorded so the restraint is legible rather than
+looking like an oversight: the fix is CI-green, the shadow is blocked from recording
+anyway while a position is held (**B34**), so no new records accrue in the meantime —
+and a deploy at 2 open positions costs two operator closes against a ledger already at
+**10 operator-closed of 20 entries**. Forcing it would be postponement dressed as
+rigour.
+
+**Closing condition:** after the next api deploy, capture **one four-panel record whose
+perpetual bars are complete** — the newest perpetual bar must have closed, not merely
+opened. **Check `open_positions` first: at 0 the deploy costs nothing** (it was 0 twice
+today), and the engine goes flat-to-two within seconds of a restart, so the only free
+window is between stop and start.
 
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
