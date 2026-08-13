@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-13 (T-0006: correlate panels wired and deployed — B11 narrowed to the missing perpetual feeds; B26/B27/B28 found, all three by criterion 4c or its fallout)
+Last updated: 2026-08-13 (T-0006: correlate panels wired and deployed — B11 narrowed to the missing perpetual feeds; B26/B27/B28 found, all three by criterion 4c or its fallout; B29 — work passing review unshipped)
 
 ---
 
@@ -1058,6 +1058,37 @@ arrives through a default rather than through a pipe.
 reported, and state it beside the number.
 **Fix:** have the endpoint return the true total alongside the returned slice, so `n`
 cannot be read as the population.
+
+### B29. Work can pass review unshipped, because the check is aimed one step short
+**Found in:** T-0006, 2026-08-13. Fourth instance of one family in a single day.
+**What it is:** a task's register changes and a test refinement sat **unpushed** while
+the work was reviewed and marked DONE. The reviewer resolved the remote ref directly
+— correctly, per T-0001's criterion 9 — got the tip, and confirmed it. **But
+`git ls-remote` answers "what is the remote's tip", and the question was "does the
+remote contain everything this task produced."** The first has a satisfying answer,
+so nobody notices it is not the second.
+
+**The disproof was already printed.** The same verdict's scope section listed the
+diff — three files, no `KNOWN_ISSUES.md` — and a few paragraphs later asserted
+"Register: B11 narrowed, B26/B27/B28 opened", taken from the work report. Evidence
+in hand, not turned on the claim being made.
+
+**On the author's side the same gap:** `git status --porcelain` answers "are there
+uncommitted edits", not "is it shipped". Clean tree, three unpushed commits, twice in
+one day after escalating a peer for exactly that reasoning.
+
+**Fix, and it needs nothing built:** **cross the file list in the work report against
+the file list in the diff.** A task claiming register changes whose diff contains no
+`KNOWN_ISSUES.md` is unshipped, and both lists are already in front of the reviewer
+when the verdict is written. For the author, the only version that holds is committing
+and pushing in the same breath — the check that would catch it is one nobody runs at
+the moment it matters.
+
+**Why this is its own entry rather than a note on B19 or B21.** Those are about wrong
+*content* — a citation that does not resolve, a constant that has gone stale. This is
+about a *correct* answer to a question adjacent to the one being asked. No linter
+catches it: every command ran, every output was accurate, and the inference from it
+was not.
 
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
