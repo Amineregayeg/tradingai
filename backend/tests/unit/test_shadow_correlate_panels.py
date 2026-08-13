@@ -411,28 +411,89 @@ def test_the_grade_carries_its_denominator_not_just_its_label():
     assert len(correlates) == 3, f"denominator must be 3, got {len(correlates)}"
 
 
-def test_the_correlates_block_satisfies_the_telemetry_schema():
-    """The block must validate, not merely look right.
+def test_the_shadow_record_validates_against_the_telemetry_contract(monkeypatch):
+    """`assert_valid` on the record the shadow actually emits. Not a key list.
 
-    `_correlates_block` first shipped passing the grader's `panels` straight through.
-    Every required key I checked by eye was present in spirit — but `correlate_state`
-    requires `symbol` and `tf`, and PanelVerdict carries `asset` and no timeframe. The
-    record failed validation, `_shadow_evaluate` swallowed it by design, and the shadow
-    recorded NOTHING for forty minutes while the engine ran normally.
+    THE VERSION THIS REPLACED CHECKED THE KEYS I EXPECTED. It imported
+    `telemetry.validate` for a side effect, never called it, and asserted against a
+    hardcoded set — under a docstring claiming it asserted against the schema. So the
+    test written to fix *"I checked the keys I expected instead of the schema the
+    record must satisfy"* did exactly that, with a better-chosen list.
 
-    Checking that the keys I expected were present is what let that through: it asked a
-    question adjacent to the one that mattered. This asserts against the schema itself.
+    It failed in the hiding direction: add a required property to `correlate_state`
+    tomorrow and the key-list version still passes while every record silently fails
+    validation and `_shadow_evaluate` swallows it — which is how the shadow went dark
+    for forty minutes.
+
+    A key list is also strictly weaker than it looks here. `correlate_state.tf` is an
+    enum of legal timeframes, so the schema rejects `""` and any malformed value; the
+    truthiness assertion it replaced could not.
+
+    One assertion, against the real record, through the real validator.
     """
-    from app.services.telemetry import validate as tvalidate  # noqa: F401  (contract loader)
+    from app.services.telemetry import validate as tvalidate
 
-    grade = DisturbanceClassifier.classify(
-        _reads_for_a_clean_btc_long(), direction="LONG",
-        instrument="BTC", main_asset_counts=False)
-    block = shadow._correlates_block(grade, "1H")
+    monkeypatch.setattr(
+        shadow, "_read_panels",
+        lambda signal_tf, **kw: (
+            {"BTCUSDT.P": _ramp(), "ETHUSDT.P": _ramp(),
+             "TOTAL": _ramp(), "USDT.D": _ramp(rising=False)},
+            {"BTCUSDT.P": None, "ETHUSDT.P": None, "TOTAL": 360, "USDT.D": 360},
+            [],
+        ),
+    )
 
-    required = {"symbol", "role", "expected_sign", "observed_order_flow", "disturbed", "tf"}
-    assert block["states"], "a graded layout must carry states"
-    for state in block["states"]:
-        missing = required - set(state)
-        assert not missing, f"correlate_state is missing {sorted(missing)}: {state}"
-        assert state["tf"], "tf must be populated, not merely present"
+    idx = pd.DatetimeIndex([T0 + timedelta(hours=k) for k in range(80)], tz="UTC")
+    base = [100.0 + k for k in range(80)]
+    df = pd.DataFrame({"open": base, "high": [b + 1 for b in base],
+                       "low": [b - 1 for b in base], "close": [b + 0.5 for b in base],
+                       "volume": [1.0] * 80}, index=idx)
+
+    record = shadow.evaluate(
+        "BTC/USD", df, signal_tf=TF,
+        declared=shadow.declared_parameters(), sequence_no=1, scan_id="test-scan",
+    )
+    assert record is not None, "the shadow produced no record at all"
+    assert record["correlates"]["layout_size"] == 4, record["correlates"]
+
+    # The contract decides, not a list I wrote.
+    tvalidate.assert_valid(record)
+
+
+def test_a_neutral_panel_does_not_silently_drop_the_record(monkeypatch):
+    """NEUTRAL is legal in `agreement_state` and illegal in `observed_order_flow`.
+
+    The grader's Flow vocabulary is BULLISH/BEARISH/NEUTRAL; the schema's is
+    BULLISH/BEARISH/UNCLEAR. A panel reads NEUTRAL whenever its structure shows no
+    clear direction, and a MISSING panel is recorded NEUTRAL by construction — so this
+    is a routine market state, and every record containing one failed validation and
+    was dropped silently by `_shadow_evaluate`.
+
+    The trap is that the same token is valid in the neighbouring field, so a blanket
+    rename would fix one and corrupt the other. This pins both halves.
+    """
+    from app.services.telemetry import validate as tvalidate
+
+    flat = [Bar(time=T0 + timedelta(hours=i), open=100.0, high=100.5,
+                low=99.5, close=100.0) for i in range(60)]
+    monkeypatch.setattr(
+        shadow, "_read_panels",
+        lambda signal_tf, **kw: (
+            {"BTCUSDT.P": flat, "ETHUSDT.P": flat, "TOTAL": flat, "USDT.D": flat},
+            {"BTCUSDT.P": None, "ETHUSDT.P": None, "TOTAL": 360, "USDT.D": 360},
+            [],
+        ),
+    )
+    idx = pd.DatetimeIndex([T0 + timedelta(hours=k) for k in range(80)], tz="UTC")
+    base = [100.0 + k for k in range(80)]
+    df = pd.DataFrame({"open": base, "high": [b + 1 for b in base],
+                       "low": [b - 1 for b in base], "close": [b + 0.5 for b in base],
+                       "volume": [1.0] * 80}, index=idx)
+
+    record = shadow.evaluate("BTC/USD", df, signal_tf=TF,
+                             declared=shadow.declared_parameters(),
+                             sequence_no=1, scan_id="test-scan")
+    assert record is not None
+    flows = {s["observed_order_flow"] for s in record["correlates"]["states"]}
+    assert "NEUTRAL" not in flows, f"grader vocabulary leaked into the record: {flows}"
+    tvalidate.assert_valid(record)

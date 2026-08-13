@@ -319,10 +319,32 @@ def _correlates_block(grade: Any, signal_tf: str = "") -> dict:
     # shadow silently recorded NOTHING for 40 minutes while the engine ran normally.
     # A schema this record must satisfy is not an internal detail; translate at the
     # boundary rather than hoping two vocabularies coincide.
-    states = [
-        {**panel, "symbol": panel.pop("asset", panel.get("symbol")), "tf": signal_tf}
-        for panel in (dict(x) for x in d["panels"])
-    ]
+    # TWO TRANSLATIONS, AND THE SECOND IS NARROWER THAN IT LOOKS.
+    #
+    # `asset` -> `symbol` and a `tf`, because correlate_state requires both and
+    # PanelVerdict has neither. That was the first defect.
+    #
+    # And `observed_order_flow: NEUTRAL` -> `UNCLEAR`. The grader's Flow vocabulary
+    # is BULLISH/BEARISH/NEUTRAL; the schema's is BULLISH/BEARISH/UNCLEAR. A panel
+    # reads NEUTRAL whenever its structure shows no clear direction, and a MISSING
+    # panel is recorded NEUTRAL by construction — so this is a routine market state,
+    # not an edge case, and every record containing one failed validation and was
+    # silently dropped.
+    #
+    # ONLY `observed_order_flow`. `agreement_state`'s enum is
+    # ALIGNED/NEUTRAL/DISTURBED, where NEUTRAL is legal and means something else
+    # entirely. The same token is valid in one field and invalid in the field beside
+    # it, so a blanket rename would fix one and corrupt the other.
+    _FLOW = {"NEUTRAL": "UNCLEAR"}
+    states = []
+    for panel in (dict(x) for x in d["panels"]):
+        flow = panel.get("observed_order_flow")
+        states.append({
+            **panel,
+            "symbol": panel.pop("asset", panel.get("symbol")),
+            "tf": signal_tf,
+            "observed_order_flow": _FLOW.get(flow, flow),
+        })
     return {
         "layout_size": d["layout_size"],
         "disturbed_count": d["disturbed_count"],
