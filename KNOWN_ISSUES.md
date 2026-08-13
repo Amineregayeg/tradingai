@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-13 (T-0008: four-panel layout grades in production with its denominator; B27's remedy corrected — it broke the guard; B14 gains restart duplication; B30/B31/B32 found; B33 — two vocabularies, no translation point; B34 — the shadow skips blocked bars, so the emission policy is false and the sample biased; B35 — GATE-007 compares labels, not times; B36 — broad handlers disguise bugs as outages; B20/B22/B29 gain dated instances; B37 — the lookahead fix is merged, not deployed)
+Last updated: 2026-08-14 (T-0007: ENTRY_TF 1H -> 5m, the first live behaviour change. B37 CLOSED — the lookahead is out of production. B33 gained the instance it predicted: every legal execution timeframe would have broken the shadow)
 
 ---
 
@@ -1311,6 +1311,34 @@ change in one place rather than a silent drop. Same shape as `correlate_denomina
 carrying its own provenance: make the contract visible at the boundary rather than
 assumed across it.
 
+**IT PREDICTED ITS OWN NEXT INSTANCE AND WAS RIGHT WITHIN HOURS — a fourth
+divergence, at the same boundary, on the same day this entry was filed.** T-0007 set
+`ENTRY_TF` to `5m` and the first bar evaluated failed the schema on
+`correlates/states/*/tf`, `primitives/*/tf` and `timeframes/*`. The shadow went dark
+again.
+
+    data layer keys        ['1m','5m','15m','30m','1H','4H','D','W']   (lowercase minutes)
+    schema timeframe enum  ['1M','3M','5M','15M','30M','1H','2H','4H','1D','1W','1MO']
+    valid in BOTH          ['1H','4H']        <- only two; D and W are '1D'/'1W' in the schema
+    ruled execution set    30M / 15M / 5M     <- NONE of them validate
+
+**And the two that validate are both ANALYSIS-ONLY.** So: **every execution timeframe
+the contract permits would have broken the shadow, and the only timeframes whose
+telemetry validated were ones GATE-017 forbids trading on.** The platform's telemetry
+was valid *because* the platform was non-compliant, and becoming compliant was
+guaranteed to break it on the first bar — for any legal choice. Nobody could have
+picked a value that worked.
+
+Fixed with the single translation point this entry asked for (`shadow.schema_tf`),
+applied wherever a timeframe enters a record. **A canonical rename would not do**:
+fetching genuinely needs the lowercase form and recording genuinely needs the
+uppercase one, in the same function, so a rename moves the failure rather than
+removing it.
+
+**The fix was itself incomplete on the first pass** — translating `correlates` and
+`primitives` left `timeframes/*` failing — which is this entry's own "found one at a
+time", applied to its own remedy.
+
 **Meanwhile the guard is a test, and its scope matters.** `assert_valid` over *one*
 record shape is a validator; over the reachable state space it is a guard. It now runs
 across nine states — every grade, both directions, the USDT.D inversion, and every
@@ -1447,34 +1475,6 @@ though they may never raise into the trading path.
 
 **Related:** B32 proposes a liveness signal for the shadow going silent. This is the
 other half — the shadow **speaking**, and saying the wrong thing about why.
-
-### B37. The lookahead fix is merged and not deployed — the recorded grade used a forming bar
-**Found in:** T-0008, 2026-08-13, at close. **Merged in `37f17fb`, deployed api is
-`237ba48`.**
-**What it is:** the perpetual panels fed the **still-forming bar** into the layout
-(B35's mechanism). `drop_partial` fixes it and is on `main`; production has not
-recreated since. Verified live at 22:44: perpetual newest bar `22:00`, closing
-`23:00`, still forming.
-
-**What this does and does not invalidate.** GATE-008's `PASS` stands — it tests panel
-**presence**, and all four were present. **The `NONE` disturbance grade on record does
-not**: it was computed with a lookahead on `BTCUSDT.P`, the MAIN panel that anchors the
-layout. **Do not cite the recorded grade as evidence about the correlate layer until
-the fix ships.** The four-panel *wiring* is demonstrated; the *grade* is not yet
-trustworthy.
-
-**Why it was not force-deployed**, recorded so the restraint is legible rather than
-looking like an oversight: the fix is CI-green, the shadow is blocked from recording
-anyway while a position is held (**B34**), so no new records accrue in the meantime —
-and a deploy at 2 open positions costs two operator closes against a ledger already at
-**10 operator-closed of 20 entries**. Forcing it would be postponement dressed as
-rigour.
-
-**Closing condition:** after the next api deploy, capture **one four-panel record whose
-perpetual bars are complete** — the newest perpetual bar must have closed, not merely
-opened. **Check `open_positions` first: at 0 the deploy costs nothing** (it was 0 twice
-today), and the engine goes flat-to-two within seconds of a restart, so the only free
-window is between stop and start.
 
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
