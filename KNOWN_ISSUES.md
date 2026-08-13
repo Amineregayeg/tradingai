@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-13 (T-0008: four-panel layout grades in production with its denominator; B27's remedy corrected — it broke the guard; B14 gains restart duplication; B30/B31/B32 found; B33 — two vocabularies, no translation point)
+Last updated: 2026-08-13 (T-0008: four-panel layout grades in production with its denominator; B27's remedy corrected — it broke the guard; B14 gains restart duplication; B30/B31/B32 found; B33 — two vocabularies, no translation point; B34 — the shadow skips blocked bars, so the emission policy is false and the sample biased)
 
 ---
 
@@ -1271,6 +1271,64 @@ record shape is a validator; over the reachable state space it is a guard. It no
 across nine states — every grade, both directions, the USDT.D inversion, and every
 degree of absence down to no panels at all — because `NEUTRAL` was caught only because
 one fixture happened to produce it.
+
+### B34. The shadow only records on bars where the ICT engine was NOT blocked
+**Found in:** T-0008, 2026-08-13, by the Manager, chasing an absent record rather than
+explaining it. **Bears on the cutover, not on T-0008.** Verified here from the source.
+**What it is:** `crypto_loop.py:802-813`. The entry-gate check returns **before** the
+shadow is called:
+
+```
+:802   block = await self._entry_block_reason(pair)
+:803   if block is not None:
+:806       await self._act(kind, f"... {block}, skipped")
+:807       return                                  <- returns here
+:813   await self._shadow_evaluate(pair, entry)    <- never reached
+```
+
+The block reasons are `KILL SWITCH ARMED`, `engine paused`, **`already in a
+position`**, and **`max concurrent N reached`** (`:353-359`). So a blocked bar produces
+**neither a decision record nor a telemetry record** — it exists only in the activity
+log.
+
+**THREE CONSEQUENCES, IN SEVERITY ORDER.**
+
+**1. The declared emission policy is false, and it is stamped on every record.**
+`shadow.py:214` declares `emission_policy_id="every-closed-bar-roster-v1"`. The
+implementation emits on *every closed bar where the ICT engine was not blocked*.
+Declared parameters exist so our choices can be audited as ours — **a declared
+parameter that misdescribes the behaviour is worse than a missing one**, because it is
+carried on every record and looks authoritative.
+
+**2. The sample is biased, and the bias runs exactly the wrong way.** The engine
+self-fills within seconds of a restart and holds until TP, SL or an operator, so
+`already in a position` is its normal state. **The shadow therefore systematically
+excludes the bars immediately following an ICT entry — precisely the bars on which the
+two strategies would most differ.** Measured on 2026-08-13: entries at 19:00 UTC, then
+no telemetry record for the 21:00 or 22:00 bars while the engine ran and skipped. Bars
+`05:00`–`10:00` NY have no records at all.
+
+**3. M9 Stage A's gate is denominated in this.** *"20 trading days or 300 evaluations
+per symbol"* accrues only on flat bars, so the count is both slower than it appears and
+**not a random sample of market conditions**. A conformance number computed over that
+window measures agreement on the subset of bars where the ICT engine happened to have
+nothing open.
+
+**What is NOT true, checked rather than assumed:** T-0007's move to 5M does not worsen
+the ratio. Flatness is time-based, so 12× the bars yields 12× the recorded evaluations
+*and* 12× the skipped ones — **5M improves the rate and leaves the bias untouched.**
+Recorded because it is the natural wrong inference.
+
+**Interaction with B32, and it changes that design:** a shadow that legitimately
+records nothing for three hours while a position is held is **indistinguishable from a
+dead one** under a naive cadence check. The liveness signal must derive its expected
+cadence from **flat bars**, not from bar closes.
+
+**Fix:** move the shadow call above the entry-gate return, beside the bar-consumed
+marking. The comment at `:808-812` already argues the shadow belongs before the ICT
+evaluation for side-effect safety; the same reasoning puts it before the gates. **One
+line — and it changes what is recorded on live bars, so it is a plan and not a
+drive-by.**
 
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
