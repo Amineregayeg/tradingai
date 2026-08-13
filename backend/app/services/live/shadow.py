@@ -294,10 +294,37 @@ def _blocked_evaluations() -> list[rec.RuleEvaluation]:
     ]
 
 
+def _correlates_block(grade: Any) -> dict:
+    """The disturbance summary, from the grader when it ran and honestly empty when not.
+
+    `layout_size` is the discriminator a reader should use: 0 means the layout was
+    never graded, whatever `disturbance_grade` says. The schema has no value for
+    "not read", so NONE is written on the ungraded path because something must be —
+    but it is paired with a zero layout size rather than standing alone.
+    """
+    if grade is None:
+        return {"layout_size": 0, "disturbed_count": 0, "disturbance_grade": "NONE",
+                "states": [], "main_asset_counted": False}
+    # `Disturbance.as_dict()` is the grader's own serialisation — used rather than
+    # rebuilt, so this block cannot drift from what GATE-002 actually decided. An
+    # earlier version of this helper reconstructed it from attribute names I had
+    # guessed (`verdicts`, `states`); the real ones are `panels` and `layout_size`,
+    # and guessing an interface instead of reading it is how the hardcoded literal
+    # got here in the first place.
+    d = grade.as_dict()
+    return {
+        "layout_size": d["layout_size"],
+        "disturbed_count": d["disturbed_count"],
+        "disturbance_grade": d["disturbance_grade"],
+        "states": d["panels"],
+        "main_asset_counted": d["main_asset_counted"],
+    }
+
+
 def _evaluate_layout(
     main_bars: Sequence[Bar], *, signal_tf: str, panel_source: Any = None,
     perp_source: Any = None, extra_panels: dict | None = None,
-) -> tuple[list[rec.RuleEvaluation], list[str]]:
+) -> tuple[list[rec.RuleEvaluation], list[str], Any]:
     """GATE-008, GATE-007 and GATE-002 against real panel reads.
 
     `extra_panels` exists for tests only — it lets a fixture stand in for the perpetual
@@ -313,6 +340,7 @@ def _evaluate_layout(
     from app.services.rules.gate_008_roster import LayoutReadability
 
     causes: list[str] = []
+    grade_obj = None
     try:
         panel_bars, sample_counts, notes = _read_panels(
             signal_tf, source=panel_source, perp_source=perp_source)
@@ -340,7 +368,7 @@ def _evaluate_layout(
             # a direction from until M6 selects one.
             main = next((r for r in reads if r.asset == "BTCUSDT.P"), None)
             direction = "SHORT" if main and main.observed_order_flow == "BEARISH" else "LONG"
-            grade = DisturbanceClassifier.classify(
+            grade_obj = grade = DisturbanceClassifier.classify(
                 reads, direction=direction, instrument="BTC", main_asset_counts=False
             )
             evaluations.append(rec.RuleEvaluation(
@@ -370,7 +398,7 @@ def _evaluate_layout(
                 values={"not_evaluated_because": reason},
                 value_provenance={"not_evaluated_because": rec.derived("GATE-008 result")},
             ))
-        return evaluations, causes
+        return evaluations, causes, grade_obj
     except Exception as exc:  # noqa: BLE001 - never break the engine
         logger.warning("shadow layout read failed", error=str(exc))
         return [rec.RuleEvaluation(
@@ -378,7 +406,7 @@ def _evaluate_layout(
             verdict="NOT_APPLICABLE",
             values={"not_evaluated_because": f"panel read raised {type(exc).__name__}"},
             value_provenance={"not_evaluated_because": rec.derived("engine fault")},
-        )], [f"panel read raised {type(exc).__name__}"]
+        )], [f"panel read raised {type(exc).__name__}"], None
 
 
 def evaluate(
@@ -419,7 +447,8 @@ def evaluate(
         # Wrapped separately from the outer try so a panel-read failure degrades this
         # section to "unreadable, and here is which panel" rather than killing the whole
         # record. A shadow that emits nothing teaches nothing.
-        layout_evaluations, layout_causes = _evaluate_layout(bars, signal_tf=signal_tf)
+        layout_evaluations, layout_causes, layout_grade = _evaluate_layout(
+            bars, signal_tf=signal_tf)
         evaluations.extend(layout_evaluations)
 
         # A setup is "in play" only if the primitives produced something to judge.
@@ -495,21 +524,22 @@ def evaluate(
                 "sweeps": [s.as_dict() for s in sweeps[-20:]],
                 "breaks": [b.as_dict() for b in breaks[-20:]],
             },
-            # `disturbance_grade` is forced to one of NONE/LIGHT/HEAVY — the schema
-            # offers no value for "the layout was never read", which is a real gap
-            # in it and is recorded as such (KNOWN_ISSUES). NONE is written because
-            # something must be, and every other field in this record contradicts
-            # any reading of it as "checked, and nothing was disturbed":
-            # layout_size is 0, states is empty, GATE-008 and GATE-002 are
-            # NOT_APPLICABLE with their reasons, and the decision is STAND_ASIDE
-            # citing the missing panels.
-            correlates={
-                "layout_size": 0,
-                "disturbed_count": 0,
-                "disturbance_grade": "NONE",
-                "states": [],
-                "main_asset_counted": False,
-            },
+            # MEASURED WHEN THERE IS SOMETHING TO MEASURE, HARDCODED NEVER.
+            #
+            # This block used to be the literal {0, 0, "NONE", []}, and that was
+            # defensible while the layout could not be read: the schema forces
+            # `disturbance_grade` to NONE/LIGHT/HEAVY with no value for "never read",
+            # so NONE was written because something had to be, and every neighbouring
+            # field contradicted any reading of it as a measurement — layout_size 0,
+            # states empty, GATE-008 and GATE-002 NOT_APPLICABLE.
+            #
+            # T-0006 and T-0008 removed every one of those safeguards. GATE-008 now
+            # PASSes and GATE-002 grades four real panels, so a hardcoded NONE beside
+            # them reads as measured — and a HEAVY layout, which GATE-001 turns into a
+            # hard skip, would be recorded as NONE. That is exactly B13's shape: a
+            # not-measured state rendering as a plausible number, and this time keying
+            # something that matters.
+            correlates=_correlates_block(layout_grade),
             rule_evaluations=evaluations,
             decision=decision.decision,
             decision_path=decision.decision_path,

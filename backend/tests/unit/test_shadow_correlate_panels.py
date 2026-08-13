@@ -125,7 +125,7 @@ def test_all_four_panels_present_makes_gate_008_pass_and_grades_the_layout():
     while the production test below still passes, the wiring is decoration.
     """
     perps = {"BTCUSDT.P": _ramp(), "ETHUSDT.P": _ramp()}
-    evaluations, _causes = shadow._evaluate_layout(
+    evaluations, _causes, _grade = shadow._evaluate_layout(
         _ramp(), signal_tf=TF, panel_source=_FakeDominance(), extra_panels=perps,
         perp_source=_FakePerp(empty=True),
     )
@@ -153,7 +153,7 @@ def test_with_no_perpetual_feed_the_two_perpetual_panels_are_named():
     network dependency is a unit test that will fail on a plane**, so the unavailable
     feed is now injected explicitly rather than assumed.
     """
-    evaluations, _ = shadow._evaluate_layout(
+    evaluations, _, _grade = shadow._evaluate_layout(
         _ramp(), signal_tf=TF, panel_source=_FakeDominance(),
         perp_source=_FakePerp(empty=True),
     )
@@ -177,7 +177,7 @@ def test_with_no_perpetual_feed_the_two_perpetual_panels_are_named():
 def test_dropping_usdt_d_is_noticed_and_named():
     """A wiring that cannot notice a missing panel is decoration."""
     perps = {"BTCUSDT.P": _ramp(), "ETHUSDT.P": _ramp()}
-    evaluations, _ = shadow._evaluate_layout(
+    evaluations, _, _grade = shadow._evaluate_layout(
         _ramp(), signal_tf=TF,
         panel_source=_FakeDominance(available=("TOTAL",)),  # USDT.D withdrawn
         extra_panels=perps,
@@ -190,7 +190,7 @@ def test_dropping_usdt_d_is_noticed_and_named():
 def test_a_thin_panel_is_refused_rather_than_graded():
     """B16 / GATE-007: below MIN_SAMPLES_PER_SYNTHETIC_BAR the bar is sampling luck."""
     perps = {"BTCUSDT.P": _ramp(), "ETHUSDT.P": _ramp()}
-    evaluations, _ = shadow._evaluate_layout(
+    evaluations, _, _grade = shadow._evaluate_layout(
         _ramp(), signal_tf="1m",
         panel_source=_FakeDominance(samples=6),  # 1m at 10s polling = 6 samples
         extra_panels=perps,
@@ -307,7 +307,7 @@ def test_panels_are_read_with_the_forming_bar_dropped():
 
 def test_four_panels_through_the_real_wiring_pass_gate_008():
     """The criterion the whole programme has walked toward, via the wiring itself."""
-    evaluations, _ = shadow._evaluate_layout(
+    evaluations, _, _grade = shadow._evaluate_layout(
         _ramp(), signal_tf=TF,
         panel_source=_FakeDominance(), perp_source=_FakePerp(),
     )
@@ -322,7 +322,7 @@ def test_four_panels_through_the_real_wiring_pass_gate_008():
 
 def test_a_perpetual_source_serving_spot_is_refused_not_substituted():
     """RUNTIME half of the identity mutation. A wrong-market panel is absent, not used."""
-    evaluations, causes = shadow._evaluate_layout(
+    evaluations, causes, _grade = shadow._evaluate_layout(
         _ramp(), signal_tf=TF,
         panel_source=_FakeDominance(), perp_source=_FakePerp(family="SPOT"),
     )
@@ -334,10 +334,38 @@ def test_a_perpetual_source_serving_spot_is_refused_not_substituted():
 
 def test_unreachable_perpetual_host_fails_naming_the_panels():
     """Criterion 6: absent, not stale and not a spot fallback."""
-    evaluations, _ = shadow._evaluate_layout(
+    evaluations, _, _grade = shadow._evaluate_layout(
         _ramp(), signal_tf=TF,
         panel_source=_FakeDominance(), perp_source=_FakePerp(empty=True),
     )
     assert _verdicts(evaluations)["GATE-008"] == "FAIL"
     assert sorted(_values(evaluations, "GATE-008")["panels_missing"]) == [
         "BTCUSDT.P", "ETHUSDT.P"]
+
+
+# ---------------------------------------------------------------------------
+# The correlates BLOCK must report what was graded, not a literal
+# ---------------------------------------------------------------------------
+
+def test_the_correlates_block_reports_the_measured_grade_not_a_constant():
+    """A hardcoded `NONE` beside a passing GATE-002 reads as measured.
+
+    This block was the literal {0, 0, "NONE", []} while the layout could not be read,
+    which was honest then: every neighbouring field said "not measured". Wiring the
+    panels removed those safeguards without touching the literal, so a HEAVY layout —
+    which GATE-001 turns into a hard skip — would have been recorded as NONE.
+
+    `layout_size` is the discriminator: 0 means never graded, whatever the grade says.
+    """
+    shadow_grade = DisturbanceClassifier.classify(
+        _reads_for_a_clean_btc_long(), direction="LONG",
+        instrument="BTC", main_asset_counts=False,
+    )
+    graded = shadow._correlates_block(shadow_grade)
+    assert graded["layout_size"] == 4, graded
+    assert graded["disturbance_grade"] == shadow_grade.grade
+    assert graded["states"], "a graded layout must carry its per-panel states"
+
+    ungraded = shadow._correlates_block(None)
+    assert ungraded["layout_size"] == 0
+    assert ungraded["states"] == []
