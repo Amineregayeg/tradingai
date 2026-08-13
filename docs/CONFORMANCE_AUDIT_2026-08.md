@@ -265,6 +265,41 @@ one: *"the engine stopped while this position was open… Not a loss — an
 absence."* The only close this platform explains is the one that should never
 happen.
 
+### CORRECTED 2026-08-13 — the denominators below count re-entries as observations
+
+**This is the second correction to this report in one evening, and neither is
+carelessness — the state moved under a committed document.** A reader should know it
+describes a moving target. The other correction is the GATE-036 note above.
+
+**A restart re-enters the setup it just abandoned.** The engine scans on startup, so
+seconds after a restart it re-detects the setup on the last closed bar and enters at
+the same signal price. Measured across the corpus:
+
+```
+acted-on entries                              20
+DISTINCT setups (symbol, direction, entry)    14
+re-entries                                     6   -> 5 restart artifacts, 1 genuine
+```
+
+`ETH/USD LONG @ 1929.02` on 07-22 is the genuine one — two exact bar-close boundaries
+six hours apart, the strategy re-offering a structural level. The other five are minutes
+apart at prices identical to the cent.
+
+**So every denominator in this section counts entries, not setups.** Entry integrity is
+12-of-12 *entries* across materially fewer distinct setups; exit integrity is 5-of-13
+resolved. **The honest population is 14 distinct setups in three weeks, 5 abandoned by
+restarts, and 10 of 20 entries closed by an operator rather than by the strategy.**
+
+`inputs_hash` is distinct on all 20, so these are not one decision replayed — the engine
+re-derived the same level from a larger window. **Grouping by `inputs_hash`, the natural
+key, reports no duplicates at all**; only `(symbol, direction, signal_entry)` reveals
+them.
+
+**And the scale, stated concretely for the first time:** setups accrue at roughly **four
+a week**, so the 200-trade significance floor is about **a year away** at the current
+rate — not "187 trades away". Nothing in this report supports a performance claim, and
+nothing will for about a year.
+
 ### Population per sub-check
 
 Stating "seven trades audited, all clean" would be accurate and would be read as

@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-13 (T-0008: the four-panel layout grades in production — B11 CLOSED; B30 and B31 found; the conformance audit's GATE-036 sentence corrected)
+Last updated: 2026-08-13 (T-0008: four-panel layout grades in production with its denominator; B27's remedy corrected — it broke the guard; B14 gains restart duplication; B30/B31/B32 found)
 
 ---
 
@@ -495,6 +495,29 @@ so a single reading at stop time cannot detect the failure. Take both.
 *when followed*. Nothing still refuses a deploy that skips it, which is the whole
 of this entry — and the risk grew rather than shrank, because the sequence now
 has a successful precedent that makes it feel routine.
+
+**A RESTART DOES NOT ONLY ORPHAN A POSITION — IT RE-ENTERS IT. Added 2026-08-13.**
+The engine scans on startup, so seconds after a restart it re-detects the setup sitting
+on the last closed bar and enters it again at the same signal price. Measured across
+the whole corpus: **20 acted-on entries, 14 distinct setups, 6 re-entries — 5 of them
+restart artifacts** with entry prices identical to the cent, minutes apart.
+
+**The worst single row is `ETH/USD LONG @ 1922.61` on 2026-08-09: first entry
+`ABANDONED`, second `LOSS`.** One setup, two recorded outcomes, one of them an absence
+— abandoned by a restart and re-entered by the same restart.
+
+**`inputs_hash` is DISTINCT on all 20**, so these are not one decision replayed: the
+engine re-derived the same level from a larger bar window. Which means **the natural key
+hides it** — group by `inputs_hash` and you get 20 distinct entries and no duplicates at
+all. The duplication is only visible on `(symbol, direction, signal_entry)`.
+
+**What it could break:** every denominator computed from entries rather than setups.
+`docs/CONFORMANCE_AUDIT_2026-08.md` counts 12-of-12 entry integrity across a corpus
+inflated this way. And the cycle is self-perpetuating — each deploy closes two positions
+as operator and immediately re-opens them, so the operator-close ratio moves on **every**
+deploy rather than occasionally. It also explains why "deploy when flat" almost never
+pays: the engine goes flat-to-two within seconds, so the only flat window is between
+stop and start.
 
 **Fix:** make it structural rather than procedural. Either the api refuses to
 shut down cleanly with an open run without closing it (a shutdown hook already
@@ -1026,9 +1049,24 @@ before assuming the read is now decision-bar-shaped.** (Review's finding, verifi
 `sample_counts` is now the decision bar. **`panel_bars` is still the full 30 days.**
 So GATE-007 judges the right bar while the structural read it guards still consumes a
 month of history. At 1H that is invisible, because every historical 1H bar clears the
-minimum — it becomes visible at 5M, where it is fixed by passing `min_samples` to
-`fetch_ohlcv_with_samples`, which that method already implements and `_read_panels`
-simply never passed. Anyone reading "GATE-007 judges the decision bar" as a
+minimum — it becomes visible at 5M.
+
+**THE REMEDY THIS ENTRY USED TO GIVE IS WRONG AND WOULD BREAK THE GUARD. Corrected
+2026-08-13.** It said to pass `min_samples` into `fetch_ohlcv_with_samples`. That
+**filters the thin decision bar out of the frame**, so `.iloc[-1]` then returns an
+older, thicker bar: GATE-007 reports `thin_panels: []` and **PASSes on a stale bar**.
+It converts *"the decision bar is too thin, refuse"* into *"grade an hour-old bar and
+call it readable"* — the exact failure this entry exists to describe, introduced by its
+own prescription. Demonstrated: unfiltered 5 samples → FAIL; `min_samples=20` → 40
+samples → PASS, on a bar nobody is confirming on.
+
+**The correct shape is one fetch, two derivations.** Fetch unfiltered; keep
+`sample_counts` as `frame["samples"].iloc[-1]`, the true count of the actual most-recent
+complete bar; filter locally for `panel_bars` only. The guard then judges the bar being
+confirmed on while the consumer sees only bars thick enough to read.
+
+**This is the most dangerous staleness the register has carried**, because B27 is the
+entry someone reads *specifically when they are about to touch that code*. Anyone reading "GATE-007 judges the decision bar" as a
 description of the whole read will not look again, and T-0007 depends on someone
 knowing the difference.
 
@@ -1153,6 +1191,38 @@ reason, as every other rule does — or make the fallback explicit in the record
 (`deciding_rule_id: null` plus a `no_rule_decided` marker). Either removes the
 ambiguity; the second is honest about what happened and the first is more useful. Do
 **not** rely on the label alone until one of them exists.
+
+### B32. Nothing reports whether the shadow is recording, and it went dark for 40 minutes
+**Found in:** T-0008, 2026-08-13, after a defect of mine stopped every shadow record
+from validating.
+**What it is:** `_shadow_evaluate` swallows every failure by design — `shadow.py:20`:
+*"a shadow that can break the engine is worse than no shadow."* **That design is correct
+and should not change.** Its consequence is that **a broken shadow is silent by
+construction**: the engine trades normally, the api is healthy, the collector is
+healthy, CI is green, and no record is written.
+
+It happened. A schema-validation failure dropped every `setup_evaluation` for ~40
+minutes while everything else read normal.
+
+**Three agents explained the silence, three different ways, all wrong.** Execute said
+"waiting on a 1H bar close"; Review said "no record since the pre-fix container's
+output"; the Manager told Malek "waiting on the 22:00 bar". **None considered "the
+shadow is crashing"**, despite the module documenting that failures are swallowed. A
+silent failure was indistinguishable from a legitimate wait, and the wait was plausible
+enough that each seat constructed its own version of it. That cost an hour and produced
+a confident consensus.
+
+**What it could break:** `data_health.py` has **no shadow section at all** — it watches
+the dominance collector and nothing else. So the shadow can go dark indefinitely and
+nothing reports it. **If that happened during the real Stage A window, the cutover's
+evidence base would have a hole in it and no signal would exist** — a materially worse
+version of tonight.
+
+**Fix:** a shadow liveness field in `data_health`, beside `dominance_collector`: time
+since the last telemetry record written, against the expected cadence of one per closed
+bar per symbol (~2/hour at 1H). Stale means dark. Same move as `expected_poll_seconds`
+for the collector and `layout_size` for the grade — **convert an inference three agents
+got wrong into a field with a number in it.**
 
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
