@@ -222,3 +222,40 @@ def test_scoring_usdt_d_by_raw_direction_corrupts_the_grade(monkeypatch):
         "the inversion produced no change in the grade, so nothing defends against it"
     )
     assert corrupted.grade == "LIGHT", f"expected LIGHT under inversion, got {corrupted.grade}"
+
+
+# ---------------------------------------------------------------------------
+# The coupling B27's fix depends on, pinned rather than described
+# ---------------------------------------------------------------------------
+
+class _RecordingDominance(_FakeDominance):
+    """Remembers the kwargs it was called with."""
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.calls: list[dict] = []
+
+    def fetch_ohlcv_with_samples(self, symbol, timeframe, start, end, **kw):
+        self.calls.append({"symbol": symbol, "timeframe": timeframe, **kw})
+        return super().fetch_ohlcv_with_samples(symbol, timeframe, start, end, **kw)
+
+
+def test_panels_are_read_with_the_forming_bar_dropped():
+    """`sample_counts` takes the LAST bar, which is only the decision bar while
+    `drop_partial=True`.
+
+    B27 replaced a window-minimum with `iloc[-1]`. That is correct exactly as long as
+    the forming bar has already been removed — a caller passing `drop_partial=False`
+    would make "the decision bar" a partial one, thin by construction, which is the
+    bug B27 fixed arriving one caller away. The coupling is implicit in the code, so
+    it is pinned here instead of described in a comment.
+    """
+    src = _RecordingDominance()
+    shadow._evaluate_layout(_ramp(), signal_tf=TF, panel_source=src)
+
+    assert src.calls, "no panel was read at all"
+    for call in src.calls:
+        assert call.get("drop_partial") is True, (
+            f"{call['symbol']} was read with drop_partial={call.get('drop_partial')!r}; "
+            "the last bar is then still forming and `iloc[-1]` is not the decision bar"
+        )

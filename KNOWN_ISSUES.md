@@ -1018,6 +1018,22 @@ for THIS confirmation**, so the only bar whose thickness matters is the one bein
 confirmed on — the last complete bar, `drop_partial` having removed the still-forming
 one.
 
+**THE FIX CORRECTED THE GUARD'S SCOPE AND LEFT THE CONSUMER'S UNTOUCHED — read this
+before assuming the read is now decision-bar-shaped.** (Review's finding, verified.)
+`sample_counts` is now the decision bar. **`panel_bars` is still the full 30 days.**
+So GATE-007 judges the right bar while the structural read it guards still consumes a
+month of history. At 1H that is invisible, because every historical 1H bar clears the
+minimum — it becomes visible at 5M, where it is fixed by passing `min_samples` to
+`fetch_ohlcv_with_samples`, which that method already implements and `_read_panels`
+simply never passed. Anyone reading "GATE-007 judges the decision bar" as a
+description of the whole read will not look again, and T-0007 depends on someone
+knowing the difference.
+
+**One coupling the fix rests on, now pinned by a test rather than a comment**
+(`test_panels_are_read_with_the_forming_bar_dropped`): `iloc[-1]` is the decision bar
+only while `drop_partial=True` at the call site. A caller passing `False` makes it a
+partial bar, thin by construction — **this bug, one caller away.**
+
 **Kept as an entry although it is fixed**, because the class recurs: a windowed
 aggregate answering a question about a single bar. Any future panel, timeframe or
 quality metric that summarises a range is exposed to it.
