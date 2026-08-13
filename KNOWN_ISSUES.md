@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-13 (T-0008: four-panel layout grades in production with its denominator; B27's remedy corrected — it broke the guard; B14 gains restart duplication; B30/B31/B32 found)
+Last updated: 2026-08-13 (T-0008: four-panel layout grades in production with its denominator; B27's remedy corrected — it broke the guard; B14 gains restart duplication; B30/B31/B32 found; B33 — two vocabularies, no translation point)
 
 ---
 
@@ -1223,6 +1223,54 @@ since the last telemetry record written, against the expected cadence of one per
 bar per symbol (~2/hour at 1H). Stale means dark. Same move as `expected_poll_seconds`
 for the collector and `layout_size` for the grade — **convert an inference three agents
 got wrong into a field with a number in it.**
+
+### B33. The rule layer and the telemetry schema are two vocabularies with no translation point
+**Found in:** T-0008, 2026-08-13, after the third divergence in one object in six
+hours. **This entry is worth more than the three defects it generalises, because it
+predicts the next one.**
+**What it is:** `Disturbance.as_dict()` speaks the grader's vocabulary;
+`correlate_state` in `TELEMETRY_SCHEMA.json` speaks the contract's. They disagree, and
+**nothing sits between them.** Found one at a time, each only when it broke:
+
+| the grader says | the schema requires |
+|---|---|
+| `asset` | `symbol` |
+| *(no timeframe at all)* | `tf` |
+| `observed_order_flow: NEUTRAL` | `BULLISH` / `BEARISH` / **`UNCLEAR`** |
+
+**Every field is a separate opportunity to diverge, and every divergence is silent.**
+`_shadow_evaluate` swallows validation failures by design — correctly, since a shadow
+that can break the engine is worse than no shadow — so a mismatch drops the record and
+nothing reports it. That is how the shadow went dark for ~40 minutes.
+
+**The third one is the instructive one.** `asset`/`tf` were *missing keys*, which a
+careful reader might spot. `NEUTRAL` is a **present key with an out-of-enum value**, so
+**no key-presence check could ever find it** — and it fires on a routine market state,
+whenever a panel shows no clear direction, and by construction for every missing panel
+(`gate_002_disturbance.py:273`). With two of four panels absent for most of 2026-08-13,
+the system was continuously in the condition that triggers it.
+
+**And the trap for whoever fixes the next one:** `NEUTRAL` is **legal** in
+`agreement_state` (`ALIGNED`/`NEUTRAL`/`DISTURBED`) and **illegal** in
+`observed_order_flow`, in adjacent fields of the same object. A blanket rename fixes
+one and corrupts the other.
+
+**What it could break:** any field added to `correlate_state`, or any enum widened on
+either side, diverges again — and the failure is another silent outage of the cutover's
+evidence base. Ad-hoc translation at the point of breakage is not a fix; it is the
+pattern.
+
+**Fix:** **one translation point, with the schema as the authority.** A single mapping
+layer between the rule layer's serialisation and the record's, so a new divergence is a
+change in one place rather than a silent drop. Same shape as `correlate_denominator`
+carrying its own provenance: make the contract visible at the boundary rather than
+assumed across it.
+
+**Meanwhile the guard is a test, and its scope matters.** `assert_valid` over *one*
+record shape is a validator; over the reachable state space it is a guard. It now runs
+across nine states — every grade, both directions, the USDT.D inversion, and every
+degree of absence down to no panels at all — because `NEUTRAL` was caught only because
+one fixture happened to produce it.
 
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)

@@ -497,3 +497,55 @@ def test_a_neutral_panel_does_not_silently_drop_the_record(monkeypatch):
     flows = {s["observed_order_flow"] for s in record["correlates"]["states"]}
     assert "NEUTRAL" not in flows, f"grader vocabulary leaked into the record: {flows}"
     tvalidate.assert_valid(record)
+
+
+# ---------------------------------------------------------------------------
+# The validator over the STATE SPACE, not over one state
+# ---------------------------------------------------------------------------
+
+def _panels(btc="up", eth="up", total="up", usdtd="down", drop=()):
+    """Four panels with per-panel direction, minus any dropped."""
+    mk = lambda d: _ramp(rising=(d == "up"))  # noqa: E731
+    all_p = {"BTCUSDT.P": mk(btc), "ETHUSDT.P": mk(eth),
+             "TOTAL": mk(total), "USDT.D": mk(usdtd)}
+    return {k: v for k, v in all_p.items() if k not in drop}
+
+
+@pytest.mark.parametrize("label,panels", [
+    ("clean-long-all-four",      _panels()),
+    ("clean-short-all-four",     _panels(btc="down", eth="down", total="down", usdtd="up")),
+    ("one-correlate-disturbed",  _panels(eth="down")),
+    ("two-correlates-disturbed", _panels(eth="down", total="down")),
+    ("usdtd-inverted",           _panels(usdtd="up")),
+    ("one-panel-missing",        _panels(drop=("USDT.D",))),
+    ("two-panels-missing",       _panels(drop=("BTCUSDT.P", "ETHUSDT.P"))),
+    ("no-panels-at-all",         {}),
+])
+def test_every_reachable_layout_state_produces_a_valid_record(label, panels, monkeypatch):
+    """A validator run over one state is a validator; over the state space it is a guard.
+
+    `NEUTRAL` was caught because the fixture happened to produce it. The next
+    out-of-enum value may only occur when a panel is missing, when the grade is HEAVY,
+    or on a SHORT — and each would go dark silently, because `_shadow_evaluate`
+    swallows a validation failure by design.
+
+    These are the states the layout can actually be in: every grade, both directions,
+    the inversion, and every degree of absence down to nothing at all.
+    """
+    from app.services.telemetry import validate as tvalidate
+
+    counts = {k: (None if k.endswith(".P") else 360) for k in panels}
+    monkeypatch.setattr(shadow, "_read_panels",
+                        lambda signal_tf, **kw: (dict(panels), dict(counts), []))
+
+    idx = pd.DatetimeIndex([T0 + timedelta(hours=k) for k in range(80)], tz="UTC")
+    base = [100.0 + k for k in range(80)]
+    df = pd.DataFrame({"open": base, "high": [b + 1 for b in base],
+                       "low": [b - 1 for b in base], "close": [b + 0.5 for b in base],
+                       "volume": [1.0] * 80}, index=idx)
+
+    record = shadow.evaluate("BTC/USD", df, signal_tf=TF,
+                             declared=shadow.declared_parameters(),
+                             sequence_no=1, scan_id=f"state-{label}")
+    assert record is not None, f"{label}: the shadow produced no record"
+    tvalidate.assert_valid(record)
