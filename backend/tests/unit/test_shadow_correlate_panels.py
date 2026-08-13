@@ -409,3 +409,30 @@ def test_the_grade_carries_its_denominator_not_just_its_label():
     # 4 panels, main excluded by the declared GATE-004 choice -> 3 correlates.
     correlates = [s for s in block["states"] if s["role"] != "MAIN"]
     assert len(correlates) == 3, f"denominator must be 3, got {len(correlates)}"
+
+
+def test_the_correlates_block_satisfies_the_telemetry_schema():
+    """The block must validate, not merely look right.
+
+    `_correlates_block` first shipped passing the grader's `panels` straight through.
+    Every required key I checked by eye was present in spirit — but `correlate_state`
+    requires `symbol` and `tf`, and PanelVerdict carries `asset` and no timeframe. The
+    record failed validation, `_shadow_evaluate` swallowed it by design, and the shadow
+    recorded NOTHING for forty minutes while the engine ran normally.
+
+    Checking that the keys I expected were present is what let that through: it asked a
+    question adjacent to the one that mattered. This asserts against the schema itself.
+    """
+    from app.services.telemetry import validate as tvalidate  # noqa: F401  (contract loader)
+
+    grade = DisturbanceClassifier.classify(
+        _reads_for_a_clean_btc_long(), direction="LONG",
+        instrument="BTC", main_asset_counts=False)
+    block = shadow._correlates_block(grade, "1H")
+
+    required = {"symbol", "role", "expected_sign", "observed_order_flow", "disturbed", "tf"}
+    assert block["states"], "a graded layout must carry states"
+    for state in block["states"]:
+        missing = required - set(state)
+        assert not missing, f"correlate_state is missing {sorted(missing)}: {state}"
+        assert state["tf"], "tf must be populated, not merely present"

@@ -294,7 +294,7 @@ def _blocked_evaluations() -> list[rec.RuleEvaluation]:
     ]
 
 
-def _correlates_block(grade: Any) -> dict:
+def _correlates_block(grade: Any, signal_tf: str = "") -> dict:
     """The disturbance summary, from the grader when it ran and honestly empty when not.
 
     `layout_size` is the discriminator a reader should use: 0 means the layout was
@@ -312,11 +312,22 @@ def _correlates_block(grade: Any) -> dict:
     # and guessing an interface instead of reading it is how the hardcoded literal
     # got here in the first place.
     d = grade.as_dict()
+    # `panels` is the GRADER's vocabulary; `states` is the SCHEMA's, and they differ.
+    # correlate_state requires `symbol` and `tf`; PanelVerdict has `asset` and no
+    # timeframe at all. Passing the grader's dicts through unmapped made every
+    # setup_evaluation fail validation, and `_shadow_evaluate` swallows that — so the
+    # shadow silently recorded NOTHING for 40 minutes while the engine ran normally.
+    # A schema this record must satisfy is not an internal detail; translate at the
+    # boundary rather than hoping two vocabularies coincide.
+    states = [
+        {**panel, "symbol": panel.pop("asset", panel.get("symbol")), "tf": signal_tf}
+        for panel in (dict(x) for x in d["panels"])
+    ]
     return {
         "layout_size": d["layout_size"],
         "disturbed_count": d["disturbed_count"],
         "disturbance_grade": d["disturbance_grade"],
-        "states": d["panels"],
+        "states": states,
         "main_asset_counted": d["main_asset_counted"],
     }
 
@@ -553,7 +564,7 @@ def evaluate(
             # hard skip, would be recorded as NONE. That is exactly B13's shape: a
             # not-measured state rendering as a plausible number, and this time keying
             # something that matters.
-            correlates=_correlates_block(layout_grade),
+            correlates=_correlates_block(layout_grade, signal_tf),
             rule_evaluations=evaluations,
             decision=decision.decision,
             decision_path=decision.decision_path,
