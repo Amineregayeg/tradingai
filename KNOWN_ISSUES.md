@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-13 (T-0008: four-panel layout grades in production with its denominator; B27's remedy corrected — it broke the guard; B14 gains restart duplication; B30/B31/B32 found; B33 — two vocabularies, no translation point; B34 — the shadow skips blocked bars, so the emission policy is false and the sample biased; B35 — GATE-007 compares labels, not times)
+Last updated: 2026-08-13 (T-0008: four-panel layout grades in production with its denominator; B27's remedy corrected — it broke the guard; B14 gains restart duplication; B30/B31/B32 found; B33 — two vocabularies, no translation point; B34 — the shadow skips blocked bars, so the emission policy is false and the sample biased; B35 — GATE-007 compares labels, not times; B36 — broad handlers disguise bugs as outages; B20/B22/B29 gain dated instances)
 
 ---
 
@@ -848,6 +848,12 @@ already green; it was not, and that would have told Malek the blocker was gone
 while it was still there. It would also have been the fifth stale figure of the
 day, one paragraph above B21, which exists because of the other four.
 
+**IT WOULD HAVE PREVENTED A RED `main` ON 2026-08-13.** A push with three failing
+tests landed unimpeded (`157d701`). The required contexts this entry proposes include
+`Backend suite (production pins)`, which was `failure` on that commit — **protection
+would have blocked it.** Second time in one day this pending item has turned out to be
+load-bearing rather than hypothetical.
+
 **This entry outlives the incident that produced it, deliberately.** The red test
 was incidental — the next one will be a different test, and the routing gap will
 be identical. Do not close this because the four runs above went green.
@@ -906,6 +912,13 @@ verification for the entire project for three days.
 and the failure is silent in the way that matters — the script exits 2 with an
 accurate, loud message, which reads as a broken environment rather than as
 disabled guards.
+
+**NEAR MISS, 2026-08-13.** A red suite was pushed to `main` (`157d701`, three failing
+tests) and **`Tier 0.2` stayed green** — because those three tests happened to live
+outside the five `BASELINE_TESTS` files. Had any of them landed in one, the prober
+would have exited 2 and gone dark again: **the exact A11 condition, which cost three
+days and which T-0003 existed to fix.** The design did not hold; it was not tested.
+One file's difference.
 
 **Fix:** baseline only the tests each probe actually uses, so a red dominance test
 costs the three dominance probes and leaves the other five running. Deliberately
@@ -1117,6 +1130,13 @@ in hand, not turned on the claim being made.
 **On the author's side the same gap:** `git status --porcelain` answers "are there
 uncommitted edits", not "is it shipped". Clean tree, three unpushed commits, twice in
 one day after escalating a peer for exactly that reasoning.
+
+**THE SAME SEAM RUNS THE OTHER WAY, 2026-08-13.** This entry is work passing review
+**unshipped**. Hours later the mirror occurred: work shipped **unverified** — a suite
+run and a `git push` chained in one command, with the push not gated on the result, so
+three failing tests reached `main`. **Unshipped-but-reviewed and shipped-but-unverified
+are the same missing gate seen from either side**, and neither is guarded by anything
+structural. Both were caught by a human reading output after the fact.
 
 **Fix, and it needs nothing built:** **cross the file list in the work report against
 the file list in the diff.** A task claiming register changes whose diff contains no
@@ -1372,6 +1392,36 @@ patch.
 monitors recency for TOTAL and USDT.D via `COLLECTOR_STALE_MIN`/`age_minutes`. The two
 perpetual panels added in T-0008 have **no recency monitoring at all**. Two of four
 panels are watched. Fold into whichever task next touches `data_health`.
+
+### B36. Broad exception handlers make a bug indistinguishable from an outage
+**Found in:** T-0008, 2026-08-13. Partially fixed; the general case is not.
+**What it is:** the shadow path swallows exceptions by design — *"a shadow that can
+break the engine is worse than no shadow"* — and that design is correct. Its
+consequence is that **the handler cannot tell a code defect from an unavailable
+dependency, and reports both as the latter.**
+
+Concretely: `_FakePerp`'s signature drifted from `BinancePerpetualSource`, so the call
+raised `TypeError`. The broad handler caught it and recorded *"perpetual panels
+unreadable"* — **exactly what a dead `fapi` host produces.**
+
+**Why that is worse than the swallow it sits under.** A dead host is *expected*: it
+yields `GATE-008 FAIL` naming the absent panels, which is a normal absent-panel day
+that nobody investigates. **So a programming error is not merely hidden — it is
+disguised as a routine, already-understood condition.** The shadow outage earlier the
+same evening was at least anomalous; this would have looked ordinary.
+
+**Partially fixed:** `TypeError` is now caught separately in `_read_panels` and named
+as an interface error rather than an availability one. Still swallowed — it must be —
+but no longer disguised.
+
+**Not fixed, and this is the entry:** every other broad `except Exception` on the
+shadow path has the same property. The handler should distinguish the exception
+classes it is *willing* to treat as availability — transport errors, timeouts, empty
+responses — from those that mean the code is wrong, which must surface loudly even
+though they may never raise into the trading path.
+
+**Related:** B32 proposes a liveness signal for the shadow going silent. This is the
+other half — the shadow **speaking**, and saying the wrong thing about why.
 
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
