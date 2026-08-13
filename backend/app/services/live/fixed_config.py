@@ -45,7 +45,25 @@ from typing import Final
 SYMBOLS: Final[dict[str, str]] = {"BTC/USD": "BTCUSDT", "ETH/USD": "ETHUSDT"}
 
 #: Timeframe the strategy looks for entries on — one evaluation per closed bar.
-ENTRY_TF: Final[str] = "1H"
+#:
+#: 5m, NOT 1H. GATE-017/019 make 1H **analysis only**, and every entry this platform
+#: had ever taken before 2026-08-13 was triggered from an analysis-only timeframe —
+#: 12 of 12, measured from the records in `docs/CONFORMANCE_AUDIT_2026-08.md`, not
+#: inferred from this constant.
+#:
+#: SPELLING IS LOAD-BEARING AND THE CODEBASE IS NOT CONSISTENT. The data layer keys on
+#: lowercase `"5m"` (`dominance._TF_TO_OFFSET`, `binance._INTERVAL`), while
+#: `shadow.RULED_EXECUTION_TFS` holds uppercase `"5M"`. `"5M"` raises `ValueError` in
+#: the data layer; `"5m"` works everywhere only because `shadow._tf_flags` normalises
+#: with `.upper()` before comparing. Change one of those and this constant breaks in a
+#: different place than you edited.
+#:
+#: 5m is viable for the correlate layout only because T-0001 took the collector to 10 s
+#: polling: a 5m bar then holds 30 samples against
+#: `MIN_SAMPLES_PER_SYNTHETIC_BAR = 20`. That is 1.5x margin, against 18x at 1H — the
+#: guard in `test_fixed_config_timeframes.py` derives it rather than trusting this
+#: comment, because the poll rate is a production fact that already changed once.
+ENTRY_TF: Final[str] = "5m"
 
 #: Timeframe the directional bias is read from. Must be higher than ENTRY_TF:
 #: a bias taken from the same series it trades tells you nothing the entry did

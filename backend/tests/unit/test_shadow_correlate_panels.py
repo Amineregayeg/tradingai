@@ -549,3 +549,60 @@ def test_every_reachable_layout_state_produces_a_valid_record(label, panels, mon
                              sequence_no=1, scan_id=f"state-{label}")
     assert record is not None, f"{label}: the shadow produced no record"
     tvalidate.assert_valid(record)
+
+
+# ---------------------------------------------------------------------------
+# B27's corrected remedy: one fetch, two derivations — TWO separate mutations
+# ---------------------------------------------------------------------------
+
+class _ThinLastBar(_FakeDominance):
+    """A series whose MOST RECENT complete bar is thin, and whose earlier bars are not.
+
+    This is the shape that separates the correct fix from the seductive one. Filtering
+    at fetch time deletes the thin last bar, so `.iloc[-1]` returns the thick one before
+    it and the guard passes on a stale bar.
+    """
+
+    def fetch_ohlcv_with_samples(self, symbol, timeframe, start, end, **kw):
+        frame = super().fetch_ohlcv_with_samples(symbol, timeframe, start, end, **kw)
+        if frame.empty:
+            return frame
+        frame = frame.copy()
+        frame.iloc[-1, frame.columns.get_loc("samples")] = 5   # decision bar: 5 < 20
+        return frame
+
+
+def test_mutation_1_scope_the_guard_reads_the_decision_bar_the_consumer_reads_thick_bars():
+    """SCOPE. `sample_counts` is the last complete bar; `panel_bars` is the thick subset.
+
+    Kept separate from mutation 2 because this one is satisfied by the BROKEN fix too:
+    filtering at fetch time also yields thick bars to the consumer. Scope alignment
+    alone does not distinguish the two implementations.
+    """
+    perps = {"BTCUSDT.P": _ramp(), "ETHUSDT.P": _ramp()}
+    bars, counts, _ = shadow._read_panels(
+        TF, source=_FakeDominance(samples=360), perp_source=_FakePerp())
+    assert counts["TOTAL"] == 360
+    assert len(bars["TOTAL"]) == 60, "thick bars must survive the local filter"
+
+
+def test_mutation_2_a_thin_DECISION_bar_still_fails_gate_007_and_names_the_panel():
+    """THE DISCRIMINATING CASE. This is the one the broken fix cannot pass.
+
+    The most recent complete bar holds 5 samples against a minimum of 20. Correct
+    behaviour: GATE-007 FAILS and names the panel. The `min_samples`-at-fetch version
+    deletes that bar, reports the previous one's 360, and PASSES — grading a stale bar
+    while reporting `thin_panels: []`.
+
+    Mutation 1 alone is green under both implementations. Only this one separates them.
+    """
+    perps = {"BTCUSDT.P": _ramp(), "ETHUSDT.P": _ramp()}
+    evaluations, _, grade = shadow._evaluate_layout(
+        _ramp(), signal_tf=TF, panel_source=_ThinLastBar(), perp_source=_FakePerp())
+
+    assert _verdicts(evaluations)["GATE-007"] == "FAIL", (
+        "a thin decision bar was graded as readable — the guard is reading the wrong bar"
+    )
+    thin = _values(evaluations, "GATE-007")["thin_panels"]
+    assert "TOTAL" in thin and "USDT.D" in thin, f"the thin panels were not named: {thin}"
+    assert grade is None, "an unreadable layout must not produce a disturbance grade"

@@ -2,10 +2,12 @@
 
 **The platform does not trade the delivered strategy.** Of the 117 rules in
 `RULE_REGISTRY.json` v1.2.0, **zero** decided any trade this platform has ever
-taken. Every one of the 12 entries in its history was produced by the
+taken. Every one of its **20 entries — 14 distinct setups** — was produced by the
 pre-contract ICT engine, and the three taken since the contract engine began
 running in shadow were each taken on a bar where the contract engine had, a
-fraction of a second earlier, refused.
+fraction of a second earlier, declined. *(Entries and setups differ because a
+restart re-enters the setup it just abandoned — see the correction below. Earlier
+versions of this paragraph said "12 entries".)*
 
 35 of 117 rules are implemented (`check_rule_coverage.py`: 35/117, HARD_GATE
 34/91, OPEN 0/14, and it prints PASSED). That number does not appear in the
@@ -92,11 +94,14 @@ on the same instrument within a second:
 | BTC/USD 2026-08-11 05:00:06.388 | SHORT | 05:00:06.149 | STAND_ASIDE | GATE-036 |
 | ETH/USD 2026-08-12 13:00:06.032 | LONG | 13:00:05.764 | STAND_ASIDE | GATE-036 |
 
-**3 of 3 — and read the reason before quoting the number.** Each was declined
-citing **GATE-036: the engine could not see.** Not a judgement on the setup. It
-declined **98 of 98** bars on the same grounds, whether the ICT path entered or
-not, so "3 of 3" is a subset of a 100% rate and discriminates nothing. The three
-were not singled out.
+**3 of 3 — and read the reason before quoting the number.** Each carried
+`deciding_rule_id: GATE-036`, which is the **fallback recorded when no rule
+decided** and not a rule that fired — see the correction below, and **B31**. The
+engine was blind at the time, but that fact comes from GATE-008/GATE-002 being
+blocked on all 98 evaluations, **not** from the GATE-036 label, which could not
+have told you either way. It declined **98 of 98** bars whether the ICT path
+entered or not, so "3 of 3" is a subset of a 100% rate and discriminates nothing.
+The three were not singled out.
 
 **So the finding is not "Salim's strategy would have refused every trade the
 platform took."** That would require the contract engine to have evaluated the
@@ -147,7 +152,7 @@ Each verified at the file and line, `grep -n`:
 | rule | status | evidence |
 |---|---|---|
 | **GATE-032 / GRADE-017** — risk from the 9-cell `box_grade × disturbance` lookup | **violated** | `live/fixed_config.py:70` `RISK_PCT: Final[float] = 0.01`, flat, deliberately not a knob. Neither grader exists, so the lookup has no inputs. |
-| **GATE-017 / GATE-019** — ruled execution timeframes are 30M/15M/5M; 1H is analysis-only | **violated** | `live/fixed_config.py:48` `ENTRY_TF: Final[str] = "1H"`, and **12 of 12 entries were on 1H** (below) |
+| **GATE-017 / GATE-019** — ruled execution timeframes are 30M/15M/5M; 1H is analysis-only | **violated at audit time; CLOSED 2026-08-14** | `ENTRY_TF` was `"1H"` and **20 of 20 entries were triggered on it**. T-0007 set it to `"5m"` and added the guard that was missing — GATE-017 is a HARD_GATE and nothing had ever enforced it. The violation is historical; every entry in the corpus below still carries it. |
 | **GATE-008** — roster `BTCUSDT.P · ETHUSDT.P · TOTAL · USDT.D` | **violated** | `live/fixed_config.py:45` `SYMBOLS = {"BTC/USD": "BTCUSDT", "ETH/USD": "ETHUSDT"}` — spot, two instruments, no correlate panel read at decision time |
 | **GATE-001 / GATE-002** — heavy-disturbance skip and the disturbance classifier | **violated *and implemented*** | both appear in `check_rule_coverage.py`'s implemented list, and neither is referenced on the live path — `disturbance` occurs only in `live/shadow.py`, which nothing trades from. **This pair is the whole argument in one line:** the rules exist, they are tested, they are counted in 35/117, and the engine violates them on every bar because nothing calls them. |
 | **EXIT-001 / GATE-022** — 70% at 2R, 30% runner, flat at 19:00 New York | **violated** | `live/strategy_step.py:179,199` emit a single TP at `rr_partial × risk`; no session-close handling exists anywhere in `live/` |
@@ -161,8 +166,8 @@ SELECT timeframe, count(*) FROM decision_records WHERE NOT abstained GROUP BY ti
 --  1H | 12
 ```
 
-**12 of 12 — 100% of entries this platform has ever taken were triggered from an
-analysis-only timeframe.** Proven from what happened, not from the constant that
+**20 of 20 — 100% of entries this platform has ever taken were triggered from an
+analysis-only timeframe** (14 distinct setups; earlier versions said 12 of 12). Proven from what happened, not from the constant that
 intends it. (The engine *can* evaluate 5m: six abstains carry it. Every entry was
 1H.)
 
@@ -189,7 +194,7 @@ that flatters us.
 | `trades` total | 252 | all rows |
 | — **F2 backtest replay** | **245** | `setup_tag = 'Backtest replay'`, avg **0.0807R** — matches F2's recorded +0.081R exactly |
 | — **genuine live trades** | **7** | `setup_tag = 'ICT (live)'` |
-| — of those, resolved | 7 | 3 SL, 2 TP, 2 operator |
+| — of those, resolved | 13 | 3 SL, 2 TP, **8 operator** |
 | `decision_records` **ABANDONED** | **5** | B14's historical casualties, including the ETH position of 2026-08-08 |
 
 12 acted-on decisions against 7 live trades: the difference is the 5 `ABANDONED`
@@ -307,8 +312,8 @@ seven trades' worth of evidence about exits.
 
 | sub-check | n | why |
 |---|---|---|
-| entry geometry vs recorded | **12 of 12** | every acted-on decision carries entry, sl, tp, size |
-| closed by the thing that should have closed it | **5 of 7** | two were closed by an operator deploying |
+| entry geometry vs recorded | **20 of 20 entries / 14 setups** | every acted-on decision carries entry, sl, tp, size |
+| closed by the thing that should have closed it | **5 of 13** | two were closed by an operator deploying |
 | stop breached without closing | 0 found in 7 | two lives truncated by the operator close, so "no breach" means "not yet" |
 | never resolved at all | **5** | `ABANDONED` — B14 |
 

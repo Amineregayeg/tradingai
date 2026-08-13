@@ -110,6 +110,7 @@ def _read_panels(
     than chosen here.
     """
     from app.services.market_data.sources.dominance import DominanceSource
+    from app.services.rules.gate_008_roster import MIN_SAMPLES_PER_SYNTHETIC_BAR
 
     panel_bars: dict[str, list[Bar]] = {}
     sample_counts: dict[str, int | None] = {}
@@ -127,25 +128,34 @@ def _read_panels(
             if frame.empty:
                 notes.append(f"{roster_name}: no bars in the last 30d")
                 continue
+            # ONE FETCH, TWO DERIVATIONS — and they must not be collapsed.
+            #
+            # The GUARD (GATE-007) asks whether the bar being confirmed on is thick
+            # enough. The CONSUMER (structure detection) should only see bars that are.
+            # Those are different questions and they need different frames from the
+            # same fetch.
+            #
+            # THE OBVIOUS SHORTCUT IS A TRAP, and B27 records it: passing `min_samples`
+            # into the fetch filters the thin decision bar OUT, so `.iloc[-1]` then
+            # returns an older, thicker bar and GATE-007 reports `thin_panels: []` and
+            # PASSES — on a stale bar. It turns "the decision bar is too thin, refuse"
+            # into "grade an hour-old bar and call it readable". Fixture: unfiltered
+            # 5 samples -> FAIL; min_samples=20 -> 40 samples -> PASS on the wrong bar.
+            #
+            # So: fetch unfiltered, take the count from the true most-recent complete
+            # bar, and filter locally for the bars handed to structure detection.
+            #
+            # At 1H this was invisible — every historical bar clears 20 with 18x margin.
+            # At 5m the margin is 30-against-20, so a single slow minute puts the
+            # decision bar under the threshold and the distinction starts deciding
+            # things.
+            sample_counts[roster_name] = int(frame["samples"].iloc[-1])
+            thick = frame[frame["samples"] >= MIN_SAMPLES_PER_SYNTHETIC_BAR]
             panel_bars[roster_name] = [
                 Bar(time=idx.to_pydatetime(), open=float(r.open), high=float(r.high),
                     low=float(r.low), close=float(r.close))
-                for idx, r in frame.iterrows()
+                for idx, r in thick.iterrows()
             ]
-            # THE DECISION BAR'S COUNT, not the window's minimum.
-            #
-            # An earlier version used `.min()` over the whole 30-day window on the
-            # reasoning that the thinnest bar should decide. It made GATE-007 fail with
-            # `thin_panels: [TOTAL, USDT.D]` at 1H, where a complete bar holds 360
-            # samples against a minimum of 20 — because the thinnest bar in the window is
-            # the collector's own first partial hour from 2026-08-04, a boundary artefact
-            # rather than a bar anyone would trade off. A mean would have been wrong for
-            # the opposite reason; both answer a question GATE-007 is not asking.
-            #
-            # GATE-007 asks whether the layout is readable *for this confirmation*, so the
-            # only bar whose thickness matters is the one being confirmed on — the last
-            # complete bar, `drop_partial` having already removed the still-forming one.
-            sample_counts[roster_name] = int(frame["samples"].iloc[-1])
         except Exception as exc:  # noqa: BLE001 - a shadow may never break the engine
             notes.append(f"{roster_name}: unreadable ({type(exc).__name__})")
 

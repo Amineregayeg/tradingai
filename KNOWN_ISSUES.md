@@ -34,6 +34,15 @@ Two things that make entries worth having:
 Fixed something? Delete its entry in the same commit as the fix. A register that
 only grows becomes wallpaper.
 
+**ONE EXCEPTION, LEARNED 2026-08-13: delete-on-fix is right for DEFECTS and wrong for
+RECURRING STATES.** B24 was *"the dominance fix is merged and not deployed"*. It was
+correctly deleted when that fix shipped — and **the same category recurred within
+hours** as B37, with nothing holding the space in between. A state that will be true
+again should be a **standing entry that is narrowed**, not one that is deleted and
+rediscovered. "Merged, not deployed" is the worked example: narrowed to whatever is
+currently merged-and-undeployed, it catches the next one without anyone noticing the
+gap.
+
 ---
 
 ## A. Wrong numbers — these can mislead a decision
@@ -1238,9 +1247,25 @@ nothing reports it. **If that happened during the real Stage A window, the cutov
 evidence base would have a hole in it and no signal would exist** — a materially worse
 version of tonight.
 
-**Fix:** a shadow liveness field in `data_health`, beside `dominance_collector`: time
-since the last telemetry record written, against the expected cadence of one per closed
-bar per symbol (~2/hour at 1H). Stale means dark. Same move as `expected_poll_seconds`
+**Fix — CORRECTED 2026-08-13, because the first version of this remedy was wrong in
+both halves.** It said: *cadence of one per closed bar per symbol, and stale means
+dark.* **B34 disproves both.** The shadow records only on bars where the ICT path was
+unblocked, so the expected cadence is **not** one per closed bar — and **stale usually
+means blocked, not dark.** A signal built to that description would report the shadow
+broken for most of every trading day, and **a liveness signal that is routinely wrong
+launders the real outage into background noise.**
+
+The correct shape is **three states, not two**: `due` / `not due` / `blocked`, with the
+cadence derived from **flat bars** rather than bar closes, and `blocked` named as the
+**common** case. Note that "not due" is its own state for a reason: at 1H the newest bar
+is legitimately absent for 54 of every 60 minutes, and reading that as missing is an
+error a person made here while proposing this very signal.
+
+**Why this correction is filed rather than left to the plan:** T-0009's plan carries
+the right version and will close; this entry outlives it. Whoever builds the signal in
+six months reads **here**, and the stale remedy would reproduce the failure it
+describes. That is B27's mechanism exactly — a superseded prescription in the entry
+someone consults *while about to build the thing*. Same move as `expected_poll_seconds`
 for the collector and `layout_size` for the grade — **convert an inference three agents
 got wrong into a field with a number in it.**
 
