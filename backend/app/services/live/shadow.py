@@ -123,10 +123,20 @@ def _read_panels(signal_tf: str, *, source: Any = None) -> tuple[dict, dict, lis
                     low=float(r.low), close=float(r.close))
                 for idx, r in frame.iterrows()
             ]
-            # The thinnest bar decides readability, not the average: GATE-007 refuses the
-            # layout if ANY panel is under the minimum, so reporting a mean would hide the
-            # bar that actually fails.
-            sample_counts[roster_name] = int(frame["samples"].min())
+            # THE DECISION BAR'S COUNT, not the window's minimum.
+            #
+            # An earlier version used `.min()` over the whole 30-day window on the
+            # reasoning that the thinnest bar should decide. It made GATE-007 fail with
+            # `thin_panels: [TOTAL, USDT.D]` at 1H, where a complete bar holds 360
+            # samples against a minimum of 20 — because the thinnest bar in the window is
+            # the collector's own first partial hour from 2026-08-04, a boundary artefact
+            # rather than a bar anyone would trade off. A mean would have been wrong for
+            # the opposite reason; both answer a question GATE-007 is not asking.
+            #
+            # GATE-007 asks whether the layout is readable *for this confirmation*, so the
+            # only bar whose thickness matters is the one being confirmed on — the last
+            # complete bar, `drop_partial` having already removed the still-forming one.
+            sample_counts[roster_name] = int(frame["samples"].iloc[-1])
         except Exception as exc:  # noqa: BLE001 - a shadow may never break the engine
             notes.append(f"{roster_name}: unreadable ({type(exc).__name__})")
 
