@@ -34,7 +34,7 @@ evidence accumulating hourly rather than as a line in a planning document.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Sequence
 
 from app.core.logging import logger
@@ -57,10 +57,80 @@ from app.services.telemetry.ny_time import iso_ny
 #: coverage report counts as implemented and that has never decided anything, and
 #: the right response to a line here is to remove its cause — not to widen what
 #: counts as evaluated.
-BLOCKED_ON_CORRELATES: dict[str, str] = {
-    "GATE-008": "roster panels TOTAL and USDT.D are unavailable (CryptoCap not wired)",
-    "GATE-002": "disturbance grade needs the correlate panels GATE-008 could not read",
-}
+BLOCKED_ON_CORRELATES: dict[str, str] = {}
+#: GATE-008 and GATE-002 left this dict on 2026-08-13 (T-0006). They are now evaluated
+#: against real panel reads. The reason they carried — "TOTAL and USDT.D are unavailable
+#: (CryptoCap not wired)" — had become false: we replaced CryptoCap with our own collector
+#: and nothing updated the code still waiting for it.
+#:
+#: WHAT IS ACTUALLY MISSING NOW, because the answer changed rather than disappeared.
+#: GATE-008's roster is four panels by NAME — BTCUSDT.P · ETHUSDT.P · TOTAL · USDT.D, and
+#: `gate_008_roster.py:38-42` is deliberate that the first two are the Binance PERPETUALS,
+#: "not spot". We have TOTAL and USDT.D from our own collector. We do NOT have the other
+#: two: `BinanceSource` reaches only spot (`/api/v3/klines` on api.binance.com), and no
+#: code in this repo calls `fapi.binance.com`.
+#:
+#: So the layout is read with two of four panels and **GATE-008 fails, naming the two that
+#: are absent**. That is the honest steady state and it is a better one: the engine's
+#: verdict stops being "I cannot see anything" and becomes "these two named feeds do not
+#: exist", which is a one-line requirement rather than a research question.
+#:
+#: SPOT WAS NOT SUBSTITUTED FOR PERPETUAL, DELIBERATELY. Mapping BTC/USD onto BTCUSDT.P
+#: would make GATE-008 emit PASS over a layout whose panels are instruments the rule does
+#: not name, and that grade feeds GATE-002's 2-of-3 count, which keys the risk matrix. It
+#: would be a plausible disturbance grade computed from the wrong instruments — and
+#: KNOWN_ISSUES A3 measures venue divergence on this repo as large enough to create or
+#: erase an FVG, so the distinction is consequential here rather than pedantic.
+
+#: The panels this engine can actually source today, and where each comes from.
+#: Keyed by the roster's canonical name so a panel can never be silently renamed into
+#: existence — if the key is not the roster's, `LayoutReadability` counts it missing.
+SOURCEABLE_PANELS: dict[str, str] = {"TOTAL": "TOTAL", "USDT.D": "USDT.D"}
+
+
+def _read_panels(signal_tf: str, *, source: Any = None) -> tuple[dict, dict, list[str]]:
+    """The roster panels we can source, as bars, on ONE timeframe.
+
+    Returns `(panel_bars, sample_counts, notes)`. Never raises: a panel that cannot be
+    read is simply absent, and `LayoutReadability` derives what is missing from the
+    roster rather than from this dict (`gate_008_roster.py:189`), so an empty return
+    degrades to "all four missing" rather than to a smaller layout.
+
+    GATE-007 requires every panel on the same timeframe and fails otherwise
+    (`AlignmentTimeframe.check_all`), so `signal_tf` is passed through unchanged rather
+    than chosen here.
+    """
+    from app.services.market_data.sources.dominance import DominanceSource
+
+    panel_bars: dict[str, list[Bar]] = {}
+    sample_counts: dict[str, int | None] = {}
+    notes: list[str] = []
+
+    src = source if source is not None else DominanceSource()
+    end = datetime.now(timezone.utc)
+    start = end - timedelta(days=30)
+
+    for roster_name, dominance_symbol in SOURCEABLE_PANELS.items():
+        try:
+            frame = src.fetch_ohlcv_with_samples(
+                dominance_symbol, signal_tf, start, end, drop_partial=True
+            )
+            if frame.empty:
+                notes.append(f"{roster_name}: no bars in the last 30d")
+                continue
+            panel_bars[roster_name] = [
+                Bar(time=idx.to_pydatetime(), open=float(r.open), high=float(r.high),
+                    low=float(r.low), close=float(r.close))
+                for idx, r in frame.iterrows()
+            ]
+            # The thinnest bar decides readability, not the average: GATE-007 refuses the
+            # layout if ANY panel is under the minimum, so reporting a mean would hide the
+            # bar that actually fails.
+            sample_counts[roster_name] = int(frame["samples"].min())
+        except Exception as exc:  # noqa: BLE001 - a shadow may never break the engine
+            notes.append(f"{roster_name}: unreadable ({type(exc).__name__})")
+
+    return panel_bars, sample_counts, notes
 
 
 def declared_parameters() -> rec.DeclaredParameters:
@@ -165,6 +235,92 @@ def _blocked_evaluations() -> list[rec.RuleEvaluation]:
     ]
 
 
+def _evaluate_layout(
+    main_bars: Sequence[Bar], *, signal_tf: str, panel_source: Any = None,
+    extra_panels: dict | None = None,
+) -> tuple[list[rec.RuleEvaluation], list[str]]:
+    """GATE-008, GATE-007 and GATE-002 against real panel reads.
+
+    `extra_panels` exists for tests only — it lets a fixture stand in for the perpetual
+    series we cannot source, so the wiring can be proven to emit PASS with four panels
+    present. **That is legitimate in a test and would not be in production**: the whole
+    point of reading two panels rather than four is that a fixture must never reach a
+    record. Under route 3 a broken wiring and a missing feed emit the identical
+    `GATE-008 FAIL, panels_missing: [BTCUSDT.P, ETHUSDT.P]`, so the PASS-with-four case
+    is the only thing that distinguishes working plumbing from none at all.
+    """
+    from app.services.rules.evaluator import build_correlate_reads
+    from app.services.rules.gate_002_disturbance import DisturbanceClassifier
+    from app.services.rules.gate_008_roster import LayoutReadability
+
+    causes: list[str] = []
+    try:
+        panel_bars, sample_counts, notes = _read_panels(signal_tf, source=panel_source)
+        if extra_panels:
+            for asset, series in extra_panels.items():
+                panel_bars[asset] = series
+                sample_counts.setdefault(asset, None)
+        causes.extend(notes)
+
+        reads = build_correlate_reads(
+            panel_bars, signal_tf=signal_tf, as_of_index=len(main_bars),
+            sample_counts=sample_counts,
+        )
+        evaluations, layout_causes = LayoutReadability.evaluate(
+            reads, signal_tf=signal_tf, instrument="BTC"
+        )
+        causes.extend(layout_causes)
+
+        readable = all(e.verdict == "PASS" for e in evaluations)
+        if readable:
+            # Direction is the main panel's own order flow: the disturbance question is
+            # whether the correlates agree with what the main asset is doing, so the
+            # setup direction a main-asset break implies is the one to grade against.
+            # Declared rather than inferred silently — there is no proposed setup to read
+            # a direction from until M6 selects one.
+            main = next((r for r in reads if r.asset == "BTCUSDT.P"), None)
+            direction = "SHORT" if main and main.observed_order_flow == "BEARISH" else "LONG"
+            grade = DisturbanceClassifier.classify(
+                reads, direction=direction, instrument="BTC", main_asset_counts=False
+            )
+            evaluations.append(rec.RuleEvaluation(
+                rule_id="GATE-002",
+                verdict="PASS",
+                values={"grade": getattr(grade, "grade", str(grade)),
+                        "direction_graded": direction,
+                        "panels_read": sorted(panel_bars)},
+                value_provenance={
+                    "grade": rec.derived("GATE-002 over the four-panel layout"),
+                    "direction_graded": rec.derived("main panel observed order flow"),
+                    "panels_read": rec.derived("panel reads actually obtained"),
+                },
+            ))
+        else:
+            missing = []
+            for e in evaluations:
+                if e.rule_id == "GATE-008":
+                    missing = list(e.values.get("panels_missing") or [])
+            reason = (
+                f"layout unreadable: no read for {', '.join(missing)}" if missing
+                else "layout unreadable: " + "; ".join(causes or ["reason not recorded"])
+            )
+            evaluations.append(rec.RuleEvaluation(
+                rule_id="GATE-002",
+                verdict="NOT_APPLICABLE",
+                values={"not_evaluated_because": reason},
+                value_provenance={"not_evaluated_because": rec.derived("GATE-008 result")},
+            ))
+        return evaluations, causes
+    except Exception as exc:  # noqa: BLE001 - never break the engine
+        logger.warning("shadow layout read failed", error=str(exc))
+        return [rec.RuleEvaluation(
+            rule_id="GATE-008",
+            verdict="NOT_APPLICABLE",
+            values={"not_evaluated_because": f"panel read raised {type(exc).__name__}"},
+            value_provenance={"not_evaluated_because": rec.derived("engine fault")},
+        )], [f"panel read raised {type(exc).__name__}"]
+
+
 def evaluate(
     pair: str,
     df,
@@ -199,6 +355,13 @@ def evaluate(
         evaluations: list[rec.RuleEvaluation] = [NewYorkTimestamps.evaluate(now)]
         evaluations.extend(_blocked_evaluations())
 
+        # -- GATE-008 / GATE-007 / GATE-002: the correlate layout, actually read ------
+        # Wrapped separately from the outer try so a panel-read failure degrades this
+        # section to "unreadable, and here is which panel" rather than killing the whole
+        # record. A shadow that emits nothing teaches nothing.
+        layout_evaluations, layout_causes = _evaluate_layout(bars, signal_tf=signal_tf)
+        evaluations.extend(layout_evaluations)
+
         # A setup is "in play" only if the primitives produced something to judge.
         # This is what separates SKIP from STAND_ASIDE, and it is a fact about the
         # bars rather than a preference (GATE-036).
@@ -209,7 +372,7 @@ def evaluate(
             causes.append("no imbalance on this bar to enter from")
         if not breaks:
             causes.append("no structure break to trade with or against")
-        causes.extend(BLOCKED_ON_CORRELATES.values())
+        causes.extend(layout_causes)
 
         # THE LAYOUT IS UNREADABLE, SO THE ANSWER IS ALWAYS STAND_ASIDE.
         #
