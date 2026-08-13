@@ -128,10 +128,35 @@ class DominanceSource(MarketDataSource):
     name = "dominance"
 
     def __init__(self, raw_csv: str | Path | None = None) -> None:
+        # BOTH NAMES, AND THE SECOND ONE IS NOT REDUNDANT.
+        #
+        # The api's deployed compose sets `DOMINANCE_DATA_DIR: "/data/dominance"` and
+        # mounts /opt/dominance there read-only — correct intent, correct mount, and a
+        # variable name this code never read. So the api fell through to the
+        # /opt/dominance default, which does not exist inside that container, and every
+        # dominance read from the api returned nothing at all. The collector's compose
+        # sets `DOMINANCE_DIR`, so the two services disagreed about the name of the same
+        # thing and only one of them matched the code.
+        #
+        # Found by T-0006 criterion 4c, and only by it: the shadow reported all FOUR
+        # roster panels missing where exactly two should have been, and GATE-007's
+        # `alignment_tf` came back empty. "Read nothing" and "read the two we have" are
+        # different verdicts and the criterion existed to tell them apart. Criterion 3
+        # alone looked like success.
+        #
+        # DOMINANCE_DIR is preferred because it is what the collector and this source
+        # already agreed on; DOMINANCE_DATA_DIR is accepted so the running api works
+        # without a root-only edit to /docker/tradingai/docker-compose.yml, which no
+        # agent can perform. The durable fix is to rename it there — see KNOWN_ISSUES.
+        dominance_dir = (
+            os.getenv("DOMINANCE_DIR")
+            or os.getenv("DOMINANCE_DATA_DIR")
+            or "/opt/dominance"
+        )
         self.raw_csv = Path(
             raw_csv
             or os.getenv("DOMINANCE_RAW_CSV")
-            or Path(os.getenv("DOMINANCE_DIR", "/opt/dominance")) / "dominance_intraday_raw.csv"
+            or Path(dominance_dir) / "dominance_intraday_raw.csv"
         )
 
     # ------------------------------------------------------------------
