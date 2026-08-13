@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-14 (T-0007: ENTRY_TF 1H -> 5m, the first live behaviour change. B37 CLOSED — the lookahead is out of production. B33 gained the instance it predicted: every legal execution timeframe would have broken the shadow)
+Last updated: 2026-08-14 (T-0007: ENTRY_TF 1H -> 5m, the first live behaviour change. B37 CLOSED — the lookahead is out of production. B33 gained the instance it predicted: every legal execution timeframe would have broken the shadow; GATE-017 closed on the live path; B38 — GATE-018 stays OPEN)
 
 ---
 
@@ -1475,6 +1475,31 @@ though they may never raise into the trading path.
 
 **Related:** B32 proposes a liveness signal for the shadow going silent. This is the
 other half — the shadow **speaking**, and saying the wrong thing about why.
+
+### B38. GATE-018 is OPEN — 5M was forced by our collector, not settled by the corpus
+**Found in:** T-0007, 2026-08-14. **Recorded so a running choice does not become a
+ruling.**
+**What it is:** the execution-timeframe conflict is **Salim's to settle and this task
+did not settle it.** The registry marks GATE-018 OPEN, and the schema says so in its
+own words — *"1M and 3M are present ONLY because the workspace documents execution on
+them while the ruling excludes them."* The trader's bracketed charts are **6 trades on
+1M and 2 on 3M against zero on 30M**; the declared set is `{30M, 15M, 5M}`.
+
+**Why 5M, stated as the contingent engineering fact it is:** **1M is unavailable at any
+polling rate the collector currently permits.** At 10 s a 1M bar holds 6 samples against
+`MIN_SAMPLES_PER_SYNTHETIC_BAR = 20`, and `collect_dominance.py:453` enforces
+`interval = max(10, …)` — a hard floor. **If the collector ever polls fast enough, the
+question reopens exactly as it stands.** 3 s would do it.
+
+**THE DECLARED PARAMETER, narrowly:** *we chose the highest-margin member of the
+trader's declared execution set.* That is a choice and it is ours. **We did NOT resolve
+which side of GATE-018 is right**, and nothing produced by running on 5M is evidence
+about that.
+
+**What it could break:** "we ran 5M for six months without trouble" becoming evidence
+that the declared set won. It is not evidence — it is the consequence of a sampling
+floor in a collector nobody chose for this purpose. **Do not let duration launder a
+constraint into a ruling.**
 
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
