@@ -162,6 +162,36 @@ other, and would it still be able to fail next week".** The passing side is the 
 the two — a mutation that fails spuriously gets investigated, and one that passes spuriously gets
 recorded as evidence.
 
+### WHEN THE DEFECT IS TIMING, THE OBSERVABLE IS THE CALL — not the output
+
+**A third discrimination class, distinct from the two reachability failures above.** Those were about
+whether a mutation *runs*. This is about what a test can observe **in principle**: a correct test, a
+reachable defect, and **no overlap between them**.
+
+**The instance.** T-0011 reorders a gate call so the block reason can be recorded. If the
+implementation *reuses* the early value rather than re-evaluating, a position closed during an
+intervening `await` leaves the engine skipping on *"already in a position"* while holding none — a
+changed trading decision. **And the verification criterion — same skips, same reasons, same entries
+taken — could pass on every run**, because it observes VALUES and the defect is a difference in
+*when* a value was read.
+
+**The answer is mechanical:** spy the two methods, assert the order, assert the call count is 2 rather
+than 1. **Reuse produces one call; re-evaluation produces two.** A call-sequence assertion
+discriminates it; no number of value assertions can.
+
+> **When a defect is WHEN something happened rather than WHAT it produced, the observable is the
+> CALL, not the output.**
+
+**With the caveat that must travel with such an assertion:** it pins the **implementation**, not the
+property. It will fail when someone legitimately restructures, and that failure looks like a defect —
+**so it carries a comment saying what it protects**, or it becomes another guard nobody can interpret.
+
+**AND THE SAME DISTINCTION SOLVED A PROCESS FAILURE THE SAME HOUR.** Three attempts to stop the
+Manager committing Review's uncommitted register work: *chain the commands*, then *check the tree
+first*. Both are about **when** to check, and both were beaten by timing. The one that worked on its
+first outing is about **what to read** — **the diff of what you are about to stage.** Status can be
+stale; a diff cannot, because it is the thing itself. **Observe the artefact, not a report about it.**
+
 ### And it keeps appearing in this register itself
 
 **Not as irony — as evidence that accuracy is not the property that prevents it.** B45's quotation
