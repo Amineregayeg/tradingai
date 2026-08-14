@@ -538,16 +538,60 @@ def evaluate(
     declared: rec.DeclaredParameters,
     sequence_no: int,
     scan_id: str,
+    engine_policy: str | None = None,
 ) -> dict[str, Any] | None:
     """Run the contract engine over `df` and return a `setup_evaluation`.
 
     Returns None if anything at all goes wrong. The caller must not care why —
     that is what keeps a shadow evaluation incapable of affecting a trade.
+
+    `evaluate_detailed` is the same call with the decline REASON returned beside
+    the record. This wrapper stays because "the caller must not care why" is still
+    true of the trading path; the census is not the trading path, and it is the
+    one caller that must care.
     """
+    record, _reason = evaluate_detailed(
+        pair, df, signal_tf=signal_tf, declared=declared,
+        sequence_no=sequence_no, scan_id=scan_id, engine_policy=engine_policy,
+    )
+    return record
+
+
+def evaluate_detailed(
+    pair: str,
+    df,
+    *,
+    signal_tf: str,
+    declared: rec.DeclaredParameters,
+    sequence_no: int,
+    scan_id: str,
+    engine_policy: str | None = None,
+) -> tuple[dict[str, Any] | None, tuple[str, str] | None]:
+    """`(record, None)` when a bar was graded, `(None, (class, reason))` when it was not.
+
+    THE CLASS IS THE POINT, and it is returned rather than inferred. A bar that reaches
+    the shadow and produces no record is an omission, and the census has to say which
+    KIND — because the contract authorises the two kinds differently:
+
+        OMISSION_POLICY   insufficient history. Declared once, in `emission_policy_id`,
+                          which is literally named for it. No per-bar record is expected.
+        OMISSION_FAILURE  the grader threw. Authorised by no rule and no policy.
+
+    Deciding that here rather than by matching on the reason text is deliberate: a
+    classification that depends on the wording of a message changes meaning the first
+    time someone improves the message, and it would do so silently.
+
+    Still incapable of reaching the trader: no path here returns anything the engine
+    branches on, and every exception is still caught.
+    """
+    from app.services.telemetry.census import OMISSION_FAILURE, OMISSION_POLICY
+
     try:
         bars = _bars_from_frame(df)
         if len(bars) < 10:
-            return None
+            # POLICY, not failure: `every-closed-bar-with-sufficient-history-v2` is the
+            # declared emission policy and this is the condition it names.
+            return None, (OMISSION_POLICY, f"fewer than 10 bars in the frame (n={len(bars)})")
 
         now = bars[-1].time
 
@@ -606,16 +650,38 @@ def evaluate(
         # that merely passed would misattribute the decision.
         deciding = decision.deciding_rule_id or "GATE-036"
 
-        return rec.setup_evaluation(
+        record = rec.setup_evaluation(
             timestamp=now,
             declared=declared,
             scan_context={
                 "scan_id": scan_id,
                 "sequence_no": sequence_no,
                 "candidate_origin": "SCHEDULED_BAR_CLOSE",
+                # NAMED close, CARRIES open — `now` is `bars[-1].time`, the last closed
+                # bar's OPEN. Measured on production rows: a 5m bar stamped 20:35:00-04:00
+                # is written at 00:40:18Z, one full bar period after the stamp. Left as it
+                # is rather than corrected here, because changing it would give one field
+                # two meanings either side of a deploy and every stored record would need
+                # a date to interpret it. Recorded as B64; `census.py` derives close from
+                # `timestamp_ny` + the timeframe period on BOTH sides instead.
                 "bar_close_time_ny": iso_ny(now),
                 "data_as_of_ny": iso_ny(datetime.now(tz=timezone.utc)),
                 "pre_filters_applied": [],
+                # BOTH FACTS, ALWAYS — never one-of-two.
+                #
+                # `engine_policy` is what the LIVE engine would do with this bar; null
+                # means nothing blocked it. `rule_verdict` is what the RULES said. They
+                # are different questions, and "the rules were not consulted" and "the
+                # rules were consulted and permitted" are different answers that a
+                # one-of-two field would render identically.
+                #
+                # Today the shadow runs above the entry gates, so the rules are consulted
+                # on every bar and NOT_CONSULTED never appears — which is exactly when
+                # this is cheapest to record and easiest to leave out. Recording both
+                # means the day someone reorders those two calls back, the change shows
+                # up in the records instead of silently changing what they mean.
+                "engine_policy": engine_policy,
+                "rule_verdict": decision.decision,
             },
             instrument={
                 "symbol": pair,
@@ -683,6 +749,12 @@ def evaluate(
             notes="; ".join(causes),
             flags=_tf_flags(signal_tf) or None,
         )
+        return record, None
     except Exception as exc:  # noqa: BLE001 - a shadow may never reach the trader
         logger.warning("Shadow evaluation failed", pair=pair, error=str(exc))
-        return None
+        # FAILURE, not policy. The declared policy's own comment claims this path as
+        # "DATA-availability", but a raised exception is not a history condition — a
+        # missing panel, a schema violation and a dead database all arrive here, and
+        # calling any of them "insufficient history" is v1's false coverage claim
+        # narrowed rather than fixed (B68).
+        return None, (OMISSION_FAILURE, f"{type(exc).__name__}: {exc}")

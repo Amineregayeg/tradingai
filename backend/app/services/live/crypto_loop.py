@@ -123,6 +123,25 @@ class LiveCryptoLoop:
         self._task: "asyncio.Task | None" = None
         #: Sequence number for shadow (M9 Stage A) telemetry within this scan.
         self._shadow_seq = 0
+        #: pair -> {bar CLOSE time (UTC) -> (omission_class, reason)}.
+        #:
+        #: WHY THIS IS NOT A COUNTER, and the distinction is the whole of T-0011's
+        #: criterion 2. `scan_census` derives BOTH of its counts from outside this loop —
+        #: bars from the series, evaluations from the store — and computes the unemitted
+        #: set by DIFFERENCE. This map supplies only the REASON a bar is missing.
+        #:
+        #: So losing it costs an attribution, never a count. A restart that wiped a
+        #: counter would shrink bars_observed, evaluations_emitted and unemitted_bars
+        #: together, the reconciliation would still hold, and half a day counted honestly
+        #: would be indistinguishable from a whole one. A restart that wipes this map
+        #: leaves the census reporting the same omissions and saying it cannot explain
+        #: them — which C-13 reports as undocumented logic, correctly.
+        self._omissions: dict[str, dict[datetime, tuple[str, str]]] = {}
+        #: pair -> the NY session date of the last bar seen. The census for a date is
+        #: emitted when a bar from the NEXT date arrives: a day's bars cannot be counted
+        #: until the day is over, and guessing early is how a partial window gets reported
+        #: as a full one.
+        self._census_date: dict[str, str] = {}
         # The active run. Held in the DB rather than only in memory so
         # recreating the api container CONTINUES the same run instead of
         # silently resetting the dashboard's numbers on every deploy.
@@ -587,6 +606,11 @@ class LiveCryptoLoop:
         self._last_eval.clear()
         self._open_decision.clear()
         self.activity.clear()
+        # A new run is a new scan. Attributions belong to the run that observed them, and
+        # the census for a date is scoped to a run's scan_id — carrying either across a
+        # reset would let one run's omissions be reported inside another run's census.
+        self._omissions.clear()
+        self._census_date.clear()
         self.paused = False
 
         await self._act("engine", f"Run reset — new run started, balance back to "
@@ -621,7 +645,7 @@ class LiveCryptoLoop:
         except Exception as exc:  # noqa: BLE001
             logger.warning("Broker reset failed", error=str(exc))
 
-    async def _shadow_evaluate(self, pair: str, entry_df) -> None:
+    async def _shadow_evaluate(self, pair: str, entry_df, engine_policy: str | None = None) -> None:
         """Emit one contract `setup_evaluation` for this bar. Never raises.
 
         THE SHADOW MAY NOT AFFECT THE TRADE, EVER. That is the whole safety
@@ -632,28 +656,167 @@ class LiveCryptoLoop:
         The counter is per-process and resets on restart. `sequence_no` is
         scoped to a scan, and the scan id is the run — so a restart legitimately
         begins a new scan rather than continuing one with a hole in it.
+
+        EVERY PATH OUT OF HERE THAT WRITES NO RECORD NOW ATTRIBUTES ITSELF, and says
+        which KIND of omission it is. The grader classifies its own declines; anything
+        swallowed by the `except` below is a FAILURE, because a raised exception is not
+        a condition the declared emission policy covers.
+
+        None of this is written into a `rule_id`. "The layout was too thin" and "the
+        database was unreachable" are engine failures, not clauses of Salim's strategy,
+        and the contract's `unemitted_bars` can only hold an omission a registry rule
+        authorises — so the census reports these in `notes` and leaves the resulting
+        imbalance standing rather than inventing a rule that would read as permission.
+
+        `engine_policy` is passed through to the record, not acted on. See the caller.
         """
+        from app.services.telemetry import census
+
+        bar_close_utc: datetime | None = None
         try:
             from app.db.session import async_session_maker
             from app.services.live import shadow
             from app.services.telemetry import store as telemetry_store
 
+            bar_close_utc = self._bar_close_utc(entry_df)
             self._shadow_seq += 1
-            record = shadow.evaluate(
+            record, decline = shadow.evaluate_detailed(
                 pair,
                 entry_df,
                 signal_tf=self.entry_tf,
                 declared=shadow.declared_parameters(),
                 sequence_no=self._shadow_seq,
                 scan_id=f"scan-{self.run_id}",
+                engine_policy=engine_policy,
             )
             if record is None:
+                cls, reason = decline or (
+                    census.OMISSION_FAILURE, "the grader returned no record and no reason",
+                )
+                self._note_omission(pair, bar_close_utc, cls, reason)
                 return
             async with async_session_maker() as db:
                 await telemetry_store.store(db, record, run_id=self.run_id)
                 await db.commit()
         except Exception as exc:  # noqa: BLE001 - a shadow may never reach the trader
             logger.warning("Shadow evaluation not recorded", pair=pair, error=str(exc))
+            self._note_omission(
+                pair, bar_close_utc, census.OMISSION_FAILURE, f"{type(exc).__name__}: {exc}",
+            )
+
+    def _bar_close_utc(self, entry_df) -> datetime:
+        """The CLOSE time, in UTC, of the last bar in `entry_df`.
+
+        The frame is indexed by bar OPEN time, so the period is added here rather than
+        assumed anywhere else. Both sides of the census's set difference go through this
+        same conversion, which is what stops one side counting opens and the other closes.
+        """
+        from app.services.live.shadow import schema_tf
+        from app.services.telemetry import census
+
+        moment = entry_df.index[-1].to_pydatetime()
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=timezone.utc)
+        return census.bar_close(moment, census.period_for(schema_tf(self.entry_tf)))
+
+    def _note_omission(
+        self, pair: str, bar_close_utc: "datetime | None", cls: str, reason: str,
+    ) -> None:
+        """Remember WHY a bar produced no record. Never raises, never counts.
+
+        A bar whose close time could not even be read is deliberately not recorded under
+        a guessed key: the census would then attribute the omission to the wrong bar,
+        which is worse than reporting it unattributed. It is still COUNTED either way —
+        the set difference finds it without this map — and lands in the census's
+        `unattributed` bucket, which C-13 reports.
+        """
+        if bar_close_utc is None:
+            return
+        self._omissions.setdefault(pair, {})[bar_close_utc] = (cls, reason)
+
+    def _bar_opens(self, df) -> list[datetime]:
+        """Every bar OPEN time in a frame, as aware UTC. Naive index -> UTC, as elsewhere."""
+        out: list[datetime] = []
+        for ts in df.index:
+            moment = ts.to_pydatetime()
+            if moment.tzinfo is None:
+                moment = moment.replace(tzinfo=timezone.utc)
+            out.append(moment.astimezone(timezone.utc))
+        return out
+
+    async def _maybe_emit_census(self, pair: str, bsym: str, entry_df) -> None:
+        """Emit the population record for the NY session date that just ended.
+
+        Never raises: a census is a measurement of the engine and must not be able to
+        stop it, exactly as the shadow cannot.
+
+        The trigger is a bar whose NY date differs from the last one seen for this pair.
+        A session's bars cannot be counted while the session is still running, and a
+        census emitted early would report a partial window as a whole one — which is the
+        undercount this record exists to detect, produced by the record itself.
+        """
+        from app.services.live.shadow import schema_tf
+        from app.services.telemetry import census
+
+        try:
+            closed = self._bar_close_utc(entry_df)
+            today = census.session_date_of(closed)
+            previous = self._census_date.get(pair)
+            self._census_date[pair] = today
+            if previous is None or previous == today:
+                return
+            await self._emit_census(pair, bsym, previous, schema_tf(self.entry_tf))
+        except Exception as exc:  # noqa: BLE001 - a census may never reach the trader
+            logger.warning("Census not emitted", pair=pair, error=str(exc))
+
+    async def _emit_census(self, pair: str, bsym: str, session_date: str, tf: str) -> None:
+        """Build and store one `scan_census`, with both counts derived externally."""
+        from app.db.session import async_session_maker
+        from app.services.live import shadow
+        from app.services.telemetry import census
+        from app.services.telemetry import store as telemetry_store
+
+        period = census.period_for(tf)
+        frm, to = census.session_window(session_date)
+        # Enough bars to span the window with room to spare. `_fetch_bars` always ends at
+        # NOW, and this runs one bar into the new session, so the window is the most
+        # recent full day plus a little — the slack covers the bar we are standing on, a
+        # 25-hour fall-back day, and a feed that returns short.
+        want = int((to - frm) / period) + 30
+        frame = await self._fetch_bars(bsym, self.entry_tf, want)
+
+        async with async_session_maker() as db:
+            record = await census.build_scan_census(
+                db,
+                declared=shadow.declared_parameters(),
+                instrument={
+                    "symbol": pair,
+                    "instrument_class": "ALIGNED_MAJOR",
+                    # The same claim the setup_evaluations for this window carry, so the
+                    # census and the records it counts describe one instrument rather
+                    # than two that must be reconciled by a reader.
+                    "venue": "BINANCE_SPOT",
+                },
+                signal_tf=tf,
+                session_date=session_date,
+                bar_opens=self._bar_opens(frame),
+                attributions=self._omissions.get(pair, {}),
+                # Unique per (run, pair, timeframe, session date). `record_id` is unique
+                # in the store, so a second attempt at the same census raises rather than
+                # quietly writing a duplicate the conformance suite would count twice.
+                scan_id=f"census-{self.run_id}-{pair}-{tf}-{session_date}",
+            )
+            await telemetry_store.store(db, record, run_id=self.run_id)
+            await db.commit()
+
+        kept = {k: v for k, v in self._omissions.get(pair, {}).items() if k >= to}
+        self._omissions[pair] = kept
+        logger.info(
+            "Census emitted", pair=pair, session_date=session_date,
+            bars_observed=record["bars_observed"],
+            evaluations_emitted=record["evaluations_emitted"],
+            unemitted=len(record["unemitted_bars"]),
+        )
 
     async def _record_abstention(self, pair: str, entry_df, trace) -> None:
         """Persist WHY no trade was taken.
@@ -828,12 +991,36 @@ class LiveCryptoLoop:
         # frame rather than mutating the one the ICT path is about to use, and every
         # exception is swallowed. Being above the gates changes what it SEES, not what
         # it can DO.
-        await self._shadow_evaluate(pair, entry)
+        # T-0011 — the block reason, computed EARLY and FOR THE RECORD ONLY.
+        #
+        # The shadow's record is the only per-bar artefact that survives the process, so
+        # it is where "what the live engine would have done with this bar" has to be
+        # written. At the old position — after the gates — there was nothing left to
+        # attach it to, because the gates `return`.
+        #
+        # THIS VALUE IS NEVER REUSED AT THE GATE, and that is deliberate rather than an
+        # oversight. `_entry_block_reason` reads live mutable state — `kill_switch`,
+        # `self.paused`, and `await self._has_position(pair)` — and the shadow call below
+        # is `async` and does database I/O, so it YIELDS. A position closed during that
+        # yield, or a kill switch armed during it, would leave a reused value describing
+        # a world that no longer exists: the engine would skip on "already in a position"
+        # while holding none. That is a changed TRADING decision produced by a
+        # bookkeeping change, and it would present as a market condition rather than as a
+        # bug. The cost of re-evaluating is two position reads.
+        engine_policy = await self._entry_block_reason(pair)
+
+        await self._shadow_evaluate(pair, entry, engine_policy)
+
+        # The population record for the session that just ended, if one just did.
+        await self._maybe_emit_census(pair, bsym, entry)
 
         # Entry gates — the bar is marked consumed above, BEFORE these gates, on
         # purpose (re-testing a stale bar later in the hour would fire a market
         # order sized off a stale FVG edge). Each block reason is surfaced to the
         # UI so the engine never no-ops silently.
+        #
+        # RE-EVALUATED, not reused. See the comment on `engine_policy` above; the
+        # ordering is asserted by test_t0011_census.py::test_the_gate_re_evaluates_...
         block = await self._entry_block_reason(pair)
         if block is not None:
             kind = "halt" if block.startswith("KILL SWITCH") else "skip"

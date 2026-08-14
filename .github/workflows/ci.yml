@@ -133,6 +133,22 @@ jobs:
         working-directory: .
         run: python3 scripts/check_partial_rules.py
 
+      # C-13. The third layer of the coverage chain, and the only one that makes the
+      # second worth having: a census nobody reads reproduces exactly the failure it was
+      # built to end.
+      #
+      # `--self-test` and NOT a run over the live store, deliberately. There are no
+      # censuses in CI and there were none in production the day this shipped, so a
+      # corpus run here would examine zero records and report green — which is the
+      # honest-looking silence this whole task is about. The self-test feeds it a census
+      # that is wrong in three distinct ways and fails if the checker reports fewer than
+      # three, so what CI asserts is that the check CAN bite. Whether it DOES is a
+      # question about production, and `--api --require-records` is the command that
+      # asks it.
+      - name: C-13 can detect a census that does not reconcile
+        working-directory: .
+        run: python3 scripts/check_census_reconciliation.py --self-test
+
   guards:
     name: Tier 0.2 - lookahead guards must bite
     runs-on: ubuntu-latest

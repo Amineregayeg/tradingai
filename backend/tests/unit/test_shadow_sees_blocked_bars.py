@@ -46,7 +46,7 @@ def loop_with_a_blocked_entry(monkeypatch):
     async def _blocked(pair):
         return "already in a position"
 
-    async def _shadow(pair, entry):
+    async def _shadow(pair, entry, engine_policy=None):
         seen.append(pair)
 
     async def _act(kind, msg):
@@ -78,6 +78,19 @@ async def test_the_shadow_runs_before_the_gate_not_merely_somewhere(monkeypatch)
 
     A test that only checks "the shadow ran" passes if someone moves the call back
     below the gate and the gate happens to be open. This pins the sequence.
+
+    T-0011 CHANGED THE EXPECTED SEQUENCE AND NOT THE PROPERTY. `_entry_block_reason` is
+    now called a SECOND time, before the shadow, purely to put "what the live engine
+    would have done with this bar" into the shadow's record — the gate below still
+    re-evaluates and is still the only call that decides anything.
+
+    The property T-0010 pinned is intact and is still what fails here: if the shadow is
+    sunk back below the gate, this gate BLOCKS and returns, so "shadow" disappears from
+    the list entirely rather than merely moving. The sequence is asserted exactly rather
+    than by `in`, because that also pins T-0011's own requirement — TWO gate calls, not
+    one. A single call would mean the early value was reused at the gate, which is a
+    trading behaviour change (a position closed during the shadow's `await` would be
+    skipped on a reason that is no longer true).
     """
     loop = LiveCryptoLoop()
     order: list[str] = []
@@ -89,7 +102,7 @@ async def test_the_shadow_runs_before_the_gate_not_merely_somewhere(monkeypatch)
         order.append("gate")
         return "already in a position"
 
-    async def _shadow(pair, entry):
+    async def _shadow(pair, entry, engine_policy=None):
         order.append("shadow")
 
     monkeypatch.setattr(loop, "_fetch_bars", _fetch)
@@ -98,7 +111,10 @@ async def test_the_shadow_runs_before_the_gate_not_merely_somewhere(monkeypatch)
     monkeypatch.setattr(loop, "_act", lambda *a, **k: _noop())
 
     await loop._tick_symbol("BTC/USD", "BTCUSDT")
-    assert order == ["shadow", "gate"], f"shadow must precede the gate, got {order}"
+    assert order == ["gate", "shadow", "gate"], (
+        f"the shadow must run between the record-only read and the deciding gate, and "
+        f"the gate must re-evaluate rather than reuse; got {order}"
+    )
 
 
 async def _noop():

@@ -1002,6 +1002,36 @@ would measure it continuously and name the first bar it misses. **T-0010 proves 
 once; the census proves it every hour.** Related: **B34** (the filtered sample),
 **B32** (nothing reports whether the shadow records at all), **B13**.
 
+**NARROWED, NOT CLOSED — T-0011, 2026-08-15.** All three layers now exist. The reason this
+entry stays open is stated before the fix, because the fix is the part that reads as closure:
+
+* **No census has been emitted in production yet.** The offline work is complete and pushed;
+  the deploy is Malek's. Until a real session date rolls over on the live engine, the caller
+  is code that has never run against production, which is a weaker claim than B41 needs to
+  be closed by. **The first census is the finding, and it does not exist yet.**
+* **C-13 is implemented as its reconciliation clause only.** `census.reconcile()` answers
+  "does this census add up, and is every shortfall accounted for". The schema's other
+  mentions of C-13 (cross-record joins from a census to the evaluations carrying its
+  `scan_id`) are not built. Naming it "C-13, done" would be this entry's own species.
+* **CI exercises the check with a SELF-TEST, not a corpus.** There are no censuses in CI and
+  none in production, so a corpus run would examine zero and report green — the exact
+  silence this entry is about. What CI asserts is that the checker CAN bite; whether it
+  DOES is `--api --require-records`, which is a question about production.
+
+**What was built:** `backend/app/services/telemetry/census.py` — both counts derived from
+outside the emitting loop (bars from the series, evaluations from stored rows filtered on
+PARSED bar time), the missing set computed by difference, and `reconcile()` as C-13.
+`crypto_loop._maybe_emit_census` is the caller, firing on NY session rollover.
+`scripts/check_census_reconciliation.py --self-test` is the CI step.
+
+**And the ruling that changed the design, because it is the durable part.** The first design
+put each omission in `unemitted_bars` with a sentinel `rule_id`. `unemitted_bars.items`
+REQUIRES a `rule_id` matching the registry pattern, so an omission caused by a FAILURE cannot
+be represented there without inventing a rule — see **B65**. The Manager ruled: the array
+stays empty, the counts go in `notes`, and **the resulting imbalance is left standing rather
+than absorbed**, because *an empty array with a silent mismatch is exactly the honest-looking
+census this task exists to prevent*. Related: **B34**, **B64**, **B65**, **B66**, **B68**.
+
 ### B42. `shadow.py` carries two comment blocks that contradict each other about whether the perpetuals feed exists
 **Found in:** 4.5, **2026-08-14** (manager, while tracing where the engine takes its data
 from). *Date added so `agents/stale_sweep.py` can bound this entry — with a version alone it
@@ -1772,6 +1802,146 @@ a predicate deferral has no owner the moment nobody recognises themselves in it.
 `34 / 104 distinct` — rather than picking one, because both are legitimate answers to different
 questions and a bare number cannot say which set it counted. Related: **B43**, **B45**, **B47**,
 **B49**, **B58**.
+
+### B69 — four sites still name `every-closed-bar-roster-v1`, including `scan_census`'s own docstring
+
+**Found in:** T-0011, 2026-08-15. Flagged to me by the Manager mid-build as out of scope, and
+recorded here rather than fixed for that reason.
+
+**What it is.** The engine has declared `every-closed-bar-with-sufficient-history-v2` since
+T-0010. Four places still say `v1`:
+
+    records.py:310                        scan_census's docstring, describing what the
+                                          policy permits — the most misleading of the four
+    tests/unit/test_telemetry_contract.py:34, :224      fixture + docstring
+    tests/integration/test_telemetry_store.py:33        fixture
+
+`crypto_loop.py:983` also names v1 and is CORRECT — it is a historical comment about what
+T-0010 fixed, and rewriting it would erase the record.
+
+**Why it matters.** `records.py:310` is the docstring of the record this task exists to emit,
+and it states a policy the engine no longer declares plus a rule the schema cannot enforce
+(*"every unemitted bar must name the registry rule id"* — see **B65**). A reader reaching for
+the authoritative description of `unemitted_bars` lands on it. The two test fixtures declare a
+policy no engine emits, so they validate a shape nothing produces.
+
+**Why it is not fixed here.** The Manager scoped it out and I did not overrule that. My own
+argument for including it — that it is the docstring of the function whose semantics I changed
+— is real, and it is recorded here so the next reader can weigh it rather than rediscover it.
+
+**Fix:** one pass over the four sites. `v1` should survive only where it is describing history.
+
+### B64 — `scan_context.bar_close_time_ny` carries the bar's OPEN time, and its NAME is the evidence it does not
+
+**Found in:** T-0011, 2026-08-15, while deciding which column the census may filter on.
+
+**What it is.** `shadow.py` sets `scan_context.bar_close_time_ny = iso_ny(now)` where `now`
+is `bars[-1].time` — the last CLOSED bar's OPEN time. The same value goes into the record's
+top-level `timestamp_ny`. Measured on production rows rather than reasoned from the source:
+
+    timestamp_ny  2026-08-13T20:35:00-04:00     = 00:35Z
+    created_at    2026-08-14 00:40:18Z
+
+**A 5m bar stamped 20:35 is written at 00:40:18Z.** If 20:35 were the CLOSE, the row would
+land at 00:35 plus a few seconds. It lands five minutes later, which is one full bar period —
+so the stamp is the OPEN and the bar closed at 00:40Z.
+
+**Why it matters.** Anything joining on that field believes it has close times. At 5m every
+join is one bar out; at 1H, an hour. It is the shape that does not raise: both values are
+valid `iso_ny` strings, both sort, and the wrong one is the one the field is named after.
+
+**Not fixed, deliberately.** Correcting the value would give one field two meanings either
+side of a deploy, and every stored record would need a date to interpret it. `census.py`
+derives close from `timestamp_ny` plus the timeframe period on BOTH sides of its comparison
+instead, so the convention cancels and the census is right whichever way this is settled.
+
+**Fix:** decide it once for the whole store — either rename the field or correct the value
+and record the changeover — and do not do it in a task that also computes with it.
+
+### B65 — the schema REQUIRES `rule_id` on an unemitted bar while its prose describes an entry with none
+
+**Found in:** T-0011, 2026-08-15, by Execute while implementing the criterion that instructed
+it. Confirmed by Review against the schema it had itself specified, and verified independently
+by the Manager, who ruled on it the same hour.
+
+**What it is.** Two clauses of `TELEMETRY_SCHEMA.json` cannot both be honoured:
+
+    unemitted_bars.items  required  ["bar_close_time_ny", "rule_id", "reason"]
+    rule_id               pattern   ^(GATE|GRADE|TARGET|ENTRY|EXIT|SIZE|PRIM)-[0-9]{3}$
+
+    the same array's description:
+      "An entry with NO rule_id, or with a rule_id absent from the registry,
+       is undocumented logic (C-13, MAJOR)."
+
+**An entry with no `rule_id` cannot validate, so `store.py` raises before it is written, so
+the case the prose asks C-13 to catch can never reach C-13.** The outer defence makes the
+inner one unreachable — this register's recurring shape, arriving inside the contract.
+
+**Why it matters, and it is not academic.** The contract authorises a skipped bar two ways:
+by POLICY (`emission_policy_id`, declared once, no per-bar record) or by RULE (a per-bar
+entry naming a `GATE-nnn`). **An omission caused by FAILURE — a dead database, a missing
+panel, a thin layout — is authorised by neither and has no representation anywhere.** That is
+the whole gap, and it is narrower than "the contract assumes every omission is rule-authorised".
+
+**What T-0011 did about it.** Nothing to the schema — an implementer widening a contract to
+unblock their own task is how a contract stops being one. `unemitted_bars` stays empty for the
+failure class, the counts go in `notes`, and the arithmetic is allowed to come out unbalanced
+with the shortfall declared to the bar. C-13 reports a DECLARED shortfall as the contract gap
+and a SILENT one as a census that does not add up, which are different failures.
+
+**Fix:** Salim's ruling. Filed as the fourth contract-gap item. Until then every infrastructure
+failure shows up as a MAJOR that cannot be cleared by fixing the engine, only by the contract
+gaining a way to say "we could not evaluate this".
+
+### B66 — the census's evaluation count scans an instrument's whole history, with no time bound in SQL
+
+**Found in:** T-0011, 2026-08-15, written by the author of the query.
+
+**What it is.** `census.emitted_closes` filters in SQL on `record_type`, `instrument` and
+`signal_tf` only, then parses `timestamp_ny` and applies the time window in Python. The window
+is deliberately NOT in the SQL: the only bar-time column is a New-York-local STRING, and every
+way of comparing it in SQL is either lexicographic (wrong across the autumn fall-back, and
+silent) or a cast that assumes an offset (wrong for half the year). Correctness first.
+
+**Why it matters.** The row count grows without bound: ~288/day/instrument at 5m, so ~576/day
+for the two configured pairs, ~210k rows after a year. Every census emission reads all of an
+instrument's rows and discards the ones outside one day. At today's 156 telemetry records this
+is free. It will not stay free, and the failure mode is a census emission that gets slower
+every day without ever getting wrong — so nothing will flag it.
+
+**Fix:** the durable answer is a real bar-time column (`timestamptz`, UTC) written beside
+`timestamp_ny`, which makes the window an indexed SQL predicate and retires this entry and half
+of **B64** at once. A generous `created_at` band as a pre-filter would work sooner but has to be
+proved wider than the largest possible write lag, and a backfill breaks that proof.
+
+### B68 — the declared emission policy says "sufficient history" and its own comment claims the exception path too
+
+**Found in:** T-0011, 2026-08-15, while classifying the omission population the census reports.
+
+**What it is.** `shadow.py` declares `emission_policy_id="every-closed-bar-with-sufficient-history-v2"`,
+and the comment above it lists TWO conditions the name is meant to cover:
+
+> *"the price fetch returned fewer than 60 bars, or fewer than 10 reach the primitives — no
+> series to evaluate; **the evaluation raised and was swallowed**, which is by design and which
+> nothing reports (B32). Both are DATA-availability."*
+
+**The second is not a history condition.** A raised exception arrives from a missing panel, a
+schema violation or an unreachable database. Calling that "insufficient history" is v1's false
+coverage claim — the one B34 was filed for and T-0010 fixed — narrowed rather than fixed.
+
+**Why it matters.** It is the difference between an omission the contract authorises and one
+nothing authorises, and it is the exact loophole the Manager forbade in T-0011's plan:
+`emission_policy_id` is `{"type": "string"}` with no enum and no registry, so a policy can be
+renamed to cover anything. *A policy declares what the engine CHOOSES not to evaluate; a
+failure is what it COULD NOT evaluate, and the second is not the engine's to declare.*
+
+**Not fixed.** The policy string is untouched — renaming it either way is the loophole. The
+census classifies the two paths correctly regardless (`OMISSION_POLICY` for insufficient
+history, `OMISSION_FAILURE` for the swallowed exception), so the counts are right while the
+declaration is still over-broad.
+
+**Fix:** narrow the comment to the condition the name actually states, and treat the swallowed
+exception as what **B65** says it is — a class the contract cannot yet express.
 
 ### B67 — no endpoint exposes a live position's SL/TP, so "every open position has a stop" is unobservable
 

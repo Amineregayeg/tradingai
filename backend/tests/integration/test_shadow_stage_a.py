@@ -190,7 +190,11 @@ async def test_the_shadow_runs_before_the_ict_decision_in_the_tick():
     from pathlib import Path
 
     src = Path("app/services/live/crypto_loop.py").read_text(encoding="utf-8")
-    assert src.index("_shadow_evaluate(pair, entry)") < src.index(
+    # The call gained an argument in T-0011 (`engine_policy`, record-only). Matched on
+    # the call OPENING rather than the whole expression so this asserts the ordering it
+    # is named for and not the argument list — a source-text guard that breaks on every
+    # signature change gets relaxed by whoever is holding the unrelated diff.
+    assert src.index("await self._shadow_evaluate(pair, entry") < src.index(
         "sig, trace = evaluate_latest_bar_traced"
     )
 
