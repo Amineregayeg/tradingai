@@ -263,6 +263,42 @@ and has needed three recorded fixes — **B18**'s over-wide restore, the `MUTATE
 could not see, and the 127 exit code. **Designed in advance is not the same as correct.** The point is
 where to look first, not which kind of tool is better.
 
+### A PROBE THAT A DEAD RULE PASSES — and the control run that separates them
+
+**Found by Execute building T-0016's criterion 2, and neither the plan nor the standing section on
+partially-evaluable rules named it.**
+
+The check flips one condition to `NOT_EVALUABLE` and asserts the rule declines to decide. **A rule
+that returns its default unconditionally — a completely dead rule — passes every one of those probes
+perfectly.** *"Blocked"* and *"always default"* are indistinguishable from the probe alone.
+
+> **The project's signature failure, inside the check written to enforce the project's signature
+> discipline.**
+
+**The fix is an ALL-TRUE CONTROL, run first: if the rule cannot reach a verdict with every condition
+readable, the probes below prove nothing and the script fails rather than passing.** Measured on
+landing: GATE-040's control is FAIL and GATE-041's is PASS, **so both are live rather than dead**, and
+the probes mean what they claim.
+
+**This is the criterion-2 analogue of the mutation-discrimination form above** — a probe that passes
+whether or not the property holds, where 3b-i was a mutation that *failed* whether or not it held.
+**Same defect, third position: the passing side, in a probe rather than a mutation.**
+
+### A MEASUREMENT TAKEN ON ONE BRANCH IS NOT A PROPERTY OF THE RULE
+
+**The Manager reported five keys on GATE-041 lacking provenance. There are six.** The list was
+measured on the **blocked** branch only; `mandatory_satisfied` (`:204`) exists solely on the **decided**
+branch and has no provenance either.
+
+**So the count was complete for the path examined and read as complete for the rule.** That is the
+denominator problem in a place the *name-the-set* fix does not reach: the set was named — *"every
+top-level key of `values`"* — and **the code path was not.** A rule with two exit branches has two
+`values` dicts, and one record per rule leaves the other branch unchecked while the figure reads as
+covered.
+
+**Execute's check examines both branches per rule for exactly this reason.** The general form: **when a
+function has multiple exits, "I measured its output" names one of them.**
+
 ### And it keeps appearing in this register itself
 
 **Not as irony — as evidence that accuracy is not the property that prevents it.** B45's quotation
