@@ -71,6 +71,12 @@ from app.services.rules.gate_017_analysis_only_tfs import (  # noqa: F401
 )
 from app.services.rules.gate_023_timezone import NewYorkTimestamps  # noqa: F401
 from app.services.rules.gate_036_stand_aside import Decision, StandAside  # noqa: F401
+from app.services.rules.gate_040_cool_off import (  # noqa: F401
+    DECLARED_COOL_OFF,
+    INPUT_UNION,
+    CoolOffBeforeReversal,
+    DeclaredDuration,
+)
 from app.services.rules.gate_041_reverse_switch import (  # noqa: F401
     CONDITIONS,
     MANDATORY_CONDITION,

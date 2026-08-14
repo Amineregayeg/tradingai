@@ -489,3 +489,120 @@ def test_too_few_bars_returns_none_rather_than_not_consolidation():
     from app.services.rules import consolidation as C
 
     assert C.detect_window([], tf="5m", threshold=C.DECLARED_THRESHOLD) is None
+
+
+# ---------------------------------------------------------------------------
+# GATE-040 / GRADE-035 (T-0014 part 2)
+# ---------------------------------------------------------------------------
+
+def _window(consolidating: bool):
+    from datetime import datetime, timedelta, timezone
+
+    from app.services.rules import consolidation as C
+    from app.services.rules.prim_001_swings import Bar
+
+    t0 = datetime(2026, 8, 14, tzinfo=timezone.utc)
+    step = 0 if consolidating else 3
+    bars = [
+        Bar(time=t0 + timedelta(minutes=5 * i), high=101 + step * i + (i % 2),
+            low=100 + step * i + (i % 2), open=100.5, close=100.5)
+        for i in range(C.WINDOW_BARS)
+    ]
+    return C.detect_window(bars, tf="5m", threshold=C.DECLARED_THRESHOLD)
+
+
+def _all_readable():
+    from app.services.rules.gate_040_cool_off import INPUT_UNION
+
+    return [ConditionReading(n, "TRUE") for n, _ in INPUT_UNION]
+
+
+def test_the_declared_duration_is_not_compared_by_default():
+    """CRITERION 5. `if elapsed >= 24H` is the forbidden implementation.
+
+    The number is in quotation marks in the statement, which is exactly why an implementer
+    writes the comparison. Both registry entries bind: 'DO NOT HARDEN THEM INTO A RULE
+    WITHOUT A RULING', and the canon omits rather than retires them so they stand
+    UNOPPOSED — which is not ratified. The elapsed time is an OUTPUT either way.
+    """
+    from datetime import timedelta
+
+    from app.services.rules import DECLARED_COOL_OFF, CoolOffBeforeReversal
+
+    assert DECLARED_COOL_OFF.ratified is False
+    assert "unopposed is not ratified" in DECLARED_COOL_OFF.source
+
+    # One minute since the sweep, far under 24H — and still satisfied, because the
+    # duration is not enforced by default.
+    ev = CoolOffBeforeReversal.evaluate(
+        consolidation=_window(True), readings=_all_readable(),
+        elapsed_since_sweep=timedelta(minutes=1),
+    )
+    assert ev.values["duration_enforced"] is False
+    assert ev.values["cool_off"]["satisfied"] is True, (
+        "a 1-minute cool-off was refused — the 24H quotation has been hardened"
+    )
+    # But the elapsed time is still reported, which is what the output shape asks for.
+    assert ev.values["cool_off"]["elapsed_duration"] == 60
+
+
+def test_enforcing_the_duration_is_opt_in_and_then_it_bites():
+    from datetime import timedelta
+
+    from app.services.rules import CoolOffBeforeReversal
+
+    short = CoolOffBeforeReversal.evaluate(
+        consolidation=_window(True), readings=_all_readable(),
+        elapsed_since_sweep=timedelta(minutes=1), enforce_duration=True,
+    )
+    assert short.values["cool_off"]["satisfied"] is False
+    long = CoolOffBeforeReversal.evaluate(
+        consolidation=_window(True), readings=_all_readable(),
+        elapsed_since_sweep=timedelta(hours=30), enforce_duration=True,
+    )
+    assert long.values["cool_off"]["satisfied"] is True
+
+
+def test_a_sweep_with_no_cool_off_is_refused_and_one_with_cool_off_permitted():
+    """CRITERION 7's mutation, both directions."""
+    from app.services.rules import CoolOffBeforeReversal
+
+    no_cool = CoolOffBeforeReversal.evaluate(
+        consolidation=_window(False), readings=_all_readable()
+    )
+    assert no_cool.verdict == "FAIL" and no_cool.values["mode"] == "FORWARD"
+
+    cooled = CoolOffBeforeReversal.evaluate(
+        consolidation=_window(True), readings=_all_readable()
+    )
+    assert cooled.verdict == "PASS" and cooled.values["mode"] == "REVERSE"
+
+
+def test_the_alias_input_union_is_recorded_per_input():
+    """CRITERION 4c. GRADE-035 must not read as covered while its inputs are absent.
+
+    The pair declares DIFFERENT inputs, so registering GATE-040 registers GRADE-035 — and
+    the alias mechanism cannot see that three of GRADE-035's four declared dependencies
+    were missing. Recording the union per input is what stops the coverage line lying.
+    """
+    from app.services.rules import CoolOffBeforeReversal
+
+    ev = CoolOffBeforeReversal.evaluate()
+    assert ev.verdict == "NOT_APPLICABLE"
+    assert ev.values["mode"] == "FORWARD", "an unreadable prerequisite authorised a reversal"
+
+    # The 9:30 marker has NO producer — it must not be reported as merely unwired, and it
+    # must never be derived from the clock.
+    assert "ny_930_open_marker" in ev.values["not_evaluable"]
+    assert "ny_930_open_marker" not in ev.values["not_read"]
+    # The detector this task built exists, so its input is unwired rather than absent.
+    assert "consolidation_detector" in ev.values["not_read"]
+    assert ev.values["not_read"]["consolidation_detector"] == "rules/consolidation.py"
+
+
+def test_grade_035_is_registered_by_alias_and_marked_unable_to_fire():
+    from app.services.rules import implementations
+
+    impls = implementations()
+    assert impls["GRADE-035"] is impls["GATE-040"]
+    assert impls["GRADE-035"].CANNOT_FIRE_WITHOUT == ("GRADE-028",)
