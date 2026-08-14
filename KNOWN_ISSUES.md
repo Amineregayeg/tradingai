@@ -544,6 +544,31 @@ it cannot depend on anything whatever its statement mentions.
 Its `inputs` are *"Time and price action since the sweep; **the consolidation/overlap
 detector**; the absence of fresh old-direction gaps; the NY 9:30 open marker."*
 
+> **AMENDED after B48 — and the amendment is about this entry, not about GRADE-035.**
+>
+> **The quotation above is complete and accurate. This entry then addressed one of the four
+> inputs, and the plan it produced dropped two of the others entirely** — see **B48**.
+>
+> **Nothing in the entry distinguished *quoted* from *addressed*, so the full quotation read as
+> coverage.** That is why B48 took a further pass to surface: **the information was on the
+> record the whole time, in an entry that had already been read.** Review's finding, about the
+> register rather than the code.
+>
+> **Status of each input, which is what this entry should have carried from the start:**
+>
+> | input | status |
+> |---|---|
+> | time and price action since the sweep | available |
+> | **the consolidation/overlap detector** | **no producer — the subject of this entry, T-0014 Part 1** |
+> | the absence of fresh old-direction gaps | **available today from `PRIM-002` — dropped, restored by B48** |
+> | the NY 9:30 open marker | **no producer — dropped, restored by B48** |
+>
+> **Standing discipline this establishes: when an entry quotes a specification, mark which parts
+> it addresses.** An accurate, complete quotation is the most convincing possible form of
+> "handled", and it is not evidence of handling. **This register's recurring subject is an output
+> that does not discriminate between working and broken; here it is a quotation that does not
+> discriminate between cited and covered.**
+
 **There is no consolidation detector and no range detector**, in the registry or in the code.
 Review checked: the only `overlap` match under `app/services/rules/` is PRIM-002's **BPR
 overlap** — two opposite-direction imbalances overlapping *in price* — which is a different
@@ -650,6 +675,54 @@ half needs no new mechanism — re-read state before asserting it, particularly 
 No prompt change is required: `PROMPT_REVIEW.md` was already correct, which is itself the
 finding — *a documented convention that nothing enforces is a convention only when someone
 remembers it.* Related: **B15** (a stale registry with no verifier), **B29**, **B39**.
+
+### B48. Two of GRADE-035's four named inputs were quoted into this register and then dropped from the work — and one of them is the sanctioned replacement for a threshold we forbid
+**Found in:** T-0014 pre-review, 2026-08-14, by Review
+**Severity:** moderate — it under-builds a HARD_GATE and leaves an implementer with no
+sanctioned way to express a condition the rule requires
+
+**`B45` quotes GRADE-035's `inputs` in full and then scopes the task to one of the four.**
+The registry says: *"Time and price action since the sweep; the consolidation/overlap
+detector; **the absence of fresh old-direction gaps**; **the NY 9:30 open marker**."* B45's
+attention went entirely to the missing consolidation detector — correctly, it is the largest
+gap — and **T-0014's plan inherited that scoping**, treating cool-off as two components
+(consolidation, momentum slowdown) rather than four. The other two are in neither the plan's
+criteria nor its Out of scope.
+
+**"Absence of fresh old-direction gaps" is buildable today, and it does a job we are
+currently asking an unratified knob to do.** `PRIM-002` is registered and its `Imbalance`
+carries `direction` and `formed_index`/`bar_time` — fresh and directional, already there.
+**A drift still printing fresh old-direction gaps is not a cool-off**, and that test needs no
+threshold at all. T-0014's own Risks section names the continuous knob as *"the largest
+single risk in the task"* — `k` from 3.0 to 4.0 moves the consolidation rate from **25% to
+69%** with no fixture failure — and asks a price-geometry detector to reject slow drift.
+**The rule's own named input rejects it structurally.**
+
+**The NY 9:30 open marker has no producer anywhere.** Checked: no `9:30`, `session_open` or
+`market_open` under `app/`; `app/services/telemetry/ny_time.py` provides `to_ny`, `iso_ny`,
+`now_ny` and `NY = ZoneInfo("America/New_York")` only, and GATE-023 uses it for offsets.
+**So a session-open marker is a missing producer in the same class as `GRADE-028`** — but it
+was never recorded as one, because B45 stopped at the detector.
+
+**Why the second one is worse than a missing input usually is.** T-0014 forbids hardening the
+documented durations — *"`if elapsed >= timedelta(hours=24)` is a forbidden implementation…
+`elapsed_duration` is recorded, not compared"* — and that prohibition is right. But **the
+statement's own operationalisation of that duration is the session marker, not the clock**:
+*"it takes around 24H to cool off… then the price shifts at 9:30AM in the morning the next
+day."* A session boundary is not a duration comparison, so it does not collide with the
+prohibition. **Forbidding the clock while its sanctioned replacement has no producer leaves an
+implementer who needs a time component with nothing legitimate to reach for** — which is the
+condition under which the forbidden comparison gets written anyway.
+
+**The generalisable shape, which is why this is an entry and not a plan comment:** a register
+entry that quotes a full input list and then scopes work to the worst item **reads afterwards
+as if the list were covered.** B45 is accurate in every word and still produced a plan missing
+half the rule's inputs, because nothing distinguishes *"quoted"* from *"addressed"*.
+
+**Fix:** enumerate a rule's inputs as individual components with a producer id or `None` each
+— the shape T-0012's `ConditionReading`/`CONDITIONS` already uses for GATE-041 — so an input
+with no producer is a recorded `None` rather than an omission nobody can see. Then a session
+marker gets built or gets tracked. Related: **B44**, **B45**, **B46**, **B43**.
 
 ### B11. The disturbance grader now runs on real data — and its grade still decides nothing
 **Found in:** M4 (implementing GATE-002/007/008/048), 2026-08-08
