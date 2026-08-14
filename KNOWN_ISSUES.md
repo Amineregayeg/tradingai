@@ -1556,6 +1556,24 @@ absence of `failure`.**
 ### B31. `deciding_rule_id` can name a rule that was never evaluated
 **Found in:** T-0008, 2026-08-13, by Review's staleness audit. **Load-bearing, because
 it has already inverted a committed document.**
+**SCOPE RESTATED 2026-08-14 (T-0013): a second table now carries this field, and the
+two DISAGREE.** `decision_records` gained `decided_by` + `deciding_rule_id`, and it
+handles the same situation the opposite way:
+
+```
+shadow.py         deciding_rule_id or "GATE-036"   -> launders an absence into a citation
+decision_records  deciding_rule_id = NO_RULE_DECIDED -> names the absence as an absence
+```
+
+**Two vocabularies for one quantity is B33's shape**, and here it is worse than cosmetic:
+an audit joining the two tables on `deciding_rule_id` would count the shadow's absences
+as GATE-036 firings and the live table's as a distinct sentinel. **Reconcile at the
+cutover** — the live representation is the correct one, so the fix is to delete the
+`or "GATE-036"` fallback rather than to teach the new table to imitate it.
+
+**Deliberately NOT fixed in T-0013:** bundling it would have made that task's
+discriminating mutation untestable in isolation.
+
 **What it is:** `shadow.py:486` is `deciding = decision.deciding_rule_id or "GATE-036"`.
 So **GATE-036 is the fallback when no rule decided**, not a rule that fired.
 `rule_id="GATE-036"` appears **zero** times as a rule evaluation anywhere in the source,
@@ -1586,6 +1604,44 @@ ambiguity; the second is honest about what happened and the first is more useful
 **not** rely on the label alone until one of them exists.
 
 ### B32. Nothing reports whether the shadow is recording, and it went dark for 40 minutes
+**CLOSED 2026-08-14 (T-0009), deployed `9fe47ed42`.** `/api/system/data-health` now
+carries a `shadow` section beside `dominance_collector` and `backups`. Read from
+production immediately after the deploy:
+
+```
+status healthy   evaluation_state not_due   entry_tf 5m
+expected_per_hour 24.0   age_bars 0.0   attests liveness_only
+```
+
+**The cadence is DERIVED** from `fixed_config.ENTRY_TF` through the existing
+`_TF_SECONDS` map — `3600/300 × 2 symbols = 24`. **Mutation proved why that matters: a
+hardcoded 1H figure reads the actual 40-minute outage as HEALTHY**, because 40 min is
+under two 1H bars. The signal built to catch this outage would have missed it. That is
+B21's class, caught by making it fail rather than by noticing it.
+
+**Two honest limits, both stated in the payload rather than in a comment:**
+
+* **It attests liveness, NOT correctness.** A shadow can be alive, writing every cycle,
+  and grading a still-forming bar — a defect this project actually shipped on GATE-008's
+  MAIN panel — with every field above green. `does_not_attest` names this so the first
+  green reading cannot be cited as evidence the correlate layer is trustworthy.
+* **When it fires it cannot say WHICH failure it is** — the loop turning with the
+  evaluation raising, versus the loop not turning at all. `ambiguous_between` says so
+  rather than implying it knows, and a `note` records that an active `engine_run` row
+  means the run was never ENDED, not that the process is alive (**B14**).
+
+**How long would the original outage have taken to notice?** Honestly: **at 5m, ten
+minutes** — two bars — *and only if someone looked at the endpoint.* Nothing pages on
+it; that was deliberately out of scope. So this converts an undetectable failure into a
+detectable one, not into an announced one.
+
+**The plan's own criteria 2 and 4 were invalidated before it was built**, by T-0010 four
+hours later: the shadow now runs above the entry gates, so `already in a position` no
+longer suppresses a record and the `blocked` state the plan centred on no longer exists.
+**Recorded as a hazard of planning against a system under change, not as a defect in the
+plan** — and the result is sharper than the plan could have specified, because a due bar
+with no record now means broken outright rather than being drowned by position-holding.
+
 **Found in:** T-0008, 2026-08-13, after a defect of mine stopped every shadow record
 from validating.
 **What it is:** `_shadow_evaluate` swallows every failure by design — `shadow.py:20`:
