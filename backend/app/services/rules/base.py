@@ -28,10 +28,14 @@ the machine-checkable half of that.
 """
 from __future__ import annotations
 
-from typing import Any, ClassVar
+from dataclasses import dataclass
+from typing import Any, ClassVar, Literal
 
 from app.services.telemetry import contract_loader as contract
 from app.services.telemetry.records import RuleEvaluation, Verdict
+
+#: Whether a named condition was met, not met, or COULD NOT BE READ AT ALL.
+ConditionState = Literal["TRUE", "FALSE", "NOT_EVALUABLE"]
 
 #: Every implementation, keyed by the rule id it claims.
 _IMPLEMENTATIONS: dict[str, type["RuleImplementation"]] = {}
@@ -39,6 +43,74 @@ _IMPLEMENTATIONS: dict[str, type["RuleImplementation"]] = {}
 
 class DuplicateRuleImplementation(RuntimeError):
     """Two classes claim the same rule id."""
+
+
+@dataclass(frozen=True)
+class ConditionReading:
+    """One named condition of a multi-condition rule, with its evaluability.
+
+    SHARED, NOT PER-RULE. GATE-041 is the first rule with conditions it cannot all read;
+    GRADE-035 is the second, blocked on the same missing GRADE-028. A carrier declared
+    inside one rule module would force the next one either to import from an unrelated
+    sibling — coupling two rules through a file — or to redeclare it, after which two types
+    drift. There will be many of these, so the decision is made once here.
+
+    `NOT_EVALUABLE` IS THE WHOLE POINT AND IS NOT A THIRD FLAVOUR OF FALSE.
+    "No implementation produces this input" and "the producer ran and found nothing" are
+    different facts with different remedies, and collapsing them is how a DEAD CHECK reads
+    as a QUIET MARKET — this project's signature failure. `missing_producer` names which
+    producer is absent, so the absence is attributable rather than merely visible.
+    """
+
+    name: str
+    state: ConditionState
+    #: Set only when `state == "NOT_EVALUABLE"`. Names the producer that does not exist.
+    missing_producer: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.state == "NOT_EVALUABLE" and not self.missing_producer:
+            raise ValueError(
+                f"{self.name} is NOT_EVALUABLE but names no missing producer — an "
+                "unattributable absence is indistinguishable from a check that is broken"
+            )
+        if self.state != "NOT_EVALUABLE" and self.missing_producer:
+            raise ValueError(
+                f"{self.name} reports {self.state} while naming a missing producer"
+            )
+
+
+
+def quorum_blocked(
+    readings: list[ConditionReading], *, default_outcome: str
+) -> tuple[dict[str, str | None], str] | None:
+    """THE SHARED INVARIANT: no quorum is claimed while any condition is unreadable.
+
+    Returns `(unevaluable, default_outcome)` when the rule is blocked, or `None` when every
+    condition was readable and the caller may score its quorum.
+
+    WHY THIS IS SHARED WHEN IT IS ONLY FOUR LINES
+    GATE-041 is the first multi-condition rule with an unreadable input; GRADE-035 is the
+    second. Duplicated, each would filter its readings and emit its own default — and
+    **the two defaults point OPPOSITE ways**: `CONTINUE` for GATE-041, `satisfied=False`
+    for GRADE-035, both conservative for their own statement. So the two blocks are
+    SUPPOSED to differ in exactly the place a mistake would appear, and a reviewer reading
+    them side by side cannot tell a correct opposite from a wrong one, because difference
+    is the expected thing. That is the one duplication rereading cannot catch, and it is
+    created by the symmetry rather than in spite of it.
+
+    The failure it admits: a rule that counts its TRUE conditions and reaches quorum while
+    one condition is NOT_EVALUABLE has claimed a quorum on incomplete evidence — the
+    denominator silently shrinks to the readable subset.
+
+    `default_outcome` IS REQUIRED AND HAS NO FALLBACK, deliberately. A helper carrying its
+    own default would let a rule inherit the wrong direction silently. Forcing it to the
+    call site puts each rule's default next to that rule, which is the only place its
+    correctness can be checked against the statement it comes from.
+    """
+    unevaluable = [r for r in readings if r.state == "NOT_EVALUABLE"]
+    if not unevaluable:
+        return None
+    return {r.name: r.missing_producer for r in unevaluable}, default_outcome
 
 
 class RuleImplementation:
@@ -68,6 +140,19 @@ class RuleImplementation:
     #: `check_rule_coverage.py` prints these. They are prose on purpose: the thing that
     #: matters is why a gap exists, and that does not reduce to a percentage.
     COVERAGE_NOTE: ClassVar[str | None] = None
+
+    #: Rule ids this implementation needs a PRODUCER for, and which do not exist.
+    #:
+    #: IMPLEMENTED IS NOT THE SAME AS CAPABLE OF FIRING, and the coverage count cannot see
+    #: the difference. A rule whose input has no producer returns its documented DEFAULT
+    #: forever: registered, green, counted — and the engine decides exactly as before. Left
+    #: unmarked, the report climbs toward 91 while nothing changes, which is A10's
+    #: "an implemented rule that decides nothing is furniture" wearing a tick.
+    #:
+    #: Declared by the implementation rather than derived from the registry graph, because
+    #: 82 of 117 rules write their `inputs` as DATA NAMES, so a rule-id graph cannot see
+    #: those edges at all (B44). The rule knows; the graph does not.
+    CANNOT_FIRE_WITHOUT: ClassVar[tuple[str, ...]] = ()
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)

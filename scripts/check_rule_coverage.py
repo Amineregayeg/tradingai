@@ -134,6 +134,39 @@ def main() -> int:
     if implemented:
         print("  implemented ids:     " + ", ".join(sorted(implemented)))
 
+    # -- 4b. IMPLEMENTED IS NOT THE SAME AS CAPABLE OF FIRING ----------------------------
+    # THE FAILURE THIS EXISTS TO PREVENT, stated plainly because the number above is how
+    # the whole rules programme is tracked: a rule implemented while one of its inputs has
+    # no producer returns its documented DEFAULT forever. It is registered, its tests pass,
+    # the count rises — and the engine's decisions are unchanged. Without this second line
+    # the coverage report climbs to 91 while nothing decides differently, which is A10's
+    # "an implemented rule that decides nothing is furniture" in a form that looks strictly
+    # better than furniture.
+    #
+    # GATE-041 is the first instance: three of its seven conditions need GRADE-028, which
+    # is SOFT_PREFERENCE and outside the 57, so no wave will ever deliver it.
+    #
+    # Derived from each implementation's own declaration rather than from the registry
+    # graph, because 82 of 117 rules write their `inputs` as DATA NAMES and a rule-id graph
+    # cannot see those dependencies at all (B44). A rule that knows it cannot fire says so.
+    blocked = sorted(
+        rid
+        for rid, cls in sorted(rules_pkg.implementations().items())
+        if getattr(cls, "CANNOT_FIRE_WITHOUT", None)
+    )
+    print(
+        f"  implemented but CANNOT FIRE  {len(blocked):>3}"
+        "   (an input has no producer — returns its default forever)"
+    )
+    for rid in blocked:
+        missing = ", ".join(rules_pkg.implementations()[rid].CANNOT_FIRE_WITHOUT)
+        print(f"      {rid}  blocked on {missing}")
+    if blocked:
+        print(
+            f"  effective coverage   {len(implemented & hard) - len(blocked):>3}"
+            f" / {len(hard)}   (HARD_GATEs implemented AND able to reach a verdict)"
+        )
+
     # -- 5. what "implemented" does NOT mean --------------------------------------------
     # A rule id is a binary tick and several contract rules are not. Printing the notes here
     # is what stops the line above from reading as "PRIM-003: done".
