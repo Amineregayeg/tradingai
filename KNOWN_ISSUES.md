@@ -206,6 +206,35 @@ worth stating as a rule. Both numbers came from tools, both looked authoritative
 checking either against reality.** An impossible pair localises the error to one of two places without
 any further work; a plausible pair proves nothing but costs nothing to verify.
 
+**THE PRECONDITION, WITHOUT WHICH THE CHECK CANNOT BE PERFORMED: every figure carries its space.**
+`37/91 ids` and `31/79 distinct` are checkable against one another. **`effective coverage` and
+`distinct implemented` are not** — the reader cannot tell whether a contradiction is real or a units
+mismatch. **A number quoted without its space cannot participate in the check that would catch it.**
+That is the referent argument (**B49**) arriving in arithmetic.
+
+**A milder instance in a CORRECT verdict, found by Review in its own:** T-0014's review says
+*"effective coverage is unchanged at 37 / 91"* at `:29` and *"33 of 79 distinct… 31 of 79"* at `:98`.
+Internally consistent — 31 ≤ 33, and 37/91 is id-space — **but `:29` never says it is id-space**, and
+the two sit 69 lines apart. **A reader can reconstruct the impossible pair out of an accurate
+document.**
+
+### AND THE CHECKS WORTH HAVING ARE THE ONES THAT RUN THEMSELVES
+
+**Every failure in this preamble was a check that was available and unused rather than absent.** The
+red CI nobody read. The pinned worktree nobody ran the suite in. The occurrence count nobody asserted.
+The diff nobody looked at before staging. The two figures nobody compared.
+
+**The common property: each costs one command, and NOTHING PROMPTS IT.** The tool does not ask, the
+file does not ask, and the reviewer runs it only if the thought occurs. **B47's lesson generalised: a
+check that depends on someone remembering is a check that will be skipped exactly when the session is
+busiest** — which is when the defects arrive.
+
+**So prefer the mechanical form every time it exists:** invariants a tool asserts about its own output
+(`effective <= implemented <= total`, which holds in any space without knowing which number is right)
+over a rule to compare figures; `agents/ci_range.py` over a habit of checking CI; the two sweeps over
+a discipline of re-reading the register. **The good version of every entry in this preamble is a
+command, not a resolution.**
+
 ### And it keeps appearing in this register itself
 
 **Not as irony — as evidence that accuracy is not the property that prevents it.** B45's quotation
