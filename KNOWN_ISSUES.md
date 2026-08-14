@@ -80,6 +80,25 @@ shared helper is not *"is it right?"* but ***"right for whose purpose, and does 
 distinction it deliberately discards?"*** Every collapse in the table above is defensible
 somewhere — that is why the code reads well at every individual site.
 
+### A SECOND PROPAGATION MECHANISM — a fact re-derived from a rendering of itself
+
+**Found by Review, in a regression it introduced and caught in the same pass.** Its sweep grouped
+skipped entries with `"date" in detail` — **string-matching its own human-readable message to
+recover a fact the code already had.** The moment the message wording changed, every prose-only
+entry in the register appeared under a heading saying they cite code.
+
+> **A derived fact must come from the thing that knew it, never from a rendering of it.**
+
+**Three instances, all this evening:** `quorum_blocked`'s merged dict reused as a record · a `git
+log -S` for a symbol answering *"where does this string's count change"* when the question was
+*"where did this line move"* · a report filtered by matching its own prose. **Fixed by carrying
+reason CODES structurally beside the message** — and the comment says so, because the next person to
+improve the wording will otherwise re-break it identically.
+
+**Related to the boundary-merge mechanism above and distinct from it:** that one is a correct
+abstraction discarding a distinction its caller needed; **this one is a round trip through a
+presentation layer.** Both let the failure travel through code that is individually right.
+
 ### And it keeps appearing in this register itself
 
 **Not as irony — as evidence that accuracy is not the property that prevents it.** B45's quotation
@@ -462,7 +481,9 @@ once; the census proves it every hour.** Related: **B34** (the filtered sample),
 **B32** (nothing reports whether the shadow records at all), **B13**.
 
 ### B42. `shadow.py` carries two comment blocks that contradict each other about whether the perpetuals feed exists
-**Found in:** 4.5 (manager, while tracing where the engine takes its data from)
+**Found in:** 4.5, **2026-08-14** (manager, while tracing where the engine takes its data
+from). *Date added so `agents/stale_sweep.py` can bound this entry — with a version alone it
+reported NOT EXAMINED, which is not a clean bill and read like one.*
 **Severity:** low as behaviour, moderate as documentation — it misdirects the next reader
 of the exact file it lives in
 
