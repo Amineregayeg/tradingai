@@ -421,8 +421,25 @@ is the reasoning that kept a plausible-but-wrong disturbance grade out of the ri
 Only the "what is actually missing now" block is stale.
 
 **Fix:** rewrite `:66-77` to say the feed was acquired in T-0008 and the roster now reads
-four panels, keeping `:78-83` intact. **Not a product-code edit I should make** — noted
-for whichever rules task next touches `shadow.py`, since GATE-017/019 will.
+four panels, keeping `:78-83` intact. **Not a product-code edit the Manager should make.**
+
+> **ASSIGNED TO T-0011 BY ID, 2026-08-14 — and the reason is this entry's own first attempt
+> failing.** It originally read *"noted for whichever rules task next touches `shadow.py`,
+> since GATE-017/019 will."* **GATE-017 and GATE-019 landed in T-0012 at `ab7dc77` and did
+> not touch `shadow.py`** — verified: that commit changes `base.py`, `__init__.py`, three
+> rule modules, one test and the coverage script. **So the deferral had no owner from the
+> moment the prediction failed, nothing reported that it had failed, and the entry was still
+> open when a staleness sweep surfaced it as one of two entries no dated check could
+> examine.**
+>
+> **DEFER BY TASK ID, NEVER BY PREDICATE.** *"Whichever task next touches X"* has no owner
+> the instant the prediction is wrong. **Third instance in one day:** the same shape produced
+> **T-0015** (perpetual-panel staleness, deferred to *"whichever task next touches
+> `data_health`"* — which turned out to be the task that correctly refused it) and the
+> census's C-13 residue.
+>
+> **T-0011 is the owner** — it will be in `shadow.py` for criterion 4's omission paths — **and
+> the edit is required whether or not that turns out to be true.**
 
 **The pattern, which is the reason to record it at all:** this is the *third* time a
 comment in this repo has outlived its fact — `BLOCKED_ON_CORRELATES`' own header (`:61-64`)
