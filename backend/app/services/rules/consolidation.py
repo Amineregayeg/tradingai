@@ -8,6 +8,15 @@ opposite-direction imbalances overlapping in price: a different object entirely.
 a primitive the contract assumes and never specifies, and it carries **no `RULE_ID`**,
 because claiming one would assert the registry defines a rule it does not.
 
+THERE IS A SECOND "CONSOLIDATION" IN THIS REPO AND IT IS NOT THIS ONE
+`ict/detector.py`'s `detect_sd_zones` calls a low-volume cluster before an impulse a
+consolidation, from volume percentiles. This module asks whether PRICE is confined to a
+band relative to its own bar ranges, from geometry alone, and knows nothing about volume.
+Different questions, different answers, both correct for their own caller — but "does this
+engine detect consolidation?" has two true answers depending on which file is open, which
+is B33's two-vocabularies shape. Neither is being changed; each now says which question it
+answers.
+
 THE DEFINITION IS OURS AND UNRATIFIED, AND THAT IS THE WHOLE HAZARD
 No source states what a consolidation is. Measured on real Binance perpetual bars with a
 12-bar window, one parameter moves the detector across the entire range of possible

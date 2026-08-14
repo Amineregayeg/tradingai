@@ -473,7 +473,16 @@ class ICTDetector:
         return results
 
     def detect_sd_zones(self, df: pd.DataFrame) -> list[dict]:
-        """Detect Supply / Demand zones (consolidation before strong move)."""
+        """Detect Supply / Demand zones (consolidation before strong move).
+
+        "CONSOLIDATION" HERE MEANS LOW VOLUME, NOT A NARROW PRICE RANGE. This asks
+        "was participation thin before the impulse?" and answers it from volume
+        percentiles. `rules/consolidation.py` asks a different question — "is price
+        confined to a band relative to its own bar ranges?" — from price geometry
+        alone, for GRADE-035's post-sweep cool-off. Both are correct for their own
+        question and neither is the other; a grep for "consolidation" finds this one
+        first because this file is older and larger.
+        """
         results = []
 
         # Simple volume-weighted approach:
