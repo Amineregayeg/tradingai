@@ -267,6 +267,76 @@ doing so shifts the baseline you compare against.
 
 ## B. Silent failure — things that break without telling anyone
 
+### B41. The detector built to catch B34 was written, documented, schema'd, tested — and never called
+**Found in:** T-0010 verification, 2026-08-14, by the Manager while checking my change.
+**A new species. Every prior entry in this section is an output that fails to
+discriminate. This is a detector that was never wired** — and it is invisible for the
+same structural reason as all of them: **a record type that is never emitted looks
+exactly like one with nothing to report.** Zero census records reads as "no coverage
+problems" to anyone querying the store.
+
+**What it is.** `records.py:303` defines `scan_census`, whose own docstring names this
+exact failure as its reason for existing:
+
+> *"Build a `scan_census` — THE POPULATION RECORD. This is the one that stops a
+> filtered sample being reported as full coverage. Every unemitted bar must name the
+> registry rule id that authorises the omission; any pre-filter citing no rule is
+> undocumented logic by definition, and is the cheapest way to score 100% fidelity
+> while running on something nobody has seen. Under our emission policy
+> (`every-closed-bar-roster-v1`) `unemitted_bars` should always be empty. **If it is
+> ever not, that is the finding.**"*
+
+**B34 is that finding** — a filtered sample reported as full coverage, for the
+platform's entire history. The designated auditor never showed up:
+
+```
+registered  models/telemetry_record.py:41   RECORD_SCAN_CENSUS constant
+            services/telemetry/store.py:31  id-field key map
+            services/telemetry/validate.py:25  accepted record type
+            contract/TELEMETRY_SCHEMA.json:2690  full schema definition
+            services/telemetry/records.py:303   the builder
+callers in app/   NONE
+production        156 records, ALL setup_evaluation. ZERO scan_census, ever.
+```
+
+**Three layers of intended guard, none load-bearing.** The docstring cites
+`every-closed-bar-roster-v1` — **the emission policy id that was false**, retired to
+`...-with-sufficient-history-v2` in T-0010. The schema (line 128) says *"C-13
+reconciles emissions against the scan_census under this policy."* **`C-13` does not
+exist** — zero references in `app/`, `tests/`, `scripts/` or `docs/` outside the schema
+sentence describing it. So: a false policy, verified by a census never emitted, checked
+by a conformance rule never written.
+
+**The part that makes it worse than "nobody got to it": the tests pass.**
+`test_telemetry_contract.py:209` and `:226` both call the builder, both green. **Green
+tests on a never-invoked builder are worse than no tests** — they make the mechanism
+look wired. And the second test is the sharpest artifact here:
+
+```python
+def test_the_census_defaults_to_claiming_no_omissions(declared):
+    census = rec.scan_census(..., bars_observed=19, evaluations_emitted=19)
+    assert census["unemitted_bars"] == []
+```
+
+**It hand-passes the two numbers in equal and asserts the record says so.** It
+constructs the coverage claim the census exists to *check*. It cannot fail on B34,
+because B34 is `bars_observed != evaluations_emitted` in production and **no production
+code has ever computed either number.** The test's own docstring asserts the truth of
+`every-closed-bar-roster-v1` — a claim that was already untrue when it was written.
+
+**Fix (not folded into T-0010 — this is a mechanism to wire, not a line to move).**
+Call the builder once per scan window with `bars_observed` and `evaluations_emitted`
+derived from the loop's actual counters, never passed in agreeing; write C-13 to
+reconcile them; make a zero-census store a FAIL rather than a silence. **The test must
+be rewritten to compute the numbers from a fixture where they disagree** — as written it
+would pass against an engine that emits nothing at all.
+
+**What it means for T-0010.** *"The shadow now sees every bar"* is currently
+**asserted**, proven once by `test_shadow_sees_blocked_bars.py`. The census is what
+would measure it continuously and name the first bar it misses. **T-0010 proves the fix
+once; the census proves it every hour.** Related: **B34** (the filtered sample),
+**B32** (nothing reports whether the shadow records at all), **B13**.
+
 ### B11. The disturbance grader now runs on real data — and its grade still decides nothing
 **Found in:** M4 (implementing GATE-002/007/008/048), 2026-08-08
 **THE DATA HALF IS FIXED, 2026-08-13 (T-0008); THE ENTRY STAYS FOR THE HALF THAT IS NOT.**
