@@ -1628,6 +1628,68 @@ a predicate deferral has no owner the moment nobody recognises themselves in it.
 questions and a bare number cannot say which set it counted. Related: **B43**, **B45**, **B47**,
 **B49**, **B58**.
 
+### B62 — `ci_range.py` withheld verdicts it already had, because `cancelled` blocked the transfer
+
+**Status: FIXED, 2026-08-14. And the route to it is the point: Review reasoned about the WORLD from
+this tool's OUTPUT, and the output was wrong about the world.**
+
+Review observed that 3 of the last 16 commits have `cancelled` runs — correct, and it identified the
+cause correctly too: **`cancel-in-progress: true` means a push within ~2 minutes of the last kills
+its predecessor's run, so THE CANCELLATION RATE IS A FUNCTION OF PUSH CADENCE**, and this loop's
+cadence is high precisely because it documents as it goes. Then it drew the consequence:
+
+> *"`.md` is in `TREE_IGNORE`, so a cancelled run on a register commit costs nothing — the code tree
+> is identical to a neighbour and the verdict transfers. **A cancelled run on a code-carrying commit
+> is a hole tree identity cannot fill.**"*
+
+**BOTH HALVES WERE FALSE, AND THE TOOL IS WHY.**
+
+    v5 logic:  if concl in ("none", "None"):   <- tree-identity search ran ONLY here
+               elif concl == "cancelled":      <- printed "asserts nothing" and STOPPED
+
+**So a register-only commit with a cancelled run did NOT transfer** — `efc61dc` and `5635e5a` are
+`.md`-only, code-identical to green commits two positions away, and were reported as though nothing
+was known about them. **And the code-carrying one was not a hole either:** `8d3fc8f` carried seven
+rule files and 1292 insertions, and its code tree is **byte-identical to `dbd7b5f`** (verified: empty
+diff excluding `*.md`), which is green. **All three cancellations were coverable; the tool declined
+to look.**
+
+**Review had the refuting fact in its own next sentence** — *"that code landed again via
+`881df28`/`dbd7b5f`, which is green"* — and still concluded "hole". **A generalisation stated one
+clause after the counterexample that kills it.**
+
+### Why the tool got it wrong, and it is this register's own defect worn inside out
+
+**The usual failure here is an output that does not discriminate between working and broken. This is
+the mirror: an output that DISCRIMINATES WHERE THERE IS NO DIFFERENCE.**
+
+**By the tool's own printed doctrine — `CANCELLED: asserts nothing (B30)` — a cancelled run and an
+absent run are in the SAME epistemic position.** v5 nonetheless routed them down different branches
+and gave only one of them the search. **The tool stated the equivalence and then failed to act on
+it**, which is the same shape as `SUPER_BPR`'s docstring requiring opposite direction while the code
+did not check it: **the correct rule written down beside code that does not implement it.**
+
+**Fixed:** `cancelled` now falls through to the identical-tree search, and the provenance is labelled
+so the reader is never told a verdict is the commit's own — `own run CANCELLED; tree identical to
+d58265c5`. Where no twin exists, a cancelled code-carrying commit is still reported as
+**UNVERIFIED**, and now says explicitly that this is the case tree identity cannot fill — **which is
+the residual truth in Review's claim, and it is much rarer than the claim implied.**
+
+    before   3 cancelled, 0 covered, 2 of them silently unverified
+    after    3 cancelled, 3 covered, 0 UNKNOWN, exit 0
+
+### The transferable part
+
+**A verdict this project ALREADY OWNED was withheld for hours by a tool built to surface verdicts**,
+and nobody noticed because *"cancelled"* reads like an answer. **B53's shape — a correct signal,
+produced continuously, with no consumer — arriving one layer up: the signal had a consumer, and the
+consumer dropped it on a branch.**
+
+**And the cadence coupling is worth keeping even though its consequence was wrong:** cancellation
+concentrates exactly when two seats push in the same minute, **which is also when the race that
+produces code-carrying register commits happens. The same event causes both** — so the commits most
+likely to lose their run are the ones most likely to be carrying somebody else's code.
+
 ### B61 — DEFER BY TASK ID fixed ATTRIBUTION and never fixed NOTIFICATION
 
 **Status: TOOL BUILT, `agents/landed_sweep.py`. Nothing owed today; the whole exposure is
