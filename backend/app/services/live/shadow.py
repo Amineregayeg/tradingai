@@ -230,10 +230,30 @@ def declared_parameters() -> rec.DeclaredParameters:
     return rec.DeclaredParameters(
         virtual_account_size=fixed.STARTING_BALANCE,
         evaluation_order_id="tradingai-shadow-v1",
-        # M0 section 5. Every closed bar on every execution TF for every roster
-        # symbol — chosen because it is the emission policy easiest to audit, not
-        # the cheapest one.
-        emission_policy_id="every-closed-bar-roster-v1",
+        # v2, RENAMED 2026-08-14 BECAUSE v1 WAS FALSE AND STAMPED ON EVERY RECORD.
+        #
+        # v1 claimed "every closed bar". The shadow call sat below the entry gates, so
+        # it never ran on a bar where the ICT path was blocked — and `already in a
+        # position` is the engine's normal state, so the policy was wrong on a large
+        # and *systematically biased* fraction of bars (KNOWN_ISSUES B34). A declared
+        # parameter exists so our choices can be audited as ours; one that misdescribes
+        # the behaviour is worse than none, because it is carried everywhere and reads
+        # as authoritative.
+        #
+        # Moving the call above the gates fixed the biased part: the kill switch,
+        # `engine paused`, `already in a position` and `max_concurrent` no longer
+        # suppress a record.
+        #
+        # WHAT STILL DOES, stated rather than rounded away — this is why it is not
+        # simply "every closed bar" now:
+        #   * the price fetch returned fewer than 60 bars (`crypto_loop`), or fewer
+        #     than 10 reach the primitives — no series to evaluate;
+        #   * the evaluation raised and was swallowed, which is by design and which
+        #     nothing reports (B32).
+        # Both are DATA-availability, not strategy state, so what remains is unbiased
+        # with respect to market conditions. That is the property that matters for a
+        # Stage A sample, and it is the reason this name is accurate where v1 was not.
+        emission_policy_id="every-closed-bar-with-sufficient-history-v2",
         layout_size_frozen=True,
         # Settled from the corpus: every statement of the disturbance rule says
         # CORRELATED assets, and a main asset disagreeing with its own setup is an

@@ -796,6 +796,29 @@ class LiveCryptoLoop:
             return
         self._last_eval[pair] = closed_t
 
+        # M9 STAGE A — ABOVE THE ENTRY GATES, and the position matters.
+        #
+        # This call used to sit below the `return` on the next block, so the shadow
+        # never saw a bar where the ICT path was blocked — and `already in a position`
+        # is the engine's normal state. It therefore missed **exactly the bars
+        # following an entry**, which are the bars on which the two strategies would
+        # most differ. On 2026-08-13: an entry at 19:00, then 20:00, 21:00 and 22:00
+        # all skipped, three consecutive bars the contract engine never evaluated
+        # (KNOWN_ISSUES B34).
+        #
+        # It also made `emission_policy_id="every-closed-bar-roster-v1"` false on every
+        # record that carried it.
+        #
+        # Placed here rather than merely earlier: the bar is already marked consumed
+        # above, `entry` already has the forming bar dropped, and the shadow does not
+        # read `bias` — which is fetched below the gates. So nothing else moves.
+        #
+        # Still incapable of affecting a trade: it returns None, it takes a copy of the
+        # frame rather than mutating the one the ICT path is about to use, and every
+        # exception is swallowed. Being above the gates changes what it SEES, not what
+        # it can DO.
+        await self._shadow_evaluate(pair, entry)
+
         # Entry gates — the bar is marked consumed above, BEFORE these gates, on
         # purpose (re-testing a stale bar later in the hour would fire a market
         # order sized off a stale FVG edge). Each block reason is surfaced to the
@@ -806,13 +829,6 @@ class LiveCryptoLoop:
             await self._act(kind, f"{pair} {self.entry_tf} bar closed — {block}, skipped")
             return
         bias = await self._fetch_bars(bsym, self.bias_tf, 220)
-
-        # M9 STAGE A — the contract engine sees the same bars and decides nothing.
-        # Placed BEFORE the ICT evaluation so that if it ever did have a side
-        # effect, the failure would show up as a shadow record disagreeing with a
-        # trade rather than as a trade that quietly changed. It cannot raise; see
-        # services/live/shadow.py.
-        await self._shadow_evaluate(pair, entry)
 
         sig, trace = evaluate_latest_bar_traced(pair, entry, bias, risk_pct=self.risk_pct)
         if sig is None:

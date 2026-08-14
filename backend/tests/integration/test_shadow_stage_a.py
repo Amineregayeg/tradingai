@@ -203,7 +203,13 @@ async def test_the_declared_parameters_are_stamped_on_every_record():
     labelled a proxy in both code and telemetry."""
     record = evaluate()
     declared = record["declared_parameters"]
-    assert declared["emission_policy_id"] == "every-closed-bar-roster-v1"
+    # v2 since 2026-08-14. v1 claimed "every closed bar" while the shadow sat below
+    # the entry gates and never saw a blocked bar — false, and stamped on every record
+    # (KNOWN_ISSUES B34). The name now describes what actually happens: gates no longer
+    # suppress, insufficient history still does, and that residue is data-availability
+    # rather than strategy state, so the sample stays unbiased with respect to market
+    # conditions.
+    assert declared["emission_policy_id"] == "every-closed-bar-with-sufficient-history-v2"
     assert declared["stop_selection_reading"] == "CLOSEST_TO_3R_TIES_TO_LARGER"
 
 
