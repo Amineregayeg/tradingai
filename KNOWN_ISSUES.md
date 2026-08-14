@@ -536,6 +536,44 @@ from 37/12/7/1 to 40/11/5/1.**
 15 rules carry it. GATE-037's is *"n/a — a negative constraint on the decision record"*, so
 it cannot depend on anything whatever its statement mentions.
 
+### B45. Two HARD_GATEs depend on components the contract never specified — and two WITHDRAWN rules were being counted as work
+**Found in:** 4.5 (Review on the detector, manager on the withdrawals)
+**Severity:** moderate — it mis-scopes the rules programme in both directions at once
+
+**GRADE-035 (`HARD_GATE`, `CALIBRATED`) names an input that does not exist and never did.**
+Its `inputs` are *"Time and price action since the sweep; **the consolidation/overlap
+detector**; the absence of fresh old-direction gaps; the NY 9:30 open marker."*
+
+**There is no consolidation detector and no range detector**, in the registry or in the code.
+Review checked: the only `overlap` match under `app/services/rules/` is PRIM-002's **BPR
+overlap** — two opposite-direction imbalances overlapping *in price* — which is a different
+concept from a post-sweep consolidation. **The word `overlap` is a false match.**
+
+**And no `PRIM-` rule specifies ranges at all**, while `GATE-037`'s output already references
+`primitives.ranges` as *"reading vocabulary"*. **So the contract references a primitive it
+never defines, and a HARD_GATE depends on it.** That is a gap in the contract rather than in
+our implementation, which makes it different from every other missing-rule entry here. Split
+into **T-0014**, which builds the primitive before the rule.
+
+**The same shape, second instance:** GATE-041's *"momentum begins deteriorating"* resolves to
+`GRADE-028`'s `momentum_slowdown{sign1..sign4}` — **`SOFT_PREFERENCE` and unimplemented**, so
+it will never arrive from the HARD_GATE programme. **A HARD_GATE blocked by a soft rule is
+invisible to any plan that tracks only hard gates**, and the planner was filtering exactly
+that way.
+
+**In the other direction: GATE-034 and GRADE-033 are `status: WITHDRAWN` and were counted as
+work.** Both sat in the dispatchable set, so the programme's headline *"57 HARD_GATEs
+missing"* was **55 to implement plus two withdrawals** — and someone following the plan would
+have built a rule the contract has retired. Fixed in `agents/rule_waves.py`: withdrawn rules
+are excluded from the waves and named on every run.
+
+**Correction to B43 that belongs here:** B43 said the ten READY-with-a-gap rules need numbers
+from Salim. **For the quorum family he was already asked and declined** — GRADE-031 records
+*"The trader declined to fix these"* and mandates declared, versioned parameters instead. **So
+a declared parameter is the ruled outcome there, not a workaround**, and GRADE-031 is itself a
+HARD_GATE: the contract's answer to its own missing numbers is a mechanism we are obliged to
+build. Related: **B43**, **B44**, **A10**.
+
 ### B11. The disturbance grader now runs on real data — and its grade still decides nothing
 **Found in:** M4 (implementing GATE-002/007/008/048), 2026-08-08
 **THE DATA HALF IS FIXED, 2026-08-13 (T-0008); THE ENTRY STAYS FOR THE HALF THAT IS NOT.**
