@@ -2211,7 +2211,42 @@ patch.
 **Related asymmetry, recorded so it is not mistaken for an absence:** `data_health`
 monitors recency for TOTAL and USDT.D via `COLLECTOR_STALE_MIN`/`age_minutes`. The two
 perpetual panels added in T-0008 have **no recency monitoring at all**. Two of four
-panels are watched. Fold into whichever task next touches `data_health`.
+panels are watched. ~~Fold into whichever task next touches `data_health`.~~
+
+> **OWNER: T-0015, assigned by id 2026-08-14.** The ticket already existed when this was
+> annotated *"needs a task id"* — created hours earlier from **T-0009's criterion 10**, which
+> deferred the same gap in the same words. **So the gap was described in two places, one with a
+> ticket and one with a dead predicate, and nothing connected them.** That is this entry's own
+> defect one level up: not a missing owner, but an owner nothing pointed to.
+>
+> **And Review's formulation of why the predicate form fails is better than the one recorded in
+> B42, so it supersedes it:** `data_health.py` was touched **twice** today, both by T-0009 —
+> `9fe47ed` and `20b8593` — and neither added the monitoring. T-0009 built the *adjacent*
+> liveness signal in the *same file*. **So the predicate did not fail to find an owner; it found
+> the right owner twice and slid off. A predicate deferral is weak not because matching is
+> unlikely, but because MATCHING PRODUCES NO NOTIFICATION.**
+
+**THE PREDICATE ALREADY FIRED — TWICE, AND BOTH TIMES WERE MISSED. Found 2026-08-14 by
+Review, sweeping for the deferral class B42 established.** `data_health.py` has been
+touched twice since this was written:
+
+    9fe47ed  2026-08-14  T-0009: a liveness signal for the shadow (B32)
+    20b8593  2026-08-14  T-0009 follow-up: density prorated to the window
+
+**Neither added recency monitoring for the two perpetual panels**, and nothing reported
+that the deferral had come due. **This is the fourth instance of `DEFER BY TASK ID, NEVER
+BY PREDICATE`** (B42, T-0015, and B42's third), and the sharpest, because the task that
+satisfied the predicate is the one that built the *adjacent* monitoring in the same file —
+**the deferral was passed over by the only task that was ever going to be well placed to
+honour it.**
+
+**And it is not cosmetic, because `B40` changed what this costs.** The correlate margin
+fell from 18× to 1.5× when `ENTRY_TF` went to 5m, so **a 5m panel carries 30 samples
+against a minimum of 20** and collector reliability stopped being a comfort. B40 states
+that *"nothing watches whether the panels are thick enough"* — and **two of the four have
+no recency monitoring at all**, so for half the roster there is not even a staleness signal
+underneath the missing thickness one. **Needs a task id.** Related: **B40**, **B42**,
+**B32**, **B34**.
 
 ### B36. Broad exception handlers make a bug indistinguishable from an outage
 **Found in:** T-0008, 2026-08-13. Partially fixed; the general case is not.
@@ -2307,6 +2342,18 @@ artifact would hold it. **A consequence of a correct change, not a defect in it.
 **What it is:** at 1H a correlate bar held **360 samples** against
 `MIN_SAMPLES_PER_SYNTHETIC_BAR = 20` — **18x margin**. At 5m it holds **30**. That is
 **1.5x**, and it is the operating margin from now on.
+
+> **OWNER: T-0015, assigned by id 2026-08-14 — this entry had none.** It cited only T-0007, the
+> task that found it, and *"nothing fails when it shrinks"* had no ticket for eleven hours.
+>
+> **Paired with B35's tail deliberately, and the two must stay SEPARATE FIELDS in one task.**
+> Both ask *"does anything watch this panel property"*, both live in `data_health`, and half the
+> roster is unmonitored on **both** axes: `BTCUSDT.P` and `ETHUSDT.P` carry
+> `bar_sample_count = None` by construction, so they are structurally invisible to the `thin`
+> check *and* have no recency monitoring. **Thickness and recency are orthogonal — density
+> within a bar versus currency of the newest bar — and merging them yields one output meaning
+> two things**, which T-0015's criterion 6 already forbids. One task, two fields, no shared
+> verdict.
 
 **Losing a third of a bar's samples makes the layout ungradeable.** At 10 s polling a
 5m bar needs 20 of its 30 ticks; ten missed polls in five minutes takes GATE-007 to
