@@ -99,8 +99,18 @@ def resolve_block_chain(
     blockers = tuple(getattr(cls, "CANNOT_FIRE_WITHOUT", ()) or ()) if cls else ()
     if not blockers:
         return [rule_id]
-    # Deterministic: the first declared blocker is the reported chain. Others still show
-    # up as their own chains when they are themselves rules.
+    # POSITIONAL-FIRST, and the choice is recorded because it is currently DORMANT: no
+    # rule declares more than one blocker today (all four are single), so this branch is
+    # untested and activates silently the first time someone declares two. Same shape as
+    # GATE-041's hardcoded FALSE — correct-looking now, load-bearing later, nothing
+    # announcing the transition.
+    #
+    # First rather than shortest, longest, or all: it is deterministic and needs no
+    # ordering rule over incommensurable chains, and any other blocker that is itself a
+    # rule still surfaces as its own chain in the report, so nothing is hidden — only the
+    # ATTRIBUTION of this rule's chain is arbitrary. Reporting every chain for a
+    # multi-blocker rule is defensible and probably better, and was not done because
+    # there is no instance to test it against; build it when the first one appears.
     nxt = blockers[0]
     if nxt in impls and nxt in registry_ids:
         return resolve_block_chain(nxt, impls, registry_ids, (*_seen, rule_id))
