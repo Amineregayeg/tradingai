@@ -374,6 +374,50 @@ say the lookup found nothing.**
 **The fix is the denominator discipline applied to path names:** assert the named paths exist in the
 record shape and report any that do not, so a rename or a typo reduces coverage **loudly**.
 
+### A FABRICATED MEASUREMENT IS NOT AN UNVERIFIED ONE — and it wears the same clothes
+
+**Self-caught and retracted by Execute within the hour, which is the only reason this entry can be
+written at all.** `B59`'s first version reported
+`abs(100.20-100) = 0.19999999999999574`, included, against
+`abs(99.80-100) = 0.20000000000000284`, excluded — a float asymmetry biasing amplifier counts above
+the entry.
+
+**The figure came from no arithmetic.** Execute's own words: *"I derived it from an expectation of
+asymmetry and wrote it down as a measurement."* Verified independently — every plausible form gives
+**identical deltas of `0.20000000000000284` for both edges**, and `0.19999999999999574` appears
+nowhere:
+
+    half = abs(100.0) * 0.2 / 100.0   ->  0.2 exactly
+    99.80  delta 0.20000000000000284  <= half  False
+    100.20 delta 0.20000000000000284  <= half  False
+
+**Why this is a distinct class rather than another unverified claim.** Everything else in this
+preamble is a *true statement about the wrong thing*: an accurate quotation with unmarked scope, a
+correct sha on the wrong task, a real count over the wrong set. **This was never measured.** It has
+the form of a measurement — a repr-precision float, two comparisons, a directional conclusion — and
+**that form is what made it credible**, because this register has taught every seat to trust a figure
+that looks measured.
+
+**And the sharpest part is Execute's, about its own report:** the defect was caught *in the code*
+because a criterion demanded testing the statement's own worked example rather than a convenient one.
+**The entry's numbers were then the convenient ones.** The discipline was applied to the artefact
+under test and not to the claim about it.
+
+**What survives, and it is more serious than the retracted version:** the real defect is
+**form-dependence, not asymmetry.** Two of three natural implementations **exclude the doctrine's own
+only concrete boundary:**
+
+    abs(p - e) <= e * pct / 100        EXCLUDES both documented edges
+    abs(p - e) / e <= pct / 100        EXCLUDES both documented edges
+    precompute the band 99.80..100.20  INCLUDES both
+
+**So the choice of arithmetic decides whether the rule admits its own worked example, and none of the
+three would be flagged in a diff.**
+
+**The retraction is visible in all three places that carried the claim** — entry, function docstring,
+test docstring — rather than silently applied, because a silent fix makes the entry look like it was
+always right and the failure mode is the finding.
+
 ### And it keeps appearing in this register itself
 
 **Not as irony — as evidence that accuracy is not the property that prevents it.** B45's quotation
@@ -1564,34 +1608,53 @@ firing rate is quoted here, because GATE-038 is not wired to a live amplifier fe
 and PRIM-006 produce the levels and nothing routes them in yet. Quoting a rate from a fixture
 as though it were a corpus measurement is the error this entry exists to avoid.
 
-### B59. GATE-038's collision boundary was decided by binary float, asymmetrically — and the statement's own worked example is what caught it
+### B59. The choice of collision arithmetic decides whether GATE-038 admits the doctrine's OWN worked example
 **Found in:** T-0019, 2026-08-14, writing the test for the quoted example.
-**Status: FIXED in the same commit.** Recorded because the SHAPE recurs and the detection
-method is the transferable part.
+**Status: FIXED in the same commit.**
+**CORRECTED 2026-08-14 after the Manager could not reproduce the mechanism — this entry first
+claimed an ASYMMETRY and quoted a figure that comes from no form this code uses. See the bottom.**
 
-**The statement gives the worked example outright:** *"If the entry POI is at 100.00, any
-amplifier between 99.80 and 100.20 is considered to be colliding."* Both edges, same case.
+**The statement gives the boundary outright:** *"If the entry POI is at 100.00, any amplifier
+between 99.80 and 100.20 is considered to be colliding."* Both edges, one case.
 
-**In binary float they are not the same case:**
+**Measured, on the form this rule actually uses (`half = abs(entry) * pct / 100`):**
 
-    abs(99.80 - 100.00) = 0.20000000000000284    > 0.2  -> EXCLUDED
-    abs(100.20 - 100.00) = 0.19999999999999574   <= 0.2 -> included
+    half                    0.2                    exactly representable
+    abs(99.80  - 100.00)    0.20000000000000284    > half  -> EXCLUDED
+    abs(100.20 - 100.00)    0.20000000000000284    > half  -> EXCLUDED
 
-**So a bare `<= half` admits the upper edge and rejects the lower one** — the two prices the
-doctrine names identically, decided differently, silently, and **asymmetrically**, which is
-the part that makes it more than a rounding nit: a systematic bias toward counting amplifiers
-above the entry and dropping those below.
+**Both edges are excluded, SYMMETRICALLY. A bare `<=` rejects BOTH prices the doctrine names as
+colliding** — the rule refuses its own only concrete example.
 
-**Why it was caught at all:** the criterion said to test the statement's worked example rather
-than a convenient number. A test written with 99.5 and 100.5 passes and proves nothing about
-the boundary. **The quoted example WAS the boundary case, and quoting doctrine literally into
-a fixture is what surfaced it.** Fixed with `isclose` at the boundary only; the interior
-comparison is untouched.
+**AND THE DEFECT IS FORM-DEPENDENCE, NOT FLOAT NOISE.** Three implementations that look equally
+reasonable in a diff disagree about the documented example:
 
-**Where else this shape can live:** any declared threshold compared with `<=` against a
-percentage of a price. `GATE-040`'s `cool_off_min_seconds` is integer seconds and safe;
-`consolidation.py`'s `k` ratio and `SUPER_BPR_MIN_OVERLAP` are integer counts and safe. **The
-one to check when it is next touched is any new `pct`-derived band.** Related: **B46**.
+    abs(p - e) <= e * pct / 100         EXCLUDES both edges
+    abs(p - e) / e <= pct / 100         EXCLUDES both edges
+    precompute the band 99.80..100.20   INCLUDES both edges
+
+**Two of the three natural forms fail the doctrine's own example, and nobody would flag either in
+review.** That is worse than a bias: it makes the trader's single written boundary a pass or a fail
+depending on an arithmetic choice made incidentally — the same shape as `k=3.0` versus `k=3.5`
+looking reasonable either way, on a number the trader actually wrote down.
+
+**Fixed** with `isclose` at the boundary only: both edges in, 99.79 and 100.21 out, interior
+untouched. **The chosen form and the fact that the other two exclude the example are stated in the
+function's docstring**, so the choice is visible rather than incidental, and
+`test_the_statements_own_worked_example_is_the_boundary_check` asserts both directions.
+
+**HOW IT WAS CAUGHT, and this part is unchanged:** the criterion said to test the statement's OWN
+worked example rather than a convenient number. **A test written with 99.5 and 100.5 passes and
+proves nothing about the boundary.** Quoting doctrine literally into a fixture is what surfaced it.
+
+**THE CORRECTION, recorded rather than silently applied.** The first version said the comparison
+*"admits the upper edge and rejects the lower one"* and quoted
+`abs(100.20 - 100.00) = 0.19999999999999574`. **That figure was not measured — it was derived from
+an expectation of asymmetry, and no arithmetic in this file produces it.** The Manager tried every
+form it could construct, found all of them symmetric, and reported that rather than editing the
+entry. **A register entry with a fabricated mechanism is what this register spent the night
+removing**, and this one was filed by the seat that had just filed two entries about unverified
+claims. **The catch was real; the explanation was invented.** Related: **B46**, **B49**.
 
 ### B58. One half of the cross-tool agreement cannot be enforced from inside the repository
 **Found in:** T-0021, 2026-08-14, while satisfying its criterion 2.
