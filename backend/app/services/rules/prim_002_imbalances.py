@@ -10,8 +10,29 @@
 WHY THIS PRIMITIVE DECIDES WHETHER THE ENGINE IS ON-DOCTRINE AT ALL
 ENTRY-001 is a precedence rule, not a preference: "we always take entries from imbalances no
 matter what, we do not use OBs or BBs to enter". Every admissible entry object in the whole
-contract comes out of this inventory. The engine we have today detects FVGs only, so three of
-the four documented inefficiency types are entries the strategy permits and ours cannot see.
+contract comes out of this inventory.
+
+WHAT THIS FILE ACTUALLY PRODUCES, MEASURED — corrected 2026-08-14 (T-0019)
+This paragraph used to read "the engine we have today detects FVGs only, so three of the four
+documented inefficiency types are entries the strategy permits and ours cannot see." **That
+described the state BEFORE this module existed and was false the moment it landed** — a
+comment denying what the file beside it does (B42's class), and it is the first thing
+ENTRY-001's implementer reads. Measured over 999 live 5m `BTCUSDT.P` bars:
+
+    FVG 268 · VOLUME_IMBALANCE 92 · BPR 59 · SUPER_BPR 651 · GAP 0     (1070 total)
+
+**Four of five types are produced.** `GAP` is 0 in that corpus and is NOT unreachable: a
+hand-built fixture with bodies apart AND wicks apart produces one
+(`test_t0019_entry_decision.py`). A 24/7 crypto perpetual has no session gaps, so zero is a
+market fact about this instrument rather than a dead branch — and that distinction could only
+be settled by construction, never by a longer corpus, which can only ever say "not seen yet".
+
+**The SUPER_BPR share is NOT a stable property of the market.** 651 of 1070 is 61% at 999
+bars and 23% at 150, because the promotion scan below has no time bound and no direction
+constraint, so the count grows monotonically with whatever history the caller passed — and
+the callers differ (shadow 320 bars, backtest 250). **Tracked as T-0020.** Until it lands, no
+rule may assert an expected outcome of the `super BPR > BPR > plain imbalance` ordering over
+detected bars, because the same band classifies differently depending on the lookback.
 
 THE ONE LINE THAT SEPARATES A GAP FROM A VOLUME IMBALANCE
 "gaps and volume imbalances are the same thing the only difference is the wicks." So:

@@ -152,15 +152,45 @@ def test_both_spaces_are_printed_and_labelled(crc, capsys):
         assert " ids" in row and " distinct" in row, row
 
 
-def test_the_real_numbers_are_the_distinct_ones(crc, capsys):
-    """Measured independently in the work report; pinned here so a regression is loud."""
+def test_the_reported_figures_match_an_INDEPENDENT_recomputation(crc, capsys):
+    """The script's arithmetic, checked against the registry rather than against a memory.
+
+    AN EARLIER VERSION OF THIS TEST PINNED THE ABSOLUTE NUMBERS (42/117, 34/104) and went
+    red the moment T-0019 landed three rules — correctly reporting a change that was not a
+    defect. A test that must be edited every time the programme progresses gets edited
+    without being read, and then it is pinning whatever was there last rather than checking
+    anything. So the expectation is DERIVED here, from the same registry, by a different
+    route than the script takes: if the two ever disagree, one of them is wrong.
+    """
+    from app.services import rules as real_rules
+    from app.services.telemetry import contract_loader as real_contract
+
+    canon = lambda rid: real_contract.alias_target(rid) or rid  # noqa: E731
+    ids = real_contract.known_rule_ids()
+    impl = real_rules.implemented_ids()
+    hard = real_contract.ids_with_enforceability("HARD_GATE")
+    blocked = {
+        rid for rid, cls in real_rules.implementations().items()
+        if getattr(cls, "CANNOT_FIRE_WITHOUT", None)
+    }
+
     assert crc.main() == 0
     out = capsys.readouterr().out
-    assert "42 / 117 ids" in out and "34 / 104 distinct" in out
-    assert "41 / 91 ids" in out and "33 / 79 distinct" in out
-    assert "37 / 91 ids" in out and "31 / 79 distinct" in out
-    assert "CANNOT FIRE    2 distinct" in out
-    assert "(4 ids incl. aliases)" in out
+
+    assert figures(out, "implemented ") == (
+        len(impl), len(ids), len({canon(i) for i in impl}), len({canon(i) for i in ids})
+    )
+    assert figures(out, "HARD_GATE covered") == (
+        len(impl & hard), len(hard),
+        len({canon(i) for i in impl} & {canon(i) for i in hard}),
+        len({canon(i) for i in hard}),
+    )
+    # The alias population is the whole reason both spaces exist, so it is asserted too.
+    assert len(ids) - len({canon(i) for i in ids}) == sum(
+        1 for i in ids if real_contract.alias_target(i)
+    )
+    assert f"CANNOT FIRE  {len({canon(i) for i in blocked}):>3} distinct" in out
+    assert f"({len(blocked)} ids incl. aliases)" in out
 
 
 def test_an_added_alias_does_not_increase_the_distinct_count(crc, monkeypatch, tmp_path, capsys):
@@ -281,8 +311,11 @@ def test_the_implemented_ids_line_keeps_the_shape_rule_waves_parses(crc, capsys)
     out = capsys.readouterr().out
     m = re.search(r"implemented ids:\s*(.+)", out)
     assert m, "rule_waves.py parses exactly this and would fall back to a FATAL"
+    from app.services import rules as real_rules
+
     ids = [i.strip() for i in m.group(1).split(",")]
-    assert len(ids) == 42, ids
+    # Derived, not pinned — see the recomputation test above for why.
+    assert len(ids) == len(real_rules.implemented_ids()), ids
     assert "GRADE-029" in ids and "GRADE-035" in ids, (
         "the ids line is ID space and must stay that way — rule_waves.py collapses it "
         "itself, so pre-collapsing here would make the other tool count 34 as 34 while "
@@ -292,4 +325,7 @@ def test_the_implemented_ids_line_keeps_the_shape_rule_waves_parses(crc, capsys)
     # the collapse and get it wrong a third time.
     d = re.search(r"distinct implemented:\s*(.+)", out)
     assert d, "the distinct set must be published, not left to be recomputed"
-    assert len([i.strip() for i in d.group(1).split(",")]) == 34
+    from app.services.telemetry import contract_loader as real_contract
+
+    expected = {real_contract.alias_target(i) or i for i in real_rules.implemented_ids()}
+    assert len([i.strip() for i in d.group(1).split(",")]) == len(expected)

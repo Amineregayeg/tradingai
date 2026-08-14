@@ -35,6 +35,11 @@ from app.services.rules.consolidation import (  # noqa: F401
     detect_window,
     detection_rate_pct,
 )
+from app.services.rules.entry_001_imbalance_poi import (  # noqa: F401
+    Block,
+    EntryPOI,
+    ImbalanceIsTheOnlyEntryPOI,
+)
 from app.services.rules.evaluator import (  # noqa: F401
     LayoutEvaluation,
     LayoutEvaluator,
@@ -71,6 +76,14 @@ from app.services.rules.gate_017_analysis_only_tfs import (  # noqa: F401
 )
 from app.services.rules.gate_023_timezone import NewYorkTimestamps  # noqa: F401
 from app.services.rules.gate_036_stand_aside import Decision, StandAside  # noqa: F401
+from app.services.rules.gate_037_no_premium_discount import (  # noqa: F401
+    NoPremiumDiscountOrOTEFilter,
+)
+from app.services.rules.gate_038_amplifiers import (  # noqa: F401
+    AmplifierLevel,
+    AmplifiersNeverCreateATrade,
+    DECLARED_COLLISION_WINDOW,
+)
 from app.services.rules.gate_040_cool_off import (  # noqa: F401
     DECLARED_COOL_OFF,
     INPUT_UNION,
