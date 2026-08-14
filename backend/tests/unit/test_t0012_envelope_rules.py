@@ -606,3 +606,29 @@ def test_grade_035_is_registered_by_alias_and_marked_unable_to_fire():
     impls = implementations()
     assert impls["GRADE-035"] is impls["GATE-040"]
     assert impls["GRADE-035"].CANNOT_FIRE_WITHOUT == ("GRADE-028",)
+
+
+def test_a_blocked_forward_is_distinguishable_from_an_evaluated_forward():
+    """Both defaults point the same way, so the record must name which case produced it.
+
+    A blocked GATE-040 emits FORWARD with satisfied=False. A working GATE-040 on a
+    trending market emits FORWARD with satisfied=False. Identical, not merely similar —
+    so "cool-off correctly not satisfied" and "cool-off never evaluated" are the same
+    record unless something says which, and the whole rule is a prerequisite check.
+    """
+    from app.services.rules import CoolOffBeforeReversal
+
+    blocked = CoolOffBeforeReversal.evaluate()
+    evaluated = CoolOffBeforeReversal.evaluate(
+        consolidation=_window(False), readings=_all_readable()
+    )
+
+    assert blocked.values["mode"] == evaluated.values["mode"] == "FORWARD"
+    assert blocked.values["cool_off"]["satisfied"] is False
+    assert evaluated.values["cool_off"]["satisfied"] is False
+    assert (
+        blocked.values["cool_off"]["determination"]
+        != evaluated.values["cool_off"]["determination"]
+    ), "a blocked cool-off is indistinguishable from an unsatisfied one"
+    assert blocked.values["cool_off"]["determination"] == "NOT_EVALUATED_BLOCKED"
+    assert evaluated.values["cool_off"]["determination"] == "EVALUATED"

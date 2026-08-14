@@ -250,6 +250,13 @@ class CoolOffBeforeReversal(RuleImplementation):
                 "satisfied": False,
                 "elapsed_duration": elapsed_s,
                 "consolidation_evidence": values["consolidation_evidence"],
+                # WHY satisfied IS FALSE. Without this, a blocked GATE-040 and a working
+                # GATE-040 on a trending market emit an IDENTICAL record: both FORWARD,
+                # both satisfied=False. The verdict differs (NOT_APPLICABLE vs FAIL) but
+                # that makes the reader infer the distinction from a convention instead
+                # of reading it. Both defaults point the same way, so the record has to
+                # say which case produced the mode.
+                "determination": "NOT_EVALUATED_BLOCKED",
             }
             values["mode"] = default_mode
             provenance["unreadable_inputs"] = derived("inputs with no producer or unwired")
@@ -269,6 +276,7 @@ class CoolOffBeforeReversal(RuleImplementation):
             "satisfied": satisfied,
             "elapsed_duration": elapsed_s,
             "consolidation_evidence": values["consolidation_evidence"],
+            "determination": "EVALUATED",
         }
         values["mode"] = REVERSE if satisfied else FORWARD
         return cls.evaluation(
