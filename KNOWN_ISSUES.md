@@ -418,6 +418,35 @@ three would be flagged in a diff.**
 test docstring — rather than silently applied, because a silent fix makes the entry look like it was
 always right and the failure mode is the finding.
 
+### THE SHARPENED LENS: NOT "IS THIS RIGHT" BUT "IS THIS RIGHT AT THE MOMENT IT IS FIRST READ"
+
+**Review's formulation, 2026-08-14, after finding two defects in a plan it had already reviewed
+twice.** This register's standing lens is *does this output distinguish working from broken* — ~25
+instances. **That lens passes both of the defects below**, which is why it needed sharpening rather
+than restating.
+
+    T-0011 criterion 3   asserted rule ids on omissions that criterion 4-i had established
+                         can never have them.   CORRECT WHEN WRITTEN -- 4 was rewritten later
+                         and 3 was not.         Fails at a REWRITE boundary.
+
+    T-0011 criterion 5   a CI check over census records, where the plan's own opening says
+                         there are ZERO censuses.  CORRECT IN STEADY STATE.
+                         Green the day it ships. Fails at t=0.
+
+**Neither criterion is wrong. Each is right everywhere except at the boundary where it will actually
+first be read** — and that is the only moment that matters, because **the first reading is the one
+that establishes whether anyone believes the mechanism works.** A check that is green on day one
+because its input set is empty gets believed on day one.
+
+> **So ask when, not whether.** *Is this right at a rewrite? At t=0? On an empty set? On the first
+> run, by a reader who has no other evidence?*
+
+**And Review's account of why it missed both across two prior passes is the transferable half:
+"I was reading the criteria I had findings in."** A reviewer's attention concentrates where it has
+already invested, so **the criteria most likely to carry an unamended contradiction are the ones
+nobody objected to** — which is the unaudited-copy rule below, arriving inside a single document
+rather than across two.
+
 ### WHEN A CLAIM LIVES IN TWO ARTEFACTS, FIX THE ONE NOBODY CHECKS FIRST
 
 **Execute's formulation, in its last message before running out of context, and it is a new axis on
