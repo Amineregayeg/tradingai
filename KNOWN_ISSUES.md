@@ -235,6 +235,34 @@ over a rule to compare figures; `agents/ci_range.py` over a habit of checking CI
 a discipline of re-reading the register. **The good version of every entry in this preamble is a
 command, not a resolution.**
 
+**AND THE DETECTORS WERE NOT THE PROBLEM. Every mechanism that actually caught a defect on 2026-08-14
+was designed in advance and worked:**
+
+    CI                                       caught the red push at 16:11:37, within a minute
+    test_every_rule_module_on_disk_is_imported  failed at 62df7d6 — "Extra items: 'consolidation'"
+    base.py's __init_subclass__              refused the GRADE-035 alias claim with a TypeError,
+                                             which rescoped T-0014 before a cycle was spent
+    verify_guards.sh                         passed honestly throughout, on every mutation
+
+**What was missing was a reader.** So the tools built that day are not detectors — checked, and four of
+five merely **route or correct signals that already existed**: the two sweeps read `KNOWN_ISSUES.md`
+and `git log`, `ci_range.py` reads the Actions API (**B53**'s whole point), the `rule_waves.py` fix
+collapses aliases in an existing counter, and the invariants above are a self-check inside a tool that
+already printed the numbers. **Not one adds detection.**
+
+**The consequence for the next proposal, and it is narrower and cheaper than "build a tool":**
+
+> **Before building a detector, check whether the thing is already detected and merely unread.**
+
+**B53 is the pure case** — the signal existed, was correct, was timestamped, and nobody had ever looked
+at it. **Had that question been asked first, `ci_range.py` was the obvious build and T-0018's
+guard-list framing would never have been written.**
+
+**One qualification, from Review against its own claim:** `verify_guards.sh` was designed in advance
+and has needed three recorded fixes — **B18**'s over-wide restore, the `MUTATED` flag its own trap
+could not see, and the 127 exit code. **Designed in advance is not the same as correct.** The point is
+where to look first, not which kind of tool is better.
+
 ### And it keeps appearing in this register itself
 
 **Not as irony — as evidence that accuracy is not the property that prevents it.** B45's quotation
