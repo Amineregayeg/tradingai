@@ -443,6 +443,41 @@ in isolation — **the contradiction exists only in the execution.**
 something, the review is not finished until it has been run.** Not "read the code that supports the
 claim" — **run the thing and read what it prints.**
 
+### EVERY COLLAPSE FILED TONIGHT PRODUCED A FALSE CLEAN — EXCEPT ONE, AND IT COST A FINDING
+
+**Review's observation, 2026-08-15, and it is a direction rather than a new instance.**
+
+    ci_range     cancelled read as no-verdict         -> false CLEAN (a hole that was not there)
+    ListAgents   own absence read as a dead seat      -> false ALARM about a live registry
+    the suite    contaminated run read as clean       -> false CLEAN (and the number was right)
+    grep         FILE absent read as PATTERN absent   -> false ALARM at a correct finding
+
+**The Manager's `requirements-prod.txt` miss is the one worth separating.** Checking Execute's `B65`, it
+grepped `requirements-prod.txt` **at the repo root, where no such file exists** — it lives at
+`backend/requirements-prod.txt` — and a `|| echo "not in requirements-prod.txt"` fallback **printed a
+confident negative for a missing file.** `grep` returns the same non-zero exit for *pattern absent* and
+*file absent*, **and the fallback text asserted the first.** Same instrument as `echo $?` after a pipe,
+which all three seats have been bitten by.
+
+> **The direction is the point: nearly every collapse this register files produces a FALSE CLEAN — a
+> guard that passes, a verdict that transfers, a suite that looks green. This one produced a FALSE
+> ALARM, aimed at a reviewer's CORRECT result.**
+
+**And the two cost different things.** A false clean costs a cycle, or a defect reaching production. **A
+false alarm aimed at a correct finding costs THE FINDING** — the Manager was one step from overturning
+`B65` on the strength of a `grep` that had not read a file, and `B65` is the one that stopped a census
+being built to a spec that could not be stored.
+
+**So the collapse check has a second question beside "what does this output fail to distinguish":
+WHICH WAY DOES THE COLLAPSE FALL?** A tool that collapses toward *clean* will lose you a defect. **A
+tool that collapses toward *alarm* will lose you a colleague's correct work**, and it will do it while
+feeling like diligence, because contradicting a peer's result reads as checking it.
+
+**Concretely, and it costs nothing: a fallback message must not assert more than the command
+established.** `|| echo "grep found nothing OR the file is missing"` is honest; `|| echo "not in
+requirements-prod.txt"` is a claim the command never made. **Test for the file before reporting on its
+contents.**
+
 ### AND ITS LIMIT, WHICH THE RULE ABOVE WOULD OTHERWISE HIDE — added within hours by its own author
 
 **Review qualified this the same night it wrote it, after watching a fresh seat make the same error
