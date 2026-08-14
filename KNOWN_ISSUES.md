@@ -138,6 +138,30 @@ four-space indent under `rules/*.py`, reported as a repo fact. **The conclusion 
 surfaces only `OFF_CONDITIONS`, a substring, in a rule using neither shared type) **and the evidence
 had a scope nobody could see.**
 
+### A MUTATION MUST FAIL ONLY FOR THE PROPERTY UNDER TEST — and it can miss from either side
+
+**Two mutations written hours apart missed this from opposite directions, which is what makes it a
+form rather than two mistakes:**
+
+    T-0017's   would have PASSED for an unrelated reason — the corpora on which the wrong
+               threshold value is accepted are the oldest in a live fetch, so within six hours
+               there is nothing left to demonstrate and the mutation goes vacuous. A vacuous
+               mutation passes.
+
+    T-0016 3b's would have FAILED for an unrelated reason — "unblock the middle rule and confirm
+               the outer clears" had no middle rule to unblock, because both declarations name
+               an unimplemented leaf rather than a blocked rule. It would have failed whether or
+               not the mechanism existed.
+
+**Neither would have discriminated, and neither failure is visible in the mutation's own text** —
+both read as precise, both name real objects, both would have run. **T-0017's needed measuring how
+the corpus moves; 3b's needed reading what the declarations actually contain.**
+
+**So the check on a mutation is not "does it fail today" but "would it fail for THIS reason and no
+other, and would it still be able to fail next week".** The passing side is the more dangerous of
+the two — a mutation that fails spuriously gets investigated, and one that passes spuriously gets
+recorded as evidence.
+
 ### And it keeps appearing in this register itself
 
 **Not as irony — as evidence that accuracy is not the property that prevents it.** B45's quotation
@@ -1108,6 +1132,120 @@ more than the run changed — is described in `B30`'s instance list and in the s
 and either restore the number as a pointer or update the four citations. **A one-line
 `### B18. — folded into Bnn` stub is enough**, and is what makes the two code citations resolve
 again. Related: **B49**, **B50**, **B30**, **B47**.
+
+### B52. The mutation prober guards a consumer and not its dependency — its coverage follows file paths, not the dependency graph
+**Found in:** 2026-08-14 by Review, checking whether `ict/detector.py` was safe to edit in T-0014
+**Severity:** moderate — the probes are sound; the boundary around them is drawn by path
+
+**`backtest/engine.py` is in `GUARDED_FILES`. `ict/detector.py`, which it imports from, is
+not.**
+
+    verify_guards.sh:28-31   ENGINE · DOMINANCE · EXECUTION · RESOLVE   (four paths)
+    engine.py:26             from app.services.ict.detector import ict_detector, _normalize_df
+    engine.py:89-90, 263-265 _compute_swing · detect_bos_choch · detect_fvg
+
+**The FVG probe asserts that reverting *"FVG entry admissible only from born+2"* in
+`engine.py` turns `tests/integration/test_lookahead_regression.py` red.** That probe is
+valid and it passes honestly. **But the property it protects also depends on `detect_fvg`,
+which lives in an unguarded file** — so the same guarantee can be broken from a direction
+the prober does not probe, does not refuse a dirty edit in, and would not `restore()`.
+
+**Why this is worth an entry rather than a wider `GUARDED_FILES`.** The obvious repair —
+add `ict/detector.py` — fixes this instance and not the shape. **The coverage boundary is
+drawn by file path while the property being protected is a behaviour spanning a call
+graph**, so the next guarded file that grows an import re-opens the same hole silently.
+Widening the list is a fix; knowing the list is path-shaped is the finding.
+
+**And it is invisible from inside the run, which is this register's signature.** Eight `ok`
+lines and `TIER 0.2 PASSED` are byte-identical whether or not the guarded property has an
+unguarded dependency. **The script already prints one blind spot it knows about** —
+*"`strategy_step.py` (the LIVE entry brain) has no causality test"* — and that precedent is
+the model: this one is not a missing test but an unprobed path into a tested property.
+
+**Live-path note that made this urgent rather than academic.** `ict/detector.py` is wired
+into production at `app/main.py:124-127` via `candle_pipeline.on_candle_close`, and
+`detect_sd_zones` sits in the detector's own dispatch list (`:141`). **It is live, it runs
+every candle, and it carries no guard** — so "shadow-only, no live behaviour change", the
+standing clause on every rules task this week, has no mechanical enforcement for this file.
+
+**Fix:** either extend `GUARDED_FILES` to the imports of the guarded set — computed rather
+than typed, so it cannot drift — or print the guarded set's unguarded dependencies as a
+`NOTE` beside the `strategy_step` one, so the boundary is visible on every run. **The second
+is cheap and honest; the first is correct and needs a plan.** Related: **B30**, **B39**,
+**B18/B51**, **B40**.
+
+### B53. CI's verdict has no consumer — main went red for nine minutes and no one in the loop knew
+**Found in:** 2026-08-14 by Review, after the Manager found T-0014 part 1 had been pushed red
+**Severity:** moderate — the detection already works; only the routing is missing, which is
+why this is worth an entry rather than a project
+
+**`62df7d6` (T-0014 part 1) was pushed with a failing suite.** Reproduced in a pinned
+worktree:
+
+    tests/unit/test_rules_base.py:158   AssertionError
+    Extra items in the left set: 'consolidation'
+    1 failed, 15 passed
+
+**CI caught it, correctly, within a minute.** From the Actions API:
+
+    e1baefd   success   16:33:16Z   main
+    ff084ac   success   16:20:36Z   main
+    62df7d6   FAILURE   16:11:37Z   main    <- part 1
+    3c8d31c   success   15:55:46Z   main
+
+The workflow triggers on push to every branch, it fired, and its verdict was right. **Execute
+self-caught the break and fixed it nine minutes later in `ff084ac`, whose title says so.**
+
+**So the failure is not detection.** A correct red verdict existed on `main`, was recorded
+with a timestamp, was resolved by its author — and **never entered the review record.**
+Neither the Manager's dispatch nor Review's part-1 report mentioned it, because **nothing in
+the three-agent loop reads CI.** The signal was not missing; it had no consumer.
+
+**Why the review protocol did not catch it either, stated because the division of labour is
+otherwise correct.** Review takes a baseline before a task and verifies when the task lands,
+which is right for attribution and deliberately leaves intermediate commits to CI. **That
+division works only if someone reads CI.** A task pushed in several commits therefore has a
+middle state that Review does not check by design and that CI checks and reports to nobody.
+**Review also had a worktree pinned at `62df7d6` throughout the part-1 review and never ran
+the suite in it** — the answer was one command away in a tree already built.
+
+**FIXED — the routing exists: `agents/ci_range.py <base>..<head>`** prints the CI conclusion
+for every commit in a range from `GET /actions/runs`, so a verdict can state it for **commits
+nobody pinned** without running the suite again. Adopted into Review's protocol 2026-08-14:
+**endpoint runs are mine; intermediate commits are CI's, and I read them now.**
+
+**Cited only after verifying it, because CI runs PER PUSH and not per commit**, so most
+commits in a batch push have no run of their own and the tool must infer. Three defects were
+found and fixed before this entry pointed at it, and the third is the one a reader should
+know about:
+
+* **v1 fired on every batch push** — every runless commit reported as a gap. The muted-alarm
+  failure, in the tool built to route a signal nobody read.
+* **v2 inferred from ANCESTRY** — a runless commit was *"covered by"* the next green
+  descendant. **False, and systematically false in the only window that matters: a fix commit
+  makes every red ancestor between the break and itself look covered.** Proved on `ab6a427`,
+  which v2 called covered and which is red.
+* **v3 searched for evidence only INSIDE the queried range**, so `bd674d5` read `=success` or
+  `UNKNOWN` depending on where the range started — **a verdict that was a property of the
+  query rather than the commit**, failing by manufacturing UNKNOWNs.
+
+**v4 infers by TREE IDENTITY across history** — a runless commit inherits the conclusion of
+the nearest commit whose code tree is byte-identical, in either direction — and reports
+`UNKNOWN` where no such neighbour exists. **Verified rather than read:** `ab6a427` inherits
+its red; `bd674d5` gives the same answer from two different ranges; an unpushed
+code-changing commit reports `UNKNOWN`; and a **frontend-only** commit reports `UNKNOWN`
+rather than inheriting, which v3 would have got wrong — its comparison covered
+`backend/` and `scripts/` while CI runs four jobs including `frontend/`. **`TREE_IGNORE` is
+now an exclusion list (`docs/`, `*.md`), so a new top-level directory defaults to counted
+rather than silently ignored** — `B52`'s lesson applied before it could bite.
+
+**Related and distinct: `B30`** is *"a `cancelled` check reads as green — the only CI state
+that asserts nothing"*. **It was filed yesterday — T-0006, 2026-08-13 — and it is Review's
+own finding and largely its wording.** So the loop established one day ago that **CI states
+are review-relevant**, and still routed nothing. B30 is a state that misleads a reader; this
+is a state no reader reaches. **The same seat filed both**, which is the part worth keeping:
+knowing a signal matters is not the same as arranging to receive it. Related: **B30**,
+**B47**, **B39**.
 
 ### B11. The disturbance grader now runs on real data — and its grade still decides nothing
 **Found in:** M4 (implementing GATE-002/007/008/048), 2026-08-08
