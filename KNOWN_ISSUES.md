@@ -99,6 +99,30 @@ improve the wording will otherwise re-break it identically.
 abstraction discarding a distinction its caller needed; **this one is a round trip through a
 presentation layer.** Both let the failure travel through code that is individually right.
 
+### NEGATIVE FINDINGS INHERIT THE SCOPE OF THE SEARCH THAT PRODUCED THEM
+
+**A distinct form, found by Review correcting its own entry.** B45 said *"There is no consolidation
+detector and no range detector, in the registry or in the code."* The search was `app/services/rules/`
+and the claim was written repo-wide. **`ict/detector.py:476` has one** — a volume-percentile detector
+for Supply/Demand zones. B45's substance survives (different question, different path, not in the
+registry, so GATE-040 genuinely had no producer) but its scope was overstated.
+
+> ***"I did not find it"* written as *"it does not exist."***
+
+**Why this is worse than the positive form and not merely another instance of it:** a positive claim
+carries a referent you can go and check. **A negative claim has no referent — you cannot follow a
+citation to an absence.** So the only thing bounding it is the scope of the search, and if the search
+is not stated the claim cannot be checked at all, only re-run by someone who guesses the same way.
+
+**So: state the search.** *"No `session_open` anywhere under `app/`"* is checkable. *"There is no
+session marker"* is not.
+
+**Same day, same seat, a second instance:** *"GATE-041 is the only rule declaring a `CONDITIONS`
+table"* — load-bearing for T-0016's denominator of 1 — rested on a grep anchored to line-start or
+four-space indent under `rules/*.py`, reported as a repo fact. **The conclusion held** (a wider search
+surfaces only `OFF_CONDITIONS`, a substring, in a rule using neither shared type) **and the evidence
+had a scope nobody could see.**
+
 ### And it keeps appearing in this register itself
 
 **Not as irony — as evidence that accuracy is not the property that prevents it.** B45's quotation
@@ -731,6 +755,25 @@ detector**; the absence of fresh old-direction gaps; the NY 9:30 open marker."*
 Review checked: the only `overlap` match under `app/services/rules/` is PRIM-002's **BPR
 overlap** — two opposite-direction imbalances overlapping *in price* — which is a different
 concept from a post-sweep consolidation. **The word `overlap` is a false match.**
+
+**SCOPING CORRECTED 2026-08-14 by Review, who wrote the claim.** *"In the registry or in the
+code"* was checked **only under `app/services/rules/`** and stated repo-wide. There is a
+consolidation notion elsewhere: `ict/detector.py:474` `detect_sd_zones` uses *"volume below
+the 30th percentile (consolidation), then a strong impulse candle"* to find Supply/Demand
+zones. **The substance of this entry is unaffected** — that is a volume-cluster detector
+serving S/D zones on the legacy ICT path, not price-geometry range compression after a
+sweep, and it is not in the registry, so GRADE-035/GATE-040 still had no producer and
+T-0014 still had to build one. **But the claim was broader than the search**, which is
+`B49`'s class applied to a negative: *"I did not find it"* was written as *"it does not
+exist."* A negative finding inherits the scope of the search that produced it and must
+carry it.
+
+**Consequence now that T-0014 part 1 has landed: two definitions of "consolidation" coexist**
+— `rules/consolidation.py` (span ≤ k × mean bar range, k declared at 3.0) and
+`ict/detector.py` (volume percentile). Different purposes and different paths, so this is not
+a conflict to resolve. It is `B33`'s two-vocabularies shape, and it wants one sentence in each
+place saying which question it answers, so *"does this engine detect consolidation?"* stops
+having two true answers depending on which file is open.
 
 **And no `PRIM-` rule specifies ranges at all**, while `GATE-037`'s output already references
 `primitives.ranges` as *"reading vocabulary"*. **So the contract references a primitive it
