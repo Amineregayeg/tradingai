@@ -31,6 +31,8 @@ packages, and checks that the strategy-critical versions match production.
 | Frontend tests (171 tests, ~1 min) | `pnpm exec vitest run` | `frontend/` |
 | Frontend typecheck | `pnpm tsc` | `frontend/` |
 | Lookahead guards (Tier 0.2) | `PYTHON=~/.venvs/tradingai/bin/python ./scripts/verify_guards.sh` | `backend/` |
+| Rule ids resolve / coverage | `~/.venvs/tradingai/bin/python scripts/check_rule_coverage.py` | repo root |
+| Partially-evaluable rule pattern | `~/.venvs/tradingai/bin/python scripts/check_partial_rules.py` | repo root |
 | Dependency single-source | `python3 scripts/check_dependency_sources.py` | repo root |
 | Deploy drift (needs ssh) | `~/.venvs/tradingai/bin/python scripts/check_deploy_drift.py` | repo root |
 | Deploy the dominance collector (needs ssh) | `./scripts/deploy_dominance.sh` (`--check` to report only) | repo root |

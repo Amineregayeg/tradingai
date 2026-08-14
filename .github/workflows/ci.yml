@@ -120,6 +120,19 @@ jobs:
         working-directory: .
         run: python3 scripts/check_rule_coverage.py
 
+      # The partially-evaluable standing pattern, enforced over EVERY registered
+      # implementation rather than over the rule under review. Five of the six standing
+      # requirements were enforced by review alone, which makes them strongest where they
+      # are least needed: the first rule of a new kind is written under maximum attention
+      # and will be correct, and its correctness says nothing about the fiftieth.
+      #
+      # Separate from the coverage check on purpose. Folding it in would make one PASSED
+      # line stand for two unrelated properties, and a reader who knows what that line
+      # used to mean would not learn it now means less than they think.
+      - name: Partially-evaluable rules obey the standing pattern
+        working-directory: .
+        run: python3 scripts/check_partial_rules.py
+
   guards:
     name: Tier 0.2 - lookahead guards must bite
     runs-on: ubuntu-latest

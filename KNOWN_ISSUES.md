@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-14 (T-0007: ENTRY_TF 1H -> 5m, the first live behaviour change. B37 CLOSED — the lookahead is out of production. B33 gained the instance it predicted: every legal execution timeframe would have broken the shadow; GATE-017 closed on the live path; B38 — GATE-018 stays OPEN; B39 — a conditional edit that matches nothing succeeds; B40 — the correlate margin is now 1.5x and nothing reports it shrinking)
+Last updated: 2026-08-14 (T-0016: the partially-evaluable requirements are enforced by script over the whole registry — B56, eleven emitted fields that cannot say where they came from, baselined not fixed and needing a task id; B57, the two of six standing requirements that script can actually enforce, so a green run is not read as six. Earlier the same day, T-0007: ENTRY_TF 1H -> 5m, the first live behaviour change. B37 CLOSED — the lookahead is out of production. B33 gained the instance it predicted: every legal execution timeframe would have broken the shadow; GATE-017 closed on the live path; B38 — GATE-018 stays OPEN; B39 — a conditional edit that matches nothing succeeds; B40 — the correlate margin is now 1.5x and nothing reports it shrinking)
 
 ---
 
@@ -1433,6 +1433,87 @@ a predicate deferral has no owner the moment nobody recognises themselves in it.
 **Fix:** the coverage script should collapse aliases before counting, or print both figures
 labelled — `42 ids / 33 distinct`. **Needs a task id.** Related: **B43**, **B45**, **B47**,
 **B49**.
+
+### B56. Eleven emitted telemetry fields state a value and cannot say where it came from
+**Found in:** T-0016, 2026-08-14, on the first run of `scripts/check_partial_rules.py` — which
+is the point of the script rather than an aside.
+**Severity:** moderate — an auditor cannot re-derive these values, and one of them is the field
+most likely to be disputed
+
+**The whole population, measured across every rule the check can invoke — not a sample:**
+
+    GATE-041   conditions_total · not_evaluable_count · not_read · unread_count ·
+               mandatory_satisfied
+    GATE-040   cool_off · duration_enforced · not_evaluable · not_read
+    GATE-019   session_gates_unconditional · swing_mode_available
+
+**`RuleEvaluation.value_provenance` exists so an auditor can re-derive a verdict with no engine
+access.** These eleven keys are emitted with no entry in it. Their siblings have one:
+`satisfied_count` gets `derived("count of conditions with state TRUE")`, `not_evaluable` gets
+`derived("no implementation produces this input")`.
+
+**THE ONE THAT MATTERS MOST IS `not_read`.** It names a producer and asserts that nobody called
+it — **the field most likely to be argued with by whoever is named in it, and the one field that
+cannot say where it came from.** Review found that in T-0012's cycle and correctly declined to
+spend a cycle on it there.
+
+**`GATE-041.mandatory_satisfied` was not in T-0016's plan's list of five**, which was measured on
+the BLOCKED branch only. It exists solely on the decided branch. The check examines both branches
+per rule for this reason. **The general form is filed by the Manager above as *A MEASUREMENT TAKEN
+ON ONE BRANCH IS NOT A PROPERTY OF THE RULE*** — kept there rather than restated here, because two
+records of one fact drift.
+
+**NOT FAILING THE BUILD, DELIBERATELY.** They are a named baseline in
+`check_partial_rules.PROVENANCE_PRE_EXISTING`, printed on every run, and a **new** gap fails
+immediately. A check that landed red would have been switched off within a day. **Clearing one
+means deleting its baseline line in the same commit — the script fails on a baseline entry that
+no longer describes anything**, so the list cannot outlive what it excuses.
+
+**Two keys are NOT in this population and are named exemptions instead:** `GATE-041.outcome` and
+`GATE-040.mode`. Both are the verdict itself, and the rest of the payload is its provenance;
+requiring the outcome to explain its own origin is circular. `mode` is Execute's extension of the
+plan's reasoning to the second instance, marked as such in the code.
+
+**Fix:** add a `derived(...)` / `from_record(...)` entry for each, and delete the matching
+baseline line. **Needs a task id.** Related: **B44**, **B49**.
+
+### B57. `check_partial_rules.py` enforces two of the six standing requirements, and a green run must not be read as six
+**Found in:** T-0016, 2026-08-14 — recorded because the plan required the limit to be written
+down where it will be read, not only printed.
+**Severity:** low as a defect, high as a misreading — this is the shape that produced **B41**
+
+**The six standing requirements for a partially-evaluable rule live in
+`agents/PROGRAMME_TO_CUTOVER.md`. The script mechanically enforces two:**
+
+    1 / 2a   no quorum is claimed while any condition is unreadable   ENFORCED
+    2        the invariant is SHARED, not duplicated inline           ENFORCED
+    3        counted as registered-and-blocked, not implemented       NOT — per rule
+    4        the verdict distribution is reported                     NOT — per rule
+    5        the non-default verdict proven reachable on a fixture    NOT — per rule
+
+**And within requirement 2 it checks that a direction was passed EXPLICITLY, never that it was
+the correct one.** No script can: `CONTINUE` for GATE-041 and `FORWARD` for GATE-040 are both
+conservative and point opposite ways, so there is no general direction to fail in. **That is read
+out of each rule's own statement.**
+
+**Three more limits, all printed by the script on every run so they cannot be separated from the
+result the way a plan can:**
+
+* **A clean grep means *"no instance of the KNOWN pattern"*, never *"no duplication"*.** A rule
+  phrasing the invariant differently escapes it. The import-binding check is the signal that does
+  not depend on phrasing — and it is an IDENTITY test against `base.quorum_blocked`, not
+  `hasattr`, because an inline copy written as a module-level function wearing the sanctioned name
+  satisfies `hasattr` while being exactly the duplication being hunted. Verified both ways.
+* **Only 2 of 34 implementations declare condition readings today** (GATE-040, GATE-041). *"All
+  rules pass"* currently means *"the two rules I could call pass"*, **and a check covering two
+  rules produces output identical to one covering all of them.** The ratio is printed for that
+  reason.
+* **The probes drive `evaluate` directly.** Nothing here proves the live engine calls these rules
+  at all — no rule has ever decided a live trade (**A10**).
+
+**No rule violated criterion 2 or criterion 3 at the time the check landed.** That is a real
+result and also the least informative one available: the two rules it examines were written under
+maximum attention, and 55 remain. Related: **B41**, **B49**, **A10**.
 
 ### B18. The prober's restore promise was wider than its mutations, and the width was the bug
 **Found in:** earlier session. **Status: FIXED** (`a4367ad`). **This heading exists because four
