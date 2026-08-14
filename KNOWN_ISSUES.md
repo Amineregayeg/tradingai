@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-14 (T-0016: the partially-evaluable requirements are enforced by script over the whole registry — B56, eleven emitted fields that cannot say where they came from, baselined not fixed and needing a task id; B57, the two of six standing requirements that script can actually enforce, so a green run is not read as six. Earlier the same day, T-0007: ENTRY_TF 1H -> 5m, the first live behaviour change. B37 CLOSED — the lookahead is out of production. B33 gained the instance it predicted: every legal execution timeframe would have broken the shadow; GATE-017 closed on the live path; B38 — GATE-018 stays OPEN; B39 — a conditional edit that matches nothing succeeds; B40 — the correlate margin is now 1.5x and nothing reports it shrinking)
+Last updated: 2026-08-14 (T-0021: B54 CLOSED — both tools collapse aliases and agree; every coverage figure now carries its space, and the script refuses to print an impossible set. B58 — the other tool is outside the repo, so half the agreement cannot be CI-enforced. Earlier, T-0016: the partially-evaluable requirements are enforced by script over the whole registry — B56, eleven emitted fields that cannot say where they came from, baselined not fixed and needing a task id; B57, the two of six standing requirements that script can actually enforce, so a green run is not read as six. Earlier the same day, T-0007: ENTRY_TF 1H -> 5m, the first live behaviour change. B37 CLOSED — the lookahead is out of production. B33 gained the instance it predicted: every legal execution timeframe would have broken the shadow; GATE-017 closed on the live path; B38 — GATE-018 stays OPEN; B39 — a conditional edit that matches nothing succeeds; B40 — the correlate margin is now 1.5x and nothing reports it shrinking)
 
 ---
 
@@ -200,7 +200,13 @@ stale; a diff cannot, because it is the thing itself. **Observe the artefact, no
 
 **The contradiction is visible without knowing which figure is right** — which is what makes it
 worth stating as a rule. Both numbers came from tools, both looked authoritative, and they came from
-**different** tools: `rule_waves.py` collapses aliases and `check_rule_coverage.py` does not (**B54**).
+**different** tools: `rule_waves.py` collapsed aliases and `check_rule_coverage.py` did not (**B54**).
+
+**Past tense as of T-0021 (2026-08-14): both collapse now, both print both spaces, and the coverage
+script asserts these relations on itself and refuses to print an impossible set.** This sentence is
+amended rather than left standing because it was a live claim about current behaviour — and the
+entry it cites is the one about two tools disagreeing, so a reader arriving here after the fix would
+have been told to distrust a tool that had been repaired.
 
 **So: when a report carries two figures about one quantity, check them against each other before
 checking either against reality.** An impossible pair localises the error to one of two places without
@@ -1391,6 +1397,22 @@ knowing a signal matters is not the same as arranging to receive it. Related: **
 ### B54. Two live tools count the registry differently — `rule_waves.py` collapses aliases and `check_rule_coverage.py` does not
 **Found in:** T-0014 verdict, 2026-08-14, by Review. **Filed here 2026-08-14, late, and the
 lateness is half the entry.**
+**Status: FIXED, 2026-08-14 (T-0021, `check_rule_coverage.py`).** Both tools now collapse and
+agree — measured live, not asserted: `rule_waves.py` prints `DISTINCT HARD_GATEs 79 implemented 33`
+and the coverage script prints `HARD_GATE covered 41 / 91 ids   33 / 79 distinct`.
+
+**THE ENTRY STAYS RATHER THAN BEING DELETED, and B51 is the reason.** Two live places cite it —
+`agents/deferral_sweep.py:41` uses it as the worked example of a predicate deferral, and this file's
+own *TWO NUMBERS QUOTED TOGETHER* section cites it for the divergence. Deleting a fixed entry that
+things point at produces *a live fact with a dead pointer*, which is B49's second class and exactly
+what B51 recorded when four artefacts cited a `B18` that did not exist.
+
+**WHAT THE FIX DOES AND DOES NOT COVER.** The coverage script's own counting is enforced in CI
+(`backend/tests/unit/test_rule_coverage_counting.py`, 8 tests, alias-collapse mutation included).
+**`rule_waves.py` lives OUTSIDE the repository, so CI can never see it** — see **B58**. What is
+enforceable from inside is the *interface*: the `implemented ids:` line that `rule_waves.py` parses
+is pinned by test, so the two tools cannot diverge through this side silently changing shape.
+
 **Severity:** moderate — the programme is scoped on an absolute count and two tools disagree
 about it
 
@@ -1430,9 +1452,32 @@ a predicate deferral has no owner the moment nobody recognises themselves in it.
   built to catch predicate deferrals is blind to the file type in which I wrote one. Limit
   now recorded in the script.
 
-**Fix:** the coverage script should collapse aliases before counting, or print both figures
-labelled — `42 ids / 33 distinct`. **Needs a task id.** Related: **B43**, **B45**, **B47**,
-**B49**.
+**Fix, applied:** the coverage script now prints **both** figures labelled — `42 / 117 ids` beside
+`34 / 104 distinct` — rather than picking one, because both are legitimate answers to different
+questions and a bare number cannot say which set it counted. Related: **B43**, **B45**, **B47**,
+**B49**, **B58**.
+
+### B58. One half of the cross-tool agreement cannot be enforced from inside the repository
+**Found in:** T-0021, 2026-08-14, while satisfying its criterion 2.
+**Severity:** low today, and structural — it is the reason B54 can recur in the other direction
+
+**T-0021's criterion 2 asks that "something must fail if the two tools diverge again".
+`agents/rule_waves.py` is not in this repository** — it sits beside it at
+`/mnt/c/Users/malek/TradingAI/agents/`, so no test in `backend/tests/` and no CI job can execute it.
+
+**What IS enforced in CI:** the coverage script's own counting, its alias collapse, its internal
+invariants, and **the interface the other tool consumes** — `rule_waves.py` parses
+`implemented ids:\s*(.+)` and a test pins that line's shape and space. So this side cannot change
+silently.
+
+**What is NOT:** `rule_waves.py` changing its own collapsing. The live comparison exists — it was
+run by hand for T-0021 and both tools agree — but **a comparison run by hand is a habit, and B15,
+B19, B21 and B47 all say habits do not hold.** The asymmetry is worth naming precisely: the tool
+that was WRONG is now guarded, and the tool that was RIGHT is not.
+
+**Fix:** move `rule_waves.py` into the repository, or have it assert against the coverage script's
+published `distinct implemented:` line and exit non-zero on disagreement. The second is smaller and
+puts the check where the two tools already meet. **Needs a task id.** Related: **B54**, **B47**.
 
 ### B56. Eleven emitted telemetry fields state a value and cannot say where it came from
 **Found in:** T-0016, 2026-08-14, on the first run of `scripts/check_partial_rules.py` — which
