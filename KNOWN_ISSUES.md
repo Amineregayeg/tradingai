@@ -1281,6 +1281,52 @@ is a state no reader reaches. **The same seat filed both**, which is the part wo
 knowing a signal matters is not the same as arranging to receive it. Related: **B30**,
 **B47**, **B39**.
 
+### B54. Two live tools count the registry differently — `rule_waves.py` collapses aliases and `check_rule_coverage.py` does not
+**Found in:** T-0014 verdict, 2026-08-14, by Review. **Filed here 2026-08-14, late, and the
+lateness is half the entry.**
+**Severity:** moderate — the programme is scoped on an absolute count and two tools disagree
+about it
+
+**`check_rule_coverage.py` reports:**
+
+    implemented but CANNOT FIRE    4
+        GATE-040 · GATE-041 · GRADE-029 · GRADE-035
+
+**That is TWO rules.** `GRADE-029` is `alias_of GATE-041` and `GRADE-035` is `alias_of
+GATE-040` — one class each, registered under two ids by `base.py`'s alias mechanism. The same
+inflation runs through `implemented 42 / 117` and `effective coverage 37 / 91`.
+
+**`rule_waves.py` was fixed to collapse aliases on 2026-08-14. `check_rule_coverage.py` was
+not.** So the two tools now disagree, and the disagreement was introduced by fixing one of
+them. Distinct figures: **2 blocked**, **33 of 79 distinct HARD_GATEs implemented**, **31 of
+79 able to reach a verdict**.
+
+**Not introduced by T-0014 — made visible by it**, because T-0014 was the first task to add
+an alias pair after the collapse rule was adopted. **The ratio survives collapsing because
+aliases inflate numerator and denominator together; the ABSOLUTE counts do not, and the
+programme's remaining-work figure is an absolute count.**
+
+**AND THE REASON THIS ENTRY IS LATE IS THE FINDING I WOULD KEEP.** I reported it in
+`agents/tasks/T-0014/review-01.md` as *"belongs to whoever owns the coverage script"* —
+**a deferral by predicate, with no task id, written by me, hours after the loop adopted DEFER
+BY TASK ID, NEVER BY PREDICATE and filed four instances of it.** It then sat unowned because
+a predicate deferral has no owner the moment nobody recognises themselves in it.
+
+**Two mechanisms let it hide, and both are mine:**
+
+* **A verdict is not the register.** This file's own preamble opens with the rule that a
+  problem found and not fixed is *written here* — *"not mentioned in passing"*. **A review
+  verdict is passing.** `B47` is the precedent: a verdict that existed where nobody would
+  look.
+* **`agents/deferral_sweep.py` reads only `KNOWN_ISSUES.md`.** Verdicts under
+  `agents/tasks/*/review-*.md` carry deferrals and **nothing sweeps them** — so the tool
+  built to catch predicate deferrals is blind to the file type in which I wrote one. Limit
+  now recorded in the script.
+
+**Fix:** the coverage script should collapse aliases before counting, or print both figures
+labelled — `42 ids / 33 distinct`. **Needs a task id.** Related: **B43**, **B45**, **B47**,
+**B49**.
+
 ### B11. The disturbance grader now runs on real data — and its grade still decides nothing
 **Found in:** M4 (implementing GATE-002/007/008/048), 2026-08-08
 **THE DATA HALF IS FIXED, 2026-08-13 (T-0008); THE ENTRY STAYS FOR THE HALF THAT IS NOT.**
