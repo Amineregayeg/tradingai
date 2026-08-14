@@ -869,6 +869,14 @@ GET /repos/Amineregayeg/tradingai/branches/main             -> "protected": fals
 GET /repos/Amineregayeg/tradingai/rulesets                  -> 0 rulesets
 ```
 
+**AND IT CANNOT BE FIXED FROM THIS SEAT — a capability limit, not a permission one.**
+Verified 2026-08-14: the `Docz2868` token holds `push: True, pull: True` but
+**`admin: False, maintain: False`** on `Amineregayeg/tradingai`, and the protection
+endpoint 404s for reading as well as writing. **No authorisation the owner gives an
+agent changes this** — it needs him to set protection in GitHub's settings himself, or
+to grant the token admin. Recorded so a future seat does not spend the attempt: this is
+not "not done yet", it is not doable from here.
+
 So every CI job on this repo is advisory. `Tier 0.2 - lookahead guards must bite`
 carries no `continue-on-error` and fails the job on exit 2 — it is written to
 block, and there is nothing for it to block. Nothing rejects a push to a red
@@ -1761,9 +1769,38 @@ reproducible.
 **Why it matters:** a rollback still means finding the previous SHA by hand, and
 recreating one container and not the other can still put the two halves on
 different code — it is now *detectable* rather than prevented.
+**EXTENDED 2026-08-14 — the floating ref couples unrelated decisions, and that is
+sharper than the reproducibility problem above.** Read from the running container's
+actual start command rather than inferred:
+
+```sh
+if [ ! -f /app/.ready ]; then
+  git fetch --depth 1 origin "${GIT_REF:-main}"     # <- unpinned
+  cp -a /tmp/src/backend/. /app/ ; rev-parse HEAD > /app/.build-sha
+  pip install ; touch /app/.ready
+fi
+python deploy_migrate.py ; exec uvicorn ...
+```
+
+**The reassuring half, which was not written down anywhere and matters:** `/app` is
+**not** a bind mount and `/app/.ready` lives in the container's writable layer, so a
+host reboot, a daemon restart, an OOM kill or any `unless-stopped` auto-restart
+**skips the clone block entirely** and keeps the running code. Passive events cannot
+change the deployed version. **Only a deliberate `--force-recreate` (or `rm` + `up`)
+re-clones.**
+
+**The hazard half: a recreate ships `main` HEAD *in full*, whatever is on it at that
+moment.** So any maintenance that requires recreating the api silently performs a code
+deploy of everything merged since the last one. **This is live right now:** the pending
+owner-only `DOMINANCE_DATA_DIR` → `DOMINANCE_DIR` compose fix requires a recreate, and
+performing it would ship whatever is on `main` — currently including code the owner has
+not ruled on. **Two independent decisions, one of which quietly executes the other.**
+
 **Fix:** set `GIT_REF` to a full 40-char SHA in the VPS compose as part of
 releasing, so a deploy is a deliberate act. Fetch-by-SHA and rollback to an
-older SHA are both verified working against GitHub.
+older SHA are both verified working against GitHub. **Until then, `GIT_REF` is also the
+decoupling tool:** recreate with `GIT_REF=<current sha>` to perform compose maintenance
+without shipping code, then deploy as its own act.
 
 ---
 
