@@ -1803,6 +1803,72 @@ a predicate deferral has no owner the moment nobody recognises themselves in it.
 questions and a bare number cannot say which set it counted. Related: **B43**, **B45**, **B47**,
 **B49**, **B58**.
 
+### B70 — a mutation going red is not evidence it went red FOR THE REASON CLAIMED
+
+**Found in:** T-0011, 2026-08-15, by Execute against its own mutation. Review reports the mirror
+of it against T-0017's criterion 4 the same evening, which makes two in one day.
+
+**What it is.** Standing rule 2 is *"a guard is not proven until you have made it fail"*. It says
+nothing about **which** guard fails, and that gap is where a proof evaporates.
+
+T-0011's criterion 2 needed proof that the census filters on BAR time rather than WRITE time. The
+mutation I ran first removed the window filter entirely. Output:
+
+    FAILED test_the_dst_fall_back_inverts_a_string_sort
+    1 failed, 18 passed
+
+**Red, restored, and worthless.** `test_the_filter_is_on_bar_time_not_write_time` — the test that
+exists for exactly this — **passed**, because every row in its fixture is inside the window, so
+removing the window changes no count. I had proven the DST guard a second time and the bar-time
+guard not at all. Re-run as an actual `created_at` filter, the right test fails.
+
+**Why it is easy to miss and hard to catch afterwards.** The exit code is 1 either way. The
+summary line says `1 failed`. Nothing in the transcript distinguishes "the guard I was proving
+went red" from "a neighbour went red", and a work report that says *"mutation A goes red"* is
+literally true and carries no information. **The check is free and it is the only one: read the
+NAME of the test that failed and confirm it is the one the mutation was aimed at.**
+
+**Generalises past mutations.** Any assertion that a change is detected has this shape — a CI
+step that fails for a syntax error, a smoke test that fails on a missing fixture. The observation
+that something broke is not the observation that the thing you were testing broke.
+
+**Fix:** when a work report claims a mutation, it names the mutation AND the test that went red,
+and the reviewer checks they correspond. Applied in T-0011's report. Related: **B39** (assert the
+occurrence count before a scripted edit — the same failure one step earlier: an edit matching
+nothing, so the mutation never happened at all).
+
+### B71 — "it validated" and "it is correct" are different claims, and the validator only answers one
+
+**Found in:** T-0011, 2026-08-15. Execute built the design; Review had made the mirror error from
+the other side an hour earlier, and named the pair.
+
+**What it is.** The first implementation of `unemitted_bars` put a vocabulary term in
+`omission_class` and a sentinel `GATE-000` in `rule_id`. **It validated against the pinned schema
+and its tests were green** — `unemitted_bars.items` has no `additionalProperties: false`, so an
+extra property is admitted, and `GATE-000` matches the `rule_id` pattern because the pattern
+checks SHAPE and the registry check happens somewhere else entirely.
+
+**Both facts are true and neither makes the design right.** A pattern-valid id that is not in the
+registry is a fabricated authority; an extra property is a schema widened by the implementer to
+unblock their own task. The Manager's ruling withdrew both. **The green suite was not evidence —
+it was the absence of one particular kind of evidence being mistaken for the presence of another.**
+
+**And the mirror, which is the half that makes it a pair.** Review specified the `DECLINED`/
+`ERRORED` vocabulary from the schema's PROSE without opening the field's validator, and the
+Manager passed it on as an instruction. **Two reviewers reasoned about a field with a validator
+attached and neither read the validator; the implementer found it because the code had to run.**
+Review's own phrasing: *"Execute found it in the artefact with the validator; I found it in the
+prose."*
+
+**Why it matters here specifically.** This project's telemetry is validated at the store, which is
+a genuinely good design (B41's chain depends on it) and which makes "it stored" feel like a
+verdict on correctness. It is a verdict on shape. Every semantic property — is this the right
+rule, does this omission exist, is this authority real — is outside what any JSON Schema can say.
+
+**Fix:** no fix, it is a discipline. When a schema accepts something surprising, that is a
+question rather than a permission. Related: **B65** (the schema clause that made this reachable),
+**B70**.
+
 ### B69 — four sites still name `every-closed-bar-roster-v1`, including `scan_census`'s own docstring
 
 **Found in:** T-0011, 2026-08-15. Flagged to me by the Manager mid-build as out of scope, and
