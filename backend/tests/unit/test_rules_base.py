@@ -147,11 +147,15 @@ def test_every_rule_module_on_disk_is_imported():
     counts as unimplemented while sitting in the tree, which is the one failure mode a
     coverage report must not have."""
     pkg_dir = Path(rules_pkg.__file__).parent
-    on_disk = {
-        p.stem
-        for p in pkg_dir.glob("*.py")
-        if p.stem not in {"__init__", "base"}
-    }
+    # Modules in this package that deliberately register NO rule. An ALLOWLIST rather
+    # than a predicate, so adding one stays a deliberate act: a new unregistered module
+    # still fails this test until someone writes down why it is exempt.
+    #
+    # `consolidation` is a primitive the CONTRACT ASSUMES AND NEVER DEFINES — GRADE-035's
+    # inputs name a consolidation/overlap detector that exists nowhere in the registry.
+    # Giving it a RULE_ID would assert the registry defines a rule it does not.
+    NOT_RULES = {"__init__", "base", "consolidation"}
+    on_disk = {p.stem for p in pkg_dir.glob("*.py") if p.stem not in NOT_RULES}
     imported = {
         cls.__module__.rsplit(".", 1)[-1] for cls in rules_pkg.implementations().values()
     }

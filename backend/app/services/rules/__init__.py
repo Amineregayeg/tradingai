@@ -27,6 +27,14 @@ from app.services.rules.base import (  # noqa: F401
     open_rule_requires_declared_parameter,
     quorum_blocked,
 )
+from app.services.rules.consolidation import (  # noqa: F401
+    DECLARED_THRESHOLD,
+    WINDOW_BARS,
+    ConsolidationThreshold,
+    ConsolidationWindow,
+    detect_window,
+    detection_rate_pct,
+)
 from app.services.rules.evaluator import (  # noqa: F401
     LayoutEvaluation,
     LayoutEvaluator,
