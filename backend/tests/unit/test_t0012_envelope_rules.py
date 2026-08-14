@@ -346,3 +346,67 @@ def test_a_reading_cannot_be_unevaluable_without_naming_its_missing_producer():
         ConditionReading("x", "NOT_EVALUABLE")
     with pytest.raises(ValueError):
         ConditionReading("x", "TRUE", missing_producer="GRADE-028")
+
+
+# ---------------------------------------------------------------------------
+# NOT_READ — a producer that exists and was never called (REVIEW_FAIL 0076)
+# ---------------------------------------------------------------------------
+
+def test_producer_backed_conditions_are_not_reported_as_FALSE():
+    """FALSE asserts the producer RAN and found nothing. None of them have been called.
+
+    The first version of this rule recorded all four producer-backed conditions as FALSE,
+    which is the conflation `ConditionReading`'s own docstring forbids — written four lines
+    above it.
+    """
+    ev = ReverseSwitchConfirmations.evaluate()
+    states = ev.values["conditions"]
+    for name, producer in CONDITIONS:
+        if producer is not None:
+            assert states[name] == "NOT_READ", (
+                f"{name} has producer {producer} and is reported {states[name]} — FALSE "
+                "claims the producer ran"
+            )
+    assert ev.values["unread_count"] == 4
+    # The two absences stay APART in the record, each naming its producer.
+    assert set(ev.values["not_read"]) == {
+        "new_opposite_imbalances", "failed_imbalances_became_sr_flips",
+        "new_imbalances_hold_price", "micro_msb_confirms",
+    }
+    assert ev.values["not_read"]["micro_msb_confirms"] == "PRIM-005"
+    assert "micro_msb_confirms" not in ev.values["not_evaluable"]
+
+
+def test_the_blocked_flag_and_the_unread_conditions_must_agree():
+    """THE LOAD-BEARING GUARD, evaluated against the REAL flag, not a patched one.
+
+    Today the three NOT_EVALUABLE conditions short-circuit the quorum, so the unread ones
+    change no verdict. The day GRADE-028 lands, someone clears `CANNOT_FIRE_WITHOUT` — and
+    if the producers are still unwired, `micro_msb_confirms` (the MANDATORY condition)
+    silently decides every evaluation. The flag that currently tells the truth would be
+    removed by the same edit that activates the bug.
+
+    So the two are COUPLED here: clearing the flag while anything is still unread turns
+    this red. That is the requirement — not the state name — and it is why the assertion
+    reads the live class attribute rather than a fixture.
+    """
+    from app.services.rules.base import quorum_blocked
+    from app.services.rules.gate_041_reverse_switch import _live_readings
+
+    readings = _live_readings()
+    unread = [r.name for r in readings if r.state == "NOT_READ"]
+
+    if not ReverseSwitchConfirmations.CANNOT_FIRE_WITHOUT:
+        assert not unread, (
+            f"GATE-041 declares itself unblocked while {len(unread)} producer-backed "
+            f"conditions were never read: {unread}. Clearing CANNOT_FIRE_WITHOUT must not "
+            "be sufficient to make the rule fire — wire the producers or keep the flag."
+        )
+        assert quorum_blocked(readings, default_outcome="CONTINUE") is None
+    else:
+        # The flag is set, so the rule must actually BE blocked. A stale flag on a rule
+        # that can score is the same defect pointing the other way.
+        assert quorum_blocked(readings, default_outcome="CONTINUE") is not None, (
+            "GATE-041 carries CANNOT_FIRE_WITHOUT but every condition is readable — the "
+            "flag is stale and is suppressing a rule that could decide"
+        )

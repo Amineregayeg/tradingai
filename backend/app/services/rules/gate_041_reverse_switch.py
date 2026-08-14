@@ -80,8 +80,23 @@ CONTINUE = "CONTINUE"
 REVERSE = "REVERSE"
 
 
-def _not_evaluable() -> list[ConditionReading]:
-    """Live reading: the three momentum conditions have no producer at all."""
+def _live_readings() -> list[ConditionReading]:
+    """What this rule can honestly say today: nothing about any of the seven.
+
+    THE DEFECT THIS REPLACED, because it is worth keeping visible. The first version
+    recorded the four producer-backed conditions as `FALSE`, which asserts the producer ran
+    and found nothing — while nothing ever called them. `ConditionReading`'s own docstring
+    forbids exactly that conflation, four lines above where it was written.
+
+    It was harmless only by accident: the three `NOT_EVALUABLE` conditions short-circuit
+    `quorum_blocked`, so the four falsehoods changed no verdict. **The day GRADE-028 lands
+    and `CANNOT_FIRE_WITHOUT` is cleared, they become load-bearing at once** — and
+    `micro_msb_confirms`, hardcoded FALSE, is `MANDATORY_CONDITION`. GATE-041 would return
+    CONTINUE forever while reporting itself unblocked, and the flag that currently tells
+    the truth would be removed by the same edit that activates the bug.
+
+    Wiring PRIM-002/005/006 is a separate task. Saying we have not read them is this one.
+    """
     out: list[ConditionReading] = []
     for name, producer in CONDITIONS:
         if producer is None:
@@ -93,7 +108,9 @@ def _not_evaluable() -> list[ConditionReading]:
                 )
             )
         else:
-            out.append(ConditionReading(name, "FALSE"))
+            out.append(
+                ConditionReading(name, "NOT_READ", unread_producer=producer)
+            )
     return out
 
 
@@ -135,13 +152,14 @@ class ReverseSwitchConfirmations(RuleImplementation):
             quorum if quorum is not None else DECLARED_QUORUMS["q6_quorum"],
             expected="q6_quorum",
         )
-        rs = readings if readings is not None else _not_evaluable()
+        rs = readings if readings is not None else _live_readings()
 
         satisfied = [r.name for r in rs if r.state == "TRUE"]
         unevaluable = [r for r in rs if r.state == "NOT_EVALUABLE"]
 
         values: dict[str, Any] = {
             "conditions": {r.name: r.state for r in rs},
+            "unread_count": sum(1 for r in rs if r.state == "NOT_READ"),
             "satisfied_count": len(satisfied),
             "conditions_total": len(rs),
             "not_evaluable_count": len(unevaluable),
@@ -161,7 +179,15 @@ class ReverseSwitchConfirmations(RuleImplementation):
             # NO QUORUM IS CLAIMED. Scoring 4-of-7 while three cannot be read would report
             # a threshold decision that was never actually taken — the count would be
             # against a denominator of four.
-            values["not_evaluable"] = unreadable
+            # KEPT APART IN THE RECORD TOO. `quorum_blocked` merges them because it only
+            # needs to know the rule is blocked; the RECORD must not, because "nobody has
+            # built this" and "somebody forgot to call this" have different owners.
+            values["not_evaluable"] = {
+                r.name: r.missing_producer for r in rs if r.state == "NOT_EVALUABLE"
+            }
+            values["not_read"] = {
+                r.name: r.unread_producer for r in rs if r.state == "NOT_READ"
+            }
             provenance["not_evaluable"] = derived("no implementation produces this input")
             return cls.evaluation(
                 "NOT_APPLICABLE",

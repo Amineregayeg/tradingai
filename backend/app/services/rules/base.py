@@ -34,8 +34,20 @@ from typing import Any, ClassVar, Literal
 from app.services.telemetry import contract_loader as contract
 from app.services.telemetry.records import RuleEvaluation, Verdict
 
-#: Whether a named condition was met, not met, or COULD NOT BE READ AT ALL.
-ConditionState = Literal["TRUE", "FALSE", "NOT_EVALUABLE"]
+#: Whether a named condition was met, not met, or could not be read — and if it could not
+#: be read, WHY, because there are two different reasons and only one of them is permanent.
+#:
+#: There are FOUR situations and a three-valued type forces one of them to masquerade:
+#:
+#:   TRUE           the producer ran and the condition holds
+#:   FALSE          the producer ran and it does not hold
+#:   NOT_EVALUABLE  NO PRODUCER EXISTS. Permanent until someone builds one.
+#:   NOT_READ       a producer EXISTS and nothing wired it. A wiring gap, not a market fact.
+#:
+#: `NOT_READ` was added after GATE-041 recorded four producer-backed conditions as FALSE
+#: without ever calling their producers. FALSE asserts the producer ran and found nothing,
+#: so the missing state was rendering as the one that reads like a working check.
+ConditionState = Literal["TRUE", "FALSE", "NOT_EVALUABLE", "NOT_READ"]
 
 #: Every implementation, keyed by the rule id it claims.
 _IMPLEMENTATIONS: dict[str, type["RuleImplementation"]] = {}
@@ -66,6 +78,11 @@ class ConditionReading:
     state: ConditionState
     #: Set only when `state == "NOT_EVALUABLE"`. Names the producer that does not exist.
     missing_producer: str | None = None
+    #: Set only when `state == "NOT_READ"`. Names the producer that DOES exist and was
+    #: not called. Kept separate from `missing_producer` so the two absences can never be
+    #: read as one: "nobody has built this" and "somebody forgot to call this" have
+    #: different owners, different fixes, and different lifespans.
+    unread_producer: str | None = None
 
     def __post_init__(self) -> None:
         if self.state == "NOT_EVALUABLE" and not self.missing_producer:
@@ -76,6 +93,15 @@ class ConditionReading:
         if self.state != "NOT_EVALUABLE" and self.missing_producer:
             raise ValueError(
                 f"{self.name} reports {self.state} while naming a missing producer"
+            )
+        if self.state == "NOT_READ" and not self.unread_producer:
+            raise ValueError(
+                f"{self.name} is NOT_READ but names no producer — the whole point of this "
+                "state is to say WHICH existing producer was not called"
+            )
+        if self.state != "NOT_READ" and self.unread_producer:
+            raise ValueError(
+                f"{self.name} reports {self.state} while naming an unread producer"
             )
 
 
@@ -107,10 +133,13 @@ def quorum_blocked(
     call site puts each rule's default next to that rule, which is the only place its
     correctness can be checked against the statement it comes from.
     """
-    unevaluable = [r for r in readings if r.state == "NOT_EVALUABLE"]
-    if not unevaluable:
+    unreadable = [r for r in readings if r.state in ("NOT_EVALUABLE", "NOT_READ")]
+    if not unreadable:
         return None
-    return {r.name: r.missing_producer for r in unevaluable}, default_outcome
+    return (
+        {r.name: (r.missing_producer or r.unread_producer) for r in unreadable},
+        default_outcome,
+    )
 
 
 class RuleImplementation:
