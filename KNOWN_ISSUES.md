@@ -724,6 +724,72 @@ half the rule's inputs, because nothing distinguishes *"quoted"* from *"addresse
 with no producer is a recorded `None` rather than an omission nobody can see. Then a session
 marker gets built or gets tracked. Related: **B44**, **B45**, **B46**, **B43**.
 
+### B49. A true claim about the wrong subject passes verification by construction — the two-seat loop cannot catch it
+**Found in:** T-0012 carrier exchange, 2026-08-14, by Review and the Manager (one error each)
+**Severity:** moderate — it is the only defect class so far that the review loop is
+*structurally* unable to catch, rather than one it happened to miss
+
+**What happened.** Review reported *"criterion 9's typed carrier exists — `ConditionReading`
+at `gate_041_reverse_switch.py:81`"*. The carrier for criterion 9 is **`DeclaredQuorum`**;
+`ConditionReading` serves criterion 10a. The Manager verified the report — `ConditionReading`
+exists, is shared, enforces its invariant both ways — **and every one of those facts is
+true.** An amendment then went to Execute pointed at the wrong carrier, and would have moved
+`DeclaredQuorum` out of the rule that owns it.
+
+**Why this one is different from the rest of this register.** The two failures compose into
+something neither contains:
+
+* **Review asked the wrong question and answered it truly** — *"does a typed carrier exist"*
+  rather than *"does criterion 9's carrier exist"*. The claim is left **true**.
+* **The Manager verified the claim and not the referent.** A verification step naturally has
+  the fact in front of it and **not the question the fact was offered as an answer to.**
+
+**So the check cannot fail.** Review's error survives verification *because* verification
+tests truth, and the error is in the mapping from fact to question — the one place the check
+does not look. **This is not two people being careless in sequence.** The second seat, which
+is the mechanism that catches everything else here, is blind to this class by construction.
+
+**Second instance on the Manager's side, recorded because it establishes the pattern rather
+than the incident:** T-0010 was reported built at `fb8bc228` — a correct sha attached to the
+wrong task. Both times a true fact was attached to the wrong subject and verified cleanly,
+**because a true fact verifies as true regardless of what it is about.**
+
+**The fix is already on this project as a code pattern, one criterion away from where the
+error happened.** `DeclaredQuorum` exists because **a bare `4` cannot tell you where it came
+from**, so the value was made to carry its own rule id and version — *"make the value carry
+its own answer"*, GRADE-031's whole content. **A claim citing a criterion by number is a bare
+`4`**: it asserts a referent and carries nothing to check it against. Quote the requirement
+being answered and the mismatch is visible **in the sentence**, with no verification step at
+all.
+
+**Same defect as two other entries filed the same night, which is why it is a class and not an
+incident:**
+
+    B45          a quotation that does not say which part it ADDRESSES
+    B48 / T-0016 a count that does not say which SET it counted
+    B49          a claim that does not say which CRITERION it answers
+
+**A reference that does not carry its referent.** In all three the reference was individually
+accurate, which is exactly why nothing caught it.
+
+**Fix:** partial. Review has committed to quoting the requirement rather than citing its
+number, and the Manager to naming the referent it checked. **Both are disciplines, and this
+register's own recurring lesson is that a documented convention nothing enforces is a
+convention only when someone remembers it (B47).** No mechanical check is proposed here
+because none is obvious — which is the reason to write the entry rather than the reason not
+
+**REJECTED, and the reason is the crux: "ask which referent was checked" as a READER-side
+discipline.** It puts the burden on the reader, **and the reader is precisely who does not have
+the referent.** Any fix that depends on the recipient noticing an omission has the same shape as
+the defect. The two disciplines above are both PRODUCER-side for that reason: quote the
+requirement you are answering, name the referent you checked.
+
+**Concrete consequence, unaddressed:** **every task file in `agents/tasks/` cites its criteria by
+number**, and dispatch messages inherit it — *"criterion 9"* is a bare `4`. So this defect is
+currently present in the primary artefact the loop runs on, not only in one exchange.
+
+to. Related: **B47**, **B45**, **B48**, **B39**.
+
 ### B11. The disturbance grader now runs on real data — and its grade still decides nothing
 **Found in:** M4 (implementing GATE-002/007/008/048), 2026-08-08
 **THE DATA HALF IS FIXED, 2026-08-13 (T-0008); THE ENTRY STAYS FOR THE HALF THAT IS NOT.**
