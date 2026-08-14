@@ -1681,6 +1681,62 @@ a predicate deferral has no owner the moment nobody recognises themselves in it.
 questions and a bare number cannot say which set it counted. Related: **B43**, **B45**, **B47**,
 **B49**, **B58**.
 
+### B63 — the B25 handshake is a CROSS-SEAT protocol, and the same hazard exists INSIDE one seat
+
+**Filed 2026-08-15 from Review's own contaminated baseline, self-caught and self-discarded before it
+was reported as a number.**
+
+Review started a suite run and a prober run against the same pinned worktree to save wall-clock:
+
+    prober   exit 0   9 ok   TIER 0.2 PASSED   porcelain 0 before / 0 after
+    suite    DISCARDED — ran concurrently with the prober IN THE SAME WORKTREE
+
+**The prober `sed`-mutates guarded files eight times and restores between probes**, so the suite was
+collecting and executing while the tree beneath it was mutated and reverted. **The figure is
+untrustworthy in BOTH directions — a failure could be a mutation window, a pass could be luck about
+which files were being read when.**
+
+**The prober's own numbers survive, and the pair that establishes that is worth naming:**
+`git status --porcelain` **0 before and 0 after**, which is what separates a real pass from a
+`restore()` that silently no-opped. **Contamination ran one way.** The prober writes; the suite only
+reads.
+
+### The structural gap, which is the reason this is filed rather than noted
+
+**`B25` exists precisely because the prober mutates a shared tree. It is a protocol between SEATS** —
+post `STARTING`, ring the doorbell, other seats hold off, post `DONE`. **Nothing in it addresses two
+measurements inside ONE seat**, and the hazard is identical: the prober does not care whether the
+reader it disturbs belongs to another session or to the same one.
+
+> **So the discipline was built for cross-seat coordination and applied to other seats and not to the
+> author's own concurrent work.** Review's words: *"I knew that about the prober — it is why the B25
+> handshake exists — and applied it to other seats and not to myself."*
+
+**The generalisation is narrower and more useful than "do not parallelise":**
+
+> **Two measurements can share a worktree only if NEITHER WRITES.**
+
+**Read/read is safe and worth keeping — the wall-clock saving is real.** Read/write is not, in either
+order, and **the writer does not have to be a test to count: the prober, `verify_guards.sh`, and any
+`git checkout` are all writers.**
+
+### And it is the second instance of this shape in one evening, from opposite directions
+
+    Execute #2   "the prober ran green twice, the second because the Manager committed tracked
+                 files while my first was in flight; I CANNOT PROVE NON-DISTURBANCE from inside
+                 my own session."
+    Review       CAN prove disturbance, because it caused it.
+
+**Together they bound the problem: from inside a session you cannot establish that you were not
+disturbed, but you can establish that you disturbed something.** So the asymmetry to act on is that
+**the writer is the party that knows** — which is what B25 already assumes for other seats, and is
+the reason the fix is to announce writes rather than to detect them.
+
+**Correct handling, recorded because discarding a number you have already computed is the part people
+skip:** Review reported the contamination, discarded the suite figure, kept the prober figure with the
+evidence for why it survives, re-ran the suite against a quiet tree, and **said the baseline was not
+usable in the interval** — rather than reporting a figure it did not trust and annotating it.
+
 ### B62 — `ci_range.py` withheld verdicts it already had, because `cancelled` blocked the transfer
 
 **Status: FIXED, 2026-08-14. And the route to it is the point: Review reasoned about the WORLD from
