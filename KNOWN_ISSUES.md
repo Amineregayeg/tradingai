@@ -389,6 +389,88 @@ would measure it continuously and name the first bar it misses. **T-0010 proves 
 once; the census proves it every hour.** Related: **B34** (the filtered sample),
 **B32** (nothing reports whether the shadow records at all), **B13**.
 
+### B42. `shadow.py` carries two comment blocks that contradict each other about whether the perpetuals feed exists
+**Found in:** 4.5 (manager, while tracing where the engine takes its data from)
+**Severity:** low as behaviour, moderate as documentation — it misdirects the next reader
+of the exact file it lives in
+
+`shadow.py:66-77` still describes the **pre-T-0008** world, in the present tense:
+
+> *"We do NOT have the other two: `BinanceSource` reaches only spot … and **no code in
+> this repo calls `fapi.binance.com`**."*
+> *"So the layout is read with two of four panels and **GATE-008 fails, naming the two
+> that are absent**. That is the honest steady state…"*
+
+**All three claims are now false.** T-0008 added `binance_perp.py`, whose `_BASES` is
+exactly `("https://fapi.binance.com",)` (`:50`). GATE-008 does not fail — verified on the
+live engine at `tf=['5m'] G8=PASS G2=PASS den=3`, a complete four-panel read.
+
+**The contradiction is thirteen lines apart in one file.** `:90` opens *"The other two,
+from a different host and a different instrument family (T-0008)"* — the correct,
+current statement — directly beneath the block saying they cannot be had.
+
+**Why it is worth an entry rather than a quiet edit.** The stale block is not decoration:
+it is the *reasoning* a maintainer would consult before touching the roster, and it argues
+for accepting a two-panel failure as "the honest steady state". A reader who trusts it
+concludes the disturbance grade is unavailable and may re-derive a workaround for a
+problem already solved — or read a real future GATE-008 failure as the documented normal.
+
+**What must NOT be deleted with it:** the paragraph at `:78-83` — *"SPOT WAS NOT
+SUBSTITUTED FOR PERPETUAL, DELIBERATELY"* — is **still true and still load-bearing**, and
+is the reasoning that kept a plausible-but-wrong disturbance grade out of the risk matrix.
+Only the "what is actually missing now" block is stale.
+
+**Fix:** rewrite `:66-77` to say the feed was acquired in T-0008 and the roster now reads
+four panels, keeping `:78-83` intact. **Not a product-code edit I should make** — noted
+for whichever rules task next touches `shadow.py`, since GATE-017/019 will.
+
+**The pattern, which is the reason to record it at all:** this is the *third* time a
+comment in this repo has outlived its fact — `BLOCKED_ON_CORRELATES`' own header (`:61-64`)
+records the previous instance, where code sat waiting for CryptoCap after CryptoCap was
+replaced. **A resolved blocker leaves its explanation behind, and the explanation keeps
+being read as current.** Related: **B21** (stale artefact read as live), **A3** (the
+spot-vs-perp venue divergence this block is reasoning about).
+
+### B43. `status: READY` does not mean the rule is quantified — the OPEN flag is not a reliable signal
+**Found in:** 4.5 (manager, scoping T-0012)
+**Severity:** moderate, and it scales with the rules programme — it governs how 57 tasks are
+written
+
+**The project's fifth standing rule is that the 14 `status: OPEN` rules each need a DECLARED
+PARAMETER stamped as ours, never an invented threshold. `status` has been the only signal for
+which rules those are. It is not reliable.**
+
+**GATE-041 is `status: READY`, `enforceability: HARD_GATE`, and its own statement says:**
+
+> *"The switch to Reverse requires 'multiple structural confirmations' drawn from seven … **HOW
+> MANY of the seven, and whether any is mandatory (e.g. the micro MSB), is never stated.**"*
+
+**So its central threshold is unstated and nothing in the registry flags it.** An implementer
+following `status` would write `>= 3 of 7`, ship a fully green HARD_GATE, and the invented
+quorum would be indistinguishable from a ruled one. **`READY` is the more dangerous case than
+`OPEN` precisely because it carries no warning.**
+
+**GRADE-035 is a second instance, and worse in a different way.** It is `CALIBRATED`, and its
+notes say *"No minimum duration or consolidation criterion is ruled … do not harden them into
+a rule without a ruling"* — while its **statement quotes two durations**, *"around 2 days"*
+and *"around 24H"*. **The forbidden numbers are in the text and the prohibition is in a
+different field.** An implementer reading top-to-bottom writes `timedelta(hours=24)`.
+
+**Why this is a register entry and not just a plan note.** It changes the shape of every
+remaining rules task: **the declared-parameter check must read the statement and notes for an
+admission of an unstated threshold, and must not trust `status`.** If the affected set is
+large, **the "14 OPEN rules" figure understates the declared-parameter work substantially** —
+and that figure is quoted in `PROGRAMME_TO_CUTOVER.md` as a scoping input.
+
+**Open:** Review is sweeping the registry for other `READY`/`CALIBRATED` rules whose text
+admits an unstated threshold, count, duration or window. **The count is not yet known — this
+entry records two confirmed instances and the method, not a total.**
+
+**Fix, when the sweep lands:** either correct `status` on the affected rules, or add a field
+that records "carries an unquantified threshold" independently of readiness — and until then,
+every rules task treats the statement text as authoritative over `status`. Related: **B38**
+(a parameter forced by a constraint must say so), **A10**.
+
 ### B11. The disturbance grader now runs on real data — and its grade still decides nothing
 **Found in:** M4 (implementing GATE-002/007/008/048), 2026-08-08
 **THE DATA HALF IS FIXED, 2026-08-13 (T-0008); THE ENTRY STAYS FOR THE HALF THAT IS NOT.**
