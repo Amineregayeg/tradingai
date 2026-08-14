@@ -192,6 +192,20 @@ first*. Both are about **when** to check, and both were beaten by timing. The on
 first outing is about **what to read** — **the diff of what you are about to stage.** Status can be
 stale; a diff cannot, because it is the thing itself. **Observe the artefact, not a report about it.**
 
+### TWO NUMBERS QUOTED TOGETHER MUST BE CHECKED AGAINST EACH OTHER
+
+**Cheap, and it caught nothing for hours because nobody applied it.** The Manager reported
+*"33 of 79 distinct implemented"* alongside *"effective coverage 37 / 91"* in the same updates.
+**Effective coverage cannot exceed implemented. 37 > 33 on its face.**
+
+**The contradiction is visible without knowing which figure is right** — which is what makes it
+worth stating as a rule. Both numbers came from tools, both looked authoritative, and they came from
+**different** tools: `rule_waves.py` collapses aliases and `check_rule_coverage.py` does not (**B54**).
+
+**So: when a report carries two figures about one quantity, check them against each other before
+checking either against reality.** An impossible pair localises the error to one of two places without
+any further work; a plausible pair proves nothing but costs nothing to verify.
+
 ### And it keeps appearing in this register itself
 
 **Not as irony — as evidence that accuracy is not the property that prevents it.** B45's quotation
@@ -1326,6 +1340,30 @@ a predicate deferral has no owner the moment nobody recognises themselves in it.
 **Fix:** the coverage script should collapse aliases before counting, or print both figures
 labelled — `42 ids / 33 distinct`. **Needs a task id.** Related: **B43**, **B45**, **B47**,
 **B49**.
+
+### B18. The prober's restore promise was wider than its mutations, and the width was the bug
+**Found in:** earlier session. **Status: FIXED** (`a4367ad`). **This heading exists because four
+artefacts cite `B18` and the entry did not — B51 recorded that and recommended a stub with no owner,
+so it stayed absent.**
+
+**What it was:** `verify_guards.sh`'s `restore()` ran `git checkout` over every path in
+`GUARDED_FILES` on any exit once *any* probe had mutated *anything*, because `MUTATED` is a single
+global flag. **So a guarded file the script never wrote to was still checked out — destroying
+uncommitted work in it.** Fixed by making the restore conditional on a mutation having occurred, and
+the pre-flight refuses on a dirty guarded file rather than silently reverting it.
+
+**Why the heading matters even though the defect is fixed.** The citations are load-bearing arguments,
+not references:
+
+    verify_guards.sh:80    "The promise used to be wider, and the width was the bug (KNOWN_ISSUES B18)"
+    verify_guards.sh:145   "strictly worse than the data loss B18 describes"
+    KNOWN_ISSUES.md:1681   "of the B18 fix (a4367ad) that nobody predicted"
+    KNOWN_ISSUES.md:1718   "the check plus the B18 fix make a spurious refusal far more likely"
+
+**Two of the four are in shipped code**, and a reader following them found nothing — **a live fact
+with a dead pointer, B49's second class**, and the reason T-0018 could reason about widening
+`GUARDED_FILES` at all: the argument against it lives here. Related: **B51**, **B49**, **T-0018**
+criterion 4.
 
 ### B11. The disturbance grader now runs on real data — and its grade still decides nothing
 **Found in:** M4 (implementing GATE-002/007/008/048), 2026-08-08
