@@ -1678,6 +1678,42 @@ the residual truth in Review's claim, and it is much rarer than the claim implie
     before   3 cancelled, 0 covered, 2 of them silently unverified
     after    3 cancelled, 3 covered, 0 UNKNOWN, exit 0
 
+### Follow-up, same evening: a transfer now states its AGE, and Review's caveat is why
+
+**Not a defect — a missing units label on a claim that already varied in strength.** The
+identical-tree search spans the whole pool (~192–200 commits), so **a transfer has no time bound.
+Tree identity says the CODE is the same. It does not say the CI ENVIRONMENT was:** CI resolves
+`pip install` from `requirements-prod.txt` at run time and the repo cannot pin what a registry
+served. **So a green inherited from one minute earlier and one inherited from two days earlier are
+different strengths of claim, and they printed identically.**
+
+    5635e5a   tree identical to d58265c5 (run 79s later)
+    efc61dc   tree identical to a144aa98 (run 11m earlier)
+    8d3fc8f   tree identical to dbd7b5f5 (run 4m later)
+    2cdf55f   tree identical to a386de8f (run 33m earlier)
+
+**Nothing in the audited range is affected — every transfer is minutes apart, and both seats checked
+independently.** But the mechanism permits a 200-commit-old transfer, so the age is now printed.
+
+**It is the same argument as B62's provenance label, one axis over:** that one made inheritance
+visible so no transferred verdict reads as the commit's own; **this makes staleness visible so no old
+transfer reads as a fresh one.** In both cases the fix is not to withhold the verdict — it is to stop
+the row from overstating it.
+
+### Independently audited, and the auditor signed the claim it had been wrong about
+
+**Review re-derived all five tree-identity claims in `7dfc3de..b543dcc` with its own diffs rather
+than reading the tool's output** — `git diff --quiet A B -- . ':(exclude)docs/' ':(exclude)*.md'` —
+**and signed all five, including `8d3fc8f` vs `dbd7b5f`, the one it had called a hole.** It also
+checked two structural properties the entry above asserts but did not prove:
+
+* **`.github/workflows/` is NOT in `TREE_IGNORE`**, so a workflow change breaks tree identity and the
+  tool refuses to inherit rather than transferring a green across a different job set. **Load-bearing:
+  it is what stops the T-0016 case being silently inherited.**
+* **The transfer is a TREE claim, not a HISTORY claim** — which is why `8d3fc8f` inheriting from its
+  own descendant is sound. **Direction does not matter once the trees are identical**, and v2's
+  ancestry-based version was the defect.
+
 ### The transferable part
 
 **A verdict this project ALREADY OWNED was withheld for hours by a tool built to surface verdicts**,
