@@ -574,6 +574,48 @@ a declared parameter is the ruled outcome there, not a workaround**, and GRADE-0
 HARD_GATE: the contract's answer to its own missing numbers is a mechanism we are obliged to
 build. Related: **B43**, **B44**, **A10**.
 
+### B46. A fixture pair proves a check discriminates and cannot bound its threshold — and ~26 rules need a threshold we choose
+**Found in:** 4.5 (Review, on T-0014; measurement reproduced independently by the manager)
+**Severity:** methodological, and it applies to most of the remaining rules programme
+
+**Every mutation criterion this project writes is a fixture pair: one case that must pass, one
+that must fail. That proves a check DISCRIMINATES. It says nothing about WHERE THE BOUNDARY
+SITS — and for a rule whose content is a threshold, the boundary is the whole rule.**
+
+**Measured, not argued.** A naive consolidation detector — `window span ≤ k × average bar
+range`, 12-bar window — over **719 real BTCUSDT perpetual 1H bars.** Review measured it; the
+manager reproduced it against `fapi` independently, within 0.2 points:
+
+    k = 2.0  ->    4/708 =  0.6%  of windows called CONSOLIDATION
+    k = 3.0  ->  180/708 = 25.4%
+    k = 4.0  ->  485/708 = 68.5%
+    k = 5.0  ->  638/708 = 90.1%
+
+**One parameter, no structural change, "almost never" to "almost always" — and every setting
+passes the fixture pair**, because a genuine-consolidation fixture is tighter than a
+strong-trend fixture *by construction*. **Nobody would question 3.0 versus 4.0 in review, and
+it is 25% versus 69% of all market conditions.** At the top of the range the rule that fixture
+pair was protecting is vacuous: the prerequisite passes on nine bars in ten.
+
+**Why this is a register entry and not a note on one task.** B43 established that **~26 rules
+need a parameter we declare** rather than 14. **A large share of those are continuous
+thresholds**, and for every one of them the mutation discipline that has served this project
+well — *"a guard is not proven until it has been made to fail"* — **is satisfied by a guard
+that fires on 0.6% or on 90% of reality.**
+
+**The mitigation, and it generalises:** for any declared threshold, **measure and report the
+rate at which the guard fires over the real corpus**, and declare a bound on that rate as part
+of the parameter. The rate is cheap — a single command produced the table above — and it is
+what makes the declaration checkable instead of decorative.
+
+**And one failure direction is worse than the other, which the rate also exposes.** For
+GRADE-035 specifically, a false positive means calling a **slow drift** a cool-off. A slow
+drift after a sweep is the **continuation** GATE-040 says the engine must assume by default, so
+an over-permissive detector does not merely err — **it manufactures reversal authority out of
+price action that means the opposite.** Where a threshold has an asymmetric failure direction,
+say which one it is. Related: **B43** (the ~26 figure), **B38** (a forced parameter must say
+so), **A10**.
+
 ### B11. The disturbance grader now runs on real data — and its grade still decides nothing
 **Found in:** M4 (implementing GATE-002/007/008/048), 2026-08-08
 **THE DATA HALF IS FIXED, 2026-08-13 (T-0008); THE ENTRY STAYS FOR THE HALF THAT IS NOT.**
