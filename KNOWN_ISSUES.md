@@ -337,6 +337,45 @@ the record reported it faithfully — while production was the dishonest case an
 measured the difference. The invariant named there is the one property worth verifying,
 and the test asserts it **by construction** instead of deriving it.
 
+**FOURTH LINK, AND IT IS THE WORST ONE, BECAUSE IT SHIPPED.** `store.py:131`
+`count_by_type` is live code — called, working — and its docstring reasons about a
+reconciliation that has never happened:
+
+> *"a census that does not reconcile against the evaluations it counts means the
+> population is not what it claims."*
+
+**The other three links were unbuilt: a false claim, an unemitted record, an unwritten
+rule. Absence is at least honest.** This one is a shipped, running function telling any
+developer who reads it that the reconciliation is a thing this system does. **An unbuilt
+guard is absent; a shipped function documenting an absent guard is actively
+misleading.** Its own filter is `run_id` only — no window, no instrument, no timeframe —
+so it cannot perform the reconciliation it describes even in principle.
+
+**And the time column needed to build it is a trap, measured on production records:**
+
+```
+timestamp_ny  2026-08-13T20:35:00-04:00   <- BAR OPEN time. A str, NY-local.
+created_at    2026-08-14 00:40:18Z        <- WRITE time. Real datetime, UTC.
+```
+
+The bar stamped `20:35` closes at `00:40Z` and the row is written ~20 s later, so
+**`created_at` ≈ bar time + one full bar period.** At 5m the write lag *is* the bar
+interval. Filtering the census window on `created_at` therefore shifts it by **exactly
+one bar at every boundary, deterministically** — not drift, a systematic off-by-one.
+
+**That produces a phantom MAJOR rather than a silence, which is worse than it sounds.**
+`bars_observed` derived from the bar series would exceed `evaluations_emitted` derived
+from a shifted window by one, every window, forever. Criterion 4 of T-0011 calls an
+omission with no `rule_id` *"undocumented logic (C-13, MAJOR)"* — so the census would
+raise a MAJOR at every boundary, caused entirely by its own filter. **An alarm that
+fires every cycle gets muted, and a muted alarm is the silence we started with.**
+
+`timestamp_ny` is the correct field — it is bar time — but it is a **string in NY-local
+time** while the builder takes UTC datetimes, so the window must be converted, not
+compared. Note also that its lexicographic order **inverts across the autumn DST
+fall-back**, when local time repeats: `01:59-04:00` sorts after `01:00-05:00` while
+being an hour earlier. One night a year, on a 24/7 market.
+
 **Fix (not folded into T-0010 — this is a mechanism to wire, not a line to move).**
 Call the builder once per scan window with `bars_observed` and `evaluations_emitted`
 derived from the loop's actual counters, never passed in agreeing; write C-13 to
