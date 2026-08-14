@@ -326,3 +326,56 @@ async def test_an_unhealthy_shadow_makes_the_whole_endpoint_not_ok(bound):
     assert composed["ok"] is False
     assert "shadow" in composed["problems"]
 
+
+
+# ---------------------------------------------------------------------------
+# Density is prorated to the window, not to a flat hour (found by the Manager
+# reading the live payload minutes after T-0009 deployed)
+# ---------------------------------------------------------------------------
+
+async def test_a_young_run_does_not_report_a_false_shortfall(bound):
+    """THE MUTATION. A 7-minute-old run with 6 records is AHEAD of rate, not 4x short.
+
+    As shipped, `observed_last_hour: 6` sat beside `expected_per_hour: 24.0` with
+    nothing relating them, and production read exactly that seven minutes after a
+    deploy. The pair invites the reader to compute a 4x shortfall that does not exist.
+
+    Misleading in the ALARMING direction is not the safe way round. A figure that
+    cries shortfall on every restart is one a reader learns to skip — and then it is
+    not read on the day it is right. That is the same failure as a liveness signal
+    that fires on every blocked bar, which criterion 4 exists to prevent.
+    """
+    await _run(bound, started_minutes_ago=7)
+    for i in range(6):
+        await _record(bound, minutes_ago=1 + i * 0.5, instrument=f"S{i}")
+
+    h = await dh.shadow_health()
+
+    assert h["window_minutes"] == pytest.approx(7, abs=1), (
+        "the window was not bounded by the run start, so a deploy gap is being "
+        "counted as missing records"
+    )
+    assert h["expected_in_window"] < 5, (
+        f"expected {h['expected_in_window']} records in {h['window_minutes']} min — "
+        "the expectation is still a flat hour"
+    )
+    assert h["recent_density_pct"] == 100.0, (
+        f"6 records in ~7 minutes read as {h['recent_density_pct']}% — a run that is "
+        "ahead of rate is being reported as a shortfall"
+    )
+
+
+async def test_a_real_shortfall_still_reads_as_one(bound):
+    """The other half: proration must not make every window read 100%."""
+    await _run(bound, started_minutes_ago=60)
+    await _record(bound, minutes_ago=1)          # 1 record where ~24 were due
+
+    h = await dh.shadow_health()
+    assert h["recent_density_pct"] < 20.0, (
+        f"1 record against ~24 expected read as {h['recent_density_pct']}%"
+    )
+    # And recency still says healthy — the two questions stay separate on purpose.
+    assert h["status"] == "healthy", (
+        "density must not drive status: alive-now and no-gaps-in-the-hour are "
+        "different questions and merging them answers neither"
+    )

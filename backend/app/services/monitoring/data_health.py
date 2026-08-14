@@ -378,6 +378,16 @@ async def shadow_health() -> dict:
         age_seconds = (now - last).total_seconds()
         last_iso = last.isoformat()
 
+    # The window is bounded below by the run's start, so a deploy gap is excluded
+    # rather than counted as missing records — nothing was due while no run existed.
+    window_minutes = max(0.0, (now - window_start).total_seconds() / 60.0)
+    expected_in_window = expected_per_hour * (window_minutes / 60.0)
+    density_pct = (
+        min(100.0, 100.0 * recent / expected_in_window)
+        if expected_in_window > 0
+        else 100.0
+    )
+
     age_bars = age_seconds / bar_seconds
     if age_bars > SHADOW_DOWN_BARS:
         status, state = "down", "due"
@@ -399,7 +409,26 @@ async def shadow_health() -> dict:
         "bar_seconds": bar_seconds,
         "symbols": symbols,
         "expected_per_hour": expected_per_hour,
-        "observed_last_hour": recent,
+        "observed_in_window": recent,
+        # PRORATED TO THE WINDOW ACTUALLY MEASURED, not to a flat hour.
+        #
+        # The count already starts at the run's own start (a deploy gap is not a
+        # shadow failure — during it, no run existed and nothing was due). But the
+        # expectation beside it was a full-hour figure, so a seven-minute-old run
+        # showing 6 records read as "6 against 24" — an apparent 4x shortfall that
+        # was in fact AHEAD of rate.
+        #
+        # Misleading in the ALARMING direction is not the safe way round: a number
+        # that cries shortfall on every restart is one a reader learns to skip, and
+        # then it is not read on the day it is right. Same failure as a liveness
+        # signal that fires on every blocked bar.
+        "window_minutes": round(window_minutes, 1),
+        "expected_in_window": round(expected_in_window, 1),
+        # Clamped, and named as `dominance_health` names it — one word for one
+        # concept, so nobody has to learn that two panels measure density
+        # differently. Above 100 at startup is real and expected: both symbols
+        # evaluate the newest closed bar the moment a run begins.
+        "recent_density_pct": round(density_pct, 1),
         "stale_after_bars": SHADOW_STALE_BARS,
         **scope,
     }
