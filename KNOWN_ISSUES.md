@@ -1133,46 +1133,50 @@ and either restore the number as a pointer or update the four citations. **A one
 `### B18. — folded into Bnn` stub is enough**, and is what makes the two code citations resolve
 again. Related: **B49**, **B50**, **B30**, **B47**.
 
-### B52. The mutation prober guards a consumer and not its dependency — its coverage follows file paths, not the dependency graph
-**Found in:** 2026-08-14 by Review, checking whether `ict/detector.py` was safe to edit in T-0014
-**Severity:** moderate — the probes are sound; the boundary around them is drawn by path
+### B52. NOT A DEFECT — the lookahead suite protects a property across two modules and an unguarded file. Kept as the record of two wrong versions.
+**Found in:** 2026-08-14 by Review. **Severity: NONE. Filed twice at moderate and HIGH, and
+both claims were wrong.** Kept rather than deleted because the way it was wrong is the entry.
 
-**`backtest/engine.py` is in `GUARDED_FILES`. `ict/detector.py`, which it imports from, is
-not.**
+**WHAT IS ACTUALLY TRUE, measured last and stated first.** A subtle causality defect injected
+into `ict/detector.py` — a file no probe covers and `GUARDED_FILES` does not contain — **IS
+caught**:
 
-    verify_guards.sh:28-31   ENGINE · DOMINANCE · EXECUTION · RESOLVE   (four paths)
-    engine.py:26             from app.services.ict.detector import ict_detector, _normalize_df
-    engine.py:89-90, 263-265 _compute_swing · detect_bos_choch · detect_fvg
+    detector.py:280   "candle_index": max(int(i) - 1, 0)     # FVG born one bar early
+    engine.py:295     fvg_by_idx.setdefault(int(f["candle_index"]), ...)
+    engine.py:362     "born": i
 
-**The FVG probe asserts that reverting *"FVG entry admissible only from born+2"* in
-`engine.py` turns `tests/integration/test_lookahead_regression.py` red.** That probe is
-valid and it passes honestly. **But the property it protects also depends on `detect_fvg`,
-which lives in an unguarded file** — so the same guarantee can be broken from a direction
-the prober does not probe, does not refuse a dirty edit in, and would not `restore()`.
+    FAILED tests/integration/test_no_entry_fills_at_its_own_bar_extreme
+    1 failed, 2 passed
 
-**Why this is worth an entry rather than a wider `GUARDED_FILES`.** The obvious repair —
-add `ict/detector.py` — fixes this instance and not the shape. **The coverage boundary is
-drawn by file path while the property being protected is a behaviour spanning a call
-graph**, so the next guarded file that grows an import re-opens the same hole silently.
-Widening the list is a fix; knowing the list is path-shaped is the finding.
+**A one-bar index shift, two modules from the assertion, and the lookahead suite fails.** That
+is a stronger test than either seat credited it with, and it is the answer to the question
+T-0018 was built on.
 
-**And it is invisible from inside the run, which is this register's signature.** Eight `ok`
-lines and `TIER 0.2 PASSED` are byte-identical whether or not the guarded property has an
-unguarded dependency. **The script already prints one blind spot it knows about** —
-*"`strategy_step.py` (the LIVE entry brain) has no causality test"* — and that precedent is
-the model: this one is not a missing test but an unprobed path into a tested property.
+**VERSION 1 was wrong about the mechanism.** It claimed the FVG probe's property *"also
+depends on `detect_fvg`"*. `born` is assigned at `engine.py:362` and compared at `:403` —
+**`born+2` is engine-local**, as are both other probed engine properties. I asserted a
+dependency from an import list without checking whether the PROPERTY depended on the import.
 
-**Live-path note that made this urgent rather than academic.** `ict/detector.py` is wired
-into production at `app/main.py:124-127` via `candle_pipeline.on_candle_close`, and
-`detect_sd_zones` sits in the detector's own dispatch list (`:141`). **It is live, it runs
-every candle, and it carries no guard** — so "shadow-only, no live behaviour change", the
-standing clause on every rules task this week, has no mechanical enforcement for this file.
+**VERSION 2 was wrong about reachability, and louder.** It reported *"965 passed with a
+genuine lookahead in the codebase"* — but the mutation went into `_detect_fvg_manual`, which
+**is dead code**: `_SMC_AVAILABLE` is true, `smartmoneyconcepts==0.0.27` is pinned in
+`requirements-prod.txt`, and the manual branch runs only if the library is absent or raises.
+**A mutation in unreached code passes trivially.** The Manager established it with a tripwire
+— `raise` in the manual path leaves the suite green, `raise` before `smc.fvg` turns it red.
 
-**Fix:** either extend `GUARDED_FILES` to the imports of the guarded set — computed rather
-than typed, so it cannot drift — or print the guarded set's unguarded dependencies as a
-`NOTE` beside the `strategy_step` one, so the boundary is visible on every run. **The second
-is cheap and honest; the first is correct and needs a plan.** Related: **B30**, **B39**,
-**B18/B51**, **B40**.
+**THE LESSON IS ONE COMMAND, NOT MORE CARE.** Both versions asserted a defect from a mutation
+whose reachability was never established. **Establish that the mutated line executes BEFORE
+concluding from its result** — a tripwire, or a check of which branch the tests take. Version
+2 was filed HIGH on that basis; running the check first would have produced no entry at all.
+
+**WHAT SURVIVED AND MOVED ELSEWHERE.** The guard-list reasoning stands on its own and is in
+T-0018: widening `GUARDED_FILES` is `B18` (one global `MUTATED`, `restore()` over the whole
+list), the transitive closure is **63 of 153 modules**, and a probe cannot manufacture a test
+that does not exist. **And the real exposure is the Manager's, not this entry's:**
+`requirements-prod.txt` states that *"the three lookahead fixes are written against
+[`smartmoneyconcepts`] exact output semantics"* and *"treat any bump here as a strategy
+change"* — **and nothing pins the library's output.** The engine-side property is well
+tested; the assumption underneath it is not tested at all. Related: **B18**, **E1**, **B39**.
 
 ### B53. CI's verdict has no consumer — main went red for nine minutes and no one in the loop knew
 **Found in:** 2026-08-14 by Review, after the Manager found T-0014 part 1 had been pushed red
