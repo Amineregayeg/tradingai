@@ -324,6 +324,19 @@ because B34 is `bars_observed != evaluations_emitted` in production and **no pro
 code has ever computed either number.** The test's own docstring asserts the truth of
 `every-closed-bar-roster-v1` — a claim that was already untrue when it was written.
 
+**And the schema says exactly what that fixture is.** `TELEMETRY_SCHEMA.json:2764`,
+on `unemitted_bars`:
+
+> *"The **honest zero-suppression case** is an engine whose `emission_policy_id` is
+> `EVERY_CLOSED_BAR...`, for which this array is empty and **`bars_observed ==
+> evaluations_emitted`**."*
+
+**The schema offers that as a description of what an honest engine looks like. The test
+used it as a fixture.** It instantiated the canonical honest case, by hand, and checked
+the record reported it faithfully — while production was the dishonest case and nothing
+measured the difference. The invariant named there is the one property worth verifying,
+and the test asserts it **by construction** instead of deriving it.
+
 **Fix (not folded into T-0010 — this is a mechanism to wire, not a line to move).**
 Call the builder once per scan window with `bars_observed` and `evaluations_emitted`
 derived from the loop's actual counters, never passed in agreeing; write C-13 to
