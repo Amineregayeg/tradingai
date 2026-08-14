@@ -16,6 +16,49 @@ Last updated: 2026-08-14 (T-0007: ENTRY_TF 1H -> 5m, the first live behaviour ch
 before moving on.** Not mentioned in passing, not left in a commit message —
 written here, where it will actually be reviewed.
 
+---
+
+## THIS PROJECT'S DEFAULT FAILURE — read this before filing or reading an entry
+
+**An output that does not discriminate between working and broken.** Stated once here because it
+has been re-derived inside individual entries and task plans too many times to keep treating as a
+coincidence.
+
+**Its commonest specific form: conflating *"this was never measured"* with *"this was measured and
+came back empty."*** Three subsystems acquired it on 2026-08-14 alone:
+
+| where | the collapse |
+|---|---|
+| `ConditionReading` | `producer=None` (no implementation exists) vs. a producer that ran and found nothing |
+| the census | *"the rules were not consulted"* vs. *"the rules were consulted and permitted"* |
+| panel thickness | `bar_sample_count = None` (not applicable to an exchange bar) vs. a genuinely thin bar |
+
+**Same shape, other surfaces, all in this register:** `deciding_rule_id or "GATE-036"` laundering an
+absence into a citation (**B31**) · a test that can only construct honesty (**B41**) · a mutation
+invisible to its own trap, printing eight `ok` lines byte-identical to a real pass (**B39**) ·
+`disturbed_count` hardcoded to `0` · a quotation that does not say which part it addresses
+(**B45**) · a count that does not say which set it counted (**B44**) · a claim that does not say
+which criterion it answers (**B49**).
+
+### The two fixes that keep working
+
+**1. MAKE THE VALUE CARRY ITS OWN ANSWER.** A bare number cannot tell you where it came from, so
+provenance travels with it: `DeclaredQuorum` carries its rule id and version, `correlate_denominator`
+ships beside the grade it explains, `expected_poll_seconds` states what it assumed. **Three-for-three
+whenever the question is *"was this value legitimate?"***
+
+**2. REPORT THE DENOMINATOR, AND NAME THE SET.** A flag count with no denominator cannot distinguish
+*clean* from *not looked at*. `examined 11 of 64` and `32 of 79 distinct` are honest;
+`6 flagged` and `40 implemented` are not.
+
+### And it keeps appearing in this register itself
+
+**Not as irony — as evidence that accuracy is not the property that prevents it.** B45's quotation
+was verbatim and complete. B49 was filed twice under one number, both correct. B43 read its own
+example through an alias face whose status no canonical rule holds. **Both staleness sweeps had it
+in their first version.** Every one of those was individually accurate, which is exactly why nothing
+caught them.
+
 This exists because of a specific failure: a problem was described as "noted"
 when it had only been said out loud and never recorded. A conversation scrolls
 away. Claiming something is written down when it is not is worse than saying
