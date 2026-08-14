@@ -117,6 +117,21 @@ is not stated the claim cannot be checked at all, only re-run by someone who gue
 **So: state the search.** *"No `session_open` anywhere under `app/`"* is checkable. *"There is no
 session marker"* is not.
 
+**AND THE BETTER FIX, WHERE IT IS AVAILABLE: ask a question that carries its own denominator.**
+Review's formulation, which upgrades "state the search" from a discipline to a design choice:
+
+> **A grep answers *"where does this text appear"*. `implementations()` answers *"which rules are
+> there"*. The second question has a knowable denominator and the first does not.**
+
+**Measured:** re-deriving *"only one rule declares a condition table"* by inspecting every class in
+`rules_pkg.implementations()` through its live module gives **40 rule ids across 17 modules, 1 of 17
+with the signal** — and the `OFF_CONDITIONS` substring that made the grep version unsafe **is not
+reachable by this method at all**, because it is not a module-level sequence.
+
+**So an inspection-derived negative carries its scope inherently and a text-derived one cannot.**
+The same correction closed the `decided_by` claim days earlier: a grep said no write site set it,
+and both sites did — through `**Attribution.ict().as_columns()`, invisible to text search.
+
 **Same day, same seat, a second instance:** *"GATE-041 is the only rule declaring a `CONDITIONS`
 table"* — load-bearing for T-0016's denominator of 1 — rested on a grep anchored to line-start or
 four-space indent under `rules/*.py`, reported as a repo fact. **The conclusion held** (a wider search
