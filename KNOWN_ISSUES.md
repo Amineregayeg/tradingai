@@ -305,6 +305,37 @@ covered.
 **Execute's check examines both branches per rule for exactly this reason.** The general form: **when a
 function has multiple exits, "I measured its output" names one of them.**
 
+### A LIMIT CAN FAIL IN BOTH DIRECTIONS — and only one had been checked
+
+**Every limit written into a tool tonight existed to stop a number being trusted too much.** Review's
+observation, made after catching the inverse: **a limit that OVERSTATES uncertainty does damage too,
+because a reader discounts a figure that deserved to be trusted.**
+
+**The instance.** `deploy_preflight.py` claimed `open_positions` was *"the broker's `open_trade_count`,
+not what the strategy considers live — so if those can differ this reports the broker's view."*
+**They cannot differ.** `paper.py:139` is `open_trade_count=len(self._positions)`;
+`crypto_loop.py:363` is `len(await self.paper.get_positions())`; `:366` is
+`any(p.pair == pair for p in await self.paper.get_positions())`. **The same list, three readers.**
+
+**So the tool reported the variable under test and told the reader it was a proxy.** For the task that
+number was written to protect, that is the difference between *"this is the thing"* and *"this is
+adjacent to the thing"* — and a reader acting on the limit would have deployed with less confidence
+than the measurement warranted.
+
+**Corrected as its own section in the file rather than silently**, because a silent fix makes the tool
+look like it was always right, and the failure mode is the interesting part.
+
+**AND THE COROLLARY, which is the reusable half:** an inferred or caveated answer must announce **when
+its assumptions lapse**, not merely that it has them. *"It degrades silently if either changes"* is the
+defect — not the inference. So the pair inference in that tool now checks its own two assumptions on
+every run: **whether the activity buffer spans the window asked about**, and **whether every configured
+symbol is accounted for** — reporting an unaccounted symbol as *"cannot infer"* rather than *"not
+held"*. **Absent-versus-empty, in the tool, on the field that matters.**
+
+**With those, an inference is honest at every degradation and a better data source becomes an
+optimisation rather than a correctness fix.** Without them it is a correct answer with no expiry date
+printed on it — **which is exactly what B34 was.**
+
 ### And it keeps appearing in this register itself
 
 **Not as irony — as evidence that accuracy is not the property that prevents it.** B45's quotation
@@ -1583,6 +1614,41 @@ not references:
 with a dead pointer, B49's second class**, and the reason T-0018 could reason about widening
 `GUARDED_FILES` at all: the argument against it lives here. Related: **B51**, **B49**, **T-0018**
 criterion 4.
+
+### B55. `DAY_TRADE` is declared twice and reconciled nowhere — and the notes saying it is recorded were the third false pointer from one file
+**Found in:** T-0012 verdict, 2026-08-14, by Review, checking a citation
+**Severity:** low as behaviour, and the citation half is the reason it is here
+
+**The mode is declared in two places and neither reads the other:**
+
+    gate_017_analysis_only_tfs.py:116   TRADING_MODE = "DAY_TRADE"     the rule's constant
+    shadow.py:628                       mode={"trading_mode": "DAY_TRADE"}   hardcoded literal,
+                                                                            and it is the LIVE emitter
+
+**GATE-019's implementation is right and its reasoning is right.** It deliberately spelled the
+constant as the schema spells it, *"because using `day_trading` here would have made two
+spellings of one quantity — B33's shape, which cost this project forty minutes of silent
+shadow downtime."* It also says the literal *"should read this constant"* and did not change
+it, correctly, under the task's shadow-only clause. **The remaining defect is only that the
+two are unreconciled: change one and nothing tells you about the other.**
+
+**THE CITATION HALF.** Both the constant's comment (`:114`) and `GATE-019`'s `COVERAGE_NOTE`
+(`:138`) say the duplication is **"recorded as B45"**. **It is not in B45, and it was not
+anywhere in this file** until this entry. Checked both by entry and by whole-file search for
+`trading_mode` and `DAY_TRADE`.
+
+**That is the third claim of the form "recorded elsewhere" from `gate_017_analysis_only_tfs.py`
+and the third that was untrue when written** — `B50` records the first, where GATE-017's
+clause-2 note said *"Recorded in KNOWN_ISSUES"* and no entry existed. **Same file, same author,
+same mechanism**: a `COVERAGE_NOTE` is durable and self-printing, so a fact it states **about
+itself** cannot go stale unnoticed — and a fact it states **about another file** is printed by
+nothing. **Three instances make it the file's normal case rather than a slip.**
+
+**Fix:** this entry is the missing record, so all three notes are now true as written and none
+should be edited — the same conclusion as B50, for the same reason: amending them to say
+"recorded nowhere" would be correct today and wrong the moment anyone wrote the entry. **The
+durable repair is that a note claiming an external record should be written by whoever writes
+the record, not by whoever wants it to exist.** Related: **B50**, **B49**, **B33**, **B45**.
 
 ### B11. The disturbance grader now runs on real data — and its grade still decides nothing
 **Found in:** M4 (implementing GATE-002/007/008/048), 2026-08-08
