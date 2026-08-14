@@ -110,7 +110,15 @@ class CoolOffBeforeReversal(RuleImplementation):
 
     RULE_ID = "GATE-040"
 
-    CANNOT_FIRE_WITHOUT = ("GRADE-028",)
+    #: PROXIMATE, not root-cause. GATE-040 consumes GATE-041's seven confirmation
+    #: conditions, and GATE-041 is what cannot reach a verdict. Declaring ("GRADE-028",)
+    #: here — as this rule originally did — is a claim about ANOTHER rule's dependency:
+    #: true today only because both block on the same producer, and silently false the
+    #: day GATE-041 blocks on something else, while still looking maintained. Nothing
+    #: local could catch that. `check_rule_coverage.resolve_block_chain` now follows the
+    #: graph, so the proximate form is the checkable one and the root cause is COMPUTED:
+    #: GATE-040 <- GATE-041 <- GRADE-028.
+    CANNOT_FIRE_WITHOUT = ("GATE-041",)
 
     COVERAGE_NOTE = (
         "REGISTERS GRADE-035 BY ALIAS WHILE NOT ALL OF ITS DECLARED INPUTS EXIST, and that "

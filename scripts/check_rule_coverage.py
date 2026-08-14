@@ -67,6 +67,47 @@ def _wrap(text: str, width: int) -> list[str]:
     return lines
 
 
+
+def resolve_block_chain(
+    rule_id: str, impls: dict, registry_ids: set, _seen: tuple = ()
+) -> list[str]:
+    """Follow CANNOT_FIRE_WITHOUT through rules that name other rules.
+
+    Returns the chain from `rule_id` to its ROOT cause, e.g.
+    `["GATE-040", "GATE-041", "GRADE-028"]`. A single-element list means not blocked.
+
+    WHY THE FLAT FORM IS NOT ENOUGH, and the case is live. GATE-040's inputs name "the
+    seven confirmation conditions (GATE-041)", and GATE-041 cannot reach a verdict. So
+    GATE-040 consumes the output of a blocked rule while NONE of its own inputs is
+    individually missing — it could have registered with no CANNOT_FIRE_WITHOUT at all
+    and landed in effective coverage as able to decide. That omission would have been
+    invisible: the flat form only sees DIRECT missing producers, and the blockage is one
+    hop away.
+
+    WHICH FORM THIS CHECK PREFERS, AND WHY IT IS NOT A STYLE CHOICE.
+    **PROXIMATE** — name the rule you actually consume (`GATE-041`), not the root cause
+    (`GRADE-028`). A root-cause declaration is a claim about ANOTHER rule's dependency:
+    correct today only because both happen to block on the same producer, and silently
+    FALSE the day GATE-041 blocks on something else, while still looking maintained. No
+    local check can catch that, because the referent lives in a different module. The
+    proximate form is the checkable one precisely because this function computes the
+    chain instead of trusting an assertion about a rule nobody re-read.
+    """
+    if rule_id in _seen:
+        return [*_seen, f"{rule_id} (CYCLE)"]
+    cls = impls.get(rule_id)
+    blockers = tuple(getattr(cls, "CANNOT_FIRE_WITHOUT", ()) or ()) if cls else ()
+    if not blockers:
+        return [rule_id]
+    # Deterministic: the first declared blocker is the reported chain. Others still show
+    # up as their own chains when they are themselves rules.
+    nxt = blockers[0]
+    if nxt in impls and nxt in registry_ids:
+        return resolve_block_chain(nxt, impls, registry_ids, (*_seen, rule_id))
+    # A leaf: named but not implemented, so there is nothing further to follow.
+    return [*_seen, rule_id, nxt]
+
+
 def main() -> int:
     registry_ids = contract.known_rule_ids()
     implemented = rules_pkg.implemented_ids()
@@ -158,9 +199,12 @@ def main() -> int:
         f"  implemented but CANNOT FIRE  {len(blocked):>3}"
         "   (an input has no producer — returns its default forever)"
     )
+    impls = rules_pkg.implementations()
     for rid in blocked:
-        missing = ", ".join(rules_pkg.implementations()[rid].CANNOT_FIRE_WITHOUT)
-        print(f"      {rid}  blocked on {missing}")
+        chain = resolve_block_chain(rid, impls, registry_ids)
+        # The chain shows the ROOT cause and the hop count. A rule blocked one hop away
+        # is invisible in the flat form, which is what this resolves.
+        print(f"      {rid}  blocked: " + " <- ".join(chain))
     if blocked:
         print(
             f"  effective coverage   {len(implemented & hard) - len(blocked):>3}"

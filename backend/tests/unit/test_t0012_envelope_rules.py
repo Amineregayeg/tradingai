@@ -605,7 +605,10 @@ def test_grade_035_is_registered_by_alias_and_marked_unable_to_fire():
 
     impls = implementations()
     assert impls["GRADE-035"] is impls["GATE-040"]
-    assert impls["GRADE-035"].CANNOT_FIRE_WITHOUT == ("GRADE-028",)
+    # PROXIMATE form: GATE-040 consumes GATE-041, which is the rule that cannot decide.
+    # The root cause (GRADE-028) is COMPUTED by resolve_block_chain rather than asserted
+    # here, because a root-cause declaration is a claim about another rule's dependency.
+    assert impls["GRADE-035"].CANNOT_FIRE_WITHOUT == ("GATE-041",)
 
 
 def test_a_blocked_forward_is_distinguishable_from_an_evaluated_forward():
@@ -632,3 +635,75 @@ def test_a_blocked_forward_is_distinguishable_from_an_evaluated_forward():
     ), "a blocked cool-off is indistinguishable from an unsatisfied one"
     assert blocked.values["cool_off"]["determination"] == "NOT_EVALUATED_BLOCKED"
     assert evaluated.values["cool_off"]["determination"] == "EVALUATED"
+
+
+# ---------------------------------------------------------------------------
+# T-0016 criterion 3b — a rule blocked BY a blocked rule
+# ---------------------------------------------------------------------------
+
+def _resolver():
+    import importlib.util
+    from pathlib import Path
+
+    p = Path(__file__).resolve().parents[3] / "scripts" / "check_rule_coverage.py"
+    spec = importlib.util.spec_from_file_location("crc", p)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_a_rule_blocked_by_a_blocked_rule_resolves_to_its_root_cause():
+    """The flat form sees DIRECT missing producers only, so one hop away is invisible.
+
+    GATE-040 consumes GATE-041's seven confirmation conditions and GATE-041 cannot reach
+    a verdict — while none of GATE-040's OWN inputs is individually missing. It could have
+    registered with no CANNOT_FIRE_WITHOUT at all and landed in effective coverage as able
+    to decide.
+    """
+    from app.services.rules import implementations
+    from app.services.telemetry import contract_loader as contract
+
+    crc = _resolver()
+    chain = crc.resolve_block_chain(
+        "GATE-040", implementations(), contract.known_rule_ids()
+    )
+    assert chain == ["GATE-040", "GATE-041", "GRADE-028"], chain
+    assert len(chain) == 3, "the two-hop chain collapsed — the resolver is not following"
+
+
+def test_the_proximate_declaration_is_what_makes_the_chain_computable():
+    """MUTATION. Revert GATE-040 to the root-cause form and the chain loses its middle hop.
+
+    ("GRADE-028",) is a claim about ANOTHER rule's dependency: true today only because
+    both rules block on the same producer, and silently false the day GATE-041 blocks on
+    something else — while still looking maintained. Nothing local can catch that. The
+    proximate form is checkable precisely because the root cause is COMPUTED.
+    """
+    from app.services.rules import CoolOffBeforeReversal, implementations
+    from app.services.telemetry import contract_loader as contract
+
+    crc = _resolver()
+    assert CoolOffBeforeReversal.CANNOT_FIRE_WITHOUT == ("GATE-041",), (
+        "GATE-040 declares a root cause rather than what it actually consumes"
+    )
+
+    class _RootCauseForm:
+        CANNOT_FIRE_WITHOUT = ("GRADE-028",)
+
+    impls = dict(implementations())
+    impls["GATE-040"] = _RootCauseForm
+    chain = crc.resolve_block_chain("GATE-040", impls, contract.known_rule_ids())
+    assert chain == ["GATE-040", "GRADE-028"], chain
+    assert "GATE-041" not in chain, (
+        "the root-cause form hid the rule GATE-040 actually depends on"
+    )
+
+
+def test_an_unblocked_rule_resolves_to_itself_alone():
+    from app.services.rules import implementations
+    from app.services.telemetry import contract_loader as contract
+
+    crc = _resolver()
+    assert crc.resolve_block_chain(
+        "GATE-017", implementations(), contract.known_rule_ids()
+    ) == ["GATE-017"]
