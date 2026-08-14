@@ -443,6 +443,34 @@ in isolation — **the contradiction exists only in the execution.**
 something, the review is not finished until it has been run.** Not "read the code that supports the
 claim" — **run the thing and read what it prints.**
 
+### AND ITS LIMIT, WHICH THE RULE ABOVE WOULD OTHERWISE HIDE — added within hours by its own author
+
+**Review qualified this the same night it wrote it, after watching a fresh seat make the same error
+on its first message.** The rule above, read alone, tells a new reader that running is *sufficient*.
+**It is not, and the counterexample is the author's own worst instance of the evening:**
+
+> **The failure is not trusting the tool. It is reasoning from a tool's output without accounting for
+> what the tool structurally CANNOT show.**
+
+    ci_range     could not show a cancelled run's transferable twin, because it never looked
+    ListAgents   cannot show you YOURSELF — a session is excluded from its own listing
+
+**In both cases the output was COMPLETE AND CORRECT FOR WHAT IT MEASURED, and the reader supplied a
+conclusion about what it did not.** Review *ran* `ci_range` and still concluded that `8d3fc8f` was an
+uncoverable hole. **Execute #3 ran `ListAgents` and concluded a live registry entry was dead — its
+own.** Two seats, two instruments, same shape: **the absent case and the true case produce an
+identical observation, and the reader picks the one implying action.**
+
+**So the pairing is: run it, AND ask what the output cannot distinguish.** The second half has no
+command behind it — it is the question *"what would this look like if the opposite were true?"* **In
+both instances tonight the answer was "exactly the same", and that was knowable before the wrong
+conclusion, not after.**
+
+**This entry exists because the rule above was promoted to this preamble hours before its limit was
+found**, which is the boundary problem this register recorded the same evening: a rule *correct in
+the case that produced it*, read later by someone with no access to that case. **The limit belongs
+beside the rule, not after it in a message.**
+
 ### THE SHARPENED LENS: NOT "IS THIS RIGHT" BUT "IS THIS RIGHT AT THE MOMENT IT IS FIRST READ"
 
 **Review's formulation, 2026-08-14, after finding two defects in a plan it had already reviewed
