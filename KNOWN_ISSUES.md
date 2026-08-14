@@ -336,6 +336,44 @@ held"*. **Absent-versus-empty, in the tool, on the field that matters.**
 optimisation rather than a correctness fix.** Without them it is a correct answer with no expiry date
 printed on it — **which is exactly what B34 was.**
 
+### A CHECK WRONG IN THE STRICT DIRECTION READS AS CONSERVATIVE AND GETS LESS SCRUTINY
+
+**Execute's clause, in GATE-037's `COVERAGE_NOTE`, and it names a failure mode nothing else here
+does:** a check that fails on the mere *presence* of a banned token *"would enforce the opposite of the
+doctrine **while looking stricter**."*
+
+**Every limit and every criterion written on 2026-08-14 assumed the danger was permissiveness** — a
+guard that fires too rarely, a threshold that accepts too much, a mutation that passes vacuously.
+**The strict direction was never checked**, and it is the direction that attracts less review, because
+over-strictness reads as caution.
+
+**Two instances, one in a rule and one in a tool:**
+
+* **GATE-037** — the statement explicitly permits premium/discount geometry to be **recorded** as
+  reading vocabulary while forbidding it from influencing a decision. **A check failing on presence
+  would forbid the reading vocabulary the rule protects**, and would have passed review as the safer
+  reading.
+* **`deploy_preflight.py`'s limit 3** — claimed a number was a proxy when it was the variable under
+  test. **A limit that overstates uncertainty makes a reader discount a figure that deserved trust.**
+
+> **Ask of every guard: what does it forbid that the doctrine permits?** The permissive failure is
+> caught by the mutation discipline; **the strict failure is caught by nothing already in place.**
+
+### AND A NAMED PATH THAT DOES NOT EXIST IS A SILENT NO-OP
+
+**Found the same hour, in the same rule.** `gate_037_no_premium_discount.py:121` scans
+`("decision", "entry", "gates", "rule_evaluations")`. **Measured: `gates` has ZERO occurrences in
+`TELEMETRY_SCHEMA.json` and zero in the model**, and the only gate-ish schema keys are
+`mitigated_imbalance_count` and `unmitigated_imbalance_count`.
+
+**So the check names four paths, can only ever scan three, and nothing says so** — a path that does not
+exist is indistinguishable from a path that is clean. **Same class as the deferral sweep's `.py`-only
+file matcher and `ci_range`'s ancestry inference: the tool reported on what it looked at and did not
+say the lookup found nothing.**
+
+**The fix is the denominator discipline applied to path names:** assert the named paths exist in the
+record shape and report any that do not, so a rename or a typo reduces coverage **loudly**.
+
 ### And it keeps appearing in this register itself
 
 **Not as irony — as evidence that accuracy is not the property that prevents it.** B45's quotation
@@ -1487,6 +1525,73 @@ a predicate deferral has no owner the moment nobody recognises themselves in it.
 `34 / 104 distinct` — rather than picking one, because both are legitimate answers to different
 questions and a bare number cannot say which set it counted. Related: **B43**, **B45**, **B47**,
 **B49**, **B58**.
+
+### B60. PRIM-002's type distribution, the GAP zero, and the 0.2% amplifier window — three measurements T-0019 owes the register
+**Found in:** T-0019, 2026-08-14. **Measurements, not defects** — filed because the plan
+required them and because two of the three are the evidence behind decisions taken elsewhere.
+
+**1. THE TYPE DISTRIBUTION, over 999 live 5m `BTCUSDT.P` bars:**
+
+    FVG 268 · VOLUME_IMBALANCE 92 · BPR 59 · SUPER_BPR 651 · GAP 0     (1070 total)
+
+**PRIM-002's docstring claimed the engine "detects FVGs only" and that three of four types
+were invisible to it. That was false from the moment the module landed** — B42's class, a
+comment denying what the file beside it does, and it is the first thing ENTRY-001's
+implementer reads. **Corrected in the same commit**, with the measurement in place of the
+claim.
+
+**2. `GAP` IS 0 IN THE CORPUS AND IS NOT UNREACHABLE.** A hand-built fixture with bodies apart
+AND wicks apart produces one, with the band cut between the wicks
+(`test_t0019_entry_decision.py`). **So zero is a market fact about a 24/7 perpetual, which has
+no session gaps — not a dead branch.** Worth stating as method rather than as a result: **a
+corpus count can only ever say "not seen yet"**, and no amount of additional data converts
+that into "cannot happen". The construction settles it in one fixture.
+
+**3. `SUPER_BPR` AT 61% IS NOT A PROPERTY OF THE MARKET.** 651 of 1070 at 999 bars; 23% at
+150. The promotion scan has no time bound, so the share grows with the caller's lookback —
+and the callers differ (shadow 320 bars, backtest 250). **T-0020 owns this.** Until it lands,
+**no rule may assert an expected outcome of the `super BPR > BPR > plain imbalance` ordering
+over DETECTED bars**, because the same band classifies differently depending on history
+length. T-0019's ranking tests therefore use an explicit candidate list, which contains no
+lookback at all.
+
+**4. THE 0.2% AMPLIFIER WINDOW IS OURS AND UNRATIFIED**, and the statement stamps itself:
+*"The 0.2% value is an engineering guideline, not a strict market rule."* Carried as a
+declared parameter on every GATE-038 record with its source and `ratified=False`. **Its firing
+rate is reported with its denominator** (B46): a corridor that catches every level and one
+that catches none emit the same shaped record, and only the rate separates them. **No live
+firing rate is quoted here, because GATE-038 is not wired to a live amplifier feed** — PRIM-003
+and PRIM-006 produce the levels and nothing routes them in yet. Quoting a rate from a fixture
+as though it were a corpus measurement is the error this entry exists to avoid.
+
+### B59. GATE-038's collision boundary was decided by binary float, asymmetrically — and the statement's own worked example is what caught it
+**Found in:** T-0019, 2026-08-14, writing the test for the quoted example.
+**Status: FIXED in the same commit.** Recorded because the SHAPE recurs and the detection
+method is the transferable part.
+
+**The statement gives the worked example outright:** *"If the entry POI is at 100.00, any
+amplifier between 99.80 and 100.20 is considered to be colliding."* Both edges, same case.
+
+**In binary float they are not the same case:**
+
+    abs(99.80 - 100.00) = 0.20000000000000284    > 0.2  -> EXCLUDED
+    abs(100.20 - 100.00) = 0.19999999999999574   <= 0.2 -> included
+
+**So a bare `<= half` admits the upper edge and rejects the lower one** — the two prices the
+doctrine names identically, decided differently, silently, and **asymmetrically**, which is
+the part that makes it more than a rounding nit: a systematic bias toward counting amplifiers
+above the entry and dropping those below.
+
+**Why it was caught at all:** the criterion said to test the statement's worked example rather
+than a convenient number. A test written with 99.5 and 100.5 passes and proves nothing about
+the boundary. **The quoted example WAS the boundary case, and quoting doctrine literally into
+a fixture is what surfaced it.** Fixed with `isclose` at the boundary only; the interior
+comparison is untouched.
+
+**Where else this shape can live:** any declared threshold compared with `<=` against a
+percentage of a price. `GATE-040`'s `cool_off_min_seconds` is integer seconds and safe;
+`consolidation.py`'s `k` ratio and `SUPER_BPR_MIN_OVERLAP` are integer counts and safe. **The
+one to check when it is next touched is any new `pct`-derived band.** Related: **B46**.
 
 ### B58. One half of the cross-tool agreement cannot be enforced from inside the repository
 **Found in:** T-0021, 2026-08-14, while satisfying its criterion 2.
