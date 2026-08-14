@@ -1705,6 +1705,65 @@ a predicate deferral has no owner the moment nobody recognises themselves in it.
 questions and a bare number cannot say which set it counted. Related: **B43**, **B45**, **B47**,
 **B49**, **B58**.
 
+### B67 — no endpoint exposes a live position's SL/TP, so "every open position has a stop" is unobservable
+
+**Filed 2026-08-15 while checking Review's observation that production has held two positions for
+twenty-five hours with ZERO closes.** The exit path turns out to be sound. **The finding is that I
+could not establish that from production, only from the source.**
+
+## What the engine actually does, traced end to end
+
+    _tick_symbol()          every tick, per pair, live ticker price
+      -> paper.on_tick()    sets the mark, then per position:
+                              LONG   price <= sl -> SL      price >= tp -> TP
+                              SHORT  price >= sl -> SL      price <= tp -> TP
+      -> _settle()          realises pnl, fires _on_settle_cb for ALL close paths
+
+**And SL is always present on the live entry path.** `crypto_loop.py:441` is `sl = float(sig.sl)` —
+unconditional, so a signal without one raises rather than opening a stopless position. **`tp` is
+conditional (`if sig.tp is not None`) and `on_tick` guards both**, so a TP-less position is possible
+by design and an SL-less one is not. `ExecutionService` passes them through at `service.py:147`
+(`sl=sig.sl, tp=sig.tp`).
+
+**So zero closes in twenty-five hours is consistent with a working engine.** `RISK_PCT = 0.01` on a
+$5,000 account is ~$50 at risk per trade; `unrealized_pl` is **-11.44** across two positions, roughly
+a tenth of the combined risk. **Price is well inside both stops. There is no defect here.**
+
+## The defect is that I proved it from the CODE and cannot prove it from the SYSTEM
+
+**Two states produce an identical `/api/engine/status` payload:**
+
+    holding two positions correctly, price inside both stops
+    holding two positions that CAN NEVER CLOSE
+
+**Nothing in the response separates them.** `open_positions` is a count. `unrealized_pl` is a sum.
+**No endpoint exposes a position's `sl` or `tp`** — `/api/positions` returns `[]` from a different
+source, `/api/engine/sim` is account-level, and `get_positions()` carries the fields internally but
+publishes none of them.
+
+**I resolved the ambiguity by LEAVING the output and reading the source.** That works for a reader who
+has the repo, at a moment when the code is trustworthy — and **it is not available to an operator, to
+a monitor, or to anyone asking "is the engine currently safe" rather than "was it written correctly".**
+The property that matters — *every open position has a stop* — is a **runtime** property, and it is
+checked nowhere at runtime.
+
+> **This is the same shape as `B53` and the deploy-preflight gap, one level in: a correct signal that
+> exists inside the process and is not published.** `deploy_preflight.py` already has to INFER held
+> pairs from an activity deque because the pair list is not exposed. **This is the same omission on the
+> same object, and the inference trick does not work for `sl` — no activity line carries it.**
+
+## Why it is worth an entry rather than a shrug
+
+**Every safety argument this project has made about the live engine is a source-reading argument.**
+`ALLOW_LIVE_TRADING` defaults false, the CFT connection is double-gated, SL is unconditional at
+`:441`. **All true, all verified by reading, and none of them observable from outside the process.**
+**A deploy that broke any one of them would present an identical status payload to one that did not.**
+
+**The cheap remedy is not a monitor, it is a field:** publish `sl` and `tp` per position in
+`/api/engine/status`, and the check becomes *"is any open position missing a stop"* — one comparison
+over data already in memory. **Deferred by id rather than predicate:** not ticketed yet, because it is
+a product change to a live endpoint and the queue is mid-T-0011. **Do not fold it into a rules task.**
+
 ### B63 — the B25 handshake is a CROSS-SEAT protocol, and the same hazard exists INSIDE one seat
 
 **Filed 2026-08-15 from Review's own contaminated baseline, self-caught and self-discarded before it
