@@ -34,11 +34,22 @@ came back empty."*** Three subsystems acquired it on 2026-08-14 alone:
 | panel thickness | `bar_sample_count = None` (not applicable to an exchange bar) vs. a genuinely thin bar |
 
 **Same shape, other surfaces, all in this register:** `deciding_rule_id or "GATE-036"` laundering an
-absence into a citation (**B31**) · a test that can only construct honesty (**B41**) · a mutation
-invisible to its own trap, printing eight `ok` lines byte-identical to a real pass (**B39**) ·
-`disturbed_count` hardcoded to `0` · a quotation that does not say which part it addresses
-(**B45**) · a count that does not say which set it counted (**B44**) · a claim that does not say
-which criterion it answers (**B49**).
+absence into a citation (**B31**) · a test that can only construct honesty (**T-0011's plan**, on
+`test_telemetry_contract.py:223` — no entry of its own yet) · a mutation invisible to its own trap,
+printing eight `ok` lines byte-identical to a real pass (**B30**'s instance list) · `disturbed_count`
+hardcoded to `0` · a quotation that does not say which part it addresses (**B45**) · a count that
+does not say which set it counted (**B43**) · a claim that does not say which criterion it answers
+(**B49**).
+
+**Three of those citations were wrong in this section's first version — corrected 2026-08-14 by
+Review, and the corrections are left visible rather than silently applied.** It said **B41** for the
+honesty-only test, when B41's own second sentence disclaims that family — *"A new species. Every
+prior entry in this section is an output that fails to discriminate. **This is a detector that was
+never wired**"*; **B39** for the eight-`ok`-lines mutation, when B39 is a conditional edit that
+matches nothing; and **B44** for the undenominated count, when B44 is about inputs declared as data
+names. **This section's own thesis, in the section stating it, within an hour of it being written**
+— and each wrong citation pointed at a real entry describing a real defect, which is why reading it
+did not feel wrong.
 
 ### The two fixes that keep working
 
@@ -50,6 +61,24 @@ whenever the question is *"was this value legitimate?"***
 **2. REPORT THE DENOMINATOR, AND NAME THE SET.** A flag count with no denominator cannot distinguish
 *clean* from *not looked at*. `examined 11 of 64` and `32 of 79 distinct` are honest;
 `6 flagged` and `40 implemented` are not.
+
+### HOW IT PROPAGATES THROUGH CODE THAT IS INDIVIDUALLY CORRECT
+
+**The mechanism, found by Execute while fixing an instance of it:**
+
+> **A helper that correctly merges two things for its own purpose will merge them for yours too,
+> unless you separate them again at the boundary.**
+
+`quorum_blocked` treats *"no producer exists"* and *"a producer exists and was never called"* as
+one thing — **and it is right to**, because for its purpose both mean *no quorum*. The defect
+appeared when its return value was reused as the **record**: the fix that added a fourth state to
+distinguish the two absences **re-merged them in the emitted payload**, through a helper that was
+not wrong. Caught by a test, not by rereading.
+
+**So a correct abstraction is a route by which this failure spreads.** The question to ask of any
+shared helper is not *"is it right?"* but ***"right for whose purpose, and does the caller need a
+distinction it deliberately discards?"*** Every collapse in the table above is defensible
+somewhere — that is why the code reads well at every individual site.
 
 ### And it keeps appearing in this register itself
 
@@ -965,6 +994,41 @@ change to the note is needed and none should be made** — amending it to say "r
 would be correct today and wrong the moment anyone wrote the entry. **The durable lesson is
 narrower than the entry: a self-printing note may state a fact about itself; when it states a
 fact about another file, nothing prints that.** Related: **B49**, **B39**, **B47**.
+
+### B51. B18 does not exist, and four places cite it — two of them in shipped code
+**Found in:** 2026-08-14 by Review, verifying the new preamble's citations
+**Severity:** low as behaviour, moderate as a signal — it is the register's own
+reference-integrity failure, and the two code citations cannot be seen from this file
+
+**There is no `### B18.` heading in this register.** Zero. Yet `B18` is cited four times:
+
+    KNOWN_ISSUES.md:1681      "of the B18 fix (`a4367ad`) that nobody predicted"
+    KNOWN_ISSUES.md:1718      "check plus the B18 fix make a spurious refusal far more likely"
+    verify_guards.sh:80       "The promise used to be wider, and the width was the bug (KNOWN_ISSUES B18)"
+    verify_guards.sh:145      "strictly worse than the data loss B18 describes"
+
+**The referenced content is real** — `a4367ad` exists and the `restore()` narrowing it made is
+in the script — so this is not a fabricated citation. **The entry was renumbered, folded or
+dropped and its inbound references were not updated.**
+
+**Why the code citations are the serious half.** `verify_guards.sh:145` sends a reader to
+*"the data loss B18 describes"* to justify a specific safety decision. **That reader opens this
+file and finds nothing**, and the decision then looks unjustified rather than merely
+undocumented. **A dangling reference in code is worse than one in prose**, because prose is read
+by people auditing the prose, and `verify_guards.sh` is read by whoever is about to change the
+mutation prober — the highest-consequence file in the repo to misunderstand.
+
+**And this file cannot see it.** Both sweeps at `agents/` read `KNOWN_ISSUES.md` and check
+whether entries' citations still resolve **outward**. Nothing checks whether **inbound**
+citations resolve — that a `B18` referenced from a shell script still names an entry.
+**Same asymmetry as `B50`'s:** a note can state a fact about itself; nothing prints a fact about
+another file.
+
+**Fix:** decide whether B18 was folded into another entry (its subject — `restore()` restoring
+more than the run changed — is described in `B30`'s instance list and in the script's own header)
+and either restore the number as a pointer or update the four citations. **A one-line
+`### B18. — folded into Bnn` stub is enough**, and is what makes the two code citations resolve
+again. Related: **B49**, **B50**, **B30**, **B47**.
 
 ### B11. The disturbance grader now runs on real data — and its grade still decides nothing
 **Found in:** M4 (implementing GATE-002/007/008/048), 2026-08-08
