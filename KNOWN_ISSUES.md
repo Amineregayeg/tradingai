@@ -1599,6 +1599,85 @@ a predicate deferral has no owner the moment nobody recognises themselves in it.
 questions and a bare number cannot say which set it counted. Related: **B43**, **B45**, **B47**,
 **B49**, **B58**.
 
+### B61 — DEFER BY TASK ID fixed ATTRIBUTION and never fixed NOTIFICATION
+
+**Status: TOOL BUILT, `agents/landed_sweep.py`. Nothing owed today; the whole exposure is
+prospective and it is 8 references deep.**
+
+`deferral_sweep.py` exists because of B35 and B42, and its central argument is this:
+
+> **A PREDICATE DEFERRAL IS WEAK BECAUSE MATCHING PRODUCES NO NOTIFICATION.** B35's predicate was
+> CORRECT — the right task arrived, in the right file, twice — and it still slid off, because
+> nothing tells a task that it has satisfied someone else's condition.
+
+**That argument never depended on the deferral being a predicate.** Nothing tells the eight
+sentences that name `T-0020` that `T-0020` has landed either. **So the rule this loop adopted —
+DEFER BY TASK ID, NEVER BY PREDICATE — made the owner NAMEABLE and left the silence exactly where
+it was.** The rule was right. It solved half the problem and was recorded as solving the problem.
+
+**Measured, and the whole exposure sits on one task:**
+
+    T-0020    8 references     "T-0020 owns that" / "until it lands, no rule may assert…"
+    T-0015    1 reference
+    T-0017    1 reference
+
+**All eight of T-0020's say some form of *"until T-0020 lands, no rule may assert the precedence
+ordering."* The hour it lands, all eight are false.** Now criteria 9, 9a and 9b of that task, with
+the references enumerated in the plan so the implementer does not have to find them.
+
+### And the tool inverted its own premise on first run, which is the more useful half
+
+**Version 1 asked the retrospective question — "does anything defer to a task that already
+shipped?" — and flagged 9. I read all nine. ZERO were owed work.** One was a genuine deferral that
+had been honoured; the other eight were narration:
+
+    "T-0014 FORBIDS hardening the durations"      standing constraint, still true
+    "Status: FIXED, 2026-08-14 (T-0021)"          closure record
+    "which T-0003 EXISTED TO FIX"                 historical narration
+    "this is T-0007's defect EXACTLY"             teaching reference
+    "T-0012. This task must not change its verdict"   scope constraint
+
+**And the reason is structural rather than a bad word list: once a task lands, this project writes
+about it in the past tense and as a standing constraint, and those are the DOMINANT way a landed id
+appears.** *"X forbids Y"* and *"X owes Y"* are both present-tense claims about a finished task, and
+no vocabulary separates them reliably. A widened list went 0-for-2 instead of 0-for-9 and was no
+more correct.
+
+> **So the retrospective question is the wrong question, and the prospective one is right.** The
+> product is not cleanup after a landed task — it is *"tell whoever closes T-0020 that eight
+> sentences go false the moment they do."* **That bucket is precise (8 of 10 genuine) and it arrives
+> before the sentences go stale rather than after.**
+
+**AND THE PRECISE RETROSPECTIVE ANSWER NEEDS NO WORD LIST AT ALL — IT NEEDS A SNAPSHOT.** A
+reference recorded *while its task was open* is a known deferral. Persist it; when the task closes,
+any recorded reference still present is owed, with no vocabulary in the decision.
+**`deferral_sweep.py` could not make this move because it had no moment at which its predicate was
+known-good. A task id gives us one** — which is the second thing defer-by-task-id bought, and
+nobody had spent it.
+
+**Mutation-proved rather than asserted:** stubbing `T-0020` to DONE turns exit 0 into exit 1 with
+all eight listed, both through the word list and through the snapshot.
+
+### Three defects found in this tool, in the seat that keeps filing them
+
+* **Version 1 counted every `T-NNNN` in source — 64 references, 11 tasks — and labelled them all
+  "DEFERS TO A LANDED TASK."** Almost all were attribution (*"added by T-0016"*), which goes stale
+  never. **A count that cannot tell "this work is owed" from "this work was done" is an output that
+  does not discriminate between working and broken**, produced in the tool built to catch a cousin
+  of it.
+* **`states[t]` KeyErrors on any task id present in text but absent from the bus.** Invisible in
+  production because every id happens to exist; found only because the mutation stub supplied a
+  short state dict. **The mutation test found a bug in the tool, not just in the tool's subject.**
+* **The mutation test corrupted production state.** Proving the check fires needs a stubbed task
+  state, and that run then rewrote the real snapshot from the stub's view, in which every task but
+  one looked open. **A sweep that reads like a report and writes as a side effect turns a test run
+  into a state change.** The write is now `--no-write`-able and the test opts out.
+
+**Standing limit, inherited and stated because a sweep that hides its blind spots is what this
+register is about: the trigger is a word list and it MISSED one live deferral** —
+`entry_001_imbalance_poi.py:27`, *"That is T-0020's defect, not this rule's"* — until that phrasing
+was added by hand. **5 references, 4 matched.** "Nothing owed" means "nothing matched as owed".
+
 ### B60. PRIM-002's type distribution, the GAP zero, and the 0.2% amplifier window — three measurements T-0019 owes the register
 **Found in:** T-0019, 2026-08-14. **Measurements, not defects** — filed because the plan
 required them and because two of the three are the evidence behind decisions taken elsewhere.
