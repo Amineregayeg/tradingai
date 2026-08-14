@@ -1711,6 +1711,69 @@ gets noisier every time the loop does the right thing. **A checker whose false-p
 with good behaviour cannot gate anything** — which is why the exit code follows the snapshot and the
 word list only advises.
 
+### CORRECTED BY REVIEW: MY REASON WAS WRONG EVEN THOUGH THE CONCLUSION HELD
+
+**I wrote that no word list can separate *"X forbids Y"* from *"X owes Y"* because both are
+present-tense claims about a landed task. Review falsified it: a marker list gets 3 of the 4 live
+constraints** — `until … lands`, `must land`, `owns` all fire. **A word list is 75%, not hopeless.**
+
+**What actually defeats it is the fourth case, and it is not a vocabulary problem.**
+`entry_001:27` — *"That is T-0020's defect, not this rule's — and it is why the tests here hand this
+rule an EXPLICIT candidate list"* — **carries its obligation in a DESIGN CHOICE described by the
+sentence, not in a verb.** The tests use an explicit candidate list and could stop once T-0020 lands.
+**No word list reaches that, because the sentence never says anything is owed.**
+
+**And the two error directions compose into an argument neither of us had alone:**
+
+    FALSE NEGATIVE   on the subtlest case — obligation as design choice, no modal
+    FALSE POSITIVE   COUPLED TO PROGRESS — 2 of the last 4 are the plan text written to
+                     DISCHARGE these deferrals, quoting "T-0019 was forbidden from…" inside
+                     the criterion that exists to pay that debt
+
+> **So the signal degrades fastest exactly when the process is going best**, and *"a threshold you
+> can only meet by writing less about your own work is not a threshold. A measure that penalises
+> diligence will be switched off."*
+
+**That is the real case for the snapshot and it is stronger than mine: the snapshot does not parse
+intent. It only needs the sentence to have EXISTED while the task was open — a fact immune to how
+much anyone writes about it.** The tool now **prints its own record (0 true positives in 15
+flagged)**, because what stops the next reader widening the list to catch `entry_001:27` is knowing
+it has never had a true positive and that widening raises noise on the same curve.
+
+**AND THE COUNT DRIFTED INSIDE THE PLAN THAT DEPENDS ON IT.** T-0020's criterion 9 first said *"the
+eight deferrals"*. Amending the plan and writing this entry pushed it to **eleven** — the prose
+describing the debt is itself deferral-language text naming the task. **Criterion 9 now refuses to
+pin a number and sends the implementer to the tool**, because a hardcoded count is *correct when
+written* and wrong when read.
+
+### `--no-write` MADE THE WRITE PATH THE ONLY UNTESTED PATH
+
+**Review's third finding, and it was self-inflicted an hour earlier.** `--no-write` was the correct
+fix for a mutation test that rewrote production state. **But it means the run being exercised and the
+run that ships are different runs, and the difference is the path that produces the artefact every
+later run depends on.**
+
+**The dangerous asymmetry was in the load, not the write:** the old code printed *"snapshot
+unreadable — treating as absent"*. **That is the safe direction for CORRUPTION and the unsafe one for
+TRUNCATION — a snapshot missing half its entries parses fine and silently narrows what can ever be
+violated.** An unreadable snapshot degraded loudly; a readable-but-incomplete one degraded silently,
+and nothing distinguished them.
+
+**Now: atomic temp-plus-rename; shape-validated on read with `exit 2` rather than treat-as-absent;
+and a scan-scope guard**, because truncation is not the only way a baseline shrinks — a partial
+checkout writes a perfectly valid, narrower snapshot. **Verified in four directions:** real write
+stamps `_meta`; a malformed snapshot exits 2 and is left untouched on disk; a planted
+`files_scanned: 900` against a 313-file run refuses; a 330 → 313 shrink still writes.
+
+### AND IT IS A CATEGORY, NOT FOUR INSTANCES
+
+**Four `agents/` tools are now load-bearing for dispatch decisions, and all four have no test, no CI
+row, and one reader:** `stale_sweep.py`, `deferral_sweep.py`, `ci_range.py`, `landed_sweep.py`.
+**All sit outside the repo**, so CI cannot see them even in principle. **Every one of them is the
+unaudited copy in the same-claim-two-homes rule** — the tools that decide what work is owed are
+themselves the artefacts nothing checks. Named here rather than ticketed because the remedy is a
+decision about where these files live, which is not a task-sized question.
+
 **Standing limit, inherited and stated because a sweep that hides its blind spots is what this
 register is about: the trigger is a word list and it MISSED one live deferral** —
 `entry_001_imbalance_poi.py:27`, *"That is T-0020's defect, not this rule's"* — until that phrasing
