@@ -418,6 +418,31 @@ three would be flagged in a diff.**
 test docstring — rather than silently applied, because a silent fix makes the entry look like it was
 always right and the failure mode is the finding.
 
+### EVERY DEFECT THAT MATTERED WAS FOUND BY RUNNING SOMETHING, NOT BY READING
+
+**Review's closing generalisation, 2026-08-14, and the one thing from this evening that transfers
+past this project:**
+
+> *"Every defect I found by reading, I could have found by reading. **Every defect that mattered, I
+> found by running something.**"*
+
+**Its own list, and none of these was visible in a diff:**
+
+    the hardcoded FALSE in GATE-041          a rule that could never fire
+    a guard that could not fire              mutation passed against unchanged code
+    arithmetic that went negative            a limit wrong in both directions
+    a check that scanned DEAD CODE           965 tests green, the path unreachable
+    a tool that withheld verdicts it had     cancelled blocked the transfer
+
+**All five were one command away.** And the asymmetry is the point: **reading finds what someone
+wrote down wrongly; running finds what nobody wrote down at all.** A docstring that requires
+opposite-direction overlap sits beside a scan that does not check it, and both halves read correctly
+in isolation — **the contradiction exists only in the execution.**
+
+**The operational form, for whoever inherits a seat here: if a claim can be checked by running
+something, the review is not finished until it has been run.** Not "read the code that supports the
+claim" — **run the thing and read what it prints.**
+
 ### THE SHARPENED LENS: NOT "IS THIS RIGHT" BUT "IS THIS RIGHT AT THE MOMENT IT IS FIRST READ"
 
 **Review's formulation, 2026-08-14, after finding two defects in a plan it had already reviewed
@@ -1699,6 +1724,40 @@ independently.** But the mechanism permits a 200-commit-old transfer, so the age
 visible so no transferred verdict reads as the commit's own; **this makes staleness visible so no old
 transfer reads as a fresh one.** In both cases the fix is not to withhold the verdict — it is to stop
 the row from overstating it.
+
+### And the age label itself shipped without its reference point — caught by checking the arithmetic
+
+**Review could not reconcile 2 of 3 rows and reported "I cannot tell" rather than "this is wrong",
+which is the correct verdict and the rarer one:**
+
+    tool said  79s      run-to-run from created_at gives  75s
+    tool said   4m      run-to-run from created_at gives  3m19s
+    tool said  11m      run-to-run agrees
+
+**Its hypothesis was `updated_at` and that was wrong — it is `created_at` throughout.** The real gap
+is that **the two ends are different KINDS of event**: one is when the *inheriting commit was
+committed*, the other is when the *twin's run started*. The residual is the commit-to-queue lag,
+which is why it shows up only where a full run sits in the pair — **exactly the pattern Review
+observed, correctly, from a wrong cause.**
+
+**AND THE MIXED REFERENCE IS RIGHT RATHER THAN SLOPPY, for a reason that only appears once you ask
+what the alternative would be: most commits taking a transfer HAVE NO RUN AT ALL.** That is the
+entire reason a transfer exists. **A run-to-run age would be undefined in the majority case and
+defined only for the cancelled ones** — an age that exists for some rows and not others, which is
+worse than a mixed reference that is always available.
+
+**So the number stays and the label now names both endpoints:** `vouching run started 79s after this
+commit`.
+
+> **This is T-0015's criterion 2a in miniature, and it arrived three hours after that criterion was
+> written.** Either reference is defensible; leaving it unstated is not. Review's phrasing is the one
+> to keep: **"a number without its reference point cannot be checked, only disputed"** — and a reader
+> who checks with the obvious timestamp gets 75, concludes the tool is broken, and is wrong about
+> that too.
+
+**Third instance tonight of a fix introducing the defect it was fixing:** the phantom-path guard that
+substring-matched schema prose, `--no-write` making the write path the untested one, and now an
+age label added for honesty that could not itself be checked.
 
 ### Independently audited, and the auditor signed the claim it had been wrong about
 
