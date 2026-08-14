@@ -418,6 +418,35 @@ three would be flagged in a diff.**
 test docstring — rather than silently applied, because a silent fix makes the entry look like it was
 always right and the failure mode is the finding.
 
+### WHEN A CLAIM LIVES IN TWO ARTEFACTS, FIX THE ONE NOBODY CHECKS FIRST
+
+**Execute's formulation, in its last message before running out of context, and it is a new axis on
+the stale-claim family rather than another instance of it:**
+
+> *"I corrected exactly this claim in the work report an hour earlier and left it standing in the
+> handoff. **The report has a reviewer. The handoff has a reader who inherits it as fact and has no
+> way to check.** I fixed the audited copy and left the unaudited one."*
+
+**Everything else here is about WHEN a claim goes false** — B34's overnight invalidation, B11's
+within-hours, the rule that recent entries are the least safe. **This is about WHERE it sits when it
+does, and the two are independent:**
+
+    same claim, two homes
+      work report   an AUDITED copy   — a reviewer re-derives it, so an error surfaces
+      handoff       an UNAUDITED copy — a fresh reader inherits it as fact, and nothing points at it
+
+**Correcting the audited copy feels like correcting the claim**, because that is where the correction
+gets read back and acknowledged. **The unaudited copy is the one that survives into the next
+session's assumptions** — and it is precisely the copy nobody re-derives: no register entry, no CI
+row, no test.
+
+**Three instances the same night, and in all three the copy that stayed wrong was the copy with no
+reviewer:** **B45**'s complete quotation versus its unmarked scope · **B50**'s `COVERAGE_NOTE`
+pointing at a register entry that did not say what it claimed · the work report versus the handoff.
+
+> **So: fix the unaudited copy first.** The audited one has a mechanism behind it and will be caught.
+> The unaudited one has only whoever remembers it is there.
+
 ### And it keeps appearing in this register itself
 
 **Not as irony — as evidence that accuracy is not the property that prevents it.** B45's quotation
