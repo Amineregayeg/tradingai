@@ -472,6 +472,54 @@ and that figure is quoted in `PROGRAMME_TO_CUTOVER.md` as a scoping input.
 The ten HARD_GATEs marked READY with an admitted hole: **GATE-004, GATE-022, GATE-027,
 GATE-038, GATE-041, GRADE-013, GRADE-019, GRADE-029, GRADE-031, TARGET-005.**
 
+**CORRECTED 2026-08-14 (Review, during the T-0012 review). THE TEN ARE NINE.** `GRADE-029` is
+`alias_of GATE-041` and **both faces are in that list**, so one rule was counted twice. The
+distinct figure is **9 HARD_GATEs**, and the derived total is **~25, not ~26**. The thesis is
+untouched — it was always reported as a floor — but the number was quoted as an absolute, and
+absolute counts are what aliases break.
+
+**The rule for auditing the rest of this register's counts, because it is not "collapse
+aliases everywhere":** an alias collapse **only reduces a count when BOTH faces appear in the
+list.** `GATE-041` + `GRADE-029` both appear, so the count drops by one. `GRADE-035` appears
+alone, so collapsing it to `GATE-040` **renames the entry without changing the total.** A
+sweep that collapses indiscriminately will under-count exactly as badly as one that does not
+collapse at all.
+
+**AND THIS ENTRY'S OWN THESIS HAS A STRONGER INSTANCE THAN THE ONE IT ARGUES FROM.** Measured
+across all 13 alias pairs, exactly one disagrees:
+
+    GRADE-035   CALIBRATED   ->   GATE-040   READY
+
+**One rule, two ids, two different statuses.** This entry says *"`status` has been the only
+signal for which rules need a declared parameter, and it is not reliable"* — and cites
+GRADE-035 as *"a second instance… It is `CALIBRATED`"*, **which is the alias face; the
+canonical says `READY`.** So the example was read through the less reliable of two
+disagreeing answers, which is the entry's own point arriving one level down. `rule_waves.py`
+now reads status at the canonical after collapsing and exits non-zero on any alias/canonical
+disagreement — currently that one pair.
+
+**EVERY OTHER ABSOLUTE REGISTRY COUNT AUDITED, and the load-bearing one survives.** Applying
+the both-faces rule across the whole registry:
+
+    status OPEN        14 ids   14 distinct   no alias faces at all   SAFE
+    status READY      100 ids   89 distinct
+    status WITHDRAWN    2 ids    1 distinct   (B45, already corrected)
+    status CALIBRATED   1 id     0 distinct   <-- see below
+    HARD_GATE          91 ids   79 distinct
+    ADVISORY           11 ids   10 distinct
+    SOFT_PREFERENCE    15 ids   15 distinct
+
+**The "14 `status: OPEN` rules" figure is unaffected** — none of the 14 is an alias face. That
+matters more than the corrections, because it is the scoping input quoted in
+`PROGRAMME_TO_CUTOVER.md` and the one this entry warned understates the work. **It understates
+it for the reason this entry gives, not for an alias reason.**
+
+**`CALIBRATED` describes ZERO distinct rules.** The status appears on exactly one id —
+`GRADE-035` — which is an alias face whose canonical `GATE-040` is `READY`. So a sentence of
+the form *"the CALIBRATED rules"* refers to no canonical rule at all, and **this entry's
+second example is built on a status that, collapsed, no rule has.** Related: **B48**,
+**B49**, **B45**.
+
 **It is a floor, and the reason matters more than the number.** The sweep matched a fixed
 phrase list, and **GRADE-035 is a 13th instance that the patterns missed** — its text reads
 *"Documented durations, which the rulings OMIT rather than retire"*, which no phrase in the
@@ -681,6 +729,31 @@ remembers it.* Related: **B15** (a stale registry with no verifier), **B29**, **
 **Severity:** moderate — it under-builds a HARD_GATE and leaves an implementer with no
 sanctioned way to express a condition the rule requires
 
+**RE-POINTED 2026-08-14 after T-0012 review, and the re-pointing is half the entry's value
+now. `GRADE-035` IS AN ALIAS — the registry marks it `alias_of GATE-040`**, so this entry was
+filed against a rule id that cannot be implemented: `base.py`'s `__init_subclass__` raises on
+any class claiming an alias, *"the alias is registered automatically, so claiming it directly
+hides the rule it restates."* T-0014 was rescoped to `GATE-040` on this finding.
+
+**And the two ids DECLARE DIFFERENT INPUTS, which is the durable problem this entry now
+carries:**
+
+    GATE-040   Time and structure since the sweep; the seven confirmation
+               conditions (GATE-041); the HTF directional bias.
+    GRADE-035  Time and price action since the sweep; the consolidation/overlap
+               detector; the absence of fresh old-direction gaps; the NY 9:30 open marker.
+
+**Same rule by declaration, different declared dependencies.** So implementing `GATE-040`
+registers `GRADE-035` as covered **while three of GRADE-035's four inputs still do not
+exist** — the exact three below. **An alias inherits coverage but not its own input list**,
+and nothing checks the union. Now T-0014 criterion 4c: satisfy the union of both lists, or
+record per input which is unmet and why; a green coverage line for `GRADE-035` must not be
+reachable while the detector, the fresh-gap check and the 9:30 marker are all absent.
+
+**Applying B49 to this entry: the finding below is sound and its referent was wrong.** Read
+every "GRADE-035" that follows as "the GATE-040/GRADE-035 pair, whose GRADE-035 face declares
+these inputs."
+
 **`B45` quotes GRADE-035's `inputs` in full and then scopes the task to one of the four.**
 The registry says: *"Time and price action since the sweep; the consolidation/overlap
 detector; **the absence of fresh old-direction gaps**; **the NY 9:30 open marker**."* B45's
@@ -776,7 +849,7 @@ accurate, which is exactly why nothing caught it.
 number, and the Manager to naming the referent it checked. **Both are disciplines, and this
 register's own recurring lesson is that a documented convention nothing enforces is a
 convention only when someone remembers it (B47).** No mechanical check is proposed here
-because none is obvious — which is the reason to write the entry rather than the reason not
+because none is obvious — which is the reason to write the entry rather than the reason not to.
 
 **REJECTED, and the reason is the crux: "ask which referent was checked" as a READER-side
 discipline.** It puts the burden on the reader, **and the reader is precisely who does not have
@@ -788,7 +861,50 @@ requirement you are answering, name the referent you checked.
 number**, and dispatch messages inherit it — *"criterion 9"* is a bare `4`. So this defect is
 currently present in the primary artefact the loop runs on, not only in one exchange.
 
-to. Related: **B47**, **B45**, **B48**, **B39**.
+Related: **B47**, **B45**, **B48**, **B39**, **B50**.
+
+### B50. GATE-017 is implemented for one of its two clauses, and the residue is recorded nowhere except in a note that says it is recorded
+**Found in:** T-0012 review, 2026-08-14, by Review, in the pinned worktree at `ab7dc77`
+**Severity:** low as a gap, moderate as a signal — the gap is small and declared; the
+pointer to it is false, and a false pointer is how a declared gap becomes an undeclared one
+
+**The gap.** `GATE-017`'s statement has two clauses. Clause 1 — *an order triggered from an
+analysis-only timeframe is a violation* — is implemented and proved by a synthetic HTF
+fixture driven in both directions. **Clause 2 is not implemented:** *LTF events must not
+redefine the higher-timeframe destination unless the HTF analysis itself changes.* That is a
+**stability requirement across consecutive LTF triggers**, and nothing records the HTF
+destination per event, so there is nothing to compare across triggers. **Clause-1-only was
+explicitly permitted by T-0012's plan provided the residue was recorded**, so the scoping is
+correct and this entry is the record it required.
+
+**The defect is the pointer.** The rule's own `COVERAGE_NOTE` ends:
+
+> *"Recorded in KNOWN_ISSUES rather than counted as covered."*
+
+**It was not.** Searched at `ab7dc77`: no entry for clause 2, and no match for `HTF
+destination`, `redefine the higher` or `stability requirement` anywhere in this file. **The
+only GATE-017 line a reader would find says the opposite** — *"**GATE-017 / GATE-019** — 1H is
+analysis only — **CLOSED 2026-08-14 (T-0007)**"*. So someone checking the register for GATE-017
+residue finds a closure notice.
+
+**Why it is worth an entry rather than a correction.** The `COVERAGE_NOTE` mechanism is good
+and is the right home for a residue — it is a class attribute, it travels with the rule, and
+`check_rule_coverage.py` prints it on every run, so it cannot go stale unnoticed the way a
+document can. **The note did its job.** What failed is the one clause in it that names another
+artefact: **a note that is durable and self-printing ended with a claim about a file it cannot
+see.**
+
+**This is B49's class, third instance, and the first one in code rather than in prose** —
+a true-sounding reference whose referent was never checked. It is also the second time
+GATE-017 specifically has carried a claim about its own closure that outran the record:
+**A10's GATE-017 row was asserted CLOSED in a commit message by an edit that matched nothing
+(B39)**. Same rule, same shape, different mechanism, one week apart.
+
+**Fix:** this entry is the missing record, so the `COVERAGE_NOTE` is now true as written. **No
+change to the note is needed and none should be made** — amending it to say "recorded nowhere"
+would be correct today and wrong the moment anyone wrote the entry. **The durable lesson is
+narrower than the entry: a self-printing note may state a fact about itself; when it states a
+fact about another file, nothing prints that.** Related: **B49**, **B39**, **B47**.
 
 ### B11. The disturbance grader now runs on real data — and its grade still decides nothing
 **Found in:** M4 (implementing GATE-002/007/008/048), 2026-08-08
@@ -1748,7 +1864,11 @@ cutover** — the live representation is the correct one, so the fix is to delet
 **Deliberately NOT fixed in T-0013:** bundling it would have made that task's
 discriminating mutation untestable in isolation.
 
-**What it is:** `shadow.py:486` is `deciding = decision.deciding_rule_id or "GATE-036"`.
+**What it is:** `shadow.py:607` is `deciding = decision.deciding_rule_id or "GATE-036"`.
+**(Line corrected 2026-08-14 by Review's staleness sweep — this entry said `:486`, which now
+sits in an unrelated comment about correlate quorums. The FACT was still true and only the
+POINTER had rotted, which is the harder case: an entry whose claim verifies and whose
+citation does not lead anywhere is one an unlucky reader disproves.)**
 So **GATE-036 is the fallback when no rule decided**, not a rule that fired.
 `rule_id="GATE-036"` appears **zero** times as a rule evaluation anywhere in the source,
 and **no shipped record carries one**. A record can therefore assert that GATE-036
@@ -1942,8 +2062,44 @@ one fixture happened to produce it.
 ### B34. The shadow only records on bars where the ICT engine was NOT blocked
 **Found in:** T-0008, 2026-08-13, by the Manager, chasing an absent record rather than
 explaining it. **Bears on the cutover, not on T-0008.** Verified here from the source.
-**What it is:** `crypto_loop.py:802-813`. The entry-gate check returns **before** the
-shadow is called:
+
+**THE ORDERING DEFECT IS FIXED — `51e0998`, 2026-08-14 01:18:58, *"Phase 1: the shadow now
+sees every bar, including ones the engine could not trade."* ANNOTATED 2026-08-14 by Review,
+during the T-0011 pre-review, because the entry still read as open and a plan had been
+written on it.**
+
+**THE TIMING IS THE LESSON, SO IT IS STATED BEFORE THE DETAIL. This entry was filed
+2026-08-13 (T-0008) and was ACCURATE WHEN WRITTEN. It went stale about thirteen hours later,
+by a commit from this same work stream.** Not an old entry nobody revisited — **an entry
+invalidated overnight by our own next task.** So "check whether a cited entry is still
+current" cannot be reserved for entries that look old: **the ones most likely to be stale are
+the ones written most recently, because they describe the code we are actively changing.**
+`B11` is the precedent — it *"went false within hours of being written"* — and this is the
+second instance, which makes it the register's normal case rather than its exception.
+Verified in pinned worktrees at both `d0b3f9b` and `ab7dc77`:
+
+    :831   await self._shadow_evaluate(pair, entry)        <- now FIRST
+    :837   block = await self._entry_block_reason(pair)
+    :838   if block is not None: ... return
+
+with a comment at the call site giving the reason for the placement. **The code block quoted
+below is the OLD ordering and no longer exists at those line numbers.**
+
+**What this does and does not close.** The shadow now evaluates blocked bars, so *"a blocked
+bar produces neither a decision record nor a telemetry record"* is **false as of `51e0998`**,
+and the four block reasons are **no longer the unemitted population**. What remains open is
+narrower and still real: `_shadow_evaluate` returns without emitting when
+`shadow.evaluate` yields `None` or when its single `except Exception` swallows one, and
+**those bars are still invisible.** The population moved; it did not vanish.
+
+**Consequence that made this worth annotating rather than rewriting:** T-0011's plan cites
+*"already in a position"* as *"the common one, and **B34's exact population**"* and builds its
+omission taxonomy on the four block reasons. **That taxonomy is aimed at bars the shadow now
+evaluates.** A stale entry produced a plan pointed at the wrong population — the same failure
+as `B11`, which is why that one was rewritten rather than annotated.
+
+**What it WAS:** `crypto_loop.py:802-813`. The entry-gate check returned **before** the
+shadow was called:
 
 ```
 :802   block = await self._entry_block_reason(pair)
