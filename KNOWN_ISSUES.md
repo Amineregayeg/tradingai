@@ -462,14 +462,79 @@ admission of an unstated threshold, and must not trust `status`.** If the affect
 large, **the "14 OPEN rules" figure understates the declared-parameter work substantially** —
 and that figure is quoted in `PROGRAMME_TO_CUTOVER.md` as a scoping input.
 
-**Open:** Review is sweeping the registry for other `READY`/`CALIBRATED` rules whose text
-admits an unstated threshold, count, duration or window. **The count is not yet known — this
-entry records two confirmed instances and the method, not a total.**
+**MEASURED, and reported as a floor rather than a count.** Review's sweep:
+
+    READY/CALIBRATED rules whose own text admits an unstated quantity :  12
+      ...of which HARD_GATE                                          :  10
+    registry `status: OPEN` count                                    :  14
+    -> declared-parameter work is ~26, not 14
+
+The ten HARD_GATEs marked READY with an admitted hole: **GATE-004, GATE-022, GATE-027,
+GATE-038, GATE-041, GRADE-013, GRADE-019, GRADE-029, GRADE-031, TARGET-005.**
+
+**It is a floor, and the reason matters more than the number.** The sweep matched a fixed
+phrase list, and **GRADE-035 is a 13th instance that the patterns missed** — its text reads
+*"Documented durations, which the rulings OMIT rather than retire"*, which no phrase in the
+list covers. **So the true figure needs reading, not matching** — the same tool class as
+`edges()` reading prose. Reported as "at least 13, by a method demonstrably incomplete"
+specifically so it is not trusted as a total, which is how the 14 came to be trusted.
+
+**Consequence for the programme:** `status: READY` does not mean implementable. **Ten HARD
+GATEs are READY with a hole where a threshold should be**, and each needs a declared
+parameter stamped as ours — the fifth standing rule arriving ten times in a programme scoped
+as 57 implementations.
 
 **Fix, when the sweep lands:** either correct `status` on the affected rules, or add a field
 that records "carries an unquantified threshold" independently of readiness — and until then,
 every rules task treats the statement text as authoritative over `status`. Related: **B38**
 (a parameter forced by a constraint must say so), **A10**.
+
+### B44. 82 of 117 rules declare their inputs as DATA NAMES, so their dependencies are invisible to any rule-id graph
+**Found in:** 4.5 (Review, adjudicating the prose citations `rule_waves.py` prints)
+**Severity:** moderate — it does not break running code, it mis-plans the work that writes it
+
+**Only 35 of 117 rules' `inputs` cite a rule id. The other 82 name data.** So a dependency
+written as a field name is invisible to any planner that follows rule ids, and the gap is not
+theoretical:
+
+    GATE-025  output : "Full candidate table [{anchor, stop_price, rr, accepted}]"
+    GATE-031  inputs : "selected_stop.rr; partial_level (2R); target price."
+
+**`selected_stop.rr` is a field of GATE-025's output.** GATE-031 consumes GATE-025, GATE-025
+consumes *"the five stop anchors from GATE-027"*, and **neither GATE-025 nor GATE-027 is
+implemented.** The real chain is **GATE-027 → GATE-025 → GATE-031**, and `rule_waves.py`
+reports **GATE-031 as wave 1** — the earliest slot, two producers short.
+
+**The sharpest part, because it argues against trusting the fix that caused it:** the script's
+earlier prose-following version placed GATE-031 in **wave 3, correctly**. Correcting the
+definition of an edge — which was right, and which removed four false cycles — **moved this
+rule from a right answer to a wrong one.** Being right about the rule did not make every
+answer better.
+
+**No second heuristic was added, deliberately.** Matching input data names against `output`
+text would not catch this case: GATE-025's output names `rr`, not `selected_stop.rr`. **A
+matcher that misses the instance that motivated it is worse than an honest gap, because it
+reads as coverage** — this register's recurring finding.
+
+**Mitigation, and it is a process step rather than a tool:** before dispatching any rules
+task, **resolve every one of its rules' `inputs` to the rule that produces that data and
+confirm the producer is implemented.** `agents/rule_waves.py --inputs <wave>` dumps the raw
+`inputs` and `output` of a wave for exactly this. The script now prints the 82/117 figure and
+this GATE-031 example on every run, so its waves cannot be read as complete.
+
+**A related bug this found in the tool itself, recorded because the shape recurs:** the same
+run asserted that three rules declaring `inputs: n/a` had resolved edges. **That was not a
+registry contradiction — it was the planner harvesting rule ids from the explanation after
+the em dash**, e.g. GRADE-018's *"n/a — a prohibition on the implementation of GRADE-017"*
+and GRADE-031's *"n/a — specification-level blocker on GRADE-027, …"*. **A prohibition on a
+rule and a blocker on a rule are the opposite of depending on it** — the prose-is-not-an-edge
+mistake, one field over, caught by an assertion written ten minutes earlier. Fixed:
+`inputs: n/a` now declares zero inputs and its explanation is treated as prose. **Waves moved
+from 37/12/7/1 to 40/11/5/1.**
+
+**Also decidable and worth keeping:** `inputs: n/a` is a *proof* of zero dependencies —
+15 rules carry it. GATE-037's is *"n/a — a negative constraint on the decision record"*, so
+it cannot depend on anything whatever its statement mentions.
 
 ### B11. The disturbance grader now runs on real data — and its grade still decides nothing
 **Found in:** M4 (implementing GATE-002/007/008/048), 2026-08-08
