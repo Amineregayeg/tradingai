@@ -1725,6 +1725,42 @@ which files were being read when.**
 `restore()` that silently no-opped. **Contamination ran one way.** The prober writes; the suite only
 reads.
 
+### THE CONTAMINATED RUN RETURNED THE SAME NUMBER, AND THAT IS THE ARGUMENT FOR DISCARDING IT
+
+    contaminated   1024 passed   133.32s
+    clean          1024 passed   127.41s
+
+**The contaminated measurement was CORRECT.** Recorded because the instinct on reading B63 is *"so the
+number was wrong"*, and it was not — **and if contamination reliably produced wrong numbers it would
+be self-announcing and no rule would be needed.**
+
+**What it means is that a contaminated run and a clean one are INDISTINGUISHABLE FROM THEIR OUTPUT.**
+Same count, same exit code, nothing in the figure recording that the tree moved beneath it. **Only the
+elapsed time differed — 133.32s against 127.41s — and no threshold on a suite's duration is a
+contamination detector.**
+
+> **So this is tonight's lens landing on a measurement instrument rather than a reporting one: the
+> output collapses two states.** *"1024 against a stable tree"* and *"1024 against a tree mutated
+> eight times"* print identically. **The discipline therefore cannot be "check whether it looks
+> contaminated" — THERE IS NOTHING TO LOOK AT.** It has to be structural: do not run a reader
+> concurrently with a writer, **because you will not be able to tell afterwards.**
+
+### Which makes the DISPOSITION load-bearing rather than the diagnosis
+
+**Review's own statement of it, and it is the part to carry:**
+
+> *"I did not discard that figure because it was wrong. **I discarded it because I could not establish
+> it was right** — and it was right."*
+
+**A rule that only bites when you were ALSO UNLUCKY is a rule people stop following.** This instance
+cost nothing: the number was correct, the re-run wasted about two minutes, and every incentive pointed
+at keeping the first figure and annotating it. **The rule held anyway, and recording that it cost
+nothing is what stops the next reader treating the discard as an overreaction.**
+
+**The generalisation past the prober: any tool that mutates a shared tree owes an announcement, and no
+reader can be asked to detect one.** That is why the fix is announcing writes rather than detecting
+them — not because detection is expensive, but **because detection is impossible from the output.**
+
 ### The structural gap, which is the reason this is filed rather than noted
 
 **`B25` exists precisely because the prober mutates a shared tree. It is a protocol between SEATS** —
