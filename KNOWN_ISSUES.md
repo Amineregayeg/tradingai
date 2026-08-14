@@ -466,6 +466,30 @@ command behind it — it is the question *"what would this look like if the oppo
 both instances tonight the answer was "exactly the same", and that was knowable before the wrong
 conclusion, not after.**
 
+**AND REVIEW NARROWED THAT INTO SOMETHING EXECUTABLE, which the version above is not.** *"What if the
+opposite were true"* is the right question and **hard to ask cold.** The answerable form:
+
+> **READ THE OUTPUT'S LABELS, NOT ITS ROWS, AND ASK WHETHER ANY TWO MEAN THE SAME THING, OR ANY ONE
+> MEANS TWO.**
+
+    ci_range     printed `cancelled` and `no run` — TWO WORDS FOR ONE epistemic state
+    ListAgents   prints a list whose absence has TWO CAUSES — not running, and being you
+
+**In both cases the collapse was visible in the output's own vocabulary before any conclusion was
+drawn.** Two labels for one state, or one label for two. **That is checkable in seconds and it would
+have caught both.**
+
+**And it composes with the failure it corrects: Review RAN `ci_range` and still concluded a hole
+existed. Running produced a correct row and the reader supplied the collapse.** So the pairing is not
+*"run, then think"* — it is **"run, then read what the row does not say."**
+
+**The constructive corollary, and it is why the four `agents/` tools now print their own limits:
+a tool that ENUMERATES THE STATES IT CANNOT SEPARATE has done the second half for its reader.**
+`landed_sweep`'s *"0 true positives in 15 flagged"*, `ci_range`'s workflow-boundary block and its
+transfer ages, the prober's `strategy_step` note, `deferral_sweep`'s five documented blind spots.
+**Every one of those exists so the next reader does not have to reconstruct what the output collapses
+— and every one was written after that collapse cost something.**
+
 **This entry exists because the rule above was promoted to this preamble hours before its limit was
 found**, which is the boundary problem this register recorded the same evening: a rule *correct in
 the case that produced it*, read later by someone with no access to that case. **The limit belongs
