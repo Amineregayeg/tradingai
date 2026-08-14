@@ -1673,6 +1673,15 @@ all eight listed, both through the word list and through the snapshot.
   one looked open. **A sweep that reads like a report and writes as a side effect turns a test run
   into a state change.** The write is now `--no-write`-able and the test opts out.
 
+**AND THE NOISE BUCKET GROWS AS THE PROJECT DOCUMENTS ITSELF, WHICH SETTLES THE ARGUMENT ABOVE.**
+Measured across three runs the same evening: **0-for-9, then 0-for-2 against a widened list, then
+0-for-4** — and **two of the last four are the plan text written to DISCHARGE the deferrals**,
+`T-0020/plan.md` quoting *"T-0019 was forbidden from…"* in the criterion that exists to pay that
+debt. **Writing about a deferral produces deferral-language prose**, so the retrospective bucket
+gets noisier every time the loop does the right thing. **A checker whose false-positive rate rises
+with good behaviour cannot gate anything** — which is why the exit code follows the snapshot and the
+word list only advises.
+
 **Standing limit, inherited and stated because a sweep that hides its blind spots is what this
 register is about: the trigger is a word list and it MISSED one live deferral** —
 `entry_001_imbalance_poi.py:27`, *"That is T-0020's defect, not this rule's"* — until that phrasing
