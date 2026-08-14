@@ -410,3 +410,82 @@ def test_the_blocked_flag_and_the_unread_conditions_must_agree():
             "GATE-041 carries CANNOT_FIRE_WITHOUT but every condition is readable — the "
             "flag is stale and is suppressing a rule that could decide"
         )
+
+
+# ---------------------------------------------------------------------------
+# The consolidation detector (T-0014 Part 1) — the threshold is the rule
+# ---------------------------------------------------------------------------
+
+def test_the_detector_distinguishes_a_range_from_a_trend():
+    """Necessary, and NOT sufficient — see the next test for why."""
+    from datetime import datetime, timedelta, timezone
+
+    from app.services.rules import consolidation as C
+    from app.services.rules.prim_001_swings import Bar
+
+    t0 = datetime(2026, 8, 14, tzinfo=timezone.utc)
+
+    def bar(i, lo, hi):
+        return Bar(time=t0 + timedelta(minutes=5 * i), high=hi, low=lo,
+                   open=(lo + hi) / 2, close=(lo + hi) / 2)
+
+    ranging = [bar(i, 100 + (i % 2), 101 + (i % 2)) for i in range(C.WINDOW_BARS)]
+    trending = [bar(i, 100 + 3 * i, 101 + 3 * i) for i in range(C.WINDOW_BARS)]
+
+    th = C.DECLARED_THRESHOLD
+    assert C.detect_window(ranging, tf="5m", threshold=th).is_consolidation is True
+    assert C.detect_window(trending, tf="5m", threshold=th).is_consolidation is False
+
+
+def test_the_fixture_pair_cannot_bound_the_threshold():
+    """THE POINT OF CRITERION 4a, asserted rather than argued.
+
+    Every k from 2.0 to 5.0 passes the test above, because a range fixture is tighter than
+    a trend fixture BY CONSTRUCTION — while those same settings call 0.1% and 86.3% of real
+    windows consolidation. So the fixtures prove the detector discriminates and say nothing
+    about where the boundary sits, and the boundary is the whole rule.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from app.services.rules import consolidation as C
+    from app.services.rules.prim_001_swings import Bar
+
+    t0 = datetime(2026, 8, 14, tzinfo=timezone.utc)
+
+    def bar(i, lo, hi):
+        return Bar(time=t0 + timedelta(minutes=5 * i), high=hi, low=lo,
+                   open=(lo + hi) / 2, close=(lo + hi) / 2)
+
+    ranging = [bar(i, 100 + (i % 2), 101 + (i % 2)) for i in range(C.WINDOW_BARS)]
+    trending = [bar(i, 100 + 3 * i, 101 + 3 * i) for i in range(C.WINDOW_BARS)]
+
+    for k in (2.0, 3.0, 4.0, 5.0):
+        th = C.ConsolidationThreshold(k=k, measured_rate_pct=0.0, measured_tf="5m",
+                                      measured_bars=0, measured_span="fixture")
+        assert C.detect_window(ranging, tf="5m", threshold=th).is_consolidation is True
+        assert C.detect_window(trending, tf="5m", threshold=th).is_consolidation is False
+
+
+def test_the_declared_threshold_carries_its_measured_rate_and_stays_in_band():
+    """A bare k is unfalsifiable. The rate is what makes the declaration checkable.
+
+    A ceiling alone is not enough: the detector could satisfy it by never firing, which
+    refuses every reversal instead of permitting every one. Both ends stop discriminating.
+    """
+    from app.services.rules import consolidation as C
+
+    th = C.DECLARED_THRESHOLD
+    assert th.ratified is False, "an invented definition is claiming ratification"
+    assert th.rate_is_within_bounds(), (
+        f"{th.measured_rate_pct}% is outside {th.rate_floor_pct}-{th.rate_ceiling_pct}%"
+    )
+    assert th.rate_floor_pct > 0, "a floor of zero permits a detector that never fires"
+    assert th.measured_tf == "5m", "the rate must be measured at ENTRY_TF, not at 1H"
+    assert "NOT enough to claim it is representative" in th.corpus_caveat
+
+
+def test_too_few_bars_returns_none_rather_than_not_consolidation():
+    """'We cannot say' and 'we looked and it is trending' are different facts."""
+    from app.services.rules import consolidation as C
+
+    assert C.detect_window([], tf="5m", threshold=C.DECLARED_THRESHOLD) is None
