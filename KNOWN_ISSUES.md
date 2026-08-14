@@ -443,6 +443,39 @@ in isolation — **the contradiction exists only in the execution.**
 something, the review is not finished until it has been run.** Not "read the code that supports the
 claim" — **run the thing and read what it prints.**
 
+### A SOURCE-TEXT GUARD THAT BREAKS ON EVERY SIGNATURE CHANGE GETS RELAXED BY WHOEVER IS BUSIEST
+
+**Execute's observation, 2026-08-15, written in the comment where it relaxed one — and it is a
+principle about guard DESIGN rather than an incident.**
+
+`test_shadow_stage_a.py` asserted call ordering by substring index:
+
+    src.index("_shadow_evaluate(pair, entry)")  <  src.index("sig, trace = evaluate_latest_bar_traced")
+
+**T-0011 added an argument to that call, so the pattern stopped matching.** Verified: the old substring
+now occurs **0 times**, which means the assertion **raised `ValueError: substring not found` rather than
+failing on the property it names.** Execute matched the call OPENING instead —
+`"await self._shadow_evaluate(pair, entry"`, which occurs exactly **once**, so `index()` is
+unambiguous — and it is *tighter* than the original in adding `await self.`.
+
+> **The principle, in its words: a source-text guard that breaks on every signature change gets relaxed
+> by whoever is holding the unrelated diff.**
+
+**And that is the part worth keeping: the person who relaxes such a guard is BY CONSTRUCTION the person
+least placed to judge it.** They are mid-task, the guard is failing for a reason unrelated to their
+work, and the cheapest way past is to widen the pattern. **A guard that cries wolf on every legitimate
+change trains the project to loosen it, and the loosening happens under time pressure by someone whose
+attention is elsewhere.**
+
+**So the design rule is to assert the NARROWEST THING THAT IS ACTUALLY THE PROPERTY.** The property here
+is *ordering of two calls*, not *the argument list of one of them* — **the original pattern encoded both
+and only one was intended.** Every incidental detail a guard pins is a future false failure, and every
+false failure spends the credibility that makes the guard obeyed.
+
+**Related and distinct from B39:** B39 says assert the occurrence count before a scripted edit. **This
+says choose the pattern so the count stays 1 across changes you expect** — B39 catches a match that
+silently became zero; this stops it becoming zero for reasons that do not matter.
+
 ### EVERY COLLAPSE FILED TONIGHT PRODUCED A FALSE CLEAN — EXCEPT ONE, AND IT COST A FINDING
 
 **Review's observation, 2026-08-15, and it is a direction rather than a new instance.**
