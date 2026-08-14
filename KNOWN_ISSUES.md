@@ -616,6 +616,41 @@ price action that means the opposite.** Where a threshold has an asymmetric fail
 say which one it is. Related: **B43** (the ~26 figure), **B38** (a forced parameter must say
 so), **A10**.
 
+### B47. A deployed change had a review verdict that existed nowhere anyone would look — and both signals for "is there a verdict" were misleading at once
+**Found in:** 4.5 (Review found its own routing error; the manager found its own)
+**Severity:** process, and it is the loop's own version of the defect the loop keeps finding
+
+**T-0013 was reviewed, PASSED, and deployed — and for roughly twenty minutes there was no
+verdict anywhere the Manager would look.**
+
+**Two independent failures, and neither contradicted the other, which is why nothing alerted:**
+
+* **The verdict was addressed to the wrong seat.** `PROMPT_REVIEW.md:164` specifies PASS goes
+  `--to manager` and FAIL goes `--to execute`. Review sent the PASS to Execute. It had been
+  inconsistent across the whole run — T-0004 to the Manager, T-0006/7/8/13 to Execute — **so
+  the convention was documented and unfollowed, and nothing checked.**
+* **The task state said `REVIEWING`, and the Manager had written that value itself.** History:
+  `REVIEWING by manager 10:36:18` → `DONE by review 10:45:00`. The Manager asserted `REVIEWING`
+  after 10:45 **without re-reading it** — trusting a value because it had produced it, which is
+  the exact failure this register documents in code, committed by the agent maintaining the
+  register.
+
+**The shape, and it is why this is recorded rather than just fixed:** the check for *"is there a
+verdict?"* consulted **two independent sources — an inbox and a state file — and both returned a
+misleading answer.** Two wrong signals that happen to agree produce more confidence than one,
+not less. **A single source would have been safer than two that cannot disagree.**
+
+**Consequence:** a change that alters the live write path for every trade was deployed while its
+review sat in another agent's drawer. **The review was not missing, and that is the point** —
+the work was done correctly and the record of it was unfindable, which is
+`B29`'s shape moved from telemetry to the message layer.
+
+**Fixes:** Review has committed to routing PASS to the Manager per the prompt. **The Manager's
+half needs no new mechanism — re-read state before asserting it, particularly state you wrote.**
+No prompt change is required: `PROMPT_REVIEW.md` was already correct, which is itself the
+finding — *a documented convention that nothing enforces is a convention only when someone
+remembers it.* Related: **B15** (a stale registry with no verifier), **B29**, **B39**.
+
 ### B11. The disturbance grader now runs on real data — and its grade still decides nothing
 **Found in:** M4 (implementing GATE-002/007/008/048), 2026-08-08
 **THE DATA HALF IS FIXED, 2026-08-13 (T-0008); THE ENTRY STAYS FOR THE HALF THAT IS NOT.**
