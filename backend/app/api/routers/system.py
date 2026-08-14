@@ -100,7 +100,7 @@ async def data_health_check(user_id: CurrentUser) -> dict[str, Any]:
     """
     from app.services.monitoring.data_health import data_health
 
-    return data_health()
+    return await data_health()
 
 
 @router.get("/readiness")

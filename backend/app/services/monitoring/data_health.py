@@ -227,14 +227,221 @@ def backup_health() -> dict:
     return out
 
 
-def data_health() -> dict:
-    """Everything that fails silently, in one place."""
+#: How many bar-periods of silence before a due evaluation is treated as missing.
+#: Records are written a few seconds AFTER a bar closes (measured: `timestamp_ny`
+#: is the bar's open and `created_at` lands ~20 s after its close), so one whole
+#: period of slack absorbs the write lag plus a missed poll without crying wolf.
+#: Expressed in bar-periods rather than minutes precisely so it tracks `ENTRY_TF`
+#: instead of silently becoming wrong when it changes (B21).
+def _as_utc(dt: datetime) -> datetime:
+    """Naive timestamps out of SQLite are UTC; Postgres returns them aware."""
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+
+
+SHADOW_STALE_BARS = 2.0
+SHADOW_DOWN_BARS = 4.0
+
+
+async def shadow_health() -> dict:
+    """Is the contract engine's shadow still RECORDING? Not: is it right.
+
+    WHY THIS EXISTS (B32)
+    `shadow.py:20` — "every failure is swallowed and logged, and the return value is
+    never read by the trading path" — and `:156` — "a shadow that can break the engine
+    is worse than no shadow". Both are correct and neither may change. The consequence
+    is that a broken shadow is **silent by construction**, and there was no second
+    signal. On 2026-08-13 a vocabulary mismatch made every record fail schema
+    validation; the engine traded normally and the evidence base went dark for forty
+    minutes. Three agents independently explained the silence and all three were wrong
+    — none considered that the shadow was crashing, because a legitimate wait looks
+    identical from outside.
+
+    WHAT COUNTS AS A LEGITIMATE SILENCE CHANGED WITH T-0010
+    The shadow used to sit BELOW the entry gates, so `already in a position` suppressed
+    it — and since the engine holds a position most of the time, long silences were
+    normal and a naive signal would have screamed all day. `_shadow_evaluate` now runs
+    ABOVE the gates (`crypto_loop`), and `shadow.py` says so outright: "engine paused,
+    already in a position and max_concurrent no longer suppress a record". So `blocked`
+    is no longer a state, and a due bar with no record now means broken, full stop.
+    """
+    from sqlalchemy import func, select
+
+    from app.db.session import async_session_maker
+    from app.models.engine_run import EngineRun
+    from app.models.telemetry_record import TelemetryRecord
+    from app.services.live.fixed_config import ENTRY_TF, SYMBOLS
+    from app.services.market_data.sources.dominance import _TF_SECONDS
+
+    # DERIVED, never written down. A hardcoded cadence is B21's class and would have
+    # been wrong within a day: 1H -> 5m multiplied it by twelve.
+    bar_seconds = _TF_SECONDS.get(ENTRY_TF)
+    if bar_seconds is None:
+        return {
+            "status": "unavailable",
+            "watching": False,
+            "reason": f"ENTRY_TF {ENTRY_TF!r} has no known duration",
+        }
+    symbols = len(SYMBOLS)
+    expected_per_hour = round(3600.0 / bar_seconds * symbols, 1)
+
+    scope = {
+        # CRITERION 9. This section attests LIVENESS ONLY. A shadow can be alive,
+        # writing on every permitted cycle, and grading a still-forming bar — which
+        # is a real defect this project shipped (the perpetual panels fed the forming
+        # bar into GATE-008's MAIN panel). Every field below would read healthy
+        # throughout. Without this said in the payload, the first green reading is
+        # what someone cites when asked whether the correlate layer can be trusted.
+        "attests": "liveness_only",
+        "does_not_attest": [
+            "correctness of the evaluation",
+            "freshness of the correlate panels",
+            "whether the grade reflects closed bars",
+        ],
+    }
+
+    try:
+        async with async_session_maker() as db:
+            active = (
+                await db.execute(
+                    select(EngineRun)
+                    .where(EngineRun.ended_at.is_(None))
+                    .order_by(EngineRun.started_at.desc())
+                    .limit(1)
+                )
+            ).scalars().first()
+
+            if active is None:
+                # Nothing is expected, so nothing is wrong. Reported as `idle` and
+                # `watching: False` rather than `healthy`: the check is not looking at
+                # a working shadow, it is looking at an engine that is not running,
+                # and those must not read the same.
+                return {
+                    "status": "idle",
+                    "watching": False,
+                    "reason": "no active engine run — no evaluations are due",
+                    "expected_per_hour": expected_per_hour,
+                    **scope,
+                }
+
+            now = datetime.now(tz=timezone.utc)
+            # SQLite hands back naive datetimes where Postgres returns aware ones, so
+            # every timestamp out of the database is normalised before it is compared.
+            # Skipping this passes in production and raises only under the test
+            # backend — a difference that would be discovered by the suite, but as a
+            # `status: unavailable` rather than as the type error it is.
+            started = _as_utc(active.started_at)
+
+            last = (
+                await db.execute(
+                    select(func.max(TelemetryRecord.created_at)).where(
+                        TelemetryRecord.record_type == "setup_evaluation",
+                        TelemetryRecord.created_at >= started,
+                    )
+                )
+            ).scalar()
+
+            window_start = max(now - timedelta(hours=1), started)
+            recent = (
+                await db.execute(
+                    select(func.count()).select_from(TelemetryRecord).where(
+                        TelemetryRecord.record_type == "setup_evaluation",
+                        TelemetryRecord.created_at >= window_start,
+                    )
+                )
+            ).scalar() or 0
+    except Exception as exc:  # noqa: BLE001
+        # Cannot see it is never "fine" — the rule this module is built on.
+        return {"status": "unavailable", "watching": False, "reason": str(exc), **scope}
+
+    run_age = (now - started).total_seconds()
+
+    if last is None:
+        # The run is young enough that the first bar has not closed yet. Genuinely
+        # "not due", and distinguishing it from a dead shadow is the whole point.
+        if run_age < bar_seconds * SHADOW_STALE_BARS:
+            return {
+                "status": "healthy",
+                "watching": True,
+                "evaluation_state": "not_due",
+                "reason": (
+                    f"run started {run_age / 60:.0f} min ago; first {ENTRY_TF} bar "
+                    "has not closed yet"
+                ),
+                "expected_per_hour": expected_per_hour,
+                "entry_tf": ENTRY_TF,
+                **scope,
+            }
+        age_seconds = run_age
+        last_iso = None
+    else:
+        last = _as_utc(last)
+        age_seconds = (now - last).total_seconds()
+        last_iso = last.isoformat()
+
+    age_bars = age_seconds / bar_seconds
+    if age_bars > SHADOW_DOWN_BARS:
+        status, state = "down", "due"
+    elif age_bars > SHADOW_STALE_BARS:
+        status, state = "stale", "due"
+    else:
+        status, state = "healthy", "not_due"
+
+    out = {
+        "status": status,
+        "watching": True,
+        "evaluation_state": state,
+        "last_record": last_iso,
+        "age_minutes": round(age_seconds / 60.0, 1),
+        "age_bars": round(age_bars, 1),
+        # What the age is measured against. `age_minutes` alone is uninterpretable —
+        # eleven minutes is fine at 1H and two bars missed at 5m.
+        "entry_tf": ENTRY_TF,
+        "bar_seconds": bar_seconds,
+        "symbols": symbols,
+        "expected_per_hour": expected_per_hour,
+        "observed_last_hour": recent,
+        "stale_after_bars": SHADOW_STALE_BARS,
+        **scope,
+    }
+
+    if status != "healthy":
+        out["warning"] = (
+            f"no shadow record for {age_bars:.1f} {ENTRY_TF} bars while the engine "
+            f"run is active. The shadow swallows every exception by design, so this "
+            f"field is the only thing that reports it."
+        )
+        # CRITERION: say what this CANNOT tell you, rather than implying it knows.
+        # Two different failures present identically here and their remedies differ.
+        out["ambiguous_between"] = [
+            "the loop is turning and the shadow evaluation is raising (swallowed)",
+            "the loop is not turning at all",
+        ]
+        # And the run row is not proof of life: A9/B14 — a process can die holding an
+        # active run, which is exactly how a record was left reading OPEN for good.
+        out["note"] = (
+            "an active engine_run row means the run was never ENDED, not that the "
+            "process is alive (B14)"
+        )
+    return out
+
+
+async def data_health() -> dict:
+    """Everything that fails silently, in one place.
+
+    Async because the shadow's evidence lives in the database rather than on a
+    mount. The two file-backed checks stay synchronous.
+    """
     dominance = dominance_health()
     backups = backup_health()
+    shadow = await shadow_health()
 
     # A component we cannot see is NOT ok. Rolling "unavailable" into "ok" here
     # would defeat the entire module.
-    components = {"dominance_collector": dominance, "backups": backups}
+    components = {
+        "dominance_collector": dominance,
+        "backups": backups,
+        "shadow": shadow,
+    }
     problems = [
         name for name, c in components.items() if c.get("status") != "healthy"
     ]

@@ -123,6 +123,20 @@ DECISION_COHORTS: tuple[str, ...] = (
 # and the corpus would lose precisely the evidence that the defect happened.
 # Storing it and detecting it by query is strictly better than refusing it and
 # losing it.
+#
+# WHERE THE LINE IS, AND WHY IT IS THERE — the rule for adding a new state.
+# "Storing beats refusing" alone does not decide this; taken alone it would
+# justify storing the contradictions too. The completing half:
+#
+#     REFUSE what the API cannot produce.  STORE what the runtime can.
+#
+# `Attribution` is frozen, `ict()` hard-codes a NULL rule id, and
+# `from_rule_evaluation()` is the only rule-engine path and raises on a bare
+# string — so `ICT + rule id` and `UNSET + rule id` are UNREACHABLE through the
+# sanctioned API. Reaching them means bypassing the value object, which is a
+# deterministic bug that recurs on every write, so refusing one row loses no
+# unique evidence. `RULE_ENGINE + NULL` is a RUNTIME state and may be
+# intermittent, so the row is the only evidence it ever happened.
 #: Nobody set an attribution on this row. The DEFAULT, deliberately — see above.
 #: It is a legal stored value rather than a rejected one so the omission survives
 #: to be counted, and it is a distinct word rather than NULL so it cannot be

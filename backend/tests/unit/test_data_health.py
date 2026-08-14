@@ -60,9 +60,25 @@ def test_missing_backup_status_is_unavailable_not_healthy(dirs):
     assert r["watching"] is False
 
 
-def test_unavailable_components_make_the_overall_result_not_ok(dirs):
+@pytest.fixture
+def shadow_ok(monkeypatch):
+    """Pin the shadow component healthy.
+
+    The composition tests below are about whether an unavailable component
+    poisons `ok` — not about the shadow, which reads the database and would
+    report `unavailable` here for reasons that have nothing to do with what
+    they assert. Its own behaviour is covered in `test_shadow_health.py`.
+    """
+    async def _healthy():
+        return {"status": "healthy", "watching": True}
+
+    monkeypatch.setattr(dh, "shadow_health", _healthy)
+
+
+@pytest.mark.asyncio
+async def test_unavailable_components_make_the_overall_result_not_ok(dirs, shadow_ok):
     """Rolling 'cannot see it' into 'ok' would defeat the entire module."""
-    r = dh.data_health()
+    r = await dh.data_health()
     assert r["ok"] is False
     assert set(r["problems"]) == {"dominance_collector", "backups"}
 
@@ -289,19 +305,21 @@ def test_backup_staleness_threshold_matches_the_backup_script(dirs):
 # ---------------------------------------------------------------------------
 # Combined
 # ---------------------------------------------------------------------------
-def test_everything_healthy_reports_ok(dirs):
+@pytest.mark.asyncio
+async def test_everything_healthy_reports_ok(dirs, shadow_ok):
     dom, bak = dirs
     write_samples(dom, list(range(0, 60)))
     _status(bak)
-    r = dh.data_health()
+    r = await dh.data_health()
     assert r["ok"] is True
     assert r["problems"] == []
 
 
-def test_one_sick_component_makes_the_whole_thing_not_ok(dirs):
+@pytest.mark.asyncio
+async def test_one_sick_component_makes_the_whole_thing_not_ok(dirs, shadow_ok):
     dom, bak = dirs
     write_samples(dom, list(range(0, 60)))      # collector fine
     _status(bak, ok=False)                       # backups failing
-    r = dh.data_health()
+    r = await dh.data_health()
     assert r["ok"] is False
     assert r["problems"] == ["backups"]
