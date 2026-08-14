@@ -1,6 +1,8 @@
 import uuid
+from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import (
     JSON,
@@ -74,6 +76,83 @@ DECISION_COHORTS: tuple[str, ...] = (
 )
 
 
+# attribution -------------------------------------------------------------
+# WHY TWO COLUMNS AND NOT ONE NULLABLE STRING
+# A single nullable `deciding_rule_id` would make NULL mean three different
+# things at once: the ICT path decided (no rule engine involved), the rule
+# engine decided but the decider was lost on the way to the row, or the rule
+# engine decided and legitimately had no rule to name. The middle one is a
+# DEFECT and the other two are normal, so one value cannot carry all three
+# without hiding the only case worth finding.
+#
+# That is B31 one layer down: `shadow.py:607` does `deciding_rule_id or
+# "GATE-036"`, which collapses "nothing decided" into "GATE-036 decided" and
+# makes "every abstention cites a rule id" satisfiable by a default. This pair
+# of columns exists so the live table cannot repeat it.
+#
+#   decided_by     deciding_rule_id     meaning
+#   UNSET          NULL                 NOBODY SAID. The write path omitted attribution.
+#   ICT            NULL                 ICT path decided. Every row until the cutover.
+#   RULE_ENGINE    NULL                 PLUMBING DEFECT — the decider was lost.
+#   RULE_ENGINE    NO_RULE_DECIDED      Rule engine ran, no rule to name. Honest.
+#   RULE_ENGINE    GATE-017             Attributed.
+#
+# The two defect rows are found by one query each and no normal state matches:
+#
+#   SELECT * FROM decision_records
+#    WHERE decided_by = 'RULE_ENGINE' AND deciding_rule_id IS NULL;   -- decider lost
+#   SELECT * FROM decision_records WHERE decided_by = 'UNSET';        -- nobody said
+#
+# WHY THE DEFAULT IS `UNSET` AND NOT `ICT`
+# Defaulting to ICT would make "every decision names its decider" SATISFIABLE BY A
+# DEFAULT — B31's exact shape, in the columns added to prevent B31. The failure it
+# produces is not a missing row but a FALSE one: after the cutover, a write path
+# that forgets the attribution would record a rule-engine decision as ICT-decided,
+# in the evidence base, answering the very question this programme exists to
+# answer — and the defect query above would never fire for it, because the row
+# claims ICT.
+#
+# The fix is NOT to drop the default and let NOT NULL raise. Both write sites
+# swallow bookkeeping exceptions, so the insert would be refused, the exception
+# eaten, and the row LOST — trading a false row for no row, which is worse. UNSET
+# is stored, detectable, and can never be read as a real attribution.
+#
+# CASE 2 IS DELIBERATELY STORABLE. A CHECK constraint forbidding it would make
+# the insert raise, and both write sites swallow bookkeeping exceptions rather
+# than kill the trading loop — so a plumbing defect would silently DROP the row
+# and the corpus would lose precisely the evidence that the defect happened.
+# Storing it and detecting it by query is strictly better than refusing it and
+# losing it.
+#: Nobody set an attribution on this row. The DEFAULT, deliberately — see above.
+#: It is a legal stored value rather than a rejected one so the omission survives
+#: to be counted, and it is a distinct word rather than NULL so it cannot be
+#: confused with either the ICT case or the lost-decider case.
+DECIDED_BY_UNSET = "UNSET"
+DECIDED_BY_ICT = "ICT"
+DECIDED_BY_RULE_ENGINE = "RULE_ENGINE"
+DECIDED_BY_VALUES: tuple[str, ...] = (
+    DECIDED_BY_UNSET,
+    DECIDED_BY_ICT,
+    DECIDED_BY_RULE_ENGINE,
+)
+
+#: The two states that mean "this row cannot be trusted to name its decider".
+#: Exposed as a vocabulary so an audit cannot hand-roll a narrower one and miss a
+#: member the way a hand-written IN-list would.
+DECIDED_BY_UNTRUSTWORTHY: tuple[str, ...] = (DECIDED_BY_UNSET,)
+
+#: The rule engine reached a verdict and no single rule owns it. A SENTINEL, not
+#: a rule: it must never collide with a registry id, and
+#: `test_decision_attribution.py` asserts that against the real 117-entry
+#: registry rather than trusting this comment. Registry ids are all `PREFIX-N`
+#: (`GATE-036`, `GRADE-029`, `ENTRY-003`), so an underscored word cannot clash.
+#:
+#: It is a distinct value rather than NULL because NULL is how a LOST decider
+#: presents, and "we looked and there was nothing to name" is a different claim
+#: from "we do not know what happened here".
+NO_RULE_DECIDED = "NO_RULE_DECIDED"
+
+
 def _sql_in(column: str, values: tuple[str, ...]) -> str:
     """Render ``column IN ('a', 'b', ...)`` for a CHECK constraint.
 
@@ -82,6 +161,65 @@ def _sql_in(column: str, values: tuple[str, ...]) -> str:
     """
     quoted = ", ".join(f"'{value}'" for value in values)
     return f"{column} IN ({quoted})"
+
+
+@dataclass(frozen=True)
+class Attribution:
+    """`decided_by` and `deciding_rule_id` as ONE value, so they cannot drift.
+
+    WHY THE PAIR IS A SINGLE OBJECT
+    The two columns are only meaningful together — `RULE_ENGINE` with no id is a
+    defect, `ICT` with an id is a contradiction. Handing callers two independent
+    keyword arguments invites exactly the combination that should be impossible,
+    so the only sanctioned way to fill them is to build one of these.
+
+    WHY THERE IS NO CONSTRUCTOR TAKING A RULE ID STRING
+    `evaluator.py:25` states that `deciding_rule_id` is **the FIRST rule that
+    failed**, which makes evaluation ORDER load-bearing — the value is a property
+    of a completed evaluation and of nothing else. `gate_036_stand_aside.py:35` is
+    explicit that nothing may pass a decider in by hand. A classmethod taking
+    `str` would let a caller assert an attribution it did not compute, which is
+    the same laundering B31 records, so `from_rule_evaluation` takes the
+    EVALUATION and reads the accessor itself.
+    """
+
+    decided_by: str
+    deciding_rule_id: str | None
+
+    @classmethod
+    def ict(cls) -> "Attribution":
+        """The ICT path decided. No rule engine ran, so there is no rule to name."""
+        return cls(decided_by=DECIDED_BY_ICT, deciding_rule_id=None)
+
+    @classmethod
+    def from_rule_evaluation(cls, evaluation: Any) -> "Attribution":
+        """Read the decider off a completed evaluation. The ONLY rule-engine path.
+
+        A missing decider becomes `NO_RULE_DECIDED` — an explicit "nothing owned
+        this verdict" — never `None`, because `None` is reserved for the plumbing
+        defect this pair exists to expose. That means a row written through here
+        can never present as case 2: case 2 is only reachable by bypassing this
+        method, which is precisely the failure the query is looking for.
+        """
+        if isinstance(evaluation, str) or not hasattr(evaluation, "deciding_rule_id"):
+            raise TypeError(
+                "Attribution.from_rule_evaluation needs the evaluation object, not a "
+                "decider value — the decider is the first rule that FAILED and is a "
+                "property of the evaluation's order, not something a caller may assert "
+                f"(got {type(evaluation).__name__})"
+            )
+        decider = evaluation.deciding_rule_id
+        return cls(
+            decided_by=DECIDED_BY_RULE_ENGINE,
+            deciding_rule_id=decider if decider else NO_RULE_DECIDED,
+        )
+
+    def as_columns(self) -> dict[str, Any]:
+        """Keyword arguments for `DecisionRecord(...)`."""
+        return {
+            "decided_by": self.decided_by,
+            "deciding_rule_id": self.deciding_rule_id,
+        }
 
 
 class DecisionRecord(Base):
@@ -166,10 +304,51 @@ class DecisionRecord(Base):
         server_default=COHORT_REPLAY,
     )
 
+    #: WHICH ENGINE decided. Written independently of whether a rule id was
+    #: captured — see the attribution block at the top of this module.
+    #:
+    #: DEFAULTS TO `UNSET`, NOT `ICT`. Defaulting to a real attribution would let
+    #: a write path that forgets this column produce a row that CLAIMS to know
+    #: who decided — and after the cutover that claim would be false and
+    #: undetectable. The historical rows genuinely are ICT and the migration
+    #: backfills them explicitly; that is a different question from what a future
+    #: forgetful write should record, and one value must not answer both.
+    decided_by: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        default=DECIDED_BY_UNSET,
+        server_default=DECIDED_BY_UNSET,
+    )
+
+    #: The registry rule that decided, when the rule engine decided. Mirrors
+    #: `telemetry_record.py:90` in type and index so the two tables can be joined
+    #: and compared — the asymmetry this column closes is that the DISCARDED
+    #: shadow verdict has carried an attribution since M9 Stage A while the
+    #: acted-on decision has never carried one.
+    deciding_rule_id: Mapped[str | None] = mapped_column(String, nullable=True)
+
     __table_args__ = (
         CheckConstraint(
             f"signal_dir IS NULL OR {_sql_in('signal_dir', SIGNAL_DIRECTIONS)}",
             name="ck_decision_records_signal_dir",
+        ),
+        CheckConstraint(
+            _sql_in("decided_by", DECIDED_BY_VALUES),
+            name="ck_decision_records_decided_by",
+        ),
+        # ONLY the rule engine may name a rule. The ICT path never consults the
+        # registry, and an UNSET row by definition has nobody standing behind its
+        # attribution — so a rule id on either is a value copied from somewhere it
+        # does not belong, and it would corrupt a `GROUP BY deciding_rule_id`
+        # audit with attributions no rule produced.
+        #
+        # NOTE the asymmetry with the two defect states, which are deliberately
+        # NOT constrained: `RULE_ENGINE + NULL` and `UNSET` must be STORABLE so
+        # they survive to be counted, while a rule id on a non-rule-engine row is
+        # a contradiction that should never be written at all.
+        CheckConstraint(
+            f"decided_by = '{DECIDED_BY_RULE_ENGINE}' OR deciding_rule_id IS NULL",
+            name="ck_decision_records_only_rule_engine_names_a_rule",
         ),
         CheckConstraint(
             f"outcome IS NULL OR {_sql_in('outcome', DECISION_OUTCOMES)}",
@@ -181,4 +360,8 @@ class DecisionRecord(Base):
         ),
         Index("ix_decision_records_created_at", "created_at"),
         Index("ix_decision_records_cohort", "cohort"),
+        # The audit groups by this column and `decision_records` is the larger of
+        # the two tables carrying it.
+        Index("ix_decision_records_deciding_rule", "deciding_rule_id"),
+        Index("ix_decision_records_decided_by", "decided_by"),
     )

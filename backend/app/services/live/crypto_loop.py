@@ -417,7 +417,7 @@ class LiveCryptoLoop:
 
             from app.db.session import async_session_maker
             from app.models.decision_record import (
-                COHORT_PAPER, OUTCOME_OPEN, DecisionRecord,
+                COHORT_PAPER, OUTCOME_OPEN, Attribution, DecisionRecord,
             )
             entry = float(sig.entry); sl = float(sig.sl)
             tp = float(sig.tp) if sig.tp is not None else None
@@ -443,6 +443,13 @@ class LiveCryptoLoop:
                 expected_r=Decimal(str(round(expected_r, 4))) if expected_r is not None else None,
                 outcome=OUTCOME_OPEN, cohort=COHORT_PAPER,
                 run_id=self.run_id,
+                # This trade was decided by the ICT path — `_tick_symbol` reaches
+                # here from the ICT setup, and the rule engine's verdict is
+                # computed in the shadow and DISCARDED (Stage A). Stated rather
+                # than left blank: it is knowable and true today, and a NULL here
+                # would be indistinguishable from a rule decision whose decider
+                # was lost. Changes at the cutover, not before.
+                **Attribution.ict().as_columns(),
             )
             async with async_session_maker() as db:
                 db.add(rec)
@@ -661,7 +668,7 @@ class LiveCryptoLoop:
         try:
             from app.db.session import async_session_maker
             from app.models.decision_record import (
-                COHORT_PAPER, OUTCOME_ABSTAINED, DecisionRecord,
+                COHORT_PAPER, OUTCOME_ABSTAINED, Attribution, DecisionRecord,
             )
             rec = DecisionRecord(
                 symbol=pair, timeframe=self.entry_tf,
@@ -671,6 +678,10 @@ class LiveCryptoLoop:
                 reasons=trace.reasons,
                 outcome=OUTCOME_ABSTAINED, cohort=COHORT_PAPER,
                 run_id=self.run_id,
+                # An ICT abstention. The shadow's rule-engine verdict for this
+                # same bar is recorded separately in `telemetry_records` and is
+                # not what stood this trade aside.
+                **Attribution.ict().as_columns(),
             )
             async with async_session_maker() as db:
                 db.add(rec)

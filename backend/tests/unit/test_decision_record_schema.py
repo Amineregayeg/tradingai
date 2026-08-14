@@ -33,6 +33,7 @@ _CHAIN = [
     ("0004", "0004_engine_runs.py", "0003"),
     ("0005", "0005_telemetry_records.py", "0004"),
     ("0006", "0006_decision_outcome_abandoned.py", "0005"),
+    ("0007", "0007_decision_attribution.py", "0006"),
 ]
 
 
@@ -233,6 +234,12 @@ def test_migration_check_constraints_match_model():
         "ck_decision_records_signal_dir",
         "ck_decision_records_outcome",
         "ck_decision_records_cohort",
+        # T-0013. Note what is NOT constrained: `RULE_ENGINE` with a NULL rule id,
+        # and `UNSET`. Both are defects and both must be STORABLE — the write
+        # sites swallow bookkeeping errors, so a constraint that refused them
+        # would drop the row and destroy the evidence of the defect.
+        "ck_decision_records_decided_by",
+        "ck_decision_records_only_rule_engine_names_a_rule",
     }
 
 
