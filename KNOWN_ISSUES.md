@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-15 (T-0022, the v1 exit model EXIT-001/EXIT-002 — the first rules in this programme that govern what happens AFTER a trade is taken, and SHADOW ONLY: nothing under `live/` or `broker/` imports them and `paper.py` still closes positions whole. B86 — `PaperPosition` has one `units`/`sl`/`tp` and `__slots__`, so it cannot represent a tranched position and the wiring task is a broker-layer change, not a call site. B87 — the 19:00 New York close is ours and UNRATIFIED, defaulted ON so shadow generates the evidence the ruling needs, and the wiring task must re-surface the question rather than inherit it. B88 — `ExitEvent` refuses `LIQUIDATION`, which is what makes criterion 1 enforceable at all, and becomes a hazard the moment a real liquidation can reach the exit path. B89 — a target at or inside 2R is refused outright because GATE-031 cannot run without GATE-025. Earlier, T-0021: B54 CLOSED — both tools collapse aliases and agree; every coverage figure now carries its space, and the script refuses to print an impossible set. B58 — the other tool is outside the repo, so half the agreement cannot be CI-enforced. Earlier, T-0016: the partially-evaluable requirements are enforced by script over the whole registry — B56, eleven emitted fields that cannot say where they came from, baselined not fixed and needing a task id; B57, the two of six standing requirements that script can actually enforce, so a green run is not read as six. Earlier the same day, T-0007: ENTRY_TF 1H -> 5m, the first live behaviour change. B37 CLOSED — the lookahead is out of production. B33 gained the instance it predicted: every legal execution timeframe would have broken the shadow; GATE-017 closed on the live path; B38 — GATE-018 stays OPEN; B39 — a conditional edit that matches nothing succeeds; B40 — the correlate margin is now 1.5x and nothing reports it shrinking)
+Last updated: 2026-08-15 (T-0023 target selection — EXIT-004/TARGET-001/TARGET-003, shadow only. B90 CLOSED: EXIT-001 now reports `ticks_seen`, so an unobserved path and a long quiet one are no longer one record. Earlier, T-0022, the v1 exit model EXIT-001/EXIT-002 — the first rules in this programme that govern what happens AFTER a trade is taken, and SHADOW ONLY: nothing under `live/` or `broker/` imports them and `paper.py` still closes positions whole. B86 — `PaperPosition` has one `units`/`sl`/`tp` and `__slots__`, so it cannot represent a tranched position and the wiring task is a broker-layer change, not a call site. B87 — the 19:00 New York close is ours and UNRATIFIED, defaulted ON so shadow generates the evidence the ruling needs, and the wiring task must re-surface the question rather than inherit it. B88 — `ExitEvent` refuses `LIQUIDATION`, which is what makes criterion 1 enforceable at all, and becomes a hazard the moment a real liquidation can reach the exit path. B89 — a target at or inside 2R is refused outright because GATE-031 cannot run without GATE-025. Earlier, T-0021: B54 CLOSED — both tools collapse aliases and agree; every coverage figure now carries its space, and the script refuses to print an impossible set. B58 — the other tool is outside the repo, so half the agreement cannot be CI-enforced. Earlier, T-0016: the partially-evaluable requirements are enforced by script over the whole registry — B56, eleven emitted fields that cannot say where they came from, baselined not fixed and needing a task id; B57, the two of six standing requirements that script can actually enforce, so a green run is not read as six. Earlier the same day, T-0007: ENTRY_TF 1H -> 5m, the first live behaviour change. B37 CLOSED — the lookahead is out of production. B33 gained the instance it predicted: every legal execution timeframe would have broken the shadow; GATE-017 closed on the live path; B38 — GATE-018 stays OPEN; B39 — a conditional edit that matches nothing succeeds; B40 — the correlate margin is now 1.5x and nothing reports it shrinking)
 
 ---
 
@@ -1829,54 +1829,6 @@ traded. PRIM-002 feeds ENTRY-001, which is every admissible entry object in the 
 
 **NOT fixed, and it is its own entry:** see **B75**. Related: **B74**.
 
-### B90 — EXIT-001's `NOT_APPLICABLE` has no denominator, and the ratification question needs a rate
-
-**Filed by Review 2026-08-15 from the T-0022 verdict at `e9ad0df`. MEASURED, not argued. The task
-PASSED — every numbered criterion is satisfied — and this is the gap the wiring task must not
-inherit silently.**
-
-**Two simulations of the same plan:**
-
-    A   zero ticks                                 verdict=NOT_APPLICABLE  events=0  runner_open=True  remaining=1.0
-    B   500 ticks over 4h09m, nothing ever fires   verdict=NOT_APPLICABLE  events=0  runner_open=True  remaining=1.0
-
-    verdicts identical : True
-    values identical   : True     <- the whole telemetry dict, byte for byte
-
-**`ExitSimulation` carries `plan, events, runner_open, remaining_fraction, session_close_active` and
-no tick count or path span.** So *"the path ran out"* and *"there was no path"* produce one record.
-
-**The module sets the standard and stops one case short.** Its docstring: *"`runner_open`
-DISTINGUISHES 'the path ran out' FROM 'the runner ended'."* **That is true, and neither is
-distinguished from "nothing was observed."** The claim is incomplete, not false.
-
-### Why it bites
-
-**Criterion 5's rationale:** *"produces a measurable record of **how often** a runner would have been
-cut and what it would have cost."* **How often is a rate.**
-
-**The numerator is present and well built** — `runner_cut_by_session_close` and
-`runner_r_at_session_close`, named rather than implied, exactly as `5-ii` requires. **The denominator
-is not recoverable**, because every `NOT_APPLICABLE` reads the same whether it observed a full
-session or nothing. **"47 runners were cut" cannot ratify a parameter without "out of how many."**
-
-**And the 19:00 close is exactly the parameter awaiting ratification** (`B87`, unanswered by Salim
-since 2026-08-15). The shadow evidence is the whole argument for implementing the close rather than
-defaulting it off — **so evidence that cannot carry a rate weakens the reason the close was built.**
-
-### The remedy is one field, and this codebase already applies it next door
-
-**`LadderOffForV1.evaluate([])` returns PASS — correct, an open position has zero tranches — and
-reports `tranche_count: 0` alongside it**, so an empty PASS is distinguishable from a conformant one.
-**That is `B84`'s prescribed remedy, implemented in EXIT-002 and absent from EXIT-001.**
-
-Add `ticks_seen` to `ExitSimulation` and its `values`, and the path span (`first_ts`/`last_ts`) if
-the rate is ever to be conditioned on whether the observation window contained a 19:00 boundary at
-all. **Then `NOT_APPLICABLE over 0 ticks` and `NOT_APPLICABLE over 500` stop being the same fact.**
-
-**Standing family:** an output that does not discriminate between working and broken — here, between
-never measured and measured and empty. Related: **B84**, **B87**, **B81**.
-
 ### B86 — `PaperPosition` CANNOT REPRESENT A TRANCHED POSITION, and the v1 exit model needs one
 
 **Filed 2026-08-15 by Execute, T-0022. This is the plan's own named risk, measured rather than
@@ -2043,6 +1995,61 @@ that is not done, this will appear a third time.**
 
 **Neither defect affects the CONTENT of `B90` or `B91`.** Both entries are correct and in the file
 once. **What is damaged is the audit trail**, which is the thing the register exists to be.
+
+### B94 — why the announce-your-writes obligation is ABSOLUTE: the reader has no detection channel
+
+**Filed 2026-08-15. This entry is a PAIRING and contains no new finding — both halves already exist
+and neither entry contains the join.** `B63` established the writer's duty; Execute supplied the
+reason it cannot be best-effort. **Filed now rather than "when the dust settles", which Review
+correctly identified as a deferral with an unobservable trigger living in a message — the `B82`
+shape, from the seat that had just filed `B82`.**
+
+### The two halves
+
+**`B63`, the writer's duty.** Two measurements can share a worktree only if neither writes. A tool
+that mutates a shared tree owes an announcement, because **the writer is the party that knows** —
+Review could prove it had disturbed its own suite because it had caused the disturbance, while
+Execute's predecessor *"could not prove non-disturbance from inside my own session."*
+
+**Execute's sentence, the reader's side, written after a contaminated mutation run:**
+
+> **"A seat running a measurement cannot distinguish 'my mutation did this' from 'someone reverted a
+> file underneath me' — both are just a red line."**
+
+### The join, which is the whole of this entry
+
+**A duty on the writer is normally a convenience: it saves the reader work the reader could do
+itself.** Here it is not. **The reader has NO detection channel at all** — a red test is a red test,
+and nothing distinguishes a mutation's effect from an unannounced write landing mid-run.
+
+> **So "announce your writes, best effort" is not a weaker version of the rule. It is NO RULE** — a
+> writer who announces when convenient produces a world in which the reader's results are sometimes
+> meaningless and never identifiably so.
+
+**Measured, not argued.** Execute's eleven-mutation table came back with one test red on all eleven.
+**It nearly recorded eleven honest reds.** The cause was `rules/__init__.py` being reverted mid-run by
+the Manager. **Nothing in the output said so**, and nothing could have.
+
+### And it retroactively settles a decision that looked like caution
+
+**Review discarded a T-0017 baseline it could not establish was right. The figure turned out to have
+been right, and the discard was still correct** — not because the number was suspect, but because
+**had it been wrong, nothing available to Review would have said so.** `B63` already records that a
+contaminated run and a clean one print identically. **This entry names the consequence: the only
+available response to an undetectable class is to discard and re-take.** Not caution. The sole
+option.
+
+### The operational form
+
+* **If you write to a shared tree, announce it — before, not after, and every time.**
+* **If you are measuring, you cannot verify that nobody wrote. Do not try.** Re-take instead, in a
+  `git worktree`, where the question does not arise.
+* **A red line is not evidence of what made it red.** Establish the tree was quiet **by construction**
+  rather than by inspection, because inspection cannot.
+
+**Four instances tonight, all from the Manager, all `git reset --hard` in a shared tree** — including
+one inside the recovery from the first, and two inside a guard added to prevent the first. **None was
+detectable by the seat whose work it destroyed until the work was already gone.**
 
 ### B92 — the register-commit check is now a HOOK, and a note stopped being the mechanism
 
