@@ -27,12 +27,21 @@ hand-built fixture with bodies apart AND wicks apart produces one
 market fact about this instrument rather than a dead branch — and that distinction could only
 be settled by construction, never by a longer corpus, which can only ever say "not seen yet".
 
-**The SUPER_BPR share is NOT a stable property of the market.** 651 of 1070 is 61% at 999
-bars and 23% at 150, because the promotion scan below has no time bound and no direction
-constraint, so the count grows monotonically with whatever history the caller passed — and
-the callers differ (shadow 320 bars, backtest 250). **Tracked as T-0020.** Until it lands, no
-rule may assert an expected outcome of the `super BPR > BPR > plain imbalance` ordering over
-detected bars, because the same band classifies differently depending on the lookback.
+**THE SUPER_BPR SHARE USED TO BE A PROPERTY OF THE CALLER RATHER THAN OF THE MARKET, AND
+T-0020 FIXED THAT ON 2026-08-15.** The promotion scan had no time bound, no direction
+constraint and no causality check, so the count grew monotonically with whatever history was
+passed — measured on `tests/fixtures/btcusdtp_5m_999.csv`, 15.8% of all imbalances at 150
+bars rising to 62.4% at 999 — while the callers differ (shadow 320 bars, backtest 250). The
+scan is now causal, requires both directions among the components, and is bounded by
+`SUPER_BPR_LOOKBACK_BARS`, which is OURS and unratified.
+
+**What is now true, and what is not.** Every band the backtest's 250-bar window and a
+999-bar window both see classifies identically, so the `super BPR > BPR > plain imbalance`
+ordering CAN be asserted over detected bars and `test_t0019_entry_decision.py` asserts it.
+Two of 86 bands still differ between a 320-bar and a 999-bar window, both window-EDGE
+cases, and the aggregate share still moves 8.8 points across corpus lengths — short of the
+declared 5.0 tolerance, reported rather than tuned away. See **B73** (the lookahead the
+scan also had) and **B74** (what this fix did not achieve).
 
 THE ONE LINE THAT SEPARATES A GAP FROM A VOLUME IMBALANCE
 "gaps and volume imbalances are the same thing the only difference is the wicks." So:
@@ -81,6 +90,32 @@ Direction = Literal["BULLISH", "BEARISH"]
 #: ≥ this many overlapping imbalances promotes a BPR to a SUPER BPR. From the statement
 #: ("a minimum of two" for BPR, "≥3 overlapping gaps = SUPER BPR"), not an engine choice.
 SUPER_BPR_MIN_OVERLAP = 3
+
+#: How far back a component may have formed and still count toward the promotion.
+#:
+#: DECLARED PARAMETER. OURS. UNRATIFIED. The statement says "≥3 overlapping gaps" and does
+#: not say overlapping WITHIN WHAT WINDOW, so this number is the engine's and must never be
+#: read as doctrine. The two constraints beside it in `_bprs` — causality and opposite
+#: direction — ARE ruled; this one is not, and the difference is stamped at each site.
+#:
+#: WHY A BOUND IS NEEDED AT ALL, AND WHY IT CANNOT BE AVOIDED BY BEING CLEVERER. Without
+#: one, the promotion scans every imbalance in whatever series the caller passed, so the
+#: classification is a function of the caller's lookback rather than of price. Measured on
+#: `tests/fixtures/btcusdtp_5m_999.csv` before the fix: the SUPER_BPR share ran 15.8% at
+#: 150 bars to 62.4% at 999, a 46.6-point spread, growing monotonically. The live callers
+#: disagree — the shadow fetches 320 bars and the backtest 250 — so the same band on the
+#: same bar classified differently in the two, which is what a conformance comparison
+#: between them cannot survive. Causality and direction alone do NOT fix it: a longer
+#: window adds OLDER imbalances, which are causally prior and may be either direction.
+#:
+#: WHY 60 AND NOT A FITTED VALUE. 60 bars is five hours at the 5m execution timeframe —
+#: the same order as the session structures the strategy reasons about, and comfortably
+#: inside both live callers' windows so neither can see a different answer. It was NOT
+#: chosen by sweeping for the flattest curve; the sensitivity across 20/40/60/80/120 is
+#: reported in T-0020's work report so a reader can see the whole curve rather than the
+#: one point that suited us. A number picked to make a fixture pass is the `k = 3.0`
+#: shape, and this task exists because of that shape.
+SUPER_BPR_LOOKBACK_BARS = 60
 
 
 @dataclass
@@ -242,8 +277,25 @@ class ImbalanceInventory(RuleImplementation):
         just the pair that produced it: "≥3 overlapping gaps = SUPER BPR".
         """
         out: list[Imbalance] = []
-        seen: set[tuple[float, float]] = set()
 
+        # WHEN A BAND BECAME A BPR IS A PROPERTY OF THE BAND, NOT OF WHICH PAIR WE HAPPENED
+        # TO FIND FIRST — and until T-0020 it was the latter.
+        #
+        # The scan used to dedupe on first sight: the first `(a, b)` producing a given
+        # `(lo, hi)` won, and that pair's `max(formed_index)` dated the BPR. But `simple`
+        # is `_three_bar()` results followed by `_two_bar()` results, so it is NOT in
+        # formation order, and a longer corpus changes which pair is reached first. That
+        # moved `formed`, which moves the lookback window, which changes the promotion —
+        # so the same band on the same bar could classify differently in two windows even
+        # after the lookback bound was added. Two of the eleven divergent bands in this
+        # task's fixture survived the bound for exactly this reason.
+        #
+        # So every qualifying pair for a band is collected first, and the band is dated by
+        # the EARLIEST moment any opposite-direction pair completed it. That is both
+        # deterministic and the reading the docstring already implied — "the BPR exists
+        # from the moment its LAST component printed" is about the pair that made it, and
+        # if two pairs make it, the earlier one made it first.
+        earliest: dict[tuple[float, float], tuple[int, Imbalance, Imbalance]] = {}
         for a_idx, a in enumerate(simple):
             for b in simple[a_idx + 1:]:
                 if a.direction == b.direction:
@@ -252,31 +304,61 @@ class ImbalanceInventory(RuleImplementation):
                 hi = min(a.price_high, b.price_high)
                 if hi <= lo:
                     continue
-                if (lo, hi) in seen:
-                    continue
-                seen.add((lo, hi))
-
-                covering = [
-                    imb for imb in simple
-                    if imb.price_low <= lo and imb.price_high >= hi
-                ]
-                is_super = len(covering) >= SUPER_BPR_MIN_OVERLAP
-                # "extended right": the BPR exists from the moment its LAST component
-                # printed, and the later component is what dates it.
                 formed = max(a.formed_index, b.formed_index)
-                out.append(Imbalance(
-                    id=f"imb-{tf}-{formed}-{'SBPR' if is_super else 'BPR'}-"
-                       f"{len(out)}",
-                    tf=tf, bar_time=bars[formed].time,
-                    price_high=hi, price_low=lo,
-                    type="SUPER_BPR" if is_super else "BPR",
-                    # A BPR is contested from both sides. The direction recorded is that of
-                    # the LATER component — the side that most recently claimed the band.
-                    direction=(a if a.formed_index >= b.formed_index else b).direction,
-                    formed_index=formed,
-                    component_ids=sorted(imb.id for imb in covering) if is_super
-                    else sorted([a.id, b.id]),
-                ))
+                prior = earliest.get((lo, hi))
+                if prior is None or formed < prior[0]:
+                    earliest[(lo, hi)] = (formed, a, b)
+
+        for (lo, hi), (formed, a, b) in sorted(earliest.items()):
+
+            # THE PROMOTION SCAN, WITH THREE CONSTRAINTS. Two are ruled and one is
+            # ours, and which is which is the whole of T-0020's criterion 1.
+            #
+            # 1. CAUSAL — ruled, and its absence was LOOKAHEAD. This scan used to
+            #    read every imbalance in the series, including ones formed AFTER
+            #    this BPR, so a band's classification on bar i depended on bars the
+            #    engine could not have seen at bar i. The docstring three lines up
+            #    already said a BPR "exists from the moment its LAST component
+            #    printed"; the code did not enforce it. Nothing in Tier 0.2 covered
+            #    this primitive, so no prober caught it (B73).
+            #
+            # 2. BOTH DIRECTIONS PRESENT — ruled. `:218` and the module docstring:
+            #    a BPR is the overlap of OPPOSITE-direction imbalances, because the
+            #    band has to be contested from both ends; "overlapping two
+            #    same-direction gaps is just a wider gap and is not a BPR". The pair
+            #    rule enforced that and the promotion did not, so three
+            #    same-direction gaps spanning a band promoted it to the strongest
+            #    POI the contract has. Note this is "both directions present among
+            #    the components", not "pairwise opposite" — with three or more
+            #    components pairwise opposition is impossible, so the coherent
+            #    reading of the pair rule extended to N is that both sides appear.
+            #
+            # 3. WITHIN `SUPER_BPR_LOOKBACK_BARS` — OURS, declared, unratified. See
+            #    the constant. This is the one that makes the answer a fact about
+            #    price rather than about how much history the caller fetched.
+            covering = [
+                imb for imb in simple
+                if imb.price_low <= lo and imb.price_high >= hi
+                and imb.formed_index <= formed
+                and formed - imb.formed_index <= SUPER_BPR_LOOKBACK_BARS
+            ]
+            is_super = (
+                len(covering) >= SUPER_BPR_MIN_OVERLAP
+                and len({imb.direction for imb in covering}) >= 2
+            )
+            out.append(Imbalance(
+                id=f"imb-{tf}-{formed}-{'SBPR' if is_super else 'BPR'}-"
+                   f"{len(out)}",
+                tf=tf, bar_time=bars[formed].time,
+                price_high=hi, price_low=lo,
+                type="SUPER_BPR" if is_super else "BPR",
+                # A BPR is contested from both sides. The direction recorded is that of
+                # the LATER component — the side that most recently claimed the band.
+                direction=(a if a.formed_index >= b.formed_index else b).direction,
+                formed_index=formed,
+                component_ids=sorted(imb.id for imb in covering) if is_super
+                else sorted([a.id, b.id]),
+            ))
         return out
 
     # -- fill state --------------------------------------------------------------------

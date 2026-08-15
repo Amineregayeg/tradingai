@@ -1803,6 +1803,72 @@ a predicate deferral has no owner the moment nobody recognises themselves in it.
 questions and a bare number cannot say which set it counted. Related: **B43**, **B45**, **B47**,
 **B49**, **B58**.
 
+### B73 — PRIM-002's SUPER_BPR promotion read the FUTURE, and no prober covers this primitive
+
+**Found in:** T-0020, 2026-08-15, while implementing the lookback bound. **Not in the plan** —
+the plan names three consequences of the unbounded scan and this is a fourth.
+
+**What it was.** `_bprs` promoted a band to SUPER_BPR by counting every imbalance in the
+series whose band covers the intersection. There was no index constraint, so **imbalances
+formed AFTER the band counted toward it.** A band created at bar 1 could be promoted by a gap
+that first printed at bar 900. Its own docstring already said a BPR *"exists from the moment
+its LAST component printed"*; the code did not enforce it.
+
+**Why it survived.** `verify_guards.sh` probes eight guards and **none of them is in
+PRIM-002.** Tier 0.2 covers the FVG entry rule, the daily bias window, three dominance
+properties and three execution properties. The contract primitives have no lookahead prober
+at all, so a primitive reading forward is invisible to the machinery built to catch exactly
+that. The suite's own `test_lookahead_regression.py` is likewise about the ICT path.
+
+**Why it matters beyond the classification.** Lookahead in a primitive is the failure mode
+this project spent Tier 0.2 on: a backtest that reads forward reports edge that cannot be
+traded. PRIM-002 feeds ENTRY-001, which is every admissible entry object in the contract.
+
+**Fixed** — components must satisfy `formed_index <= formed`, and
+`test_a_component_formed_after_the_band_cannot_promote_it` goes red without it.
+
+**NOT fixed, and this is the part to carry:** the five other contract primitives have never
+been checked for the same thing, and nothing would report it. **A prober for the primitives
+is a task, not a note.** Related: **B74**, and Tier 0.2's own premise.
+
+### B74 — what T-0020 did NOT achieve: the declared tolerance is not met, and the lookback is ours
+
+**Filed by the implementer of the fix, 2026-08-15**, because the improvement is large enough
+to read as completion.
+
+**The declared tolerance is NOT met.** 5.0 percentage points was stated BEFORE the fix and
+measured against the unfixed code (46.6-point spread), so it genuinely rejects the old
+behaviour. The fixed code gives **8.8 points**. That is recorded as a `strict=True` xfail
+rather than widened, because moving a tolerance after measuring is the `k = 3.0` shape this
+task exists because of.
+
+**What the fix DID achieve, so the two are not confused:**
+
+    monotonic unbounded growth      gone  (15.8->62.4 rising; now 6.6/12.1/14.0/16.0/15.1)
+    bands differing 250 vs 999      0 of 54
+    bands differing 320 vs 999      2 of 86  (was 11 of 86) — both window-EDGE cases
+    lookahead in the promotion      fixed (B73)
+    same-direction bulk promoting   fixed — fires on 2 of 698 bands, so rare, not decoration
+
+**Why the aggregate metric is a poorer measure than it looked, and I chose it before knowing
+that.** The share's denominator is EVERY imbalance, and the BPR population grows
+super-linearly with window length because BPRs come from PAIRS — 26 BPRs from 50 simple
+imbalances at 150 bars, 698 from 356 at 999. So the share moves with window length even when
+the promotion RULE does not. The per-band comparison has no such confound, and it is the
+metric that matches the operational question.
+
+**`SUPER_BPR_LOOKBACK_BARS = 60` IS OURS AND UNRATIFIED.** The statement says "≥3 overlapping
+gaps" and never says within what window. Causality and the direction requirement are ruled;
+this is not. The sensitivity across 20/40/60/80/120/240 is in T-0020's work report so a
+reader sees the curve rather than the point that suited us — and note that a SMALLER bound
+gives a FLATTER curve (20 bars gives a 1.2-point spread), which is precisely why it was not
+chosen that way.
+
+**And the already-collected shadow corpus is classified the OLD way.** Every SUPER_BPR in it
+counted future and unbounded-history components. Any conformance number over the pre-2026-08-15
+window is measuring a different classifier and must be excluded rather than compared.
+Related: **B73**, **B60**.
+
 ### B70 — a mutation going red is not evidence it went red FOR THE REASON CLAIMED
 
 **Found in:** T-0011, 2026-08-15, by Execute against its own mutation. Review reports the mirror
@@ -2310,7 +2376,8 @@ it was.** The rule was right. It solved half the problem and was recorded as sol
 
 **Measured, and the whole exposure sits on one task:**
 
-    T-0020    8 references     "T-0020 owns that" / "until it lands, no rule may assert…"
+    T-0020    DISCHARGED 2026-08-15 — all 12 references updated, and the assertion
+                                        they were waiting for is written (see B60 item 3)
     T-0015    1 reference
     T-0017    1 reference
 
@@ -2370,6 +2437,7 @@ all eight listed, both through the word list and through the snapshot.
 Measured across three runs the same evening: **0-for-9, then 0-for-2 against a widened list, then
 0-for-4** — and **two of the last four are the plan text written to DISCHARGE the deferrals**,
 `T-0020/plan.md` quoting *"T-0019 was forbidden from…"* in the criterion that exists to pay that
+[DISCHARGED 2026-08-15 — T-0020 landed; the prohibition is lifted and the assertion written]
 debt. **Writing about a deferral produces deferral-language prose**, so the retrospective bucket
 gets noisier every time the loop does the right thing. **A checker whose false-positive rate rises
 with good behaviour cannot gate anything** — which is why the exit code follows the snapshot and the
@@ -2382,7 +2450,7 @@ present-tense claims about a landed task. Review falsified it: a marker list get
 constraints** — `until … lands`, `must land`, `owns` all fire. **A word list is 75%, not hopeless.**
 
 **What actually defeats it is the fourth case, and it is not a vocabulary problem.**
-`entry_001:27` — *"That is T-0020's defect, not this rule's — and it is why the tests here hand this
+`entry_001:27` [DISCHARGED 2026-08-15] — *"That is T-0020's defect, not this rule's — and it is why the tests here hand this
 rule an EXPLICIT candidate list"* — **carries its obligation in a DESIGN CHOICE described by the
 sentence, not in a verb.** The tests use an explicit candidate list and could stop once T-0020 lands.
 **No word list reaches that, because the sentence never says anything is owed.**
@@ -2440,7 +2508,7 @@ decision about where these files live, which is not a task-sized question.
 
 **Standing limit, inherited and stated because a sweep that hides its blind spots is what this
 register is about: the trigger is a word list and it MISSED one live deferral** —
-`entry_001_imbalance_poi.py:27`, *"That is T-0020's defect, not this rule's"* — until that phrasing
+`entry_001_imbalance_poi.py:27` [DISCHARGED 2026-08-15], *"That is T-0020's defect, not this rule's"* — until that phrasing
 was added by hand. **5 references, 4 matched.** "Nothing owed" means "nothing matched as owed".
 
 ### B60. PRIM-002's type distribution, the GAP zero, and the 0.2% amplifier window — three measurements T-0019 owes the register
@@ -2464,13 +2532,19 @@ no session gaps — not a dead branch.** Worth stating as method rather than as 
 corpus count can only ever say "not seen yet"**, and no amount of additional data converts
 that into "cannot happen". The construction settles it in one fixture.
 
-**3. `SUPER_BPR` AT 61% IS NOT A PROPERTY OF THE MARKET.** 651 of 1070 at 999 bars; 23% at
-150. The promotion scan has no time bound, so the share grows with the caller's lookback —
-and the callers differ (shadow 320 bars, backtest 250). **T-0020 owns this.** Until it lands,
-**no rule may assert an expected outcome of the `super BPR > BPR > plain imbalance` ordering
-over DETECTED bars**, because the same band classifies differently depending on history
-length. T-0019's ranking tests therefore use an explicit candidate list, which contains no
-lookback at all.
+**3. `SUPER_BPR` AT 61% WAS NOT A PROPERTY OF THE MARKET — DISCHARGED BY T-0020, 2026-08-15.**
+651 of 1070 at 999 bars; 23% at 150, because the promotion scan had no time bound and the
+callers differ (shadow 320 bars, backtest 250). The scan is now causal, requires both
+directions among its components, and is bounded by a DECLARED lookback that is ours.
+
+**The prohibition this item carried is lifted and the assertion it was blocking is written.**
+Discharging the sentence without writing the test would have deleted the debt rather than
+paid it, so `test_t0019_entry_decision.py::test_the_precedence_ordering_holds_over_detected_bars`
+now ranks what PRIM-002 actually detects over a committed corpus, at both live window
+lengths. **That test does NOT catch the original defect** — measured, not assumed: removing
+the lookback leaves it green, because the strongest type present is the same either way.
+`test_t0020_super_bpr_stability.py::test_the_two_live_callers_never_disagree` is what
+catches it. Both matter and only one discriminates; see **B74** for what remains.
 
 **4. THE 0.2% AMPLIFIER WINDOW IS OURS AND UNRATIFIED**, and the statement stamps itself:
 *"The 0.2% value is an engineering guideline, not a strict market rule."* Carried as a

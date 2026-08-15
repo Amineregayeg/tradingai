@@ -148,14 +148,26 @@ def test_a_bpr_is_the_overlap_of_two_opposite_direction_imbalances():
 def test_three_overlapping_imbalances_promote_the_bpr_to_a_super_bpr():
     """"≥3 overlapping gaps = SUPER BPR". Built from hand-made components so the count is the
     only thing under test — the geometry that produces three overlapping imbalances on one
-    band is incidental to the promotion rule."""
+    band is incidental to the promotion rule.
+
+    THE FORMATION ORDER IS NOT INCIDENTAL AND USED TO BE (T-0020). This fixture originally
+    had `c` forming at index 2 while the `(a, b)` pair created the band at index 1, so the
+    promotion counted a component that did not exist yet — the band's classification on bar
+    1 depended on bar 2. The promotion scan now refuses that, correctly, and this fixture
+    was the only thing in the suite asserting the old behaviour.
+
+    So `b` is the LAST to form: all three components exist at the moment the band does, and
+    the test still measures what it says it measures. `a` and `c` are BULLISH and `b` is
+    BEARISH, which also satisfies the both-directions constraint the pair rule always had
+    and the promotion never enforced.
+    """
     parts = [
         Imbalance(id="a", tf="1H", bar_time=T0, price_high=13, price_low=11,
                   type="FVG", direction="BULLISH", formed_index=0),
-        Imbalance(id="b", tf="1H", bar_time=T0, price_high=14, price_low=12,
-                  type="FVG", direction="BEARISH", formed_index=1),
         Imbalance(id="c", tf="1H", bar_time=T0, price_high=13.5, price_low=11.5,
-                  type="GAP", direction="BULLISH", formed_index=2),
+                  type="GAP", direction="BULLISH", formed_index=1),
+        Imbalance(id="b", tf="1H", bar_time=T0, price_high=14, price_low=12,
+                  type="FVG", direction="BEARISH", formed_index=2),
     ]
     bars = candles([(10, 11, 9, 10)] * 3)
     bprs = ImbalanceInventory._bprs(parts, bars, tf="1H")

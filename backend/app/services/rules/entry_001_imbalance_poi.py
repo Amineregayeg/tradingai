@@ -20,12 +20,20 @@ justified.
 
 THE PRECEDENCE ORDER IS IMPLEMENTED AND ITS OUTCOME IS NOT ASSERTED OVER LIVE DATA
 `super BPR > BPR > plain imbalance` is ranked here, deterministically, over whatever
-candidates the caller supplies. What this rule must NOT be tested against is which type
-PRIM-002 will *classify* a given band as: the promotion scan at
-`prim_002_imbalances.py:238-242` has no time bound, so the SUPER_BPR share grows with the
-corpus (23% at 150 bars, 61% at 999) and the same band ranks differently depending on how
-much history the caller passed. That is T-0020's defect, not this rule's — and it is why the
-tests here hand this rule an EXPLICIT candidate list, which has no lookback in it at all.
+candidates the caller supplies.
+
+**T-0020 HAS LANDED (2026-08-15) and the prohibition this paragraph used to carry is
+DISCHARGED.** It read: this rule must not be tested against which type PRIM-002 classifies a
+band as, because the promotion scan had no time bound, the SUPER_BPR share grew with the
+corpus, and the same band ranked differently depending on how much history the caller
+passed. The scan is now causal, direction-constrained and bounded by a declared lookback,
+and over a committed 999-bar corpus **every band the backtest's 250-bar window and a
+999-bar window both see is classified identically**. So the ordering CAN now be asserted
+over detected bars, and `test_t0019_entry_decision.py` asserts it.
+
+The tests here still hand this rule an explicit candidate list, which remains the right
+shape for a ranking rule — but that is now a choice about what this rule owns, not a
+prohibition imposed by a defect upstream.
 
 FILL STATE IS RECORDED AND NOT FILTERED ON, DELIBERATELY
 The registry names fill state as an input and says nothing about how it gates entry. "An
@@ -122,12 +130,13 @@ class ImbalanceIsTheOnlyEntryPOI(RuleImplementation):
 
     COVERAGE_NOTE = (
         "The precedence order (super BPR > BPR > plain imbalance) is implemented and is "
-        "quoted doctrine, but WHICH type a given band is classified as is not stable: "
-        "PRIM-002's SUPER_BPR promotion has no time bound, so the share grows with the "
-        "caller's lookback (23% at 150 bars, 61% at 999) and the shadow and the backtest "
-        "pass different lengths. T-0020 owns that. Fill state is RECORDED and not filtered "
-        "on — the statement makes no admissibility claim about it, and excluding filled "
-        "imbalances would be an invented rule wearing this id."
+        "quoted doctrine. The classification upstream WAS unstable — PRIM-002's promotion "
+        "had no time bound, so the share grew with the caller's lookback and the shadow "
+        "and the backtest disagreed — and T-0020 fixed it on 2026-08-15: the scan is now "
+        "causal, direction-constrained and bounded by a DECLARED lookback that is ours "
+        "and unratified. Fill state is RECORDED and not filtered on — the statement makes "
+        "no admissibility claim about it, and excluding filled imbalances would be an "
+        "invented rule wearing this id."
     )
 
     @classmethod

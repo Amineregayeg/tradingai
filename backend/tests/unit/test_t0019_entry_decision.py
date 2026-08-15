@@ -5,12 +5,19 @@ fires. So each negative is mutated in BOTH directions: the thing it forbids must
 thing it explicitly permits must pass. A one-directional test on a negative gate proves only
 that the gate is quiet.
 
-NO CRITERION HERE ASSERTS WHAT PRIM-002 WILL CLASSIFY A BAND AS. The SUPER_BPR promotion at
-`prim_002_imbalances.py:238-242` has no time bound, so the share grows with the caller's
-lookback (23% at 150 bars, 61% at 999) and the shadow (320 bars) and the backtest (250) would
-disagree about the same setup. T-0020 owns that. ENTRY-001's ranking is tested over an
-EXPLICIT candidate list, which has no lookback in it at all — the ranking is deterministic
-given inputs; only the classification upstream is not.
+T-0020 LANDED ON 2026-08-15 AND THE PROHIBITION THIS PARAGRAPH CARRIED IS DISCHARGED. It
+read: no criterion here may assert what PRIM-002 will classify a band as, because the
+promotion had no time bound, the share grew with the caller's lookback, and the shadow (320
+bars) and the backtest (250) would disagree about the same setup.
+
+The scan is now causal, direction-constrained and bounded by a declared lookback, and every
+band the 250-bar and 999-bar windows both see is classified identically. So the ordering IS
+now asserted over detected bars — `test_the_precedence_ordering_holds_over_detected_bars`,
+at the bottom of this file, is the assertion the three deferrals were waiting for.
+
+The ranking tests above still use an EXPLICIT candidate list, and that stays: a ranking rule
+should be tested on ranking. The difference is that it is now a choice rather than a
+restriction.
 """
 from __future__ import annotations
 
@@ -91,9 +98,11 @@ def test_a_block_that_does_not_overlap_the_poi_is_not_recorded_as_colliding():
 def test_the_precedence_order_is_deterministic_over_an_explicit_candidate_list():
     """The ranking, tested with NO lookback in the fixture.
 
-    This asserts what ENTRY-001 does with candidates it is GIVEN. It deliberately does not
-    assert what PRIM-002 would classify a band as over live bars — that is the value which
-    moves with the caller's lookback, and T-0020 owns it.
+    This asserts what ENTRY-001 does with candidates it is GIVEN, which is the right scope
+    for a ranking rule. It does not assert what PRIM-002 classifies a band as over real
+    bars — that is now stable (T-0020, 2026-08-15) and is asserted separately by
+    `test_the_precedence_ordering_holds_over_detected_bars`, so the two properties stay
+    testable independently rather than one hiding a regression in the other.
     """
     candidates = [
         _imb("plain", "FVG", 99.0, 101.0, idx=0),
@@ -437,3 +446,87 @@ def test_every_emitted_field_carries_provenance():
     ):
         missing = set(ev.values) - set(ev.value_provenance)
         assert not missing, f"{ev.rule_id} emits {sorted(missing)} with no provenance"
+
+
+# ---------------------------------------------------------------------------
+# T-0020 criterion 9a — THE ASSERTION THREE DEFERRALS WERE WAITING FOR
+# ---------------------------------------------------------------------------
+def test_the_precedence_ordering_holds_over_detected_bars():
+    """`super BPR > BPR > plain imbalance`, over REAL bars rather than a handed list.
+
+    WHY THIS IS A SEPARATE TEST AND WHY IT COULD NOT BE WRITTEN UNTIL NOW. Three places —
+    this file's header, `entry_001_imbalance_poi.py`'s docstring, and PRIM-002's — carried
+    the same prohibition: no rule may assert an expected outcome of the precedence ordering
+    over detected bars, because the same band classified differently depending on how much
+    history the caller passed. Discharging those sentences without writing this test would
+    have deleted the debt rather than paid it.
+
+    Every test above hands ENTRY-001 an explicit candidate list, so it proves the RANKING
+    is correct given inputs and proves nothing about the inputs. This one runs PRIM-002
+    over the committed 999-bar corpus and ranks what it actually finds — which is the
+    composition the live engine sees.
+
+    AND WHAT THIS TEST DOES NOT DO, MEASURED RATHER THAN ASSUMED. Removing T-0020's
+    lookback bound — reinstating the defect this test was gated on — leaves it GREEN. At
+    250 and 320 bars the strongest type present is the same either way, so the chosen POI
+    does not move and the agreement assertion below is satisfied by the broken code too.
+
+    So this is not the test that catches the defect. `test_t0020_super_bpr_stability.py
+    ::test_the_two_live_callers_never_disagree` is, and dropping the bound turns it red.
+    What this one adds is the property nothing else covers: that ENTRY-001 applies its
+    precedence order to REAL PRIM-002 output rather than only to lists a test handed it.
+    Both are worth having; only one of them discriminates, and saying which is the point.
+    """
+    import csv
+    from pathlib import Path
+
+    from app.services.rules.prim_001_swings import Bar
+    from app.services.rules.entry_001_imbalance_poi import SUB_RANK
+    from app.services.rules.prim_002_imbalances import ImbalanceInventory
+
+    fixture = Path(__file__).resolve().parents[1] / "fixtures" / "btcusdtp_5m_999.csv"
+    bars = []
+    with fixture.open() as fh:
+        for row in csv.DictReader(fh):
+            bars.append(Bar(
+                time=datetime.fromisoformat(row["time"]),
+                open=float(row["open"]), high=float(row["high"]),
+                low=float(row["low"]), close=float(row["close"]),
+            ))
+
+    # THE TWO LIVE WINDOW LENGTHS. The whole point is that they must agree — the shadow
+    # fetches 320 bars and the backtest 250, and before T-0020 the same band could be a
+    # SUPER_BPR in one and a BPR in the other.
+    chosen: dict[int, str] = {}
+    for window in (250, 320):
+        detected = ImbalanceInventory.detect(bars[-window:], tf="5M")
+        admissible = [i for i in detected if i.type in SUB_RANK]
+        assert admissible, f"no admissible candidates detected at {window} bars"
+
+        # Pick a price the strongest candidate actually covers, so the location filter is
+        # not what decides the outcome.
+        strongest_rank = min(SUB_RANK[i.type] for i in admissible)
+        target = next(i for i in admissible if SUB_RANK[i.type] == strongest_rank)
+        at_price = (target.price_low + target.price_high) / 2.0
+
+        ev = ImbalanceIsTheOnlyEntryPOI.evaluate(admissible, [], at_price=at_price)
+        poi = ev.values["entry_poi"]
+        assert poi is not None, f"nothing selected at {window} bars"
+
+        here = [i for i in admissible if i.price_low <= at_price <= i.price_high]
+        best_here = min(SUB_RANK[i.type] for i in here)
+        assert poi["sub_rank"] == best_here, (
+            f"at {window} bars ENTRY-001 chose sub_rank {poi['sub_rank']} where rank "
+            f"{best_here} was available at that price — the precedence order is not "
+            "being applied to what PRIM-002 actually detected"
+        )
+        chosen[window] = poi["type"]
+
+    # AND THE TWO WINDOWS AGREE. This is the half that was impossible to assert before:
+    # the ordering was always implemented correctly, but the TYPES it ordered moved with
+    # the caller's lookback, so the same bar produced different entries in the shadow and
+    # the backtest.
+    assert chosen[250] == chosen[320], (
+        f"the backtest window chose a {chosen[250]} and the shadow window a "
+        f"{chosen[320]} on the same price action"
+    )
