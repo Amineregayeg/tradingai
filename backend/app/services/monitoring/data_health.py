@@ -589,7 +589,27 @@ async def panel_health() -> dict:
         newest_open = got.frame.index[-1].to_pydatetime()
         newest_close = _as_utc(newest_open) + timedelta(seconds=bar_seconds)
         age_bars = (now - newest_close).total_seconds() / bar_seconds
-        if age_bars >= PANEL_DOWN_BARS:
+        if age_bars < 0:
+            # A BAR THAT CLOSES IN THE FUTURE IS NOT FRESH — IT IS UNMEASURABLE.
+            #
+            # The comparison chain below is one-sided, so without this a negative age
+            # falls straight through to `fresh` and the monitor reports perfect health
+            # forever. That is the catastrophic direction: not alarming every cycle,
+            # which someone would notice and mute, but NEVER alarming, which nobody
+            # notices at all.
+            #
+            # Two ways to get here and neither is exotic. `bar_seconds` comes from
+            # `ENTRY_TF` while the panels are read at `signal_tf` — equal by PLUMBING,
+            # not by definition (see `scope.timeframe_coupling`) — so a divergence makes
+            # every close time land one wrong interval into the future. And a host clock
+            # behind the exchange's timestamps does the same thing for free.
+            #
+            # Deliberately NOT `stale` or `down`: both assert something about the FEED,
+            # and the feed may be perfectly healthy while the clock or the timeframe is
+            # wrong. `unavailable` means nobody served this panel; this is its sibling —
+            # served, and the arithmetic is impossible.
+            recency_status = "invalid"
+        elif age_bars >= PANEL_DOWN_BARS:
             recency_status = "down"
         elif age_bars >= PANEL_STALE_BARS:
             recency_status = "stale"
@@ -602,7 +622,13 @@ async def panel_health() -> dict:
             "newest_bar_close": newest_close.isoformat(),
             "bar_seconds": bar_seconds,
         }
-        if recency_status != "fresh":
+        if recency_status == "invalid":
+            recency["warning"] = (
+                f"{asset}: newest complete bar CLOSES {abs(age_bars):.1f} {ENTRY_TF} bars "
+                "in the FUTURE — this panel's age cannot be measured, and the cause is "
+                "the clock or the timeframe rather than the feed"
+            )
+        elif recency_status != "fresh":
             recency["warning"] = (
                 f"{asset}: newest complete bar closed {age_bars:.1f} {ENTRY_TF} bars ago"
             )
@@ -646,8 +672,13 @@ async def panel_health() -> dict:
     stale = [a for a, p in panels.items() if p["recency"]["status"] in ("stale", "down")]
     thin_panels = [a for a, p in panels.items() if p["thickness"]["status"] == "thin"]
     absent = [a for a, p in panels.items() if p["recency"]["status"] == "unavailable"]
+    # Its own list. Folding it into `stale_panels` would send an operator to restart a
+    # feed that is working, and folding it into `absent_panels` would say nobody served
+    # a panel that was served.
+    unmeasurable = [a for a, p in panels.items() if p["recency"]["status"] == "invalid"]
 
-    if absent or any(p["recency"]["status"] == "down" for p in panels.values()):
+    if (absent or unmeasurable
+            or any(p["recency"]["status"] == "down" for p in panels.values())):
         status = "down"
     elif stale or thin_panels:
         status = "failing"
@@ -663,6 +694,7 @@ async def panel_health() -> dict:
         "stale_panels": stale,
         "thin_panels": thin_panels,
         "absent_panels": absent,
+        "unmeasurable_panels": unmeasurable,
         "panels": panels,
         "scope": scope,
     }

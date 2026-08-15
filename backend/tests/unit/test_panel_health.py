@@ -389,3 +389,46 @@ async def test_thin_recent_bars_do_not_manufacture_staleness(monkeypatch):
     assert r["panels"]["TOTAL"]["thickness"]["status"] == "thin"
     assert r["stale_panels"] == []
     assert r["thin_panels"] == ["TOTAL"]
+
+
+async def test_a_bar_closing_in_the_future_is_unmeasurable_not_fresh(monkeypatch):
+    """Review's finding against T-0015's own implementation, and it is the never-alarm end.
+
+    The status chain is one-sided — `>= 4`, `>= 2`, else fresh — so a NEGATIVE age falls
+    straight through to `fresh` and the monitor reports perfect health forever. It is
+    reachable two ways, neither exotic: `bar_seconds` comes from `ENTRY_TF` while the
+    panels are read at `signal_tf` (equal by plumbing, not by definition), so a divergence
+    puts every close time an interval into the future; and a host clock behind the
+    exchange's does the same for free.
+
+    THIS IS THE STATE MY OWN BROKEN FIXTURE WAS IN. The first version of
+    `test_the_threshold_tracks_entry_tf_rather_than_a_minute_count` read a 5m frame at 1H,
+    which is exactly this condition — and I diagnosed it as a bad test and fixed the test,
+    which removed the only thing reaching the hole. So it is asserted here on the
+    condition itself rather than via a mislabelled fixture.
+
+    Not `stale` and not `down`: both assert something about the FEED, and the feed can be
+    perfectly healthy while the clock or the timeframe is wrong.
+    """
+    panels = _all_fresh(1.0)
+    # A bar whose close is two intervals ahead of now.
+    panels["TOTAL"] = PanelFetch("TOTAL", _frame(-15.0, samples=30), 30)
+    _panels(monkeypatch, panels)
+
+    r = await dh.panel_health()
+    rec = r["panels"]["TOTAL"]["recency"]
+
+    assert rec["status"] == "invalid", (
+        f"a bar closing in the future reported {rec['status']!r} at {rec['age_bars']} "
+        "bars — a negative age is an unusable measurement, not freshness, and reading it "
+        "as fresh means this monitor never alarms again"
+    )
+    assert rec["age_bars"] < 0
+    assert "FUTURE" in rec["warning"]
+    assert "clock or the timeframe rather than the feed" in rec["warning"]
+
+    # Its own list, and it must not be laundered through the other two.
+    assert r["unmeasurable_panels"] == ["TOTAL"]
+    assert r["stale_panels"] == [], "an unmeasurable panel was reported as a stale feed"
+    assert r["absent_panels"] == [], "an unmeasurable panel was reported as unserved"
+    assert r["status"] == "down", "the component must not read healthy"
