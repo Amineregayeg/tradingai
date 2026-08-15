@@ -9,6 +9,8 @@ emits.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -159,7 +161,74 @@ def test_every_rule_module_on_disk_is_imported():
     imported = {
         cls.__module__.rsplit(".", 1)[-1] for cls in rules_pkg.implementations().values()
     }
-    assert on_disk <= imported, f"not imported by rules/__init__.py: {sorted(on_disk - imported)}"
+    # THE MESSAGE SAYS WHAT THE ASSERTION CAN SUPPORT, AND NO MORE (B93).
+    # `implementations()` is a PROCESS-GLOBAL registry populated by any import, so this can
+    # only ever say "was this registered in THIS interpreter" — and pytest imports every
+    # collected test module before running any, so a test file that imports a rule module
+    # directly satisfies it whether or not `rules/__init__.py` mentions the module. The old
+    # message read "not imported by rules/__init__.py", a specific claim about a specific
+    # file that this assertion never checks, and it is the sentence someone trusts while
+    # debugging. `test_the_package_alone_registers_every_rule_module` below is the one that
+    # can actually make that claim.
+    assert on_disk <= imported, (
+        f"not registered in this interpreter: {sorted(on_disk - imported)}. "
+        "This does NOT establish that rules/__init__.py is missing them — this registry is "
+        "process-global and any import populates it. See "
+        "test_the_package_alone_registers_every_rule_module for the check that does."
+    )
+
+
+def test_the_package_alone_registers_every_rule_module():
+    """THE GUARD ABOVE IS VACUOUS FOR MOST MODULES. This is the one that is not (B93).
+
+    Measured, not asserted. Of the 26 modules in the guard's own domain (29 `.py` in
+    `rules/` minus the three `NOT_RULES` exclusions at `test_rules_base.py:157`), **23 are
+    imported directly by some test module**, and pytest imports every collected test module
+    before running any test. So for those 23 the assertion above is satisfied by the test
+    suite's own import side effects, and deleting them from `rules/__init__.py` leaves the
+    whole suite green while `check_rule_coverage.py` correctly reports them unimplemented.
+
+    That is not hypothetical: it happened to EXIT-004 / TARGET-001 / TARGET-003 during
+    T-0023, when an `__init__.py` edit was reverted in the shared tree. Fifty tests stayed
+    green, the guard above stayed green, and the coverage tool held at 39/104 — two
+    instruments disagreeing silently, **with the suite being the wrong one.**
+
+    So this spawns a clean interpreter that imports ONLY the package. No test file's imports
+    can reach it.
+
+    ITS OWN LIMIT, MEASURED THE SAME WAY RATHER THAN CAVEATED: rule modules import each
+    other, so removing ONE module's import block from `rules/__init__.py` often leaves it
+    registered anyway through a sibling. Removing each of the 26 in turn and re-importing
+    the package in a clean interpreter: **15 of 26 stay registered via a sibling (this test
+    is blind to those), 11 of 26 genuinely lose registration (this test catches those).**
+    It reliably catches a GROUP going missing — which is the case that occurred — and not
+    every single dropped line.
+    """
+    result = subprocess.run(
+        [
+            sys.executable, "-c",
+            "from app.services.rules import implementations;"
+            "print(','.join(sorted({c.__module__.rsplit('.',1)[-1] "
+            "for c in implementations().values()})))",
+        ],
+        cwd=Path(rules_pkg.__file__).parents[3],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0, f"importing the package alone failed:\n{result.stderr}"
+    registered = set(result.stdout.strip().split(","))
+
+    pkg_dir = Path(rules_pkg.__file__).parent
+    NOT_RULES = {"__init__", "base", "consolidation"}
+    on_disk = {p.stem for p in pkg_dir.glob("*.py") if p.stem not in NOT_RULES}
+
+    assert on_disk, "no rule modules found on disk — the scan is not looking where it thinks"
+    missing = sorted(on_disk - registered)
+    assert not missing, (
+        f"rules/__init__.py does not register: {missing}. These rule modules exist on disk "
+        "and the suite may well be green — a test importing them directly is enough for "
+        "that — but check_rule_coverage.py counts them as UNIMPLEMENTED, because a rule "
+        "nothing imports is invisible to the coverage report."
+    )
 
 
 def test_the_registry_reports_what_is_actually_implemented():

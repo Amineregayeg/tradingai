@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-15 (B90 CLOSED: EXIT-001 now reports `ticks_seen`, so an unobserved path and a long quiet one are no longer one record. Earlier, T-0022, the v1 exit model EXIT-001/EXIT-002 — the first rules in this programme that govern what happens AFTER a trade is taken, and SHADOW ONLY: nothing under `live/` or `broker/` imports them and `paper.py` still closes positions whole. B86 — `PaperPosition` has one `units`/`sl`/`tp` and `__slots__`, so it cannot represent a tranched position and the wiring task is a broker-layer change, not a call site. B87 — the 19:00 New York close is ours and UNRATIFIED, defaulted ON so shadow generates the evidence the ruling needs, and the wiring task must re-surface the question rather than inherit it. B88 — `ExitEvent` refuses `LIQUIDATION`, which is what makes criterion 1 enforceable at all, and becomes a hazard the moment a real liquidation can reach the exit path. B89 — a target at or inside 2R is refused outright because GATE-031 cannot run without GATE-025. Earlier, T-0021: B54 CLOSED — both tools collapse aliases and agree; every coverage figure now carries its space, and the script refuses to print an impossible set. B58 — the other tool is outside the repo, so half the agreement cannot be CI-enforced. Earlier, T-0016: the partially-evaluable requirements are enforced by script over the whole registry — B56, eleven emitted fields that cannot say where they came from, baselined not fixed and needing a task id; B57, the two of six standing requirements that script can actually enforce, so a green run is not read as six. Earlier the same day, T-0007: ENTRY_TF 1H -> 5m, the first live behaviour change. B37 CLOSED — the lookahead is out of production. B33 gained the instance it predicted: every legal execution timeframe would have broken the shadow; GATE-017 closed on the live path; B38 — GATE-018 stays OPEN; B39 — a conditional edit that matches nothing succeeds; B40 — the correlate margin is now 1.5x and nothing reports it shrinking)
+Last updated: 2026-08-15 (T-0023, target selection — EXIT-004 / TARGET-001 / TARGET-003, SHADOW ONLY like every rules task. B93 — a test can make a guard vacuous just by importing what the guard checks for: `test_every_rule_module_on_disk_is_imported` was vacuous for 23 of the 26 modules in its own domain; FIXED by a clean-interpreter guard, whose own limit is measured at 15 of 26 still reachable through a sibling and is NOT fixed. B95 — TARGET-001 and TARGET-003 are three levels, not two, and 'ignore size entirely' is the wrong implementation that looks safe. B96 — the active institutional destination has NO producer, so TARGET-001 registers unable to fire. B97 — `target_object_type` is lossier than PRIM-003's pool classes and INSTITUTIONAL_CANDLESTICK must never map to INSTITUTIONAL_LEVEL. Earlier, B90 CLOSED: EXIT-001 now reports `ticks_seen`, so an unobserved path and a long quiet one are no longer one record. Earlier, T-0022, the v1 exit model EXIT-001/EXIT-002 — the first rules in this programme that govern what happens AFTER a trade is taken, and SHADOW ONLY: nothing under `live/` or `broker/` imports them and `paper.py` still closes positions whole. B86 — `PaperPosition` has one `units`/`sl`/`tp` and `__slots__`, so it cannot represent a tranched position and the wiring task is a broker-layer change, not a call site. B87 — the 19:00 New York close is ours and UNRATIFIED, defaulted ON so shadow generates the evidence the ruling needs, and the wiring task must re-surface the question rather than inherit it. B88 — `ExitEvent` refuses `LIQUIDATION`, which is what makes criterion 1 enforceable at all, and becomes a hazard the moment a real liquidation can reach the exit path. B89 — a target at or inside 2R is refused outright because GATE-031 cannot run without GATE-025. Earlier, T-0021: B54 CLOSED — both tools collapse aliases and agree; every coverage figure now carries its space, and the script refuses to print an impossible set. B58 — the other tool is outside the repo, so half the agreement cannot be CI-enforced. Earlier, T-0016: the partially-evaluable requirements are enforced by script over the whole registry — B56, eleven emitted fields that cannot say where they came from, baselined not fixed and needing a task id; B57, the two of six standing requirements that script can actually enforce, so a green run is not read as six. Earlier the same day, T-0007: ENTRY_TF 1H -> 5m, the first live behaviour change. B37 CLOSED — the lookahead is out of production. B33 gained the instance it predicted: every legal execution timeframe would have broken the shadow; GATE-017 closed on the live path; B38 — GATE-018 stays OPEN; B39 — a conditional edit that matches nothing succeeds; B40 — the correlate margin is now 1.5x and nothing reports it shrinking)
 
 ---
 
@@ -1995,6 +1995,198 @@ that is not done, this will appear a third time.**
 
 **Neither defect affects the CONTENT of `B90` or `B91`.** Both entries are correct and in the file
 once. **What is damaged is the audit trail**, which is the thing the register exists to be.
+
+### B93 — a test can make a guard VACUOUS just by importing what the guard checks for: 23 of 26
+
+**Filed 2026-08-15 by Execute, T-0023. Found by accident, and the accident is not the finding —
+these are repo-wide numbers, measured.**
+
+**`test_rules_base.py::test_every_rule_module_on_disk_is_imported` exists to catch a rule module
+that `rules/__init__.py` does not import**, because such a module is invisible to
+`check_rule_coverage.py` — it counts as unimplemented while sitting in the tree. **It cannot do
+that job for almost any module in its domain.**
+
+    guard domain                              26   (29 .py in rules/ minus the three
+                                                    NOT_RULES at test_rules_base.py:157)
+    imported DIRECTLY by some test module      23
+    guard therefore VACUOUS for                23 / 26
+    still protected                             3   gate_017_analysis_only_tfs,
+                                                    gate_037_no_premium_discount,
+                                                    grade_031_declared_quorums
+
+**The mechanism: `implementations()` is a PROCESS-GLOBAL registry populated by any import, and
+pytest imports every collected test module before running any test.** So a test file that imports
+a rule module directly has already registered it by the time the guard runs. No mutation, no bad
+assertion — **the collection order does it.**
+
+**Observed live, not theorised.** During T-0023 an `__init__.py` edit was reverted in the shared
+tree (see **B94**). All 50 tests in the new file stayed green, **the guard stayed green**, and
+`check_rule_coverage.py` correctly held at 39/104 with EXIT-004, TARGET-001 and TARGET-003 reported
+unimplemented. **Two instruments disagreeing silently — and the suite was the wrong one**, which is
+the inversion worth keeping, because the suite is the instrument everyone trusts. That is `B54`'s
+shape reached by a new route: **a test masking a guard through its own imports.**
+
+**And the guard's failure message asserted something the guard cannot know.** It read *"not imported
+by rules/__init__.py"* — a specific claim about a specific file — while the assertion can only
+establish *"not registered in THIS interpreter"*. **The standing family one layer nastier: the
+output does not discriminate AND it names the specific thing it did not check**, in the sentence a
+reader trusts while debugging. Found by Review.
+
+**FIXED in this task, both halves.** `test_the_package_alone_registers_every_rule_module` spawns a
+clean interpreter importing ONLY the package, so no test's imports can reach it; the old guard's
+message now says only what it can support and points at the new one.
+
+**THE NEW GUARD'S OWN LIMIT, MEASURED THE SAME WAY RATHER THAN CAVEATED — this is the part that is
+still open.** Rule modules import each other, so removing one module's import block from
+`rules/__init__.py` often leaves it registered anyway through a sibling. Removing each of the 26 in
+turn and re-importing the package in a clean interpreter:
+
+    STILL REGISTERED via a sibling — new guard BLIND   15 / 26
+    registration genuinely lost   — new guard CATCHES  11 / 26
+
+**So it reliably catches a GROUP going missing, which is the case that occurred, and NOT every
+single dropped import line. NOT FIXED: the 15.**
+
+**State all three numbers together, or "fixed" reads as "covered":**
+
+    OLD guard, in the full suite    catches   3 / 26
+    NEW guard, clean interpreter    catches  11 / 26
+    STILL BLIND                              15 / 26
+
+**3 → 11 is a real improvement and it is not 26. The two blindnesses are one property each of two
+different instruments, not two properties of one:** 23/26 is the OLD guard in a full-suite context
+(a test already imported it, so it never had a chance); 15/26 is the NEW guard in a clean one (a
+sibling re-imports it). The first is fixed; the second is not.
+
+**THE CHEAP INSTRUMENT THAT WOULD CLOSE ALL 15, named here so whoever takes it does not re-derive
+it (Review's, and it is better than what was built).** Parse `rules/__init__.py` with `ast` and
+assert every module on disk appears in an import statement. No subprocess, no interpreter state.
+
+* **It measures the invariant the failure message actually claims** — *"not imported by
+  `rules/__init__.py`"* — instead of *"was registered in this interpreter by anybody"*. **That
+  substitution is what created BOTH blindnesses: registration is a proxy, and it is the proxy that
+  has failed twice.**
+* **Sibling re-import cannot defeat it, because nothing is executed.** A module reachable only
+  through a sibling has no import statement in `__init__.py`, so it fails.
+* Its one limit: it assumes `__init__.py` imports explicitly rather than looping with `importlib`.
+  **True today**, and a conversion to a dynamic loop would break it loudly — the right direction.
+
+**A SMALL FOLLOW-UP TASK, not filed as done.** It was left out of T-0023 deliberately: that task
+was three target-selection rules and this would have been its third expansion.
+
+**AND THE LESSON FROM HOW THE MEASUREMENT NEARLY WENT WRONG, which is not "check your numbers".**
+The first harness reported **7/26** and it was an artefact: the remover assumed a multi-line import
+block's first line ends with `(`, and these end with `# noqa: F401`, so it deleted the header and
+left a dangling body. **It was caught only because the bad edits BROKE LOUDLY** — 17 of 26 failed to
+import, a signal impossible to read as a result. **Had the remover produced syntactically valid but
+semantically wrong edits, 7/26 would have looked exactly like a clean measurement.** Nothing in the
+process would have caught it. **A harness whose failures are silent is a harness whose findings are
+unfalsifiable**, and that property is worth checking before trusting any measurement, including the
+ones in this entry.
+
+### B95 — TARGET-001 and TARGET-003 look contradictory and are not: THREE levels, not two
+
+**Filed 2026-08-15 by Execute, T-0023. Not a defect — a reading that the next person will get wrong
+without this, because the two statements contradict each other on their face.**
+
+    TARGET-001   "The concerning liquidity is NOT simply the closest liquidity";
+                 "Distance alone never determines the destination"
+    TARGET-003   "the engine should target the CLOSEST one first"
+
+**The reconciliation is not an interpretation. TARGET-001 states the carve-out itself and hands it
+to TARGET-003, which then adds a level the carve-out does not mention:**
+
+    LEVEL 1   WHICH OBJECTIVE          TARGET-001   distance is BARRED as an input
+    LEVEL 2   ACROSS timeframes        TARGET-003   SIZE RANKS
+    LEVEL 3   within one dir + one TF  TARGET-003   proximity wins, size is NOT the tie-break
+
+*"Proximity survives ONLY as an ordering input among same-direction, same-timeframe candidates"*
+(TARGET-001, delegating) and *"SIZE IS NOT A SAME-TF SELECTOR. Size still ranks ACROSS timeframes;
+it never beats proximity WITHIN one"* (TARGET-003, occupying it and naming a middle level).
+
+**So distance is BARRED at level 1 and MANDATED at level 3. An implementation using distance in the
+first, or size in the third, is wrong in opposite directions — and both pass a test that only checks
+a target came out.**
+
+**THE TRAP IS LEVEL 2, AND IT IS THE CONSERVATIVE-LOOKING CHOICE.** *"Ignore size entirely"*
+satisfies every same-timeframe test — size never breaks a tie because size is never read — and
+**violates the rule**, because size is the cross-timeframe ranker. `§9.B IM13`'s pixels state both
+halves at once: *"1D+1D LIQ > 1D LIQ. However 1D+1D area is NOT our concern at the moment."*
+
+**Implemented as two functions with different orderings, and the tests pair them: the SAME large
+pool must WIN across timeframes and LOSE within one.** A single sort cannot produce both results,
+which is what makes the separation checkable rather than asserted. Related: **B96**.
+
+### B96 — "the active institutional destination" has NO PRODUCER, so TARGET-001 cannot fire
+
+**Filed 2026-08-15 by Execute, T-0023. Measured before building, as the plan required.**
+
+**TARGET-001's selector is *"the next unresolved objective that supports the active institutional
+destination"*. Nothing in this repository produces an institutional destination** — zero mentions of
+`institutional_destination`, `active_destination` or any spelling, anywhere under `app/`. No rule
+computes one and none is planned in any wave.
+
+**So TARGET-001 consumes an input the engine cannot supply.** It is taken as a PARAMETER, and
+`CANNOT_FIRE_WITHOUT = ("active_institutional_destination",)` is declared so
+`check_rule_coverage.py` files it under *"implemented but CANNOT FIRE"* rather than letting it
+inflate effective coverage. **Registering it moves implemented 39 → 42 and effective 36 → 38, not
+39** — the distinction `B54` exists for.
+
+**Why no heuristic was substituted, which is the whole point:** the obvious fallback is to infer the
+destination from price or from the nearest structure. **That is the banned reasoning wearing a
+different name** — TARGET-001's `banned_inputs` are `fixed_pct_distance` and
+`atr_multiple_distance`, and its statement forbids asking *"is liquidity within X% or Y × ATR?"*.
+Inferring a destination by proximity would violate the rule at the exact point the rule exists to
+govern, while passing every test that only checks a destination was present.
+
+**What it could break:** nothing today — the rule returns `NOT_APPLICABLE` naming the missing
+producer, and nothing calls it. **At wiring, TARGET-001 is inert and the target layer has no
+selector**, so EXIT-004 would be handed candidates nobody chose between. Deriving the destination is
+its own task and needs Salim's structure, not our inference. Related: **B95**, **B97**.
+
+### B97 — `target_object_type` is lossier than the pool classes feeding it, and one mapping is a TRAP
+
+**Filed 2026-08-15 by Execute, T-0023. The first LIVE instance of `B77` — a contract enum lossier
+than the vocabulary feeding it — and it is live because this task populates the field.**
+
+    PRIM-003 BUILDS            faithful target_object_type?
+    SWING_LEVEL                NO   -> widened to the generic LIQUIDITY_POOL
+    INSTITUTIONAL_CANDLESTICK  NO   -> widened to LIQUIDITY_POOL. SEE BELOW.
+    EQUAL_HIGHS_LOWS           yes
+    SESSION_LEVEL              yes
+
+**Two of the four classes PRIM-003 actually produces have no faithful target type.** (The other
+three of its seven — `PARABOLIC_COMPRESSED`, `INSTITUTIONAL_LEVEL`, `DIAGONAL_POOL` — are its
+declared `UNBUILT_CLASSES`, each needing a number Salim declined to fix, so counting them here would
+inflate a live problem with a latent one.)
+
+**THE TRAP: `INSTITUTIONAL_CANDLESTICK` MUST NOT MAP TO `INSTITUTIONAL_LEVEL`.** The names differ by
+one word and the objects are different. `INSTITUTIONAL_LEVEL` is a monthly/weekly/daily **deep-V
+swing extreme** — what `TARGET-007` is OPEN about, because *"a 'Deep-V' is not defined by a fixed
+retracement percentage or ATR value"*. `INSTITUTIONAL_CANDLESTICK` is **PDH/PDL, PWH/PWL, PMH/PML and
+the Monday range**. Mapping one onto the other files every previous-day-high target as a deep-V
+extreme: **a CONFIDENT WRONG CLASS, strictly worse than a visibly generic one**, because the generic
+bucket announces its imprecision and the wrong class does not. **Nothing in the schema warns anyone,
+and a future edit "tidying up" the mapping lands on it** — so the test is written against the
+mistake (`test_institutional_candlestick_does_NOT_map_to_institutional_level`) rather than for the
+behaviour.
+
+**Half-filled imbalances also widen**, to `UNFILLED_IMBALANCE`. `PRIM-002` distinguishes
+`HALF_FILLED` and even carries `fill_fraction`; the statement names *"unfilled or half filled"* as
+targets both; the enum has one value for the pair.
+
+**Not fixed by widening the schema — that is not ours.** The field is SET rather than omitted
+(`target_object_type` is not in the schema's `required` list, so omitting would validate and would
+make *"no faithful value exists"* read as *"nobody populated this"*), `type_is_widened` is emitted
+beside it, and the true class is recoverable by joining `target_object_id` to the linked
+`setup_evaluation`'s `primitives.liquidity_pools[]`.
+
+**The honest cost, which a duplicate would have hidden: a `trade_execution` read ALONE cannot tell
+you the pool class.** That is real. The remedy is the join, not a second copy — a pool's class is
+immutable, so a stored copy can only ever drift. **`fill_state_at_selection` IS carried, and is not
+the same kind of thing:** an imbalance's fill state ADVANCES as price approaches, so the join returns
+the state NOW and never the state WHEN THE TARGET WAS CHOSEN. One is a duplicate; the other is the
+only copy of a different fact. See **B91** for the general form. Related: **B77**.
 
 ### B94 — why the announce-your-writes obligation is ABSOLUTE: the reader has no detection channel
 
