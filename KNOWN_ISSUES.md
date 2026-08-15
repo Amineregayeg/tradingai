@@ -1829,6 +1829,54 @@ traded. PRIM-002 feeds ENTRY-001, which is every admissible entry object in the 
 
 **NOT fixed, and it is its own entry:** see **B75**. Related: **B74**.
 
+### B90 — EXIT-001's `NOT_APPLICABLE` has no denominator, and the ratification question needs a rate
+
+**Filed by Review 2026-08-15 from the T-0022 verdict at `e9ad0df`. MEASURED, not argued. The task
+PASSED — every numbered criterion is satisfied — and this is the gap the wiring task must not
+inherit silently.**
+
+**Two simulations of the same plan:**
+
+    A   zero ticks                                 verdict=NOT_APPLICABLE  events=0  runner_open=True  remaining=1.0
+    B   500 ticks over 4h09m, nothing ever fires   verdict=NOT_APPLICABLE  events=0  runner_open=True  remaining=1.0
+
+    verdicts identical : True
+    values identical   : True     <- the whole telemetry dict, byte for byte
+
+**`ExitSimulation` carries `plan, events, runner_open, remaining_fraction, session_close_active` and
+no tick count or path span.** So *"the path ran out"* and *"there was no path"* produce one record.
+
+**The module sets the standard and stops one case short.** Its docstring: *"`runner_open`
+DISTINGUISHES 'the path ran out' FROM 'the runner ended'."* **That is true, and neither is
+distinguished from "nothing was observed."** The claim is incomplete, not false.
+
+### Why it bites
+
+**Criterion 5's rationale:** *"produces a measurable record of **how often** a runner would have been
+cut and what it would have cost."* **How often is a rate.**
+
+**The numerator is present and well built** — `runner_cut_by_session_close` and
+`runner_r_at_session_close`, named rather than implied, exactly as `5-ii` requires. **The denominator
+is not recoverable**, because every `NOT_APPLICABLE` reads the same whether it observed a full
+session or nothing. **"47 runners were cut" cannot ratify a parameter without "out of how many."**
+
+**And the 19:00 close is exactly the parameter awaiting ratification** (`B87`, unanswered by Salim
+since 2026-08-15). The shadow evidence is the whole argument for implementing the close rather than
+defaulting it off — **so evidence that cannot carry a rate weakens the reason the close was built.**
+
+### The remedy is one field, and this codebase already applies it next door
+
+**`LadderOffForV1.evaluate([])` returns PASS — correct, an open position has zero tranches — and
+reports `tranche_count: 0` alongside it**, so an empty PASS is distinguishable from a conformant one.
+**That is `B84`'s prescribed remedy, implemented in EXIT-002 and absent from EXIT-001.**
+
+Add `ticks_seen` to `ExitSimulation` and its `values`, and the path span (`first_ts`/`last_ts`) if
+the rate is ever to be conditioned on whether the observation window contained a 19:00 boundary at
+all. **Then `NOT_APPLICABLE over 0 ticks` and `NOT_APPLICABLE over 500` stop being the same fact.**
+
+**Standing family:** an output that does not discriminate between working and broken — here, between
+never measured and measured and empty. Related: **B84**, **B87**, **B81**.
+
 ### B86 — `PaperPosition` CANNOT REPRESENT A TRANCHED POSITION, and the v1 exit model needs one
 
 **Filed 2026-08-15 by Execute, T-0022. This is the plan's own named risk, measured rather than
@@ -1961,6 +2009,54 @@ cases fall on opposite sides.** Caught by the parametrised test at `target == 11
 first run. **Anywhere a comparison helper is shared between a market question and an admissibility
 question, the shared helper is where that distinction gets lost** — not generalised into its own
 entry because this is one instance and one is not a pattern, but worth the grep if a second appears.
+
+### B91 — a snapshot of a MUTABLE value is EVIDENCE, not a duplicate — the limit of "never store a second copy"
+
+**Found 2026-08-15 by Execute while applying a Manager ruling, and it is a refinement of that ruling
+rather than an exception to it. Filed because the rule as I stated it would, applied literally, delete
+evidence.**
+
+**The ruling was:** do not copy a liquidity pool's `class` into the target record — set
+`target_object_id` to the pool's own id and recover the class by joining to the linked
+`setup_evaluation`. **Rationale: a second copy can go stale, and the copy nothing checks is the one
+that goes wrong.**
+
+**Execute applied it, dropped `source_class` and `tf` as duplicates, and KEPT `fill_state` — then
+flagged the asymmetry rather than letting it pass unexplained.** It is right, and the test it found is
+the one my rule was missing:
+
+    pool `class`          IMMUTABLE.  A stored copy can only ever DRIFT FROM the truth.   -> DUPLICATE
+    imbalance fill_state  MUTATES as price approaches. A join recovers the state NOW,
+                          never the state WHEN THE TARGET WAS CHOSEN.                     -> EVIDENCE
+
+> **"It was HALF_FILLED when we selected it as a target" is unrecoverable by any later read.** By
+> settle time the imbalance may be `FULLY_FILLED`, and the join returns that — **correct, and
+> useless.** So the stored value is not a second copy of a fact; **it is the only copy of a different
+> fact.**
+
+### The general form
+
+**"Do not store a second copy" assumes the source can be re-read to get the same answer. That
+assumption is what makes a copy redundant, and it fails for anything that changes.**
+
+**So the test before deduplicating is not *"is this value available elsewhere"* — it is *"will
+re-reading it later return the value I mean?"*** For an immutable attribute, yes, and the copy is
+waste. **For a state that advances, no** — and a decision record that omits it can never be
+reconstructed, because **the world moved on and the source now describes the world, not the
+decision.**
+
+**This is the same distinction as B34's stale-claim family seen from the other side.** There, the
+danger is a copy that goes false. **Here, the copy is the only thing that stays true** — the SOURCE is
+what goes false relative to the moment being recorded.
+
+### And name the field so it cannot be misread
+
+**`fill_state` alone invites the reading that it is current state, which the join would then
+contradict.** A point-in-time field must say so in its name — `fill_state_at_selection` — **the same
+device as `risk_altcoin_heavy_as_written`, where the suffix is the registry warning a reader that the
+value is a quotation rather than an input.**
+
+**A snapshot that does not announce itself as a snapshot is a stale value waiting to be believed.**
 
 ### B85 — the id ledger issued a DUPLICATE, and it took two independent failures that each looked harmless
 
