@@ -1860,6 +1860,22 @@ it.** Execute #3 is the first seat here to stop on that ground rather than on ru
 **its predecessors both exhausted themselves mid-work and left a handoff written under pressure.** This
 one wrote the handoff deliberately, with room.
 
+### Footnote, and it is the same-claim-two-homes rule catching its own author
+
+**This entry is `B80`. The commit that introduced it says `B78` in its subject line** — and `B78`
+exists, belongs to Execute, and is about the reproducibility of a declared rate. **So a reader
+searching `git log` for `B80` finds nothing, and a reader following the `B78` message finds an entry
+about something else.** Corrected by a follow-up commit rather than a force-push.
+
+**The mechanism worked and the hand-typed copy did not.** `bus.py bid` returned `B80` correctly —
+Execute had taken 78 and 79 while I was working, which is exactly the collision the ledger exists to
+prevent. **The script wrote the heading from the returned variable and I typed the number into the
+commit message by hand.**
+
+> **The generated copy was right; the hand-copied one was wrong. That is the unaudited-copy rule from
+> this preamble, and the unaudited copy was the commit message** — no test, no CI row, and nothing
+> pointing at it, exactly as that entry predicts.
+
 ### And the same session produced a third-order instance of the truncation failure
 
 **I built `agents/rule_show.py` specifically because a 420-character slice cost `T-0023` a rule level.
