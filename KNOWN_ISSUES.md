@@ -1829,6 +1829,40 @@ traded. PRIM-002 feeds ENTRY-001, which is every admissible entry object in the 
 
 **NOT fixed, and it is its own entry:** see **B75**. Related: **B74**.
 
+### B77 — `poi_type` cannot express two of the five imbalance types, and M6 is where that bites
+
+**Found 2026-08-15 by the Manager while auditing the schema ahead of T-0017, for the failure class
+`B65` established: an artefact that cannot represent what the engine produces.** **NOT a live defect —
+filed so it is not discovered by whoever is mid-build on M6.**
+
+    /$defs/imbalance/properties/type            FVG · VOLUME_IMBALANCE · GAP · BPR · SUPER_BPR
+    /$defs/.../imbalance_primary_poi/poi_type    IMBALANCE ·                GAP · BPR · SUPER_BPR
+
+**Two enums, overlapping objects, different vocabularies.** The mapping M6 must write:
+
+    FVG               -> IMBALANCE      lossy: the name changes
+    VOLUME_IMBALANCE  -> IMBALANCE      LOSSY: collapses with FVG, no distinct slot
+    GAP / BPR / SUPER_BPR               identity
+
+> **So a record can say the primary POI was "an imbalance" and cannot say WHICH KIND.** `FVG` and
+> `VOLUME_IMBALANCE` are distinct primitives the detector separates and the contract then merges —
+> **and the merge is invisible in the stored record**, which is the property that makes it worth an
+> entry rather than a note.
+
+**Why it is not live, stated so nobody spends time confirming it:** `entry_criteria` is **absent from
+`setup_evaluation.required`**, nothing in production populates it, and `shadow.py:694` says so
+explicitly — *"`entry_criteria`, none of which exists before M6"*. **But if `entry_criteria` IS present
+it requires `imbalance_primary_poi`**, so the first M6 record that carries entry criteria at all must
+resolve this mapping. **There is no partial adoption.**
+
+**And `poi_type` itself is optional inside `imbalance_primary_poi`** (no `required` list), so **the
+lazy path is to omit it** — a POI recorded with `met: true` and no type, which validates. **That is the
+outcome to forbid in M6's plan rather than discover in its review.**
+
+**Same family as `B65` and one degree milder:** there, the truthful record could not be stored; here it
+can be stored and says less than the engine knew. **Unrepresentable versus lossy — and lossy is the
+one that passes validation.**
+
 ### B76 — a BATCHED push leaves intermediate commits with no run, and tree identity cannot rescue them
 
 **Found 2026-08-15 by Review inside a T-0015 verdict — it declined to call the range clean — and
