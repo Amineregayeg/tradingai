@@ -2188,6 +2188,53 @@ the same kind of thing:** an imbalance's fill state ADVANCES as price approaches
 the state NOW and never the state WHEN THE TARGET WAS CHOSEN. One is a duplicate; the other is the
 only copy of a different fact. See **B91** for the general form. Related: **B77**.
 
+### B98 — `DISTANCE_WORDS` rejects standard SMC vocabulary, and the rejection will read as a rule violation
+
+**Filed by Review 2026-08-15 from the T-0023 verdict at `119d773`. MEASURED, not reasoned. The task
+PASSED; this is a false positive waiting in a heuristic, not a defect in the rule.**
+
+`why_names_a_destination()` rejects a `why_selected` containing any of `DISTANCE_WORDS`, which
+includes the bare substrings **`"far"`** and **`"near"`**. **Run against realistic strings:**
+
+    False   the far edge of the daily order block
+    False   the far side of the H4 flip zone
+    False   the nearest unresolved high              <- correct, this IS a distance answer
+    True    the weekly equal highs at 112.5
+    True    sell-side liquidity under the Monday low
+    True    the unresolved daily high that the destination sits above
+
+**`far side` and `far edge` are standard SMC vocabulary for a STRUCTURAL location** — the far side
+of a flip zone is the same object `GATE-027`'s notes discuss under `§9.J IM79/IM86`, where a stop
+must cover the WHOLE zone. **A `why_selected` naming one is a structural answer, and the check
+reports it as a distance answer.**
+
+### Why it is worth an id despite being small
+
+**The failure is not "a string got rejected". It is that the rejection is indistinguishable from a
+real TARGET-001 violation** — the same value, the same FAIL, the same message. **A reader six weeks
+from now sees a rule breach and goes looking for a distance-based selector that does not exist.**
+Standing family: an output that does not discriminate between working and broken.
+
+**And the reasoning cannot be repaired by lengthening the list**, because the list is lexical and the
+property is semantic. `"far"` is a distance word in *"the far one"* and a structural word in *"the far
+side of the zone"*, and no blocklist separates them.
+
+### What holds it up today, and what would not
+
+**The blocklist is NOT the load-bearing check and the module says so** — a constant string passes it,
+and the real assertion is that two destinations produce two DIFFERENT strings, with `why_selected`
+derived from the destination object rather than templated. **So today nothing generates a `far side`
+string, because the generator names the destination's id and label.**
+
+**The exposure arrives when a human or a later rule supplies the `why`** — which `TARGET-007` (`OPEN`,
+deep-V undefined) and the `GATE-027` ladder work both plausibly do. **The check is fine as a tripwire
+on machine-generated text and wrong as a validator of human text, and nothing currently records which
+of those it is.**
+
+**Cheapest honest fix:** require the whole-word form and drop the two bare substrings, or state in
+the docstring that the check applies only to derived strings and must not be run over supplied ones.
+**Either is a line. The point is that it stops being silent.** Related: **B97**, **B96**.
+
 ### B99 — when the DATA validates the wrong hypothesis, and it does so on the row you check first
 
 **Found 2026-08-15 by Execute, verifying two facts the Manager had given it for `T-0024` rather than
