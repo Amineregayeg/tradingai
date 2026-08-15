@@ -1829,6 +1829,49 @@ traded. PRIM-002 feeds ENTRY-001, which is every admissible entry object in the 
 
 **NOT fixed, and it is its own entry:** see **B75**. Related: **B74**.
 
+### B76 — a BATCHED push leaves intermediate commits with no run, and tree identity cannot rescue them
+
+**Found 2026-08-15 by Review inside a T-0015 verdict — it declined to call the range clean — and
+verified by the Manager. `1b1c61a` is genuinely UNVERIFIED.**
+
+    1b1c61a   committed 01:06:50   T-0015 panel recency and thickness    NO RUN, no twin
+    d2d85ea   committed 01:13:36   T-0015 a bar closing in the future    run at 01:17:54, success
+
+**Both were pushed together, so the workflow fired only for the pushed tip.** And `d2d85ea` modified
+the same two files (`data_health.py`, `test_panel_health.py`, +78 lines), **so the two trees differ and
+no verdict can transfer.**
+
+### The asymmetry, which is the part worth carrying
+
+**This project has already recorded that cancellation rate tracks push cadence (`B62`). This is the
+opposite failure and it is strictly worse:**
+
+    PUSH OFTEN     runs get CANCELLED           tree identity USUALLY RESCUES them, because
+                                                consecutive register commits share a code tree
+    PUSH BATCHED   intermediates get NO RUN     tree identity CANNOT rescue them, because each
+                                                commit in the batch changed code — that is why
+                                                they are separate commits
+
+> **Cancellation is loud and recoverable. A never-run intermediate is silent and unrecoverable** —
+> and it is the one nobody looks for, because the tip is green and the range summary says `0 red`.
+
+**`ci_range` reports it correctly and always did** — *"no run, and no identical-tree commit anywhere —
+UNVERIFIED"*, `1 UNKNOWN` in the totals. **The gap was never in the tool; it was that nobody ran it
+over a range containing a batch.** Review ran it and reported the one UNKNOWN rather than the
+range-level `0 red`, which is the whole reason this is filed.
+
+### Severity, stated precisely because "unverified" overstates it
+
+**The SHIPPED code is verified.** T-0015's final state is in the green tip; what never ran is an
+intermediate state **that no longer exists on `main`** and that nobody will check out. **So the cost is
+not a live untested path — it is that `git bisect` across this range lands on a commit whose test
+status is unknown, and that a claim of "every commit on main is green" is false.**
+
+**Remedy is a choice rather than a fix, and both options are legitimate:** push one commit at a time and
+every state is tested, or batch and accept that intermediates are untested. **What is not legitimate is
+batching and then saying every commit is verified.** Run `ci_range` over the range after any multi-commit
+push, and read the `UNKNOWN` count rather than the `red` count.
+
 ### B75 — no Tier 0.2 probe covers ANY contract primitive
 
 **Found in:** T-0020, 2026-08-15, as the structural half of **B73**. Review confirms it is the
