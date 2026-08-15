@@ -1829,6 +1829,61 @@ traded. PRIM-002 feeds ENTRY-001, which is every admissible entry object in the 
 
 **NOT fixed, and it is its own entry:** see **B75**. Related: **B74**.
 
+### B80 — VERIFICATION CAPACITY RUNS OUT LAST, and a seat that refuses the next task is doing it right
+
+**Execute #3 finished five tasks, declined to start `T-0022`, and gave the reason. Recorded because
+the refusal is the correct behaviour and the next seat needs to know it is allowed.**
+
+> *"Starting T-0022 now would mean opening the largest and most consequential task in the programme —
+> the first one that changes what happens to money — with enough room to write code and not enough to
+> verify it. **Five of my seven passing mutations were vacuous TESTS, and I only caught them because I
+> had room to ask why nothing went red.** A half-verified exit model is worse than none."*
+
+**FIVE OF SEVEN. The mutation discipline's main yield this session was catching its own tests being
+broken**, not catching the code being wrong — and that catch is the part that needs slack.
+
+### Why context exhaustion is specifically dangerous, and it is not "less gets done"
+
+**Work is written early and verified late.** So a seat that runs low does not degrade evenly:
+
+    early context    code written, tests written, mutations run
+    late context     "why did nothing go red?"  <- the half that finds vacuous tests
+    exhausted        code still lands. verification silently does not.
+
+> **Context exhaustion converts a verifying seat into a non-verifying one WITHOUT CHANGING ITS
+> OUTPUT.** The commits look the same. The suite is green either way — **that is what a vacuous test
+> means.** So this is the register's standing failure applied to a seat rather than a tool: **an output
+> that does not discriminate between verified and unverified.**
+
+**Hence the rule: do not start a task you cannot finish verifying, and say so rather than starting
+it.** Execute #3 is the first seat here to stop on that ground rather than on running out mid-task, and
+**its predecessors both exhausted themselves mid-work and left a handoff written under pressure.** This
+one wrote the handoff deliberately, with room.
+
+### And the same session produced a third-order instance of the truncation failure
+
+**I built `agents/rule_show.py` specifically because a 420-character slice cost `T-0023` a rule level.
+I then ran it on `GATE-032`, piped the output through `sed` to read only the `SIZE-004` half, and
+scoped `T-0024` from the part I did not read.**
+
+**What was in the unread half:** `exact_relation` — *"LIGHT = NONE - 0.0075, exact for all three
+grades"* — which makes criterion 1's *"no decomposition reproduces it"* **false**, and
+`depends_on: ["GATE-002","GRADE-002","GRADE-003","GRADE-004"]`, which answers a question the plan's
+out-of-scope section told the implementer to go and check.
+
+    the tool truncated        -> B44, filed against rule_waves.py
+    the reader truncated      -> T-0023, 420 chars, lost a rule level
+    the reader truncated the FULL-TEXT TOOL'S OUTPUT  -> this, one hour after building it
+
+**Three levels of the same failure, the third by the author of the fix, inside the hour.** The lesson is
+not "read more carefully" — it is that **a tool cannot fix a truncation the caller performs downstream
+of it.** `rule_show.py` printed everything and said it printed everything; **`sed -n '/^SIZE-004/,$p'`
+discarded it after the guarantee had been honoured.**
+
+**Both instances were caught by Review, and both were caught in the same direction: my confident claim
+contradicting the registry.** That is the false-alarm direction from the collapse entry above — it
+costs a colleague's correct work rather than a cycle, and it is now four for four.
+
 ### B77 — `poi_type` cannot express two of the five imbalance types, and M6 is where that bites
 
 **Found 2026-08-15 by the Manager while auditing the schema ahead of T-0017, for the failure class
