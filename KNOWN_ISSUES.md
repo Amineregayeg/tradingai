@@ -1829,9 +1829,58 @@ traded. PRIM-002 feeds ENTRY-001, which is every admissible entry object in the 
 
 **NOT fixed, and it is its own entry:** see **B75**. Related: **B74**.
 
-### B83 — a check over an empty world: TWO confirmed, and here is what the third must look like
+### B85 — the id ledger issued a DUPLICATE, and it took two independent failures that each looked harmless
 
-**Filed 2026-08-15 as a DEFERRAL WITH A TRIGGER, not as a shape. There are two instances and two is
+**Filed 2026-08-15. `B83` was assigned twice: to Review's cushion-monotonic entry, committed at
+`5a58e2a`, and again to the Manager's empty-world entry minutes later. The second is now `B84`.**
+
+**The ledger exists for exactly this** — `bus.py bid` was built after two seats both wrote a `B55`,
+and its promise is *"it takes the max of the highest committed heading and the highest previous
+claim, so it sees the uncommitted claim the file cannot."* **It issued a collision anyway.**
+
+### Two failures, neither sufficient alone
+
+    1. THE FILE SCAN WAS BLIND.  regex `^### B(\d+)\.`  — it requires a PERIOD after the number.
+       Every heading since the format changed reads `### B83 — …` with an EM-DASH.
+       So the scan silently matched nothing newer than the last period-formatted entry.
+
+    2. REVIEW DOES NOT BID.  By arrangement it writes entries and the Manager commits them —
+       the separation that makes "finder and committer are different seats" true, and which
+       this register defended two hours before this happened.
+
+**Each is survivable alone.** With a working scan, an unbid entry is still seen once committed. With
+every entry bid, a blind scan does not matter. **Together the id was invisible to both halves and the
+next bid reissued it.**
+
+> **And the blind scan had been broken for a long time without symptom, because the claim file alone
+> was sufficient while every entry was claimed.** The tool reported *"highest in file 60"* on every
+> bid for hours — **a number that had stopped moving, printed next to one that kept moving, and
+> nobody read the pair.** That is this register's two-numbers-together check, available on every
+> single invocation and never performed.
+
+### What made it visible, and it was not a check
+
+**Nothing detected it. The Manager noticed the returned id was one it had committed itself twenty
+minutes earlier** — recognition from memory, in the one window where that memory existed. **A seat
+that had not committed `B83` personally would have taken `B83` and written a second entry under it.**
+
+### Fixed, and the residue
+
+**The regex now matches `^### B(\d+)\b`** and the scan reports `highest in file 84`, which is
+correct. **The arrangement that Review does not bid is NOT changed** — it is load-bearing for
+authorship, and the correct fix was the scan, not the convention. **A process rule and a tool must not
+both be relied on to cover the same gap unless one of them is checked.**
+
+**Standing consequence: `bid` prints `highest in file N` and `highest previously claimed M` on every
+call. READ BOTH.** If `N` stops moving while `M` climbs, the scan is broken again — **the failure is
+visible in the tool's own output and always was.**
+
+### B84 — a check over an empty world: TWO confirmed, and here is what the third must look like
+
+**Filed 2026-08-15 as a DEFERRAL WITH A TRIGGER, not as a shape. Renumbered from B83 to B84 —
+see B85 for why the ledger issued a duplicate.**
+
+** There are two instances and two is
 not a pattern** — but *"wait for the third"* is a decision with a condition, and `B82` established
 that such decisions die in whatever message they were written in. **This is that decision, put where
 `deferral_sweep.py` can see it.**
