@@ -2010,6 +2010,40 @@ first run. **Anywhere a comparison helper is shared between a market question an
 question, the shared helper is where that distinction gets lost** — not generalised into its own
 entry because this is one instance and one is not a pattern, but worth the grep if a second appears.
 
+### CORRECTION to `35b3712`, and the commit that carried B91 committed two defects of its own
+
+**Both are the Manager's, both were preventable by reading output it had just generated, and they are
+recorded here because the entry above was landed by a commit that demonstrates two of this register's
+standing failures.**
+
+**1. IT SWEPT REVIEW'S `B90` IN.** `B90` was uncommitted in the shared tree; `git add KNOWN_ISSUES.md`
+took it. **So `B90` is committed under the Manager's authorship and message, when Review wrote it** —
+the exact authorship property both seats defended two hours earlier, when Review refused to commit its
+own `B83` while a peer was blocked precisely so finder and committer would differ. **`B90` is Review's
+finding: `EXIT-001`'s `NOT_APPLICABLE` has no denominator.** Attributed here because the commit
+message cannot be.
+
+**And the check ran.** `git status --porcelain` printed ` M KNOWN_ISSUES.md` **immediately before the
+edit, in the same command block** — the file was already dirty and the output said so. **It was not
+read.** Fifth instance of the shared-file hazard, and the first where the warning was on screen.
+
+**2. THE COMMIT MESSAGE SAYS `B86`. THE ENTRY IS `B91`.** And `B86` exists — it is Execute's
+`PaperPosition` tranching entry. **So the message points at a real and unrelated entry**, which is
+worse than pointing at nothing.
+
+> **This is the SECOND time, and the first is recorded in `B80`'s own footnote.** Same mechanism
+> exactly: **the script wrote the heading from the id the ledger returned, and the Manager typed the
+> number into the commit message by hand.** The generated copy was right both times; the hand-copied
+> one was wrong both times.
+
+**`B80` recorded that as an instance of the unaudited-copy rule and changed nothing about how commit
+messages get written.** A note is not a mechanism, and **the recurrence is the evidence.** The fix is
+to derive the id in the message from the same variable as the heading, never to retype it — **and if
+that is not done, this will appear a third time.**
+
+**Neither defect affects the CONTENT of `B90` or `B91`.** Both entries are correct and in the file
+once. **What is damaged is the audit trail**, which is the thing the register exists to be.
+
 ### B91 — a snapshot of a MUTABLE value is EVIDENCE, not a duplicate — the limit of "never store a second copy"
 
 **Found 2026-08-15 by Execute while applying a Manager ruling, and it is a refinement of that ruling
