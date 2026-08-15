@@ -1829,6 +1829,44 @@ traded. PRIM-002 feeds ENTRY-001, which is every admissible entry object in the 
 
 **NOT fixed, and it is its own entry:** see **B75**. Related: **B74**.
 
+### B82 — `GATE-027`'s five-anchor ladder is KNOWN-INCOMPLETE, and nobody has decided the sixth
+
+**Filed 2026-08-15 at Review's insistence, and the reason it is here rather than in a task is the
+entry's own point.** It was written in `T-0025`'s **Out of scope** section, which was correct
+guidance for the implementer and **stops being read the moment T-0025 goes DONE.**
+
+**`deferral_sweep.py` cannot see it.** Its docstring states the blind spot in as many words: *"IT
+READS ONLY KNOWN_ISSUES.md … a clean run here says nothing about task files."* **This is the first
+thing to fall into a blind spot that was documented before it had an instance.**
+
+### The gap
+
+`GATE-027`'s ladder has five anchors — `DEEPEST_SWING`, `MOMENTUM_IMBALANCE`, `LIQUIDITY_SWEEP_QML`,
+`ORDER_BLOCK`, `INNER_MSB`. **Two documented stop behaviours are not among them:**
+
+* **The wide-cover variant** — *"my SL is way above… because i am covering the imbalance above with
+  the BB level"* (`049/116`).
+* **`§9.J IM79/IM86`'s rule that a stop at a flip zone must cover the WHOLE zone.**
+
+**`GATE-027`'s own notes say the disposition is unstated:** whether these were *"folded into
+'Momentum Imbalance' or dropped"* is **not recorded anywhere** (`§10.F.2` item 19).
+
+> **So the ladder is not five-of-five. It is five documented anchors with at least one documented
+> behaviour that fits none of them, and no ruling on whether that behaviour is a sixth anchor, a
+> special case of the second, or withdrawn.**
+
+**This is question 5(b) in the pack sent to Salim on 2026-08-15. Unanswered.**
+
+**What must NOT happen, and it is the reason this is worth an id:** an implementer meeting a
+wide-cover stop in a fixture and **folding it into `MOMENTUM_IMBALANCE` because that is the nearest
+slot.** That is a ruling, made by whoever was holding the diff, wearing the ladder's authority — the
+same shape as widening `emission_policy_id` to make a failure compliant. **The ladder is authoritative
+for what it lists; it is silent, not exhaustive, about what it does not.**
+
+**Distinct from the QML hole** (`T-0025` criterion 2), which is a listed anchor the engine cannot
+locate. **This is an unlisted behaviour the doctrine demonstrates.** One is a slot with no shape; the
+other is a shape with no slot.
+
 ### B81 — "already covered" can mean "covered by a test that sends you the wrong way"
 
 **From T-0018, found by Execute past the criterion that asked the question. Review added `1c` during
@@ -1869,6 +1907,21 @@ will report a misdirecting canary as protection.
 **So when a premise check reports *"already covered"*, name the covering test and read it.** The
 distinction costs one grep and it changed T-0018's conclusion after the criterion had already been
 satisfied.
+
+**AND THE OPERATIONAL FORM IS NARROWER THAN "READ THE FAILURE MESSAGE" — Review's addition, and it is
+the part that can actually be enforced:**
+
+> **A coverage measurement must record WHICH TEST caught it, never only the count.**
+
+`1c` returned `1 FAILED -> already caught`. **That string was true and useless.** It became a real
+result the moment the test's **name** appeared, because the name was
+`test_fixture_opens_trades_both_directions` and **any reader can see instantly that a fixture-trades
+canary is not library-semantics coverage.**
+
+**A count cannot be wrong in that way. It also cannot be right** — it carries no information that
+distinguishes protection from coincidence. **Same family as everything else in this register: an
+output that does not discriminate between working and broken**, arriving in the output of a check
+written to establish coverage.
 
 ### B80 — VERIFICATION CAPACITY RUNS OUT LAST, and a seat that refuses the next task is doing it right
 
