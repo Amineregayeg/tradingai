@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-14 (T-0021: B54 CLOSED — both tools collapse aliases and agree; every coverage figure now carries its space, and the script refuses to print an impossible set. B58 — the other tool is outside the repo, so half the agreement cannot be CI-enforced. Earlier, T-0016: the partially-evaluable requirements are enforced by script over the whole registry — B56, eleven emitted fields that cannot say where they came from, baselined not fixed and needing a task id; B57, the two of six standing requirements that script can actually enforce, so a green run is not read as six. Earlier the same day, T-0007: ENTRY_TF 1H -> 5m, the first live behaviour change. B37 CLOSED — the lookahead is out of production. B33 gained the instance it predicted: every legal execution timeframe would have broken the shadow; GATE-017 closed on the live path; B38 — GATE-018 stays OPEN; B39 — a conditional edit that matches nothing succeeds; B40 — the correlate margin is now 1.5x and nothing reports it shrinking)
+Last updated: 2026-08-15 (T-0022, the v1 exit model EXIT-001/EXIT-002 — the first rules in this programme that govern what happens AFTER a trade is taken, and SHADOW ONLY: nothing under `live/` or `broker/` imports them and `paper.py` still closes positions whole. B86 — `PaperPosition` has one `units`/`sl`/`tp` and `__slots__`, so it cannot represent a tranched position and the wiring task is a broker-layer change, not a call site. B87 — the 19:00 New York close is ours and UNRATIFIED, defaulted ON so shadow generates the evidence the ruling needs, and the wiring task must re-surface the question rather than inherit it. B88 — `ExitEvent` refuses `LIQUIDATION`, which is what makes criterion 1 enforceable at all, and becomes a hazard the moment a real liquidation can reach the exit path. B89 — a target at or inside 2R is refused outright because GATE-031 cannot run without GATE-025. Earlier, T-0021: B54 CLOSED — both tools collapse aliases and agree; every coverage figure now carries its space, and the script refuses to print an impossible set. B58 — the other tool is outside the repo, so half the agreement cannot be CI-enforced. Earlier, T-0016: the partially-evaluable requirements are enforced by script over the whole registry — B56, eleven emitted fields that cannot say where they came from, baselined not fixed and needing a task id; B57, the two of six standing requirements that script can actually enforce, so a green run is not read as six. Earlier the same day, T-0007: ENTRY_TF 1H -> 5m, the first live behaviour change. B37 CLOSED — the lookahead is out of production. B33 gained the instance it predicted: every legal execution timeframe would have broken the shadow; GATE-017 closed on the live path; B38 — GATE-018 stays OPEN; B39 — a conditional edit that matches nothing succeeds; B40 — the correlate margin is now 1.5x and nothing reports it shrinking)
 
 ---
 
@@ -1828,6 +1828,139 @@ traded. PRIM-002 feeds ENTRY-001, which is every admissible entry object in the 
 `test_a_component_formed_after_the_band_cannot_promote_it` goes red without it.
 
 **NOT fixed, and it is its own entry:** see **B75**. Related: **B74**.
+
+### B86 — `PaperPosition` CANNOT REPRESENT A TRANCHED POSITION, and the v1 exit model needs one
+
+**Filed 2026-08-15 by Execute, T-0022. This is the plan's own named risk, measured rather than
+worked around: the Manager asked for the finding in preference to a workaround, and this is it.**
+
+**The 70/30 split is the first rule in the programme that requires a position to have PARTS.**
+Everything before it decides whether a trade is taken; `EXIT-001` decides what happens to it after.
+
+    backend/app/services/broker/paper.py:22
+      class PaperPosition:
+          __slots__ = ("id","pair","direction","entry","units","sl","tp","open_time","mark")
+
+**ONE `units`, ONE `sl`, ONE `tp`, and `__slots__` so an attribute cannot even be attached at
+runtime.** `_settle()` does `self._positions.pop(pos.id, None)` — **a position leaves the book whole
+or not at all. There is no partial-close path in the class.** `on_tick` closes 100% at `sl` or `tp`.
+
+**So the model was built where it could be correct — `rules/exit_001_v1_model.py`, shadow only —
+and NOT forced into the broker.** `V1ExitModel.simulate` walks a price path and emits `exit_events`;
+it holds `remaining_fraction` itself and never touches a `PaperPosition`.
+
+**What this costs the wiring task, stated so it is not rediscovered:** wiring the v1 exit model is
+**not** a matter of calling the model from `on_tick`. It requires either a second position record
+for the runner (two `PaperPosition`s, which splits one trade's identity across two rows and breaks
+the `position_id` join in `_settle`'s event and everything downstream of it), or a genuine tranche
+model on `PaperPosition` (`units` becoming a list of open tranches, with `_settle` closing one
+tranche rather than popping the position). **The second is correct and is a broker-layer change with
+its own migration for the closed-trade record shape.** Neither is a small change, and a wiring task
+scoped as "call the model from the exit path" will discover this after it has started.
+
+**What it could break:** nothing today — nothing under `live/` or `broker/` imports the model, and
+`test_no_live_or_broker_module_imports_the_exit_model` goes red the moment that stops being true.
+The risk is entirely to the wiring task's estimate. Related: **B87**, **B88**, **B84**.
+
+### B87 — the 19:00 New York close is OURS AND UNRATIFIED, and it will not look it in six weeks
+
+**Filed 2026-08-15 by Execute, T-0022. Implemented as the rule states, defaulting ON, stamped
+`ratified=False`. The open question is not the number; it is whether the number was ever meant for
+our instrument.**
+
+    the rule says      EXIT-001: "the end of the trading session (19:00 New York time), at which
+                       point any remaining position is closed"
+    its provenance     GATE-022 records that 19:00 enters the codex ONLY through the EURUSD /
+                       algo HT v2.0 strand — "70% of position 2RR, 30% (EOD; 19:00)" — and that
+                       the two-strand question is "answered by adoption, never by argument"
+    our instrument     BTC and ETH. 24/7. The Magic Strategy has NO session-end concept.
+    asked              question 4 of the pack sent to Salim 2026-08-15 — UNANSWERED
+
+**Why it was NOT defaulted off despite 24/7 making it look wrong: a session close that never fires
+generates no evidence.** One that fires in shadow produces the measurable record the ruling should
+rest on — how often a runner would have been cut and the R it was carrying. `EXIT-001`'s telemetry
+emits `runner_cut_by_session_close` and `runner_r_at_session_close` **only on records where it
+fired**, so the count is obtained by counting keys rather than by reading values (a field present on
+every record cannot be counted, and a default of `False` is indistinguishable from a record written
+before the field existed).
+
+**THE ACTUAL RISK IS THE HANDOFF, NOT THE BEHAVIOUR.** Nothing in a declared parameter's declaration
+says *"still unanswered"* to someone reading it much later, and by then it will have sat in the code
+looking settled. **Two requirements on the wiring task, which are requirements and not notes:**
+
+1. **Re-surface the ratification question BEFORE enabling the session close.** Do not inherit it.
+2. **Bring the shadow evidence to that decision** — the count of runners that would have been cut
+   and the R they were carrying.
+
+**What it could break:** once wired, a runner is cut every evening on an instrument that trades
+through the night, on our authority rather than Salim's. **Today it cuts nothing** — T-0022 is
+shadow-only and nothing under `live/` references `EXIT-001`. Related: **B86**, **GATE-022**.
+
+### B88 — `ExitEvent` REFUSES `LIQUIDATION`, which is right today and a hazard the moment it is wired
+
+**Filed 2026-08-15 by Execute, T-0022, after Review raised it as a forward note. Kept strict
+deliberately; recorded because the reason it is safe expires at wiring.**
+
+**The telemetry schema's `exit_event.reason` enum has SIX values; `EXIT-001`'s output names FOUR.**
+
+    schema     PARTIAL_2R, FINAL_TARGET, STOP_HIT, SESSION_CLOSE, LIQUIDATION, MANUAL_OVERRIDE
+    EXIT-001   PARTIAL_2R, FINAL_TARGET, STOP_HIT, SESSION_CLOSE
+
+**Both extras belong in the schema** — SIZE-003 keeps `LIQUIDATION` separate from `STOP_HIT` so an
+isolated-margin liquidation is never counted as the strategy's stop working, and `MANUAL_OVERRIDE`
+is a human act outside any model. **Neither belongs in EXIT-001's output.** The consequence is that
+**a record carrying `LIQUIDATION` VALIDATES against the schema and violates the rule**, so T-0022's
+criterion 1 ("a fifth reason is a defect") is enforceable only in the rule, never by the contract.
+`ExitEvent.__post_init__` therefore raises on anything outside the four.
+
+**THE HAZARD: once the model is wired, a real margin liquidation would RAISE inside the exit path
+instead of recording one.** Review's reading, which I agree with: SIZE-003 keeping liquidation
+separate reads as *a different event path*, not *an invalid value of this one*. **The wiring task
+must settle this BEFORE it ships** — most likely a separate constructor or a distinct event type for
+non-model exits, so that `EXIT-001`'s four-reason guarantee survives without the exit path throwing
+on a real market event.
+
+**And a limit on what the EXIT-002 check currently proves.** `ladder_violations` reports
+`REASON_OUTSIDE_V1` over raw stored dicts, but **every route to an exit event in this codebase goes
+through `ExitEvent`, which has already refused the bad value — so that finding cannot fire over
+anything produced today and its test is verified against its own fixture.** It guards a future
+writer. The tranche-count findings (`MULTIPLE_PARTIALS`, `MULTIPLE_TERMINALS`, `TOO_MANY_TRANCHES`,
+`OVERSIZED_EXIT`, `SCALE_OUT_LADDER`) **are** reachable from validly constructed `ExitEvent`s,
+because the constructor validates each event alone and says nothing about the sequence. Related:
+**B84** (nothing writes a stored exit record at all), **B52**, **B86**.
+
+### B89 — a target sitting at or inside 2R is REFUSED, and the rule that should adjudicate it cannot run
+
+**Filed 2026-08-15 by Execute, T-0022. A deliberate choice with a live consequence, recorded because
+the choice is only defensible while the model is unwired.**
+
+**`GATE-031` governs the gap between the 2R partial level and the final target and says the engine
+"must not silently invent" a minimum one. `GATE-031` is NOT DISPATCHABLE:** its inputs name
+`selected_stop.rr`, produced by `GATE-025`, which is unimplemented (wave 2). So the rule that would
+decide what to do about a degenerate runner **cannot be consulted.**
+
+**What T-0022 did:** `TradePlan.__post_init__` raises `DegenerateRunner` when the final target is not
+STRICTLY beyond the 2R level. It neither invents a gap (which GATE-031 forbids) nor hides the
+condition (which the plan forbids). **It refuses to represent the setup at all.**
+
+**Why that is a problem and not merely conservative:** the market produces such setups. A target at
+exactly 2R makes the partial and the final target fire on the same tick at the same price and gives
+the runner zero distance to run — but it is a real configuration, and **refusing to model it means
+that once wired, the engine cannot express a trade the strategy might well take.** Today it costs
+nothing: nothing calls the model. **At wiring it becomes "the engine raised instead of trading",
+which is a worse failure than a degenerate runner.**
+
+**Resolution requires GATE-025, then GATE-031** — in that order — and the wiring task must not
+paper over it with a minimum-gap constant, which is the specific thing GATE-031 prohibits.
+
+**The near-miss worth keeping.** The guard was written with the module's own `_beyond` helper, which
+is INCLUSIVE, so a target sitting exactly ON the 2R level was accepted as a normal trade. Inclusive
+is correct for `_beyond`'s other caller — a price touching a level HAS reached it — and wrong here.
+**One predicate served "has the market reached this?" and "is this plan admissible?", whose boundary
+cases fall on opposite sides.** Caught by the parametrised test at `target == 110`, which failed on
+first run. **Anywhere a comparison helper is shared between a market question and an admissibility
+question, the shared helper is where that distinction gets lost** — not generalised into its own
+entry because this is one instance and one is not a pattern, but worth the grep if a second appears.
 
 ### B85 — the id ledger issued a DUPLICATE, and it took two independent failures that each looked harmless
 
