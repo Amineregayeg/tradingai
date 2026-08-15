@@ -2188,6 +2188,55 @@ the same kind of thing:** an imbalance's fill state ADVANCES as price approaches
 the state NOW and never the state WHEN THE TARGET WAS CHOSEN. One is a duplicate; the other is the
 only copy of a different fact. See **B91** for the general form. Related: **B77**.
 
+### B99 — when the DATA validates the wrong hypothesis, and it does so on the row you check first
+
+**Found 2026-08-15 by Execute, verifying two facts the Manager had given it for `T-0024` rather than
+relaying them. It accepted one, confirmed the other, and found a third the Manager had not seen.**
+
+**`GATE-032`'s risk matrix is additively decomposable — `LIGHT = NONE - 0.0075`, exact for all three
+grades, and the registry says so in `values.exact_relation`. It is NOT multiplicatively
+decomposable.** That much was already ruled.
+
+**What was missed: the multiplicative reading is CORRECT ON THE FIRST ROW.**
+
+    grade          NONE     LIGHT    additive -0.0075   multiplicative x0.5
+    MANIPULATED    0.0150   0.0075   correct            ALSO CORRECT      <-- the trap
+    SUPER          0.0125   0.0050   correct            WRONG (0.00625)
+    STANDARD       0.0100   0.0025   correct            WRONG (0.0050)
+
+**`0.015 x 0.5 = 0.0075` and `0.015 - 0.0075 = 0.0075`. The two hypotheses agree on exactly one row,
+and it is the row `GATE-032`'s statement leads with** — so it is the row an implementer spot-checks
+first.
+
+### Why this is a new shape rather than another instance
+
+**Everything in this register's standing family is about an OUTPUT that fails to discriminate** — a
+test that cannot fail, a count with no unit, a green run that means nothing. **All of them are
+defects in something someone wrote.**
+
+> **This one is in the DATA.** Nobody wrote a bad check. **The table itself contains a coincidence
+> that validates the wrong rule on the most likely first observation** — and no amount of care in
+> writing the test helps, because the value being checked genuinely agrees.
+
+**It is the criterion-cannot-see-its-own-defect shape with the defect relocated from the instrument
+to the subject.** The instrument is fine. The subject is misleading.
+
+### What actually protects against it
+
+**Not "check carefully" — check the row that DISCRIMINATES, and know which one that is.** Here,
+`MANIPULATED` cannot distinguish the two hypotheses and either other row can. **The test must carry
+all three and its docstring must say why three**, because a later edit trimming it to *"one
+representative row"* restores the trap **and would look like a tidy-up.**
+
+**The general form, and it is cheap: when a rule can be read two ways, find a case where the two
+readings DISAGREE before writing any test.** If every case you have agrees, you have not tested the
+rule — **you have tested a value on which both readings happen to coincide.**
+
+**Third instance tonight of a family where the check is sound and the thing checked is the problem**,
+after `T-0011`'s criterion 5 over an empty census and `EXIT-002`'s constraint over exit sequences
+nothing writes. **In all three the assertion was correct and the world it ran against could not tell
+it apart from a broken one.**
+
 ### B94 — why the announce-your-writes obligation is ABSOLUTE: the reader has no detection channel
 
 **Filed 2026-08-15. This entry is a PAIRING and contains no new finding — both halves already exist
