@@ -45,8 +45,16 @@ slowapi==0.1.9
 # --- strategy-critical: these decide what the engine "sees" on a chart ---
 # smartmoneyconcepts supplies FVG / BOS / CHoCH detection. The three lookahead
 # fixes are written against its exact output semantics (notably that a bullish
-# FVG's near edge is low.shift(-1)). Treat any bump here as a strategy change
-# and re-run scripts/verify_guards.sh before merging.
+# FVG's near edge is low[born+1] -- ONE phrasing, deliberately: this comment used
+# to say low.shift(-1) while engine.py said low[born+1], neither string was ever
+# executed, and two vocabularies for one quantity is how they drift). Treat any
+# bump here as a strategy change and re-run scripts/verify_guards.sh.
+#
+# THOSE SEMANTICS ARE NOW ASSERTED, not merely documented:
+#   backend/tests/integration/test_smc_output_semantics.py
+# It pins the version above, so a bump turns it red and names WHICH semantic moved.
+# Measured (T-0018): of the three, only smc.bos_choch's BrokenIndex was previously
+# unprotected -- shifting it left all seven lookahead/bias tests green.
 smartmoneyconcepts==0.0.27
 pandas==3.0.2
 numpy==2.2.6

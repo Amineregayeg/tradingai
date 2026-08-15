@@ -1906,6 +1906,50 @@ every state is tested, or batch and accept that intermediates are untested. **Wh
 batching and then saying every commit is verified.** Run `ci_range` over the range after any multi-commit
 push, and read the `UNKNOWN` count rather than the `red` count.
 
+### B79 — the library-semantics exposure, and the ONE axis that was actually unprotected
+
+**Filed by T-0018, 2026-08-15.** Points at `requirements-prod.txt`, NOT at `ict/detector.py`.
+
+**The exposure.** `requirements-prod.txt` says *"the three lookahead fixes are written against
+its exact output semantics… treat any bump here as a strategy change"*, and
+`test_lookahead_regression.py` restates the same dependency in prose. **Both DOCUMENTED it;
+neither ASSERTED it.** The file is not in `GUARDED_FILES`, a bump is a one-line diff, our
+engine code is unchanged, and no probe fires. **The prober cannot help** — it verifies that
+existing tests are load-bearing, and there was no test to be load-bearing.
+
+**MEASURED PER AXIS rather than assumed, by monkeypatching each library function at its
+boundary and running the existing lookahead and bias-causality tests:**
+
+    smc.fvg stamping                  shifted one bar      1 FAILED  -> already caught
+    smc.swing_highs_lows confirmation shifted one bar      1 FAILED  -> already caught
+    smc.bos_choch BrokenIndex         BrokenIndex - 1      7 passed  -> NOT CAUGHT
+
+**So two of three were already protected and the task shrank, which is the good outcome.** The
+honest form of *"treat any bump as a strategy change"* is *"here is precisely which part is
+unprotected"*, and it is `BrokenIndex`.
+
+**AND THE TWO "CAUGHT" RESULTS ARE WEAKER THAN THE WORD SUGGESTS.** Both were caught by
+`test_fixture_opens_trades_both_directions` — a canary asserting the fixture still trades. It
+fires because a shifted library changes behaviour enough to stop trades, not because anything
+noticed the semantics moved, so the red would send a reader to the engine. *Something goes red*
+is not *the right thing goes red*.
+
+**Fixed:** `tests/integration/test_smc_output_semantics.py` pins all three against the pinned
+version's real output, asserts the pin itself (`==0.0.27`), and mutates each at the LIBRARY
+boundary — which is the only thing distinguishing "pins the library" from "re-tests the engine".
+
+**A transcription error I made and measured out.** My first swing assertion used a SYMMETRIC
+window either side of the swing — the intuitive reading, and wrong: it holds on 11 of 12. The
+library's rule is the FORWARD window, 13/13, which *is* the confirmation lag `_daily_bias_events`
+corrects for. A guessed semantic would have shipped as a test failing on real data for reasons
+unrelated to any bump.
+
+**Not done, deliberately:** `requirements-prod.txt` is NOT added to `GUARDED_FILES`. The list is
+for files the prober WRITES TO — `restore()` runs `git checkout` over the whole list, so adding
+a file the script never mutates means the next probe destroys uncommitted work in it (**B18**).
+The dependency closure (63 of 153 modules, saturating at depth 4) is why a guard list is the
+wrong instrument here at all. **B52's collapse is recorded in B52 and is not restated here.**
+
 ### B78 — how reproducible is a declared rate? Measured, and the answer bounds every future threshold
 
 **Filed by T-0017, 2026-08-15.** The next declared threshold will face the question "is that
