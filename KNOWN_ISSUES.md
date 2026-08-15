@@ -1829,6 +1829,54 @@ traded. PRIM-002 feeds ENTRY-001, which is every admissible entry object in the 
 
 **NOT fixed, and it is its own entry:** see **B75**. Related: **B74**.
 
+### B83 — a check over an empty world: TWO confirmed, and here is what the third must look like
+
+**Filed 2026-08-15 as a DEFERRAL WITH A TRIGGER, not as a shape. There are two instances and two is
+not a pattern** — but *"wait for the third"* is a decision with a condition, and `B82` established
+that such decisions die in whatever message they were written in. **This is that decision, put where
+`deferral_sweep.py` can see it.**
+
+### The two
+
+    T-0011 / criterion 5-i    a CI check over `scan_census` records, with ZERO censuses stored.
+                              Green the day it ships, and stays green until the first census exists.
+
+    T-0022 / EXIT-002         a negative constraint over exit sequences. `records.trade_execution()`
+                              is the ONLY builder of a record carrying an `exits` array and has
+                              ZERO CALLERS in app/, tests/ or scripts/ — verified by Review and
+                              independently by the Manager. `records.setup_evaluation()` IS called,
+                              at `shadow.py:711`, so this is not "telemetry is unwired" generally.
+
+**Both are the same failure: an assertion whose input set is empty passes, and the pass is
+indistinguishable from the assertion doing its job.** The remedy in both cases is `T-0011`'s `5-i` —
+**report the number of records examined and make ZERO a distinct outcome rather than a pass.**
+
+### What is NOT a third, and naming it is the point
+
+**The Manager listed the prober's `strategy_step` gap as a third instance in the same breath as
+saying it would wait for a third. Review caught the contradiction and the diagnosis is Review's:
+`strategy_step` is a different animal.** A probe with no step to probe is **a checker with nothing to
+check**; these two are **a telemetry type that shipped with a schema, a builder and no producer.**
+**Dropped from the count. The honest number is two.**
+
+### The trigger, stated so a later reader can recognise it
+
+**File the shape as its own entry when a THIRD case appears with all of:**
+
+1. **a stored record type or field defined in the contract**, with
+2. **a builder or writer that exists in the source**, and
+3. **no caller anywhere**, so that
+4. **a conformance assertion written over it passes on an empty set.**
+
+**If the third arrives, the question the entry must answer is which of two worlds we are in:** *"new
+telemetry types routinely ship without producers"* — a process defect in how contract work is
+sequenced — or *"this happened twice for unrelated local reasons"*. **Two instances cannot separate
+those and three probably can.**
+
+**And check the trigger BEFORE writing a conformance check over any stored record type.** The cost of
+the check is one grep for callers of its builder; **the cost of skipping it is a green CI row that
+means nothing, discovered by whoever eventually wires the producer.**
+
 ### B83 — the ladder is asserted cushion-monotonic, and if that is true `GATE-030`'s flag can never fire
 
 **Filed by Review 2026-08-15, from reading `GATE-027`'s notes in full while verifying B82. Not
