@@ -251,6 +251,46 @@ def test_a_distance_phrased_why_is_a_failing_value():
         assert why_names_a_destination(bad) is False, bad
 
 
+def test_the_distance_word_check_has_MEASURED_false_positives_and_is_scoped_to_derived_text():
+    """B98 — the check is LEXICAL and the property is SEMANTIC, so it cannot be repaired.
+
+    `"far"` is a distance word in "the far one" and a STRUCTURAL word in "the far side of the
+    flip zone" — standard SMC vocabulary for a location. Lengthening `DISTANCE_WORDS` cannot
+    separate them, so the false positives are PINNED HERE as measured behaviour rather than
+    left to be rediscovered as a bug.
+
+    Why this is not a live defect: the only call site is the `why` the module DERIVES from
+    the destination object, which never produces that vocabulary. The exposure is a future
+    caller validating human-written or another rule's text. **A false positive there would
+    be indistinguishable from a real TARGET-001 violation** — same value, same FAIL — so a
+    reader would hunt for a distance-based selector that does not exist.
+
+    This test goes red if someone "fixes" the word list, which is the point: the fix is to
+    stop using a lexical test on supplied text, not to make the list longer.
+    """
+    structural_but_refused = [
+        "the far edge of the daily order block",
+        "the far side of the H4 flip zone",
+    ]
+    for phrase in structural_but_refused:
+        assert why_names_a_destination(phrase) is False, (
+            f"{phrase!r} now passes — if the lexical check was replaced with a semantic one, "
+            "update B98 and this test; if the word list merely grew, that is not a fix"
+        )
+
+    # Correctly refused: these really are distance answers to a structural question.
+    assert why_names_a_destination("the nearest unresolved high") is False
+    # Correctly accepted.
+    assert why_names_a_destination("the weekly equal highs at 112.5") is True
+    assert why_names_a_destination("sell-side liquidity under the Monday low") is True
+
+    # And the scope claim itself: the text this module derives is unaffected by any of it.
+    derived_why = ConcerningLiquidityIsStructural.evaluate(
+        [objective("o", 130.0, distance=5.0)], DEST_A
+    ).values["concerning_objective"]["why_selected"]
+    assert why_names_a_destination(derived_why) is True
+
+
 def test_why_selected_names_the_destination_and_DIFFERS_BETWEEN_TWO_DESTINATIONS():
     """CRITERION 2-i — the only assertion that separates DERIVED from TEMPLATED.
 

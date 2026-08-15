@@ -148,12 +148,41 @@ class ConcerningObjective:
 
 
 def why_names_a_destination(why: str) -> bool:
-    """Does `why_selected` name a destination rather than answer with a distance?
+    """A TRIPWIRE ON TEXT THIS MODULE DERIVED. **Not a validator of text supplied to it.**
+
+    Does `why_selected` name a destination rather than answer with a distance?
 
     A NEGATIVE CHECK PLUS A LENGTH FLOOR IS NOT ENOUGH ON ITS OWN, and the module docstring
     says why: a constant string passes both. The load-bearing assertion is the one in the
     test — two destinations must produce two DIFFERENT strings. This function catches the
     other failure, a `why` that is derived but phrased as a distance.
+
+    ITS SCOPE IS RECORDED HERE BECAUSE THE CHECK IS LEXICAL AND THE PROPERTY IS SEMANTIC
+    (B98, found by Review). `DISTANCE_WORDS` holds the bare substrings `"far"` and `"near"`,
+    and those are distance words in *"the far one"* and STRUCTURAL words in *"the far side of
+    the flip zone"* — standard SMC vocabulary for a location, the same object `GATE-027`'s
+    notes discuss at `§9.J IM79/IM86`. Measured false positives:
+
+        rejected   "the far edge of the daily order block"      structural, wrongly refused
+        rejected   "the far side of the H4 flip zone"           structural, wrongly refused
+        rejected   "the nearest unresolved high"                CORRECT — a distance answer
+        accepted   "the weekly equal highs at 112.5"
+        accepted   "sell-side liquidity under the Monday low"
+
+    **LENGTHENING THE LIST CANNOT FIX THIS.** The same token is correct in one sentence and
+    wrong in another, so no lexical rule separates them.
+
+    **The defect a false positive would cause is not a rejected string — it is that the
+    rejection is INDISTINGUISHABLE FROM A REAL TARGET-001 VIOLATION**: same value, same FAIL,
+    same message, and a reader goes hunting for a distance-based selector that does not
+    exist.
+
+    **What holds today: the ONLY call site is on the `why` this module derives from the
+    destination object, which never produces that vocabulary.** So the check is sound where
+    it is used. It is exported for tests, and a caller passing HUMAN-WRITTEN or
+    ANOTHER-RULE'S text — `TARGET-007` and the `GATE-027` ladder work both plausibly would —
+    is outside what it can answer. **Do not make it a gate on supplied text without
+    replacing the lexical test.**
     """
     lowered = why.lower()
     return bool(why.strip()) and not any(w in lowered for w in DISTANCE_WORDS)
