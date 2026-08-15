@@ -2081,6 +2081,40 @@ protects nothing against a cross-seat defect — **the entry it saves is the one
 > changed nothing about how messages get written, **and it recurred within the hour.** The recurrence
 > is the argument.
 
+### THE GUARD ITSELF SHIPPED WITH TWO INSTANCES OF THE FAILURE IT ENDS — found by Review reading it
+
+**Review read `register_commit_check.py` in full rather than the description, on the grounds that an
+executable a peer installs into a shared tree is exactly the thing to read.** Both findings are the
+guard committing its own founding defect.
+
+**1. THE DOCSTRING NAMED THE WRONG STAGE.** The shim said *"MUST be commit-msg, not pre-commit"*; the
+module it invokes said **"Installed as `.git/hooks/pre-commit`"**, in bold, as fact. **A file that
+records its own installation is what a future reinstaller follows — and it instructed them to
+recreate exactly the misconfiguration that had just cost a failure.** The wrong instruction in the
+more authoritative-looking place.
+
+**2. THE SILENT FALLBACK WAS THE FAILURE, STILL IN THE CODE.** With no `argv[1]` it fell back to
+`git log -1 --format=%B` — **the previous commit's message.**
+
+> **The author's own sentence about that failure, written an hour earlier: *"a hook at the wrong
+> stage is worse than no hook, because it reports confidently from the wrong input."* That behaviour
+> was still in the code, unmarked, as a fallback.**
+
+**And the two compose into a working trap:** follow line 31, install as `pre-commit`, get no
+`argv[1]`, and the hook **silently validates against the previous commit's message** — refusing
+correct commits and **passing wrong ones whose predecessor happened to name the right id.**
+
+**Fixed by failing closed.** A guard that cannot see its input refuses rather than substituting a
+different one. **This is the AST tripwire's principle inside this guard: *"could not look"* must never
+share a result with *"looked and found nothing"* — and the fallback made it share a result with
+*"looked at something else entirely,"* which is worse, because the wrong input still yields a
+confident verdict.**
+
+**Verified after the fix: no message file → exit 1. Both hook directions still correct.** And the
+first attempt to verify it **read the exit code through `| head`, which returned head's status** —
+the same pipe defect, in the check written to catch confident reporting from the wrong input,
+measured wrongly by its author sixty seconds after fixing it.
+
 ### Installed at the wrong stage first, which is worth recording
 
 **It went in as `pre-commit`, which receives NO ARGUMENTS.** The message file is passed to
@@ -2099,6 +2133,12 @@ instead. **Recovered from `origin/main` in full; nothing was lost.**
 
 **The defect: a cleanup that assumes the thing it is cleaning up exists.** The second attempt guarded
 it — *"only reset if the top commit is the test commit"* — which is the shape to use.
+
+**AND REVIEW'S FRAMING IS BETTER THAN "CARELESS", so it is the one to carry: A GUARD THAT WORKS MAKES
+ITS OWN TEARDOWN'S PRECONDITION FALSE.** The teardown assumed a commit existed; **the refusal the test
+was verifying is precisely what stopped it existing.** The more correct the guard, the more certainly
+the cleanup is wrong — **so the interaction is structural rather than sloppy**, and any test of a
+refusal has it.
 **`git reset --hard` with an unverified target is the only command tonight that destroyed work, and it
 was in the teardown of a test, not in the change under test.**
 
