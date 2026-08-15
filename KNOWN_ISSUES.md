@@ -1906,6 +1906,46 @@ every state is tested, or batch and accept that intermediates are untested. **Wh
 batching and then saying every commit is verified.** Run `ci_range` over the range after any multi-commit
 push, and read the `UNKNOWN` count rather than the `red` count.
 
+### B78 — how reproducible is a declared rate? Measured, and the answer bounds every future threshold
+
+**Filed by T-0017, 2026-08-15.** The next declared threshold will face the question "is that
+rate real or is it the window you measured on", and this is the only measurement of it.
+
+**The drift, over sliding 863-bar corpora of live 5m `BTCUSDT.P`:**
+
+    sliding 863-bar corpora    min 12.9%   max 20.4%   spread 7.5 points
+    |change| over 1h           median 0.23   max 1.17
+    |change| over 3h           median 0.70   max 2.70
+    |change| over 6h           median 0.82   max 3.05
+
+**So a rate quoted without its window is reproducible to about ±3 points over a few hours.**
+That is the size of the error bar on any single-corpus declaration, and it is large enough to
+move a value across a band edge — which is the whole of T-0017.
+
+**AND `k = 3.5`'s 6-of-54 ACCEPTANCE DID NOT SURVIVE THE FIXTURE CAPTURE. It is 0 of 54.**
+The plan turned on that value: Review measured it marginal on a live fetch, and the mutation
+was specified against it. In `tests/fixtures/btcusdtp_5m_1500.csv`, captured five days later,
+`3.5` runs 37.8%–43.7% and is **rejected on every corpus**.
+
+**This is the plan's own predicted risk arriving, and it is the reason the criterion forbade
+pre-committing to a `k`.** The marginal value in the pinned fixture is **`k = 2.5` at 26 of
+54**, and that is what the mutation runs on. **The fixture was NOT recaptured to look for a
+friendlier number** — the property under test is that the set form is stricter than the
+single-corpus form, not that any particular `k` is marginal.
+
+**What it says about the method rather than the value:** a threshold's marginality is not a
+property of the threshold. It moved from 6/54 to 0/54 in five days without anyone changing
+anything, which is a stronger statement of the same finding the drift table makes.
+
+**The declared `k = 3.0` is unmoved** — 54/54 in the live measurement and 54/54 in the pinned
+fixture, 16.5%–21.7%. The declaration is robust; only the marginal neighbours move.
+
+**The fixture is now a maintained artefact** and it will age. Its value is REPRODUCIBILITY,
+not currency: a red run against it is unambiguously a defect because the market cannot move
+under it, and that is exactly what a live check cannot offer. A fixture nobody re-captures
+describes a market that no longer exists, and that is acceptable and stated. Related:
+**B46**, and T-0014 Part 1's declaration, which is honest and unchanged.
+
 ### B75 — no Tier 0.2 probe covers ANY contract primitive
 
 **Found in:** T-0020, 2026-08-15, as the structural half of **B73**. Review confirms it is the

@@ -86,7 +86,29 @@ class ConsolidationThreshold:
     corpus_caveat: str = ""
 
     def rate_is_within_bounds(self) -> bool:
+        """The SINGLE-CORPUS predicate. Kept, and it is the weaker form (T-0017).
+
+        It answers "was the rate in bounds on the one corpus this threshold was declared
+        against", which is the right question for a DECLARATION and the wrong one for an
+        assertion. One number cannot distinguish "inside the band" from "inside the band on
+        the window I happened to measure": measured over 54 sliding 863-bar corpora of
+        `tests/fixtures/btcusdtp_5m_1500.csv`, `k = 2.5` lands in bounds on 26 of them and
+        outside on the other 28. A single-corpus predicate anchored on any of those 26
+        accepts it, on exactly the same kind of evidence the correct value is accepted on.
+
+        `validate_over_corpora()` is the form that can tell those apart. Use it for any
+        assertion; use this only to check a declaration against its own stated span.
+        """
         return self.rate_floor_pct <= self.measured_rate_pct <= self.rate_ceiling_pct
+
+    def validate_over_corpora(
+        self, bars: Sequence[Bar], *, tf: str,
+        corpus_bars: int = 863, step_bars: int = 12,
+    ) -> "RateValidation":
+        """This threshold's rate over a SET of sliding corpora. Three outcomes, not two."""
+        return validate_over_corpora(
+            bars, tf=tf, threshold=self, corpus_bars=corpus_bars, step_bars=step_bars,
+        )
 
 
 #: THE DECLARED THRESHOLD. Ours, unratified, and measured at the timeframe the engine runs.
@@ -189,3 +211,97 @@ def detection_rate_pct(
         windows += 1
         hits += 1 if w.is_consolidation else 0
     return (100.0 * hits / windows if windows else 0.0), windows
+
+
+# ---------------------------------------------------------------------------------------
+# T-0017 — validating a declared threshold over a SET of corpora
+# ---------------------------------------------------------------------------------------
+#: The three verdicts. MARGINAL is the one that does not exist in a boolean, and it is the
+#: reason this type exists: a threshold in bounds on some corpora and not others is neither
+#: passing nor failing, and collapsing it either way destroys the only interesting case.
+#: Into PASS, and a value that will start failing is hidden. Into FAIL, and a value that
+#: nearly works is hidden. Both are information a boolean cannot carry.
+ACCEPTED = "ACCEPTED"
+MARGINAL = "MARGINAL"
+REJECTED = "REJECTED"
+
+
+@dataclass(frozen=True)
+class RateValidation:
+    """A declared rate, checked over many corpora rather than the one it was declared on.
+
+    WHY THE DENOMINATOR IS A FIELD AND NOT A LOG LINE. A check over one corpus and a check
+    over fifty produce identical green output, so `in_bounds` alone reads as thorough
+    without saying what it counted. Every consumer gets `total` in the same object.
+    """
+
+    k: float
+    in_bounds: int
+    total: int
+    min_rate_pct: float
+    max_rate_pct: float
+    floor_pct: float
+    ceiling_pct: float
+    corpus_bars: int
+
+    @property
+    def verdict(self) -> str:
+        if self.total == 0:
+            # Not a pass. A validation that examined nothing has not validated anything,
+            # and saying ACCEPTED here would be the failure this whole family of checks
+            # exists to prevent.
+            return REJECTED
+        if self.in_bounds == self.total:
+            return ACCEPTED
+        if self.in_bounds == 0:
+            return REJECTED
+        return MARGINAL
+
+    @property
+    def summary(self) -> str:
+        return (
+            f"k={self.k}: in bounds on {self.in_bounds} of {self.total} corpora "
+            f"({self.corpus_bars} bars each), rate {self.min_rate_pct:.1f}%–"
+            f"{self.max_rate_pct:.1f}% against a {self.floor_pct}–{self.ceiling_pct}% band "
+            f"-> {self.verdict}"
+        )
+
+
+def validate_over_corpora(
+    bars: Sequence[Bar], *, tf: str, threshold: ConsolidationThreshold,
+    corpus_bars: int = 863, step_bars: int = 12,
+) -> RateValidation:
+    """Run the detector's own rate over sliding corpora and report the fraction in bounds.
+
+    THE CORPUS SET MUST COME FROM A PINNED FIXTURE, NOT A LIVE FETCH, and that is a property
+    of the CALLER rather than of this function — which is why it takes bars. Measured: the
+    corpora on which a marginal `k` passes are the OLDEST windows in a fetch, and a live
+    fetch anchors to now, so within about six hours the marginal case disappears and any
+    mutation built on it becomes vacuous. Trimming from the END is harmless; only forward
+    motion destroys it, which is the direction real time runs and the direction every CI
+    run experiences.
+
+    So: `tests/fixtures/btcusdtp_5m_1500.csv` for anything that must still mean something
+    next week, and a live fetch only for detecting regime change — where a red result is a
+    question rather than a defect.
+    """
+    rates: list[float] = []
+    for start in range(0, max(0, len(bars) - corpus_bars) + 1, step_bars):
+        corpus = bars[start:start + corpus_bars]
+        if len(corpus) < corpus_bars:
+            break
+        rates.append(detection_rate_pct(corpus, tf=tf, threshold=threshold)[0])
+
+    in_bounds = sum(
+        threshold.rate_floor_pct <= r <= threshold.rate_ceiling_pct for r in rates
+    )
+    return RateValidation(
+        k=threshold.k,
+        in_bounds=in_bounds,
+        total=len(rates),
+        min_rate_pct=min(rates) if rates else 0.0,
+        max_rate_pct=max(rates) if rates else 0.0,
+        floor_pct=threshold.rate_floor_pct,
+        ceiling_pct=threshold.rate_ceiling_pct,
+        corpus_bars=corpus_bars,
+    )
