@@ -1829,6 +1829,49 @@ traded. PRIM-002 feeds ENTRY-001, which is every admissible entry object in the 
 
 **NOT fixed, and it is its own entry:** see **B75**. Related: **B74**.
 
+### B83 — the ladder is asserted cushion-monotonic, and if that is true `GATE-030`'s flag can never fire
+
+**Filed by Review 2026-08-15, from reading `GATE-027`'s notes in full while verifying B82. Not
+measured on data — this is an inconsistency between three rule texts and `T-0025`'s plan, and which
+side of it is true is exactly what nobody has established.**
+
+**The three statements.** `GATE-027` asserts the ladder *"is cushion-monotonic"* — *"The first
+options provide more room for natural pullbacks, while the later options progressively reduce that
+cushion."* `GATE-025` says reject a candidate below 2R and *"evaluate the next tighter option"*,
+where **"next tighter" means next in ladder order** — which is only "tighter" if the ladder is
+monotonic. And `GATE-030` (SOFT_PREFERENCE) emits `TIGHTER_THAN_NECESSARY` **"when a tighter
+candidate is chosen over a wider one that also cleared 2R."**
+
+> **Walk the ladder in order and stop at the first rung clearing 2R. If the ladder really is
+> cushion-monotonic, that procedure CANNOT select a tighter candidate over a wider one that also
+> cleared 2R — every wider candidate sits earlier and was already rejected for failing 2R. So
+> `GATE-030`'s flag is unreachable by construction.**
+
+**Either the monotonicity claim is true and `TIGHTER_THAN_NECESSARY` is dead code, or the flag is
+reachable and the monotonicity claim is false. Both cannot hold, and nothing measures which.**
+
+**Why the false side is plausible rather than theoretical.** The ladder is monotonic at its ends by
+definition — `DEEPEST_SWING` is the deepest, `INNER_MSB` the innermost. **Rungs 2–4 are not ordered
+by construction at all:** `MOMENTUM_IMBALANCE`, `LIQUIDITY_SWEEP_QML`, `ORDER_BLOCK` are named chart
+objects, and there is no reason a swept wick cannot sit closer to entry than an order block on a
+given setup. **Monotonicity is an empirical property of rungs 2–4, asserted in prose as if it were a
+definition.**
+
+**This is live for `T-0025`, which does not mention `GATE-030` anywhere.** Its plan says the ladder
+runs *"from most cushion to least, stopping at the first candidate that clears 2R"* — **the
+assertion adopted as fact.** If it is false, the implementation is wrong precisely on the setups
+where the ordering matters, and no criterion in the task can see it.
+
+**It is measurable, and the shape is B78's, not a single fixture's:** compute the five anchor prices
+per setup over a corpus SET and check whether ladder position is monotonic in `|entry − stop|`. **One
+inversion anywhere proves the flag reachable and the claim false.** Two pinned setups prove nothing,
+for the same reason `ε` needed a corpus rate.
+
+**What must not happen:** implementing the ladder, observing `TIGHTER_THAN_NECESSARY` never fires,
+and reading that as the rule being satisfied. **It is the same reading either way** — which is the
+standing family: an output that does not discriminate between working and broken. Related: **B82**
+(the same rule's other unresolved sub-item), **B79**, **B52**.
+
 ### B82 — `GATE-027`'s five-anchor ladder is KNOWN-INCOMPLETE, and nobody has decided the sixth
 
 **Filed 2026-08-15 at Review's insistence, and the reason it is here rather than in a task is the
