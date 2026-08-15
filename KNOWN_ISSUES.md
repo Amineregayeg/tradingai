@@ -2088,6 +2088,35 @@ protects nothing against a cross-seat defect — **the entry it saves is the one
 > changed nothing about how messages get written, **and it recurred within the hour.** The recurrence
 > is the argument.
 
+### WHAT A GREEN HOOK IS EVIDENCE OF — read this before trusting it
+
+**Review's formulation, put here rather than left in a message because it is the thing a future seat
+will most easily get wrong about this guard.**
+
+**It HAS been proven capable of firing.** Replayed against `35b3712` and `33a3951`, live-tested in
+both the refusing and passing directions, both before and after the removal extension. **So this is
+not `B79`'s shape** — a claim documented and never asserted. **Capability is demonstrated.**
+
+**What has never happened is a catch IN ANGER, and those are different facts.** Every defect it now
+covers was found by a person:
+
+    the mistyped id            found by reading a commit message against its diff
+    the swept-in foreign entry found by Review noticing its entry under someone else's name
+    the silent fallback        found by Review reading the code against the author's own sentence
+    the missing removal check  found by Execute having its deletion swept
+
+**Two extensions in two hours, both from reading rather than from firing.**
+
+> **So its coverage is exactly the set of mistakes ALREADY MADE, and its blind spots are, by
+> construction, the mistakes nobody has made yet.**
+>
+> **It prevents recurrence. It cannot produce discovery. A green hook is evidence about the PAST,
+> not about this commit.**
+
+**The practical consequence: do not let a passing hook substitute for reading your own staged diff.**
+`git diff --cached KNOWN_ISSUES.md | grep '^[+-]### B'` costs one line and answers the question the
+hook only answers for the failure modes someone already hit.
+
 ### EXTENDED TO REMOVALS — and a REMOVED heading is the STRONGER claim
 
 **Found by Execute after the guard let a swept DELETION through. Verified: `33a3951` named `B94`,
