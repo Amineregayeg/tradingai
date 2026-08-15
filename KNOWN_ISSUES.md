@@ -4016,6 +4016,39 @@ no recency monitoring at all**, so for half the roster there is not even a stale
 underneath the missing thickness one. **Needs a task id.** Related: **B40**, **B42**,
 **B32**, **B34**.
 
+**RECENCY TAIL CLOSED — T-0015, 2026-08-15.** `data_health.panel_health()` now reports
+per-panel recency for all four roster panels, `BTCUSDT.P` and `ETHUSDT.P` included, and
+`data_health()` carries it as its own `correlate_panels` component. **B35's GATE-007
+label-comparison finding above is UNCHANGED and still open** — this closes the tail about
+unmonitored panels, not the head about how alignment is asserted.
+
+**The threshold is DERIVED and the reference point is written down**, because both were
+ways to ship this and measure nothing:
+
+    threshold   PANEL_STALE_BARS = 2.0 bar-periods, from ENTRY_TF via _TF_SECONDS
+    reference   the bar's CLOSE (label + one interval), not its label
+
+`COLLECTOR_STALE_MIN = 5.0` is correct for a process polling every 10 s and would have
+been catastrophic here: with `drop_partial=True` the newest complete bar's LABEL reaches
+**9.9 minutes** old in healthy operation before the next one closes, so a 5-minute
+label-referenced threshold alarms on essentially every cycle. An alarm that fires every
+cycle gets muted, and a muted alarm is the silence this monitor exists to end.
+
+**And the coupling is recorded as a coupling.** The panels are read at `signal_tf`, a
+parameter that `crypto_loop` happens to feed from `ENTRY_TF`; they coincide by PLUMBING,
+not by definition. `data_health` has no access to a per-panel timeframe, so the config
+constant is the only option available — and if `signal_tf` ever diverges this monitor
+measures against the wrong interval and goes silently wrong in the direction that never
+alarms. Stated in the payload as `scope.timeframe_coupling`.
+
+**THE HONEST RESIDUE: NOTHING CONSULTS THE FIELD.** It is reachable at
+`GET /api/system/data-health` and no code reads it — nothing alerts, nothing refuses to
+grade, nothing blocks a trade. That was deliberate (acting on the signal is out of
+T-0015's scope, and making GATE-008 fail on stale panels would be a live behaviour
+change), and it is **the same gap B32 recorded for the shadow**: a monitor that ships and
+is never read is B41's shape one layer down. The payload says so about itself, in
+`scope.does_not_attest`. Related: **B40**, **B32**, **B41**.
+
 ### B36. Broad exception handlers make a bug indistinguishable from an outage
 **Found in:** T-0008, 2026-08-13. Partially fixed; the general case is not.
 **What it is:** the shadow path swallows exceptions by design — *"a shadow that can
@@ -4144,6 +4177,31 @@ tell you either.
 per-panel sample counts already exist in the record (`thin_panels` is derived from
 them). Surfacing "30 of 20 required" beside the grade turns a cliff into a gauge.
 Related: **B34** means a thin bar on a blocked bar is invisible twice over.
+
+**FIXED AS SPECIFIED — T-0015, 2026-08-15. The margin is a gauge, not a verdict.**
+`panel_health()` reports per panel `samples`, `minimum`, and **`margin`** as a ratio, so
+`30 of 20` reads as `1.5` and a figure trending toward `1.0` is visible before it becomes
+a cliff. A boolean could not have said that.
+
+**Reported on a SEPARATE axis from recency, and that separation is load-bearing rather
+than tidy.** Thickness is observations WITHIN a bar (density); recency is how long ago the
+newest bar closed (currency). A perfectly thick bar from six hours ago passes one and
+fails the other. **And either can MANUFACTURE the other**: filtering thin bars out leaves
+the newest-bar pointer on an older thick bar (**B27**), which turns a density problem into
+a currency one. So the recency read takes the UNFILTERED frame, and
+`test_thin_recent_bars_do_not_manufacture_staleness` pins it with a frame that is thin at
+the tip and thick behind it — a uniformly thin fixture cannot catch this, because the
+filter empties the frame and any implementation falls back.
+
+**Criterion 6's question — does GATE-007's existing `thin` list already cover this? —
+answered NO, and structurally.** `gate_008_roster.py` builds `thin` only `if
+bar_sample_count is not None`, and the perpetual panels never set it: an exchange bar is a
+candle, not a resampling of point observations. **The two panels this work exists for are
+excluded from `thin` by the condition itself** — not partially covered, invisible. So
+`panel_health` answers `not_applicable` with that reason rather than letting them fall out
+of the check silently, which is how the gap survived.
+
+**Same residue as B35: nothing reads the field.** Related: **B35**, **B27**, **B32**.
 
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)

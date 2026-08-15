@@ -454,6 +454,220 @@ async def shadow_health() -> dict:
     return out
 
 
+#: How many bar-periods since a panel's newest complete bar CLOSED before it is stale.
+#:
+#: DERIVED FROM BAR DURATION, NEVER COPIED FROM THE COLLECTOR. `COLLECTOR_STALE_MIN = 5.0`
+#: is right for a process polling every 10 s and catastrophically wrong here: measured
+#: live at 10:59:53 with `ENTRY_TF = 5m`, the newest complete bar was LABELLED 10:50, so
+#: its label age reaches 9.9 minutes in perfectly healthy operation. A 5-minute threshold
+#: measured from the label would alarm on essentially every cycle, and an alarm that
+#: fires every cycle gets muted — which is the silence this monitor exists to end.
+#:
+#: AND THE REFERENCE POINT IS THE BAR'S CLOSE, NOT ITS LABEL. The frames are fetched with
+#: `drop_partial=True`, so the newest bar we see has already closed and the still-forming
+#: one is correctly absent. Measured from the LABEL the healthy band is `[1, 2)` intervals
+#: and any threshold has an offset nobody wrote down; measured from the CLOSE it is
+#: `[0, 1)` and the threshold reads as "we have missed N bars". Either is defensible and
+#: leaving it unstated is not: the same number against the wrong reference is off by one
+#: interval, which at 5m is the difference between alarming always and never alarming.
+PANEL_STALE_BARS = 2.0
+PANEL_DOWN_BARS = 4.0
+
+
+async def panel_health() -> dict:
+    """Are the GATE-008 roster panels RECENT, and are they THICK? Two answers, never one.
+
+    WHY THIS EXISTS (B35, B40)
+    `data_health` has carried panel recency for the dominance collector since it was
+    written — `TOTAL` and `USDT.D` are watched. `BTCUSDT.P` and `ETHUSDT.P` arrive from a
+    different host (`fapi.binance.com`) with a different failure mode and **nothing
+    checked their age at all**. Half the roster was unmonitored.
+
+    It is not cosmetic. GATE-008 grades a four-panel layout and GATE-002's 2-of-3
+    disturbance count keys the risk matrix, so a FROZEN perpetual panel produces a
+    confident disturbance grade computed from stale prices — present, well-formed, and
+    wrong — while the roster check passes because the panel exists.
+
+    WHY RECENCY AND THICKNESS ARE REPORTED SEPARATELY AND MUST STAY SEPARATE
+    They measure different quantities: thickness is observations WITHIN a bar (density),
+    recency is how long ago the newest bar closed (currency). A perfectly thick bar from
+    six hours ago is fresh by one and stale by the other. And either can MANUFACTURE the
+    other — filtering thin bars out leaves the newest-bar pointer on an older thick bar,
+    which is B27 — so a merged verdict would answer two questions with one output and
+    could not distinguish the two failures it exists to name.
+
+    This is also why `GATE-007`'s existing `thin` list does not already cover this. It is
+    built only `if bar_sample_count is not None`, and the perpetual panels never set it:
+    an exchange bar is a candle, not a resampling of point observations. The two panels
+    this monitor exists for are excluded from `thin` by the condition itself — not
+    partially covered, structurally invisible.
+
+    WHAT IT DOES NOT ATTEST — see `scope` in the payload.
+    """
+    import asyncio
+
+    from app.services.live.fixed_config import ENTRY_TF
+    from app.services.live.shadow import fetch_roster_panels
+    from app.services.market_data.sources.dominance import _TF_SECONDS
+    from app.services.rules.gate_008_roster import (
+        MAIN, MIN_SAMPLES_PER_SYNTHETIC_BAR, NEGATIVE, POSITIVE,
+    )
+
+    roster = (MAIN, *POSITIVE, *NEGATIVE)
+
+    bar_seconds = _TF_SECONDS.get(ENTRY_TF)
+    if bar_seconds is None:
+        return {
+            "status": "unavailable",
+            "watching": False,
+            "reason": f"ENTRY_TF {ENTRY_TF!r} has no known duration",
+        }
+
+    scope = {
+        # CRITERION 5. Recency and thickness ONLY. A panel can be seconds old, thick, and
+        # carrying the wrong instrument's prices; it can be fresh and thick while a
+        # different panel is missing entirely and the layout is ungradeable. Every field
+        # below reads healthy in both cases. Without this said in the payload, the first
+        # green reading is what someone cites when asked whether the correlate layer can
+        # be trusted.
+        "attests": "recency_and_thickness_only",
+        "does_not_attest": [
+            "that the values are correct, or that they came from the intended market",
+            "that the roster is complete — a missing panel is absent here, not stale",
+            "that the disturbance grade computed from these panels is sound",
+            "that anything reads this field (nothing does — see B32's shape)",
+        ],
+        # CRITERION 2-i. The threshold tracks ENTRY_TF because that is the only timeframe
+        # this module can see, and the panels are read at `signal_tf` — a PARAMETER that
+        # `crypto_loop` happens to feed from `ENTRY_TF`. They coincide by PLUMBING, not by
+        # definition. If `signal_tf` ever diverges, this monitor keeps measuring against
+        # the wrong interval and goes silently wrong in the direction that alarms never.
+        "timeframe_coupling": (
+            f"thresholds derived from ENTRY_TF ({ENTRY_TF}); panels are read at "
+            "signal_tf, which equals ENTRY_TF by plumbing rather than by definition"
+        ),
+        "reference_point": "bar CLOSE (label + one interval), not the bar's label",
+        "stale_after_bars": PANEL_STALE_BARS,
+        "down_after_bars": PANEL_DOWN_BARS,
+        "min_samples_per_bar": MIN_SAMPLES_PER_SYNTHETIC_BAR,
+    }
+
+    try:
+        # RAW `ENTRY_TF`, not its schema form. The sources take the timeframe the
+        # engine uses ("5m"); `schema_tf` is for what goes INTO a telemetry record, and
+        # handing "5M" to a fetch would ask for a timeframe no source knows. This is
+        # B33's shape — two vocabularies for one quantity — and the reason it is worth a
+        # comment is that both strings look equally plausible at the call site.
+        fetched = await asyncio.to_thread(fetch_roster_panels, ENTRY_TF)
+    except Exception as exc:  # noqa: BLE001 - a monitor may never break its host
+        return {
+            "status": "unavailable", "watching": False,
+            "reason": f"panels unreadable ({type(exc).__name__}: {exc})",
+            "scope": scope,
+        }
+
+    by_asset = {f.asset: f for f in fetched}
+    now = datetime.now(tz=timezone.utc)
+    panels: dict[str, dict] = {}
+
+    for asset in roster:
+        got = by_asset.get(asset)
+        if got is None or got.frame is None or len(got.frame) == 0:
+            # ABSENT is not STALE. A panel nobody served has no age, and reporting it as
+            # infinitely old would put a missing feed and a frozen one under one word.
+            panels[asset] = {
+                "recency": {"status": "unavailable", "age_bars": None,
+                            "reason": (got.note if got else None) or "panel not served"},
+                "thickness": {"status": "unavailable", "samples": None,
+                              "reason": "no bar to measure"},
+            }
+            continue
+
+        # RECENCY, from the UNFILTERED frame. `fetch_roster_panels` deliberately does not
+        # thin-filter, because filtering would leave this pointer on an older thick bar
+        # and report a THIN panel as a STALE one.
+        newest_open = got.frame.index[-1].to_pydatetime()
+        newest_close = _as_utc(newest_open) + timedelta(seconds=bar_seconds)
+        age_bars = (now - newest_close).total_seconds() / bar_seconds
+        if age_bars >= PANEL_DOWN_BARS:
+            recency_status = "down"
+        elif age_bars >= PANEL_STALE_BARS:
+            recency_status = "stale"
+        else:
+            recency_status = "fresh"
+
+        recency = {
+            "status": recency_status,
+            "age_bars": round(age_bars, 2),
+            "newest_bar_close": newest_close.isoformat(),
+            "bar_seconds": bar_seconds,
+        }
+        if recency_status != "fresh":
+            recency["warning"] = (
+                f"{asset}: newest complete bar closed {age_bars:.1f} {ENTRY_TF} bars ago"
+            )
+
+        # THICKNESS, and a None count is ANSWERED rather than left absent.
+        if got.sample_count is None:
+            thickness = {
+                "status": "not_applicable",
+                "samples": None,
+                # CRITERION 6a. Saying so beats falling out of the check the way these
+                # panels already fall out of GATE-007's `thin` list, where the silence is
+                # indistinguishable from having passed.
+                "reason": (
+                    "an exchange bar is a candle, not a resampling of point observations, "
+                    "so there is no sample count to threshold"
+                ),
+            }
+        else:
+            margin = got.sample_count / MIN_SAMPLES_PER_SYNTHETIC_BAR
+            thin = got.sample_count < MIN_SAMPLES_PER_SYNTHETIC_BAR
+            thickness = {
+                "status": "thin" if thin else "ok",
+                "samples": got.sample_count,
+                "minimum": MIN_SAMPLES_PER_SYNTHETIC_BAR,
+                # The operating margin, printed because B40's finding is that it SHRANK
+                # from 18x at 1H to 1.5x at 5m and nothing failed when it did. A ratio
+                # trending toward 1.0 is the warning a boolean cannot give.
+                "margin": round(margin, 2),
+            }
+            if thin:
+                thickness["warning"] = (
+                    f"{asset}: newest complete bar holds {got.sample_count} samples "
+                    f"against a minimum of {MIN_SAMPLES_PER_SYNTHETIC_BAR}"
+                )
+
+        panels[asset] = {"recency": recency, "thickness": thickness}
+
+    # NAMED, NOT AGGREGATED. A boolean would tell an operator something is wrong and not
+    # which of two hosts to restart — the perpetual panels come from `fapi.binance.com`
+    # and the others from our own collector, with independent failure modes.
+    stale = [a for a, p in panels.items() if p["recency"]["status"] in ("stale", "down")]
+    thin_panels = [a for a, p in panels.items() if p["thickness"]["status"] == "thin"]
+    absent = [a for a, p in panels.items() if p["recency"]["status"] == "unavailable"]
+
+    if absent or any(p["recency"]["status"] == "down" for p in panels.values()):
+        status = "down"
+    elif stale or thin_panels:
+        status = "failing"
+    else:
+        status = "healthy"
+
+    return {
+        "status": status,
+        "watching": True,
+        # The rollup exists so `data_health` can list a problem component. It is NOT the
+        # answer — these three lists are, and they stay separate because an operator
+        # needs to know which axis failed on which feed.
+        "stale_panels": stale,
+        "thin_panels": thin_panels,
+        "absent_panels": absent,
+        "panels": panels,
+        "scope": scope,
+    }
+
+
 async def data_health() -> dict:
     """Everything that fails silently, in one place.
 
@@ -463,6 +677,7 @@ async def data_health() -> dict:
     dominance = dominance_health()
     backups = backup_health()
     shadow = await shadow_health()
+    panels = await panel_health()
 
     # A component we cannot see is NOT ok. Rolling "unavailable" into "ok" here
     # would defeat the entire module.
@@ -470,6 +685,11 @@ async def data_health() -> dict:
         "dominance_collector": dominance,
         "backups": backups,
         "shadow": shadow,
+        # Separate from `shadow` on purpose. Liveness and staleness are orthogonal: the
+        # shadow can be alive, writing on every permitted cycle, and grading frozen
+        # panels — liveness green, grade garbage — and it can be correctly silent while
+        # every panel is fresh. Merging them answers two questions with one output.
+        "correlate_panels": panels,
     }
     problems = [
         name for name, c in components.items() if c.get("status") != "healthy"

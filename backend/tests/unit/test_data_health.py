@@ -75,8 +75,24 @@ def shadow_ok(monkeypatch):
     monkeypatch.setattr(dh, "shadow_health", _healthy)
 
 
+@pytest.fixture
+def panels_ok(monkeypatch):
+    """Pin the correlate-panel component healthy.
+
+    Same reasoning as `shadow_ok`: `panel_health` reaches two live market-data hosts and
+    would report `down` here for reasons that have nothing to do with what the
+    composition tests assert. Its own behaviour is covered in `test_panel_health.py`.
+    """
+    async def _healthy():
+        return {"status": "healthy", "watching": True}
+
+    monkeypatch.setattr(dh, "panel_health", _healthy)
+
+
 @pytest.mark.asyncio
-async def test_unavailable_components_make_the_overall_result_not_ok(dirs, shadow_ok):
+async def test_unavailable_components_make_the_overall_result_not_ok(
+    dirs, shadow_ok, panels_ok
+):
     """Rolling 'cannot see it' into 'ok' would defeat the entire module."""
     r = await dh.data_health()
     assert r["ok"] is False
@@ -306,7 +322,7 @@ def test_backup_staleness_threshold_matches_the_backup_script(dirs):
 # Combined
 # ---------------------------------------------------------------------------
 @pytest.mark.asyncio
-async def test_everything_healthy_reports_ok(dirs, shadow_ok):
+async def test_everything_healthy_reports_ok(dirs, shadow_ok, panels_ok):
     dom, bak = dirs
     write_samples(dom, list(range(0, 60)))
     _status(bak)
@@ -316,7 +332,7 @@ async def test_everything_healthy_reports_ok(dirs, shadow_ok):
 
 
 @pytest.mark.asyncio
-async def test_one_sick_component_makes_the_whole_thing_not_ok(dirs, shadow_ok):
+async def test_one_sick_component_makes_the_whole_thing_not_ok(dirs, shadow_ok, panels_ok):
     dom, bak = dirs
     write_samples(dom, list(range(0, 60)))      # collector fine
     _status(bak, ok=False)                       # backups failing

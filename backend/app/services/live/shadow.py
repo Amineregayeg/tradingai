@@ -34,6 +34,7 @@ evidence accumulating hourly rather than as a line in a planning document.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Sequence
 
@@ -95,27 +96,41 @@ SOURCEABLE_PANELS: dict[str, str] = {"TOTAL": "TOTAL", "USDT.D": "USDT.D"}
 PERPETUAL_PANELS: tuple[str, ...] = ("BTCUSDT.P", "ETHUSDT.P")
 
 
-def _read_panels(
+@dataclass(frozen=True)
+class PanelFetch:
+    """One roster panel, as fetched, BEFORE any thinness filtering.
+
+    THE UNFILTERED FRAME IS THE POINT. `_read_panels` hands structure detection a
+    thick-filtered view, which is correct for its consumer and WRONG for anything asking
+    how recent the data is: filtering thin bars out leaves `.iloc[-1]` on an older thick
+    bar, so a thin panel would be reported as a STALE one. Thinness and staleness are
+    orthogonal — density within a bar versus currency of the newest bar — and filtering
+    for one manufactures the other. Both views are derived from this single fetch so they
+    cannot disagree about what was served.
+    """
+
+    asset: str
+    #: The unfiltered OHLCV frame, indexed by bar OPEN time. None when unreadable.
+    frame: Any | None
+    #: Observations inside the newest complete bar, or None for an exchange bar — a real
+    #: candle is not a resampling of point samples, so there is nothing to count.
+    sample_count: int | None
+    note: str | None = None
+
+
+def fetch_roster_panels(
     signal_tf: str, *, source: Any = None, perp_source: Any = None
-) -> tuple[dict, dict, list[str]]:
-    """The roster panels we can source, as bars, on ONE timeframe.
+) -> list[PanelFetch]:
+    """Every roster panel we can source, unfiltered, on ONE timeframe. Never raises.
 
-    Returns `(panel_bars, sample_counts, notes)`. Never raises: a panel that cannot be
-    read is simply absent, and `LayoutReadability` derives what is missing from the
-    roster rather than from this dict (`gate_008_roster.py:189`), so an empty return
-    degrades to "all four missing" rather than to a smaller layout.
-
-    GATE-007 requires every panel on the same timeframe and fails otherwise
-    (`AlignmentTimeframe.check_all`), so `signal_tf` is passed through unchanged rather
-    than chosen here.
+    Extracted from `_read_panels` so the layout grader and the health monitor read the
+    SAME fetch. Two fetches would mean two answers to "was this panel served", and the
+    perpetual identity refusal below is exactly the kind of decision that must not be
+    made in one place and not the other.
     """
     from app.services.market_data.sources.dominance import DominanceSource
-    from app.services.rules.gate_008_roster import MIN_SAMPLES_PER_SYNTHETIC_BAR
 
-    panel_bars: dict[str, list[Bar]] = {}
-    sample_counts: dict[str, int | None] = {}
-    notes: list[str] = []
-
+    out: list[PanelFetch] = []
     src = source if source is not None else DominanceSource()
     end = datetime.now(timezone.utc)
     start = end - timedelta(days=30)
@@ -126,7 +141,8 @@ def _read_panels(
                 dominance_symbol, signal_tf, start, end, drop_partial=True
             )
             if frame.empty:
-                notes.append(f"{roster_name}: no bars in the last 30d")
+                out.append(PanelFetch(
+                    roster_name, None, None, f"{roster_name}: no bars in the last 30d"))
                 continue
             # ONE FETCH, TWO DERIVATIONS — and they must not be collapsed.
             #
@@ -149,15 +165,11 @@ def _read_panels(
             # At 5m the margin is 30-against-20, so a single slow minute puts the
             # decision bar under the threshold and the distinction starts deciding
             # things.
-            sample_counts[roster_name] = int(frame["samples"].iloc[-1])
-            thick = frame[frame["samples"] >= MIN_SAMPLES_PER_SYNTHETIC_BAR]
-            panel_bars[roster_name] = [
-                Bar(time=idx.to_pydatetime(), open=float(r.open), high=float(r.high),
-                    low=float(r.low), close=float(r.close))
-                for idx, r in thick.iterrows()
-            ]
+            out.append(PanelFetch(roster_name, frame, int(frame["samples"].iloc[-1])))
         except Exception as exc:  # noqa: BLE001 - a shadow may never break the engine
-            notes.append(f"{roster_name}: unreadable ({type(exc).__name__})")
+            out.append(PanelFetch(
+                roster_name, None, None,
+                f"{roster_name}: unreadable ({type(exc).__name__})"))
 
     # -- the two perpetual panels, from the OTHER host ---------------------------
     # Separate source, separate failure mode: if fapi is unreachable these panels are
@@ -180,26 +192,22 @@ def _read_panels(
             frame, identity = psrc.fetch_with_identity(
                 roster_name, signal_tf, start, end, drop_partial=True)
             if frame.empty:
-                notes.append(f"{roster_name}: no bars from {identity.venue}")
+                out.append(PanelFetch(
+                    roster_name, None, None,
+                    f"{roster_name}: no bars from {identity.venue}"))
                 continue
             if identity.instrument_family != "PERPETUAL":
                 # Refuse rather than accept the wrong market under the right name. This
                 # is the runtime half of the mutation in test_binance_perp_identity.
-                notes.append(
+                out.append(PanelFetch(
+                    roster_name, None, None,
                     f"{roster_name}: source served {identity.instrument_family}, not "
-                    f"PERPETUAL — panel refused rather than substituted"
-                )
+                    f"PERPETUAL — panel refused rather than substituted"))
                 continue
-            panel_bars[roster_name] = [
-                Bar(time=idx.to_pydatetime(), open=float(r.open), high=float(r.high),
-                    low=float(r.low), close=float(r.close))
-                for idx, r in frame.iterrows()
-            ]
-            sample_counts[roster_name] = None
-            notes.append(
+            out.append(PanelFetch(
+                roster_name, frame, None,
                 f"{roster_name}: {len(frame)} bars from {identity.venue} "
-                f"({identity.instrument_family}, symbol {identity.symbol_requested})"
-            )
+                f"({identity.instrument_family}, symbol {identity.symbol_requested})"))
     except TypeError as exc:  # noqa: BLE001
         # A TypeError here is a PROGRAMMING error — a signature that has drifted —
         # not an availability problem, and the broad handler below reported it as
@@ -207,9 +215,59 @@ def _read_panels(
         # cost a red suite that read as a network flake. Still swallowed, because a
         # shadow may never break the engine, but named for what it is.
         logger.warning("perpetual panel signature mismatch", error=str(exc))
-        notes.append(f"perpetual panels: interface error, not availability ({exc})")
+        out.append(PanelFetch(
+            "perpetual panels", None, None,
+            f"perpetual panels: interface error, not availability ({exc})"))
     except Exception as exc:  # noqa: BLE001 - never break the engine
-        notes.append(f"perpetual panels unreadable ({type(exc).__name__})")
+        out.append(PanelFetch(
+            "perpetual panels", None, None,
+            f"perpetual panels unreadable ({type(exc).__name__})"))
+
+    return out
+
+
+def _read_panels(
+    signal_tf: str, *, source: Any = None, perp_source: Any = None
+) -> tuple[dict, dict, list[str]]:
+    """The roster panels we can source, as bars, on ONE timeframe.
+
+    Returns `(panel_bars, sample_counts, notes)`. Never raises: a panel that cannot be
+    read is simply absent, and `LayoutReadability` derives what is missing from the
+    roster rather than from this dict (`gate_008_roster.py:189`), so an empty return
+    degrades to "all four missing" rather than to a smaller layout.
+
+    GATE-007 requires every panel on the same timeframe and fails otherwise
+    (`AlignmentTimeframe.check_all`), so `signal_tf` is passed through unchanged rather
+    than chosen here.
+
+    The FETCH lives in `fetch_roster_panels`; what is left here is this consumer's own
+    derivation — the thick-filtered view structure detection needs. `sample_count` is
+    taken from the UNFILTERED frame by the fetch, which is what keeps B27's trap shut.
+    """
+    from app.services.rules.gate_008_roster import MIN_SAMPLES_PER_SYNTHETIC_BAR
+
+    panel_bars: dict[str, list[Bar]] = {}
+    sample_counts: dict[str, int | None] = {}
+    notes: list[str] = []
+
+    for fetched in fetch_roster_panels(
+        signal_tf, source=source, perp_source=perp_source
+    ):
+        if fetched.note:
+            notes.append(fetched.note)
+        if fetched.frame is None:
+            continue
+        sample_counts[fetched.asset] = fetched.sample_count
+        frame = fetched.frame
+        if fetched.sample_count is not None:
+            # Only the RESAMPLED panels are filtered. An exchange bar carries no sample
+            # count and there is nothing to filter it by — see `PanelFetch.sample_count`.
+            frame = frame[frame["samples"] >= MIN_SAMPLES_PER_SYNTHETIC_BAR]
+        panel_bars[fetched.asset] = [
+            Bar(time=idx.to_pydatetime(), open=float(r.open), high=float(r.high),
+                low=float(r.low), close=float(r.close))
+            for idx, r in frame.iterrows()
+        ]
 
     return panel_bars, sample_counts, notes
 
