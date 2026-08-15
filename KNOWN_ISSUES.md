@@ -1829,6 +1829,47 @@ traded. PRIM-002 feeds ENTRY-001, which is every admissible entry object in the 
 
 **NOT fixed, and it is its own entry:** see **B75**. Related: **B74**.
 
+### B81 — "already covered" can mean "covered by a test that sends you the wrong way"
+
+**From T-0018, found by Execute past the criterion that asked the question. Review added `1c` during
+plan review to test the task's own premise — *nothing pins the library's output* — because that
+premise had never been contested. Measured per axis:**
+
+    smc.fvg stamping                   shifted 1 bar   1 FAILED   -> "already caught"
+    smc.swing_highs_lows confirmation  shifted 1 bar   1 FAILED   -> "already caught"
+    smc.bos_choch BrokenIndex          BrokenIndex-1   7 passed   -> NOT CAUGHT
+
+**Two of three protected, so the motivating claim was two-thirds false and the task shrank to one
+axis.** That alone is `1c` working.
+
+**THEN EXECUTE LOOKED AT *WHICH* TEST CAUGHT THEM, WHICH NOBODY ASKED FOR.** Both "caught" results
+fired the same single test — `test_fixture_opens_trades_both_directions`, **a canary asserting the
+fixture still trades.**
+
+> **It goes red because a shifted library STOPS TRADES, not because anything noticed the semantics
+> moved.** So a reader who saw it fail would go looking **in the engine**, at trade generation —
+> **away from the library that actually changed.**
+
+**That downgrades the verdict: not *"already caught"* but *"incidentally caught by a test that
+misdirects."*** One axis unprotected and two behind a canary, which is a different picture from two
+of three protected.
+
+### The shape, and it is distinct from everything above it
+
+    a test that CANNOT fail        the standing family — ~25 instances
+    a test that fails for the
+      WRONG REASON                 THIS — it fails, so coverage looks real, and the failure
+                                   points at the wrong subsystem
+
+**A canary is cheap and worth having. The defect is COUNTING IT AS COVERAGE OF THE THING IT DID NOT
+TEST.** *"Does a test fail when I break this?"* is the question everyone asks; **the second question
+is *"does the failure tell the reader WHAT broke?"*** — and a coverage audit that only asks the first
+will report a misdirecting canary as protection.
+
+**So when a premise check reports *"already covered"*, name the covering test and read it.** The
+distinction costs one grep and it changed T-0018's conclusion after the criterion had already been
+satisfied.
+
 ### B80 — VERIFICATION CAPACITY RUNS OUT LAST, and a seat that refuses the next task is doing it right
 
 **Execute #3 finished five tasks, declined to start `T-0022`, and gave the reason. Recorded because
