@@ -355,6 +355,20 @@ class ExitSimulation:
     runner_open: bool
     remaining_fraction: float
     session_close_active: bool
+    #: HOW MANY TICKS THE MODEL ACTUALLY SAW. The denominator (B90).
+    #:
+    #: Without it, a zero-tick path and a 500-tick path where nothing ever fires emit a
+    #: BYTE-IDENTICAL `NOT_APPLICABLE` record: same empty `exit_events`, same
+    #: `runner_open=True`, same `remaining_fraction=1.0`. So "the path ran out" and "there
+    #: was no path" are one record, and B84's remedy — report the number of records examined
+    #: and make ZERO a distinct outcome — was applied in EXIT-002 (`tranche_count`) and
+    #: missed here, in the same commit.
+    #:
+    #: It bites on precisely what the session close was built to produce. Criterion 5's
+    #: rationale is a measurable record of HOW OFTEN a runner would have been cut, and how
+    #: often is a RATE: `runner_cut_by_session_close` is the numerator, and "47 runners were
+    #: cut" cannot ratify B87's parameter without "out of how many observed."
+    ticks_seen: int = 0
 
     @property
     def partial(self) -> ExitEvent | None:
@@ -435,8 +449,10 @@ class V1ExitModel(RuleImplementation):
         #: boundary recomputed per tick would never be crossed, because every tick is
         #: trivially before its own next 19:00.
         next_close: datetime | None = None
+        ticks_seen = 0
 
         for ts, price in ticks:
+            ticks_seen += 1
             if remaining <= 0.0:
                 break
             price = float(price)
@@ -488,6 +504,7 @@ class V1ExitModel(RuleImplementation):
             plan=plan,
             events=tuple(events),
             runner_open=remaining > 0.0,
+            ticks_seen=ticks_seen,
             remaining_fraction=round(remaining, 10),
             session_close_active=session_close_active,
         )
@@ -518,6 +535,7 @@ class V1ExitModel(RuleImplementation):
             "partial_level": round(plan.partial_level, 10),
             "partial_taken": sim.partial is not None,
             "runner_open": sim.runner_open,
+            "ticks_seen": sim.ticks_seen,
             "remaining_fraction": sim.remaining_fraction,
             "terminal_reason": terminal.reason if terminal is not None else None,
             "terminal_conditions": list(TERMINAL_REASONS),
@@ -545,6 +563,10 @@ class V1ExitModel(RuleImplementation):
             "partial_level": derived("entry + sign * partial_at_r * r_distance"),
             "partial_taken": derived("a PARTIAL_2R event is present in exit_events"),
             "runner_open": derived("remaining_fraction > 0 after the path ended"),
+            "ticks_seen": derived(
+                "count of ticks the model observed — the DENOMINATOR, without which a "
+                "zero-tick path and a long path where nothing fired are one record (B90)"
+            ),
             "remaining_fraction": derived("1.0 - sum(exit_events[].fraction)"),
             "terminal_reason": derived("the terminal event's reason, or null if still open"),
             "terminal_conditions": from_registry("EXIT-001", "output"),

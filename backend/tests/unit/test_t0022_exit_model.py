@@ -745,6 +745,45 @@ def test_the_paper_broker_still_closes_whole_positions():
 # ---------------------------------------------------------------------------
 # Telemetry shape
 # ---------------------------------------------------------------------------
+def test_an_unobserved_path_and_a_long_quiet_one_are_DIFFERENT_records():
+    """B90 — the denominator. Without `ticks_seen` these two are byte-identical.
+
+    Both are NOT_APPLICABLE with no events, `runner_open=True` and `remaining_fraction=1.0`,
+    so "there was no path" and "the path ran and nothing happened" were one record. B84's
+    remedy — report how many were examined and make ZERO a distinct outcome — was applied in
+    EXIT-002's `tranche_count` and missed here in the same commit.
+
+    It matters for the thing the session close exists to produce: criterion 5's rationale is
+    a record of HOW OFTEN a runner would have been cut, and how often is a RATE. The
+    numerator is `runner_cut_by_session_close`; this is the denominator.
+
+    The long path runs with the session close INACTIVE — otherwise it terminates at 19:00 NY
+    and is no longer the "nothing fired" case being compared.
+    """
+    nothing = V1ExitModel.simulate(LONG_PLAN, [])
+    quiet = V1ExitModel.simulate(
+        LONG_PLAN,
+        ticks_from_prices(MORNING_EDT, [100.0] * 200),
+        session_close_active=False,
+    )
+
+    assert nothing.ticks_seen == 0
+    assert quiet.ticks_seen == 200
+    for sim in (nothing, quiet):
+        assert sim.events == ()
+        assert sim.runner_open is True
+        assert sim.remaining_fraction == pytest.approx(1.0)
+
+    a = V1ExitModel.evaluate(nothing)
+    b = V1ExitModel.evaluate(quiet)
+    assert a.verdict == b.verdict == "NOT_APPLICABLE"
+    assert a.values != b.values, (
+        "an unobserved path and a 200-tick path where nothing fired emit the same record — "
+        "the NOT_APPLICABLE corpus cannot supply a denominator"
+    )
+    assert a.values["ticks_seen"] == 0 and b.values["ticks_seen"] == 200
+
+
 def test_every_value_names_its_provenance_on_every_verdict():
     """ALL THREE VERDICTS, because the branches are where a value gets added unpinned.
 
