@@ -1827,9 +1827,33 @@ traded. PRIM-002 feeds ENTRY-001, which is every admissible entry object in the 
 **Fixed** — components must satisfy `formed_index <= formed`, and
 `test_a_component_formed_after_the_band_cannot_promote_it` goes red without it.
 
-**NOT fixed, and this is the part to carry:** the five other contract primitives have never
-been checked for the same thing, and nothing would report it. **A prober for the primitives
-is a task, not a note.** Related: **B74**, and Tier 0.2's own premise.
+**NOT fixed, and it is its own entry:** see **B75**. Related: **B74**.
+
+### B75 — no Tier 0.2 probe covers ANY contract primitive
+
+**Found in:** T-0020, 2026-08-15, as the structural half of **B73**. Review confirms it is the
+honest successor to **B52**, which asked whether the prober's guard list was too narrow, found
+that it was not, and became a note. **This is the gap B52 was reaching for.**
+
+**What it is.** `verify_guards.sh` probes eight guards and every one of them is the LEGACY
+path: the ICT FVG entry rule, the daily bias window, three dominance properties, three
+execution properties. **Not one covers a contract primitive** — PRIM-001 through PRIM-006, the
+inventory that produces every admissible entry object after cutover.
+
+**Why it matters, and B73 is the proof rather than the hypothesis.** PRIM-002's SUPER_BPR
+promotion read forward — a band formed at bar `i` promoted by a component formed at `i+900` —
+and it went unnoticed through two independent measurement passes by two other seats. **Tier
+0.2 exists precisely to catch a rule that reads the future, and it is pointed entirely at the
+code being replaced.** A primitive reading forward is invisible to the machinery built for
+that class of defect.
+
+**The five others have never been checked.** Swings, liquidity pools, sweeps, breaks and SR
+flips all scan sequences and all could take the same shape.
+
+**Fix:** extend `GUARDED_FILES` and the probe list to the primitives — one probe per
+primitive that mutates its causality constraint and requires a test to go red. Note the
+prober refuses to run on a dirty tree, so this also puts the primitives under that guard.
+Related: **B73**, **B52**.
 
 ### B74 — what T-0020 did NOT achieve: the declared tolerance is not met, and the lookback is ours
 
