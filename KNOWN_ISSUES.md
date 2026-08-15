@@ -2044,6 +2044,64 @@ that is not done, this will appear a third time.**
 **Neither defect affects the CONTENT of `B90` or `B91`.** Both entries are correct and in the file
 once. **What is damaged is the audit trail**, which is the thing the register exists to be.
 
+### B92 — the register-commit check is now a HOOK, and a note stopped being the mechanism
+
+**Designed by Review, tested by it against real history before proposing it, installed and verified
+by the Manager 2026-08-15.** `.git/hooks/commit-msg` → `agents/register_commit_check.py`.
+
+**THE RULE, entire: every `### B<id>` heading a commit ADDS must be named somewhere in that
+commit's message.**
+
+    35b3712   added=[B90 B91]         unnamed=[B90 B91]   CAUGHT — both of the night's defects
+    e9ad0df   added=[B86 B87 B88 B89] unnamed=[]          pass  — Execute's, names all four
+    d9b987c   added=[B85 B84]         unnamed=[]          pass  — legitimately two, both named
+    c52f1d5   added=[B83]             unnamed=[]          pass
+    9b2bbef   added=[B82]             unnamed=[]          pass
+
+**One rule catches two unrelated defects and does not false-positive on the legitimate two-entry
+commit:**
+
+* **A MISTYPED ID** — the message said `B86`, the diff added `B91`, and `B86` was a real unrelated
+  entry.
+* **ANOTHER SEAT'S ENTRY SWEPT IN** — Review's `B90` was dirty in the shared tree and
+  `git add KNOWN_ISSUES.md` took it. **Caught by the same rule without needing to know whose it
+  was:** an added heading the author never named.
+
+### Why it succeeds where four previous guards failed
+
+**Every earlier defence read the tree BEFORE staging** — `git status` first, chaining `add` and
+`commit` with `&&` — **and all of them were beaten by timing, four times.** This reads the **staged
+diff**, after `git add`, **when the race is already over.** A file swept in by `git add` cannot hide
+from a check on what is actually about to be committed.
+
+**And it is a HOOK because all three seats share ONE working tree.** A habit adopted by one seat
+protects nothing against a cross-seat defect — **the entry it saves is the one the other seat wrote.**
+
+> **This is "a note is not a mechanism" applied to its own instance.** `B80` recorded the mistyped id,
+> changed nothing about how messages get written, **and it recurred within the hour.** The recurrence
+> is the argument.
+
+### Installed at the wrong stage first, which is worth recording
+
+**It went in as `pre-commit`, which receives NO ARGUMENTS.** The message file is passed to
+`commit-msg`. So the script's fallback read `git log -1` — **the PREVIOUS commit's message** — and the
+check compared new ids against an old message. **It refused a correct commit and would have passed a
+wrong one whose predecessor happened to name the right id.**
+
+**A hook at the wrong stage is worse than no hook**, because it reports confidently from the wrong
+input — this register's standing shape, in the guard written to end it.
+
+### And the cleanup destroyed a real commit
+
+**Testing it, the Manager ran `git reset --hard HEAD~1` to drop a test commit the hook had just
+REFUSED TO CREATE.** No test commit existed, so it dropped **`a69f368`** — the correction commit —
+instead. **Recovered from `origin/main` in full; nothing was lost.**
+
+**The defect: a cleanup that assumes the thing it is cleaning up exists.** The second attempt guarded
+it — *"only reset if the top commit is the test commit"* — which is the shape to use.
+**`git reset --hard` with an unverified target is the only command tonight that destroyed work, and it
+was in the teardown of a test, not in the change under test.**
+
 ### B91 — a snapshot of a MUTABLE value is EVIDENCE, not a duplicate — the limit of "never store a second copy"
 
 **Found 2026-08-15 by Execute while applying a Manager ruling, and it is a refinement of that ruling
