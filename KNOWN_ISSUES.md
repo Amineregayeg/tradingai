@@ -2088,6 +2088,44 @@ protects nothing against a cross-seat defect — **the entry it saves is the one
 > changed nothing about how messages get written, **and it recurred within the hour.** The recurrence
 > is the argument.
 
+### EXTENDED TO REMOVALS — and a REMOVED heading is the STRONGER claim
+
+**Found by Execute after the guard let a swept DELETION through. Verified: `33a3951` named `B94`,
+added `B94`, satisfied the check — and carried away Execute's uncommitted removal of `B90`.**
+
+    a69f368  B90 present: 1
+    17ebdd6  B90 present: 1
+    ec711b4  B90 present: 1
+    33a3951  B90 present: 0    <- removed here, while the FIX was still uncommitted
+
+**For about twenty minutes `main` said `B90` was fixed with no code implementing it.** Fifth sweep by
+the Manager, and the first the new guard was supposed to prevent.
+
+**The rule was asymmetric and the asymmetry was backwards. Execute's argument, adopted:**
+
+> **An ADDED heading says *"here is a problem."* A REMOVED heading says *"this problem is FIXED."***
+> It retires a known defect, and the register's rule is that an entry disappears only when the fix
+> lands in the same commit. **A swept deletion breaks that invariant silently, and it breaks it in
+> the OPTIMISTIC direction** — the register and the code disagree, with the register claiming the
+> better state.
+
+**So the check is now symmetric: every `### B<id>` a commit ADDS *or REMOVES* must be named in its
+message.** Same staged diff, same place in the hook.
+
+**Replayed against history:**
+
+    33a3951   adds=[B94]  removes=[B90]  unnamed_del=[B90]   CAUGHT
+    c6ebd2f   adds=[]     removes=[]                          pass
+    e9ad0df   adds=[B86 B87 B88 B89]     removes=[]           pass
+
+**And the removal branch says why it fired**, because the two cases need different responses: an
+unnamed ADD is usually a typo or another seat's entry; **an unnamed REMOVAL means you are retiring
+someone else's fix, or your own too early.**
+
+**Implemented by the Manager rather than referred to Review, whose design it is** — the gap was live,
+the fix was ten lines, and **the Manager caused the incident it closes.** Review invited to change any
+of it.
+
 ### THE GUARD ITSELF SHIPPED WITH TWO INSTANCES OF THE FAILURE IT ENDS — found by Review reading it
 
 **Review read `register_commit_check.py` in full rather than the description, on the grounds that an
