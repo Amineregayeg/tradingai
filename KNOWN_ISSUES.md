@@ -2376,6 +2376,51 @@ protects nothing against a cross-seat defect — **the entry it saves is the one
 > changed nothing about how messages get written, **and it recurred within the hour.** The recurrence
 > is the argument.
 
+### THE UNGUARDED DIRECTION: an id NAMED in a message that does not exist in the register
+
+**Review found the inverse of the rule and deliberately did not propose fixing it tonight. Recorded
+here with its trigger, because *"if it happens again"* in a message is `B82`'s shape and the Manager
+has now been caught by that twice.**
+
+**The rule is: every heading a commit ADDS or REMOVES must be named in its message. The inverse is
+unguarded** — **a commit that adds no heading and cites an id that does not exist passes cleanly.**
+`16a5243` cited `B98` five times against a register that had no such entry, and the check correctly
+returned without an opinion because the commit added nothing.
+
+### The trigger, and the Manager's first version of it was measuring the wrong thing
+
+**Proposed: *"if a second dangling citation appears, that is the trigger."* Review dismantled it:**
+
+> **An incident caught for the WRONG REASON is not evidence about the mechanism that failed to catch
+> it.**
+
+**The refused commit an hour earlier said `B97` — a real, unrelated entry belonging to Execute — AND
+swept in an unbid `B98`. The hook caught it via the SWEEP rule.** So **the citation route has already
+fired once and produced no observation of itself**, because the two rules could not be distinguished
+by that event.
+
+**Waiting for a "second" therefore measures the rate of citation defects that arrive WITHOUT an
+accompanying sweep** — a different quantity, with a base rate nobody has seen. **`B81` in a new
+place: the guard went red, coverage looked real, and the red came from a different mechanism than the
+one under test.** The count says one; **the count cannot say one OF WHAT.**
+
+**Corrected trigger: THE NEXT CITATION DEFECT OF ANY KIND.** Not a second dangling one — **the
+narrower phrasing excludes the two already on record**, `B80`'s footnote (a citation pointing at a
+real unrelated entry) and this one. **Two instances of the class, zero observations of a guard, which
+is a better basis than a trigger that cannot be evaluated.**
+
+### Why not build it now, which is Review's call and I agree
+
+**The convention it would enforce was decided minutes ago and has not been lived with.** The ruling —
+**an entry lands BEFORE or WITH the code that cites it, and the obligation is on the COMMITTER, not
+the citing seat** — is the symmetric form of Execute's removal argument. **A strict check today would
+flag Execute's behaviour in `16a5243`, which was correct:** it could not commit another seat's entry
+without taking its authorship, so it scoped its own commit and left the entry. **The latency was the
+Manager's.**
+
+**A check that flags the right behaviour teaches people to bypass it**, which is the credibility cost
+recorded above for over-tight guards.
+
 ### WHAT A GREEN HOOK IS EVIDENCE OF — read this before trusting it
 
 **Review's formulation, put here rather than left in a message because it is the thing a future seat
