@@ -1952,7 +1952,26 @@ any Execute seat branches for `T-0030`.** Then:
 
 * **its provenance is a commit that predates the branch point — git-verifiable, not asserted;**
 * **the measuring seat cannot set it, so there is no honesty to rely on;**
-* **a reviewer checks it mechanically:** `git merge-base --is-ancestor <this commit> <work commit>`.
+* **a reviewer reads the number FROM THE PIN:** `git show 66b9f03:KNOWN_ISSUES.md`.
+
+> **CORRECTED SAME DAY — Review found the hole in its own mechanism and it is worth keeping visible.**
+> It first proposed `git merge-base --is-ancestor 66b9f03 HEAD`. **That verifies ORDERING, not
+> IMMUTABILITY** — it returns yes for any earlier commit whatever happened afterwards, and
+> `KNOWN_ISSUES.md` is a file Execute writes to routinely, **so this very entry could be amended at
+> `HEAD` and the check would still pass.** The commit-msg hook would make the edit visible, **but
+> visibility is not prevention.**
+>
+> **Reading from the pin makes immutability irrelevant:** an amendment at `HEAD` cannot move the
+> binding value, because the binding value is the one in the pinned object.
+>
+> **`THE FLOOR VALUE IS UNCHANGED BY THIS CORRECTION — `n >= 30`, as pinned. Only the CHECK moved.`**
+> Confirmed with a control pair, per `B122`'s third fix: `git show e735959:… | grep -c 'n >= 30
+> setups'` returns **0** and `git show 66b9f03:… ` returns **2**, so `git show <sha>:<file>`
+> demonstrably reads per-commit content rather than the worktree.
+>
+> **If the floor ever needs revising it gets a NEW pinned commit and an amendment to the criterion that
+> cites it — never an edit at `HEAD` under the same pin.** A pin that silently changes meaning is worse
+> than no pin.
 
 **It lands in `KNOWN_ISSUES.md` specifically because `agents/` is NOT a git repository** — the plan
 file has no history to verify against, so a floor written only into the plan would have kept exactly
