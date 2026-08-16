@@ -1829,6 +1829,61 @@ traded. PRIM-002 feeds ENTRY-001, which is every admissible entry object in the 
 
 **NOT fixed, and it is its own entry:** see **B75**. Related: **B74**.
 
+### B101 — `ci_range.py` measured the distinguishing fact and dropped it on one branch of three
+
+**Filed by Review 2026-08-16, against my own tool, found by Execute during the T-0026 verdict. The
+bug is FIXED. What is OPEN is that the fix is unexercised, and that is the reason this has an id.**
+
+### The defect
+
+`own_cancelled` is computed once and was used on **two branches of three**:
+
+    inherited branch   why = "own run CANCELLED; "     printed it
+    UNKNOWN branch     had = "run CANCELLED"           printed it
+    PENDING branch     DROPPED IT ENTIRELY
+
+**So a commit whose own CI run was CANCELLED printed as plain `PENDING`.** I read that and wrote
+*"PENDING … I will flag it if it turns red."* **It was never going to turn.** `ce12b88`'s Backend
+suite was killed by the workflow's concurrency group when `07eb4c0` landed.
+
+> **`PENDING` says wait for THIS sha. The truth was that this sha's run was dead and the coverage
+> depended on a DIFFERENT sha finishing. Those imply different next actions, and only one of them
+> was printed.**
+
+**This is the sharpest instance of the standing family we hit all night, because of where it
+happened: the instrument built to stop outputs that do not discriminate, failing to discriminate —
+on the one branch of three that lost the fact, which is the branch that produced the line a reviewer
+then repeated in a verdict.**
+
+**The cause is not ignorance of the distinction.** `cancelled` is handled deliberately elsewhere in
+the same file, with a comment explaining why it must not be a separate outcome (**B30**). **The fact
+was known, computed, and dropped on output.**
+
+### Fixed
+
+That branch now reports **`SUPERSEDED`** with *"own run CANCELLED and will NEVER complete; tree
+identical to X, WHOSE RUN IS STILL IN PROGRESS — check THAT sha, not this one."* **The label changed,
+not only the arrow**, because the label is what a reader acts on.
+
+### What is OPEN, and why it is here rather than in a verdict
+
+**The new branch has never executed.** Its condition — a cancelled run coinciding with a
+tree-twin still in progress — stopped holding the moment `07eb4c0` completed. **I verified only that
+two real ranges still report correctly with no regression. That is a regression check, not a test of
+the fix.**
+
+> **It is correct by construction and verified against nothing — the same state as `B93`'s
+> `REASON_OUTSIDE_V1` and `TARGET-001`'s `CANNOT_FIRE`.**
+
+**What would exercise it:** any range containing a commit whose own run was cancelled while a
+tree-identical commit's run is still in progress. **Execute measured that three seats pushing in
+quick succession is now the normal condition** — `03b18d6` cancelled the run before it, `ce12b88`
+cancelled `03b18d6`'s, `07eb4c0` cancelled `ce12b88`'s — **so this will recur, and the next reviewer
+to hit it should confirm the branch fires rather than assume it.**
+
+**Related:** **B92** (the guard family and its standing limit — it prevents recurrence, it cannot
+produce discovery), **B30** (why `cancelled` asserts nothing), **B93**, **B81**.
+
 ### B86 — `PaperPosition` CANNOT REPRESENT A TRANCHED POSITION, and the v1 exit model needs one
 
 **Filed 2026-08-15 by Execute, T-0022. This is the plan's own named risk, measured rather than
