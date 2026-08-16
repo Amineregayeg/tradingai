@@ -9,6 +9,7 @@ emits.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import ast
 import subprocess
 import sys
 from pathlib import Path
@@ -23,6 +24,39 @@ from app.services.rules.base import (
 )
 from app.services.rules.gate_023_timezone import NewYorkTimestamps
 from app.services.telemetry import contract_loader as contract
+
+RULES_PKG_DIR = Path(rules_pkg.__file__).parent
+
+#: Modules in the rules package that deliberately register NO rule. An ALLOWLIST rather than
+#: a predicate, so adding one stays a deliberate act: a new unregistered module still fails
+#: the guards below until someone writes down why it is exempt.
+#:
+#: `consolidation` is a primitive the CONTRACT ASSUMES AND NEVER DEFINES — GRADE-035's inputs
+#: name a consolidation/overlap detector that exists nowhere in the registry. Giving it a
+#: RULE_ID would assert the registry defines a rule it does not.
+#:
+#: ONE COPY, MODULE LEVEL, read by all three guards (T-0026 criterion 3). It used to be a
+#: local in each, and a second copy of an allowlist is the same-claim-two-homes failure —
+#: the copy nothing checks is the one that rots. It is also the DENOMINATOR of every coverage
+#: number quoted about these guards: 29 `.py` in the package minus these three is 26, and
+#: **the domain of a guard's coverage is the guard's own exclusion set, not the directory
+#: listing.**
+#:
+#: `check_rule_coverage.py` DELIBERATELY DOES NOT SHARE THIS, and must not be made to.
+#: Measured: it has no exempt set at all — it globs `app/**/*.py` for `RULE_ID = "..."`
+#: strings. **That is a DIFFERENT DOMAIN answering a DIFFERENT QUESTION.** This constant
+#: answers *"which files in `rules/` are exempt from having to register a rule"*; the script
+#: answers *"which rule ids appear anywhere under `app/`"*. Unifying them would assert the
+#: two sets are the same, which is the defect rather than the tidy-up: **B54 was two tools
+#: disagreeing, and this would be two tools agreeing about different things — worse, because
+#: it looks correct.** It also belongs in tests rather than in `app/`, since it is an
+#: assertion about test exemption and production code should not carry one.
+NOT_RULES = {"__init__", "base", "consolidation"}
+
+
+def rule_modules_on_disk() -> set[str]:
+    """The guards' shared domain: every module expected to register a rule."""
+    return {p.stem for p in RULES_PKG_DIR.glob("*.py") if p.stem not in NOT_RULES}
 
 
 @pytest.fixture(autouse=True)
@@ -148,16 +182,7 @@ def test_every_rule_module_on_disk_is_imported():
     """A rule implementation nothing imports is invisible to the coverage report — it
     counts as unimplemented while sitting in the tree, which is the one failure mode a
     coverage report must not have."""
-    pkg_dir = Path(rules_pkg.__file__).parent
-    # Modules in this package that deliberately register NO rule. An ALLOWLIST rather
-    # than a predicate, so adding one stays a deliberate act: a new unregistered module
-    # still fails this test until someone writes down why it is exempt.
-    #
-    # `consolidation` is a primitive the CONTRACT ASSUMES AND NEVER DEFINES — GRADE-035's
-    # inputs name a consolidation/overlap detector that exists nowhere in the registry.
-    # Giving it a RULE_ID would assert the registry defines a rule it does not.
-    NOT_RULES = {"__init__", "base", "consolidation"}
-    on_disk = {p.stem for p in pkg_dir.glob("*.py") if p.stem not in NOT_RULES}
+    on_disk = rule_modules_on_disk()
     imported = {
         cls.__module__.rsplit(".", 1)[-1] for cls in rules_pkg.implementations().values()
     }
@@ -175,6 +200,85 @@ def test_every_rule_module_on_disk_is_imported():
         "This does NOT establish that rules/__init__.py is missing them — this registry is "
         "process-global and any import populates it. See "
         "test_the_package_alone_registers_every_rule_module for the check that does."
+    )
+
+
+def test_every_rule_module_is_imported_BY_NAME_in_rules_init():
+    """THE INVARIANT THE FAILURE MESSAGE HAS ALWAYS CLAIMED, finally measured (B93, T-0026).
+
+    **This asks a SYNTACTIC question: does every on-disk rule module appear by name in an
+    import statement in `rules/__init__.py`?** That question has an exact answer and no
+    proxy.
+
+    THE TWO GUARDS AROUND THIS ONE ASK DIFFERENT QUESTIONS AND ALL THREE ARE KEPT:
+
+        this test                                 is the import WRITTEN?      syntactic
+        test_the_package_alone_registers_...      does importing WORK?        runtime
+        test_every_rule_module_on_disk_is_...     registered in THIS process? weakest
+
+    A module can be imported in the file and still fail to register — a renamed class, a
+    broken decorator — so the runtime check is not redundant with this one. And this one
+    catches what the runtime check cannot, which is the whole reason it exists:
+
+    **REGISTRATION IS A PROXY, AND IT IS THE PROXY THAT HAS FAILED TWICE.** Once to test
+    modules importing rule modules directly (pytest imports every collected module before
+    running any, so the process-global registry is already populated — the guard below was
+    vacuous for 23 of 26). Once to SIBLING REACHABILITY: rule modules import each other, so
+    removing a module's own import line from `__init__.py` often leaves it registered anyway
+    through a neighbour, and a clean interpreter cannot tell the difference. Measured during
+    T-0023: **15 of 26 stayed registered via a sibling.**
+
+    Nothing is executed here, so a sibling cannot cover for a missing line.
+    """
+    init_path = RULES_PKG_DIR / "__init__.py"
+    source = init_path.read_text()
+    tree = ast.parse(source)
+
+    def _module_names(node: ast.AST) -> set[str]:
+        """Last path segment of every module named by one import node."""
+        names: set[str] = set()
+        if isinstance(node, ast.ImportFrom):
+            if node.module:
+                names.add(node.module.rsplit(".", 1)[-1])
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                names.add(alias.name.rsplit(".", 1)[-1])
+        return names
+
+    top_level: set[str] = set()
+    for node in tree.body:
+        top_level |= _module_names(node)
+
+    # THE FIRST RISK, MEASURED RATHER THAN ASSUMED. This check reads module-level imports;
+    # an import nested in a `try`, an `if`, or a function body would be invisible to the
+    # loop above while still being a real import. If any exist, the guard's domain is
+    # smaller than it looks and it must say so instead of quietly under-reporting.
+    all_imports: set[str] = set()
+    for node in ast.walk(tree):
+        all_imports |= _module_names(node)
+    nested_only = all_imports - top_level
+    assert not nested_only, (
+        f"{sorted(nested_only)} are imported somewhere OTHER than module level in "
+        "rules/__init__.py. This guard reads top-level imports, so its coverage is now "
+        "narrower than it reports — widen the walk or flatten the import."
+    )
+
+    # The denominator, asserted. A parse that silently produced nothing would report the
+    # same empty `missing` set as a clean file.
+    assert top_level, "no imports found in rules/__init__.py — the parse produced nothing"
+    on_disk = rule_modules_on_disk()
+    assert on_disk, "no rule modules found on disk — the scan is not looking where it thinks"
+
+    missing = sorted(on_disk - top_level)
+    # THIS MESSAGE IS NOW TRUE. The old guard said "not imported by rules/__init__.py" while
+    # asserting only that something had registered the class in this interpreter — a claim
+    # about a specific file that the assertion never opened, and the sentence a reader
+    # trusts while debugging. This assertion has actually read that file.
+    assert not missing, (
+        f"not imported by rules/__init__.py: {missing}. These modules exist on disk and "
+        "check_rule_coverage.py will count them as UNIMPLEMENTED. The suite may still be "
+        "green — a test importing them directly, or a sibling rule module importing them, "
+        "is enough for both other guards to pass."
     )
 
 
@@ -217,9 +321,7 @@ def test_the_package_alone_registers_every_rule_module():
     assert result.returncode == 0, f"importing the package alone failed:\n{result.stderr}"
     registered = set(result.stdout.strip().split(","))
 
-    pkg_dir = Path(rules_pkg.__file__).parent
-    NOT_RULES = {"__init__", "base", "consolidation"}
-    on_disk = {p.stem for p in pkg_dir.glob("*.py") if p.stem not in NOT_RULES}
+    on_disk = rule_modules_on_disk()
 
     assert on_disk, "no rule modules found on disk — the scan is not looking where it thinks"
     missing = sorted(on_disk - registered)
