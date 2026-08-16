@@ -1970,13 +1970,47 @@ strength it did not have. **The flattering artefact is the one nobody audits.**
 
 **What actually caught it here was asking the right question of the right object:** not *"did a
 test go red"* but *"did the EMITTED RECORD change"*. **Which test failed established the premise;
-how many failed established nothing.** Same move as **B81** — proving the table is not
-multiplicative is not proving the code reads the table — applied to the verification step instead
-of to the code.
+how many failed established nothing.**
 
-**Directly related: B120** (a fixture that cannot fail), **B111**, **B93**, **B46**. **This
-register's default failure, now found inside the instrument used to check for this register's
-default failure.**
+**THE UNIFICATION WITH `B81`, and it is tighter than "the same thing one level up":**
+
+> **In both cases the OBSERVABLE is compatible with two very different underlying states, and the
+> reader defaults to the flattering one.**
+
+    B81     a red is compatible with "the property is covered" and "a canary fired"
+            -> the reader assumes covered
+    B121    a red is compatible with "the mutation was detected" and "the mutation crashed"
+            -> the reader assumes detected
+
+**B120 is the same shape with the observable inverted:** a GREEN is compatible with *"the
+tie-break is correct"* and *"the tie-break reads list order"*, and the reader assumes correct.
+
+**Directly related: B120, B111, B93, B46.** **This register's default failure, now found inside
+the instrument used to check for this register's default failure.**
+
+**AND A CITATION DEFECT FOUND INSIDE THIS ENTRY, WHICH IS WORTH MORE THAN THE TIDY-UP.** This
+entry and `B120` both originally read *"Same move as B81 — proving the table is not multiplicative
+is not proving the code reads the table."* **That sentence is not in `B81`.** `B81` is T-0018's
+misdirecting canary; it contains no table and no lookup. The formulation is
+`agents/tasks/T-0024/review-01.md`, **and the table-versus-lookup finding was never filed as a
+register entry at all** — it was judged not a criteria failure and closed in-cycle.
+
+**The propagation is the interesting part, because nobody invented anything:**
+
+    review-01.md:35     "That is B81 inside the task whose entire purpose is..."   an ANALOGY
+    T-0024 work-report  repeated verbatim                                          still an analogy
+    the handoff         repeated verbatim                                          still an analogy
+    B120 and B121       "Same move as B81 — <the sentence>"                        now a CITATION
+
+**Four hops, no step wrong on its own, and the shape changed from *"this resembles B81"* to *"B81
+says this"* without anyone asserting it.** A reader following the citation goes to `B81` and does
+not find the sentence — **which is `B80`'s footnote defect, arriving inside an entry about
+verification.** Found by Review, 2026-08-16; corrected here and in `B120`.
+
+**The cheap lesson is to check citations. The load-bearing one is that an ANALOGY and a CITATION
+are different claims and the prose form is identical**, so the drift is invisible at every
+individual hop — the same structure as the mutation counts above, where each attempt looked fine
+on its own.
 
 ### B117 — `locatable: false` with NO reason and NO evidence validates against the schema today, and the invariant that forbids it exists only in prose
 
@@ -2098,8 +2132,16 @@ assumed monotonicity in order to test the tie-break would be assuming the thing 
 **The general form, and it is this register's default failure at one more depth:** proving a
 FIXTURE separates two implementations requires running BOTH implementations against it. **An
 assertion that merely agrees with the correct implementation proves nothing about the wrong
-one.** Directly related: **B81** (proving the table is not multiplicative is not proving the code
-reads the table), **B111**, **B46**.
+one.**
+
+**Directly related: `B81`** — same shape, observable inverted. **`B81`'s red is compatible with
+*"the property is covered"* and *"a canary fired"*; this entry's GREEN is compatible with *"the
+tie-break is correct"* and *"the tie-break reads list position"*. Both times the reader defaults to
+the flattering reading.** Also **B121**, **B111**, **B46**.
+
+*(The table-versus-lookup formulation this entry originally cited `B81` for is NOT in `B81` — it
+is `agents/tasks/T-0024/review-01.md`, and it was never filed as a register entry. Corrected
+2026-08-16; see `B121` for how the misattribution propagated.)*
 
 ### B116 — 41 of 45 rules are counted ABLE TO FIRE because nobody said otherwise, and the cheap instrument that would replace that does not work
 
