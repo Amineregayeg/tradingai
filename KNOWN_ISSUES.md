@@ -1859,6 +1859,72 @@ it alone.
 **Until then, read a green run in `test_t0027_round2_patch.py` as: the prose landed on the rules WE
 LISTED. Not: we listed the right rules.**
 
+### B111 — the criterion is unfalsifiable because the FIXTURE cannot tell the two implementations apart
+
+**Filed by Review 2026-08-16, at the Manager's request and from findings we produced jointly. Four
+criteria across three tasks, enumerated below rather than counted — the first version of this entry
+said "four tasks", which is a materially stronger claim and was wrong.**
+
+**In all four cases the assertion was CORRECT.** Nobody wrote a bad check. **They wrote good checks
+against corpora that could not exercise them**, which is why none of the four was caught by reading
+the test.
+
+### The property, in one line
+
+> **Does a fixture exist under which the correct and the incorrect implementation produce DIFFERENT
+> output? If no, the criterion is unfalsifiable however well the assertion is written.**
+
+### The four
+
+    T-0022  criterion 6   both DST fixtures pass whether the implementation is a boundary
+                          CROSSING or a time-of-day COMPARISON. The named defect class —
+                          a hardcoded offset — is caught; the actual defect, a runner
+                          surviving a feed gap across 19:00, is invisible to both dates.
+
+    T-0023  criterion 4   sorting TARGET-001's candidates by DISTANCE left the whole file
+                          green. With only ONE candidate supporting the destination the
+                          filter decides and iteration order cannot matter, so a
+                          distance-sorting implementation satisfies the criterion exactly
+                          as written, in both directions.
+
+    T-0028  criterion 2   "delete the ~1% constant and every clearance verdict is unchanged"
+                          is GUARANTEED when no fixture sits near the boundary — it passes a
+                          gating and a non-gating implementation alike.
+
+    T-0028  criterion 1   collapsing `tested` and `consumed` into one boolean passes every
+                          fixture in which the two happen to agree.
+
+**Two of the four are in one task.** T-0022's and T-0023's were found **by mutation, not by
+reasoning** — the implementer mutated, saw green, and reported it. T-0028's two were found in plan
+review, before anything was built.
+
+### NOT the same as B81, and folding them together makes both weaker
+
+    B81          the failure MISDIRECTS — "1 FAILED -> already caught" never said WHICH test,
+                 and the test was a fixture-trades canary. THE FIXTURE DISCRIMINATED FINE.
+    this family  THE FIXTURE CANNOT TELL the implementations apart. The assertion was correct
+                 in all four cases and its output was not misleading.
+
+**Two shapes that look alike and fail differently.** `B81`'s remedy is to name the evidence in the
+output; this one's remedy is to change the corpus.
+
+### The remedy, and it has a shape
+
+**Assert that the DISCRIMINATING CASE IS PRESENT — not merely that the assertion passes.**
+
+    T-0023   assert ev.values["destination_supported_candidates"] == 2
+             "the fixture must have TWO supporting candidates or it cannot discriminate"
+    T-0028   a boundary-adjacent case, asserted present
+             a divergent tested/consumed case, asserted present and non-zero
+
+**That converts a silent degradation into a red test:** a later edit removing the second candidate
+turns the fixture back into the vacuous one it replaced, **and now says so.** Same discipline as
+T-0018's `len(gaps) >= 20` sample-size guards and the AST guard's `assert parsed >= 200` — **the
+denominator asserted inside the test rather than beside it.**
+
+**So this family has a fix and not only a diagnosis, which is more than most of this register
+carries.** Related: **B81**, **B84**, **B93**.
+
 ### B110 — `GRADE-019` tells a consumer to refuse and a reader to ship, in the same rule
 
 **Filed by Execute 2026-08-16. Found by the Manager while checking T-0024's plan against `1d0f74a`.
