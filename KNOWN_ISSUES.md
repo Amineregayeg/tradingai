@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-16 (T-0027: Salim's round-2 rulings applied to the pinned contract — RULE_REGISTRY 1.2.0 -> 1.2.1, prose only, ZERO status fields changed, plus six TELEMETRY_SCHEMA additions including the fourth record type `evaluation_unavailable`. NOTHING was implemented and nothing deployed. B82 SUPERSEDED — the wide-cover stop is a zone-coverage modifier applied after anchor selection, not a sixth anchor, and rung 3 is a swept liquidity level because Salim withdrew the QML requirement himself. B102 — ENTRY-004's closure is owed to code that does not exist, so the row stays OPEN and our open_items carries 14 where the patch's arithmetic says 13. B103 — the main-asset exclusion has run UNGATED in live shadow since 2026-08-08 and T-0027 could NOT fix it: `main_asset_state` is in the schema but deliberately NOT required, because no producer computes the verdict and faking it in the fixture would be a vacuous green. B104 — a missing correlate still reads as a calm aligned one, same direction of failure. B105 — `data_gaps` is now required and the ambiguity moved to the caller rather than disappearing. B106 — THREE round-2 rows could not be applied here and are NOT done: two P1 targets live in a pack we do not hold, and HG-29 does not exist in this repo at all. B107 — the schema changed content with no version bump; a sha pin is the only tripwire. B108 — 84% of our citations cannot be followed from this repo, so every negative image-corpus finding is INHERITED, labelled UNVERIFIABLE_HERE. Earlier, T-0026: B93 CLOSED — the AST guard measures the invariant the failure message always claimed, catching 26/26 against the clean-interpreter guard's 11/26, and all three guards are kept because they ask three different questions. Earlier, T-0023, target selection — EXIT-004 / TARGET-001 / TARGET-003, SHADOW ONLY like every rules task. B93 — a test can make a guard vacuous just by importing what the guard checks for: `test_every_rule_module_on_disk_is_imported` was vacuous for 23 of the 26 modules in its own domain; FIXED by a clean-interpreter guard, whose own limit is measured at 15 of 26 still reachable through a sibling and is NOT fixed. B95 — TARGET-001 and TARGET-003 are three levels, not two, and 'ignore size entirely' is the wrong implementation that looks safe. B96 — the active institutional destination has NO producer, so TARGET-001 registers unable to fire. B97 — `target_object_type` is lossier than PRIM-003's pool classes and INSTITUTIONAL_CANDLESTICK must never map to INSTITUTIONAL_LEVEL. Earlier, B90 CLOSED: EXIT-001 now reports `ticks_seen`, so an unobserved path and a long quiet one are no longer one record. Earlier, T-0022, the v1 exit model EXIT-001/EXIT-002 — the first rules in this programme that govern what happens AFTER a trade is taken, and SHADOW ONLY: nothing under `live/` or `broker/` imports them and `paper.py` still closes positions whole. B86 — `PaperPosition` has one `units`/`sl`/`tp` and `__slots__`, so it cannot represent a tranched position and the wiring task is a broker-layer change, not a call site. B87 — the 19:00 New York close is ours and UNRATIFIED, defaulted ON so shadow generates the evidence the ruling needs, and the wiring task must re-surface the question rather than inherit it. B88 — `ExitEvent` refuses `LIQUIDATION`, which is what makes criterion 1 enforceable at all, and becomes a hazard the moment a real liquidation can reach the exit path. B89 — a target at or inside 2R is refused outright because GATE-031 cannot run without GATE-025. Earlier, T-0021: B54 CLOSED — both tools collapse aliases and agree; every coverage figure now carries its space, and the script refuses to print an impossible set. B58 — the other tool is outside the repo, so half the agreement cannot be CI-enforced. Earlier, T-0016: the partially-evaluable requirements are enforced by script over the whole registry — B56, eleven emitted fields that cannot say where they came from, baselined not fixed and needing a task id; B57, the two of six standing requirements that script can actually enforce, so a green run is not read as six. Earlier the same day, T-0007: ENTRY_TF 1H -> 5m, the first live behaviour change. B37 CLOSED — the lookahead is out of production. B33 gained the instance it predicted: every legal execution timeframe would have broken the shadow; GATE-017 closed on the live path; B38 — GATE-018 stays OPEN; B39 — a conditional edit that matches nothing succeeds; B40 — the correlate margin is now 1.5x and nothing reports it shrinking)
+Last updated: 2026-08-16 (T-0024: position sizing — GATE-032 as a LITERAL 9-cell lookup, SIZE-004's two-part conformance assertion, GRADE-019 as a REFUSAL. SHADOW ONLY: nothing under `live/` imports the sizer and `crypto_loop` still sizes from the flat `RISK_PCT = 0.01`; nothing deployed. B113 — SIZE-004's 2% ceiling was retired BY OMISSION rather than by argument, recorded because the rule's own last clause requires it, and stamped on every evaluation as `retired_ceiling` + `retirement_by_omission`. B114 — the altcoin Heavy `0.05` is a dropped decimal on three independent signatures and is left UNRECONCILED on purpose; the vector is never INDEXED, enforced by an AST walk that caught its own module on the first run. B115 — `RISK_PCT = 0.01` is EXACTLY the matrix's `STANDARD/NONE` cell, so the matrix moves live sizing UP for better boxes, and `fixed_config.py:35` says in prose that this value "was never settable", denying the premise of the rule; not edited, because this task is shadow-only. B112 — T-0023's producer scan is a substring match and cannot tell a producer from a mention, so documenting the gap turned it red; fixed by rewording MY module rather than widening the guard. B110 UPDATED — the behaviour half is closed, the registry half is NOT, and reconciling `triage_note` is outside the Execute seat's authority; escalated rather than performed. Earlier, T-0027: Salim's round-2 rulings applied to the pinned contract — RULE_REGISTRY 1.2.0 -> 1.2.1, prose only, ZERO status fields changed, plus six TELEMETRY_SCHEMA additions including the fourth record type `evaluation_unavailable`. NOTHING was implemented and nothing deployed. B82 SUPERSEDED — the wide-cover stop is a zone-coverage modifier applied after anchor selection, not a sixth anchor, and rung 3 is a swept liquidity level because Salim withdrew the QML requirement himself. B102 — ENTRY-004's closure is owed to code that does not exist, so the row stays OPEN and our open_items carries 14 where the patch's arithmetic says 13. B103 — the main-asset exclusion has run UNGATED in live shadow since 2026-08-08 and T-0027 could NOT fix it: `main_asset_state` is in the schema but deliberately NOT required, because no producer computes the verdict and faking it in the fixture would be a vacuous green. B104 — a missing correlate still reads as a calm aligned one, same direction of failure. B105 — `data_gaps` is now required and the ambiguity moved to the caller rather than disappearing. B106 — THREE round-2 rows could not be applied here and are NOT done: two P1 targets live in a pack we do not hold, and HG-29 does not exist in this repo at all. B107 — the schema changed content with no version bump; a sha pin is the only tripwire. B108 — 84% of our citations cannot be followed from this repo, so every negative image-corpus finding is INHERITED, labelled UNVERIFIABLE_HERE. Earlier, T-0026: B93 CLOSED — the AST guard measures the invariant the failure message always claimed, catching 26/26 against the clean-interpreter guard's 11/26, and all three guards are kept because they ask three different questions. Earlier, T-0023, target selection — EXIT-004 / TARGET-001 / TARGET-003, SHADOW ONLY like every rules task. B93 — a test can make a guard vacuous just by importing what the guard checks for: `test_every_rule_module_on_disk_is_imported` was vacuous for 23 of the 26 modules in its own domain; FIXED by a clean-interpreter guard, whose own limit is measured at 15 of 26 still reachable through a sibling and is NOT fixed. B95 — TARGET-001 and TARGET-003 are three levels, not two, and 'ignore size entirely' is the wrong implementation that looks safe. B96 — the active institutional destination has NO producer, so TARGET-001 registers unable to fire. B97 — `target_object_type` is lossier than PRIM-003's pool classes and INSTITUTIONAL_CANDLESTICK must never map to INSTITUTIONAL_LEVEL. Earlier, B90 CLOSED: EXIT-001 now reports `ticks_seen`, so an unobserved path and a long quiet one are no longer one record. Earlier, T-0022, the v1 exit model EXIT-001/EXIT-002 — the first rules in this programme that govern what happens AFTER a trade is taken, and SHADOW ONLY: nothing under `live/` or `broker/` imports them and `paper.py` still closes positions whole. B86 — `PaperPosition` has one `units`/`sl`/`tp` and `__slots__`, so it cannot represent a tranched position and the wiring task is a broker-layer change, not a call site. B87 — the 19:00 New York close is ours and UNRATIFIED, defaulted ON so shadow generates the evidence the ruling needs, and the wiring task must re-surface the question rather than inherit it. B88 — `ExitEvent` refuses `LIQUIDATION`, which is what makes criterion 1 enforceable at all, and becomes a hazard the moment a real liquidation can reach the exit path. B89 — a target at or inside 2R is refused outright because GATE-031 cannot run without GATE-025. Earlier, T-0021: B54 CLOSED — both tools collapse aliases and agree; every coverage figure now carries its space, and the script refuses to print an impossible set. B58 — the other tool is outside the repo, so half the agreement cannot be CI-enforced. Earlier, T-0016: the partially-evaluable requirements are enforced by script over the whole registry — B56, eleven emitted fields that cannot say where they came from, baselined not fixed and needing a task id; B57, the two of six standing requirements that script can actually enforce, so a green run is not read as six. Earlier the same day, T-0007: ENTRY_TF 1H -> 5m, the first live behaviour change. B37 CLOSED — the lookahead is out of production. B33 gained the instance it predicted: every legal execution timeframe would have broken the shadow; GATE-017 closed on the live path; B38 — GATE-018 stays OPEN; B39 — a conditional edit that matches nothing succeeds; B40 — the correlate margin is now 1.5x and nothing reports it shrinking)
 
 ---
 
@@ -1925,6 +1925,132 @@ denominator asserted inside the test rather than beside it.**
 **So this family has a fix and not only a diagnosis, which is more than most of this register
 carries.** Related: **B81**, **B84**, **B93**.
 
+### B113 — `SIZE-004`'s 2% ceiling was retired BY OMISSION, and the rule itself requires that stay visible
+
+**Filed by Execute 2026-08-16, T-0024. This entry exists because the rule's own last clause demands
+it, not because a seat thought it was interesting.**
+
+`SIZE-004`'s closing sentence: *"the fact that the retirement was by omission rather than argument
+must stay visible in the open-questions register."* This is that register.
+
+    H2                "You shall never risk more than 2% of your account in any trade… if you
+                      are risking like 2% of the account it should be the most magical setup"
+    §9.G IM40         "2% = 2R reserved for a 4R Perfect setup"
+    GATE-032 caps at  1.50%
+
+**Neither statement is retracted and neither is explained away. The ruling simply never mentions
+2%.** So the 2% tier and the 2R pairing become UNREACHABLE CELLS — not overruled, just unreachable,
+which is a different thing and leaves a doctrine that still says 2% out loud.
+
+**Why capping is nonetheless the safer reading, and it is corroboration rather than argument:**
+across the whole image corpus **the 2% tier is never demonstrated with money anywhere — every
+execution frame uses 1% = 1R.** That is the rule's own stated evidence, and it is
+`UNVERIFIABLE_HERE` from this machine (**B108** — the frames are in the 84% of citations we do not
+hold). We are inheriting it, not confirming it.
+
+**What it could break:** if Salim later says the 2% tier was meant to survive, `SIZE-004`'s ceiling
+is wrong and every stored `risk_pct` was capped by a rule he did not intend. That is recoverable
+only because the cap is recorded: `retired_ceiling: 0.02` and `retirement_by_omission: true` are
+stamped on **every** SIZE-004 evaluation, so stored history can be re-partitioned rather than
+thrown away. **Do not delete those two fields to tidy the record shape.**
+
+### B114 — the altcoin Heavy `0.05` is almost certainly a dropped decimal, and it is left UNRECONCILED on purpose
+
+**Filed by Execute 2026-08-16, T-0024. Criterion 3a requires it recorded and explicitly forbids
+correcting it.**
+
+    slot   risk_altcoin_no   risk_altcoin_light   heavy (as written)   ratio to siblings
+    0      0.0075            0.0075               0.0075               1.0x
+    1      0.005             0.005                0.05                 10.0x   <-- exactly ten
+    2      0.0025            0.0025               0.0025               1.0x
+
+**Three independent signatures agree:** an exact factor of ten in one slot; a monotonic descent
+broken in the one place nothing else in the table breaks it; and a value **3.33× over `SIZE-004`'s
+0.015 ceiling**, sitting in the column `GATE-032` sets to `0.0`. Restoring the missing zero gives
+`0.005`, which repairs the descent **and** makes the cell identical to both its siblings — the
+disturbance-invariance the column has everywhere else.
+
+**IT IS STILL NOT OURS TO FIX.** A plausible typo fix is an implementer editing the authoritative
+database. The field is named `..._as_written`, which is the registry's own record that it is a
+**QUOTATION** preserved so the transcription can be audited — somebody recorded it faithfully and
+flagged it in the name. Nobody adopted it.
+
+**Labelled INFERENCE, not finding:** the source that would settle it is in the 84% of citations this
+machine cannot follow (**B108**).
+
+**What T-0024 did instead of adjudicating it: the vector is never indexed.** Not read-and-rejected —
+**not read**. A code path that reads a corrupt cell is one edit away from using it. This is enforced
+by an AST walk over `app/services/rules/` in `test_t0024_position_sizing.py`, which permits the name
+in a docstring and fails on any string literal, attribute or identifier in executable code. **It
+caught its own module on the first run** — `AltcoinRiskUndefined.COVERAGE_NOTE` is prose to a human
+and an assignment to the parser — and the note was reworded rather than exempted.
+
+**What it could break:** nothing today; `GRADE-019` refuses and no sizer can emit `0.05`
+(`SIZE-004`'s membership assertion rejects it). **It becomes live the moment anyone implements the
+altcoin column**, which is why the ban is mechanical rather than a comment. Related: **B110**.
+
+### B115 — the live sizer is pinned at the matrix's LOWEST non-zero cell, and `fixed_config.py` denies the rule's premise in prose
+
+**Filed by Execute 2026-08-16, T-0024. Two facts that only bite together, at wiring time.**
+
+**First: `RISK_PCT = 0.01` at `fixed_config.py:88` is EXACTLY `GATE-032`'s `STANDARD / NONE` cell.**
+So the live engine currently sizes every trade as though every setup were a Standard box with no
+disturbance — the most conservative non-zero row of nine. **The matrix's effect on live sizing is
+therefore UPWARD**, to 1.25% for Super and 1.50% for Manipulated, and downward to 0.25–0.75% on any
+Light disturbance. **Anyone who wires this is raising the risk on the best setups, and should know
+that before they do it rather than discover it in a fill.**
+
+**Second, and it is the part that will cause an argument: `fixed_config.py:35` asserts the opposite
+of the rule.**
+
+> *"`RISK_PCT` is pre-registered at 1% and is not a knob. ROI ≈ risk_pct × n × avg_R is an exact
+> identity, so changing it rescales the equity curve and the drawdown together — it cannot make a
+> strategy better, only louder. **It was never settable**."*
+
+**`GATE-032` varies `risk_pct` from 0.25% to 1.5% by box grade and disturbance.** The docstring's
+argument is not wrong in general — it is an argument against a **FREE** knob, and the matrix is a
+**RULED LOOKUP**, which is a different object. But the sentence as written denies the premise of the
+rule, and **whoever wires the matrix will meet a config comment saying the value they are about to
+make variable was never settable. That decision is not theirs to make quietly.**
+
+**Not fixed here deliberately:** T-0024 is shadow-only by its own criterion 6, nothing under
+`live/` imports the sizer, and editing that file would be a live behaviour change smuggled into a
+rules task. A test pins the prose as still present, so this entry going stale is a red test rather
+than a silent drift.
+
+**What it could break:** the wiring task, in the one way that matters — a seat that reads the
+docstring and trusts it will conclude the matrix is wrong, or will edit the constant without
+touching the prose and leave the next reader with a comment that lies. **Coverage will also read
+`GATE-032` and `SIZE-004` as EFFECTIVE (47/91) while nothing calls either**; effective coverage
+measures *able to reach a verdict if called*, never *is called*. Related: **B96**, and A10's
+*"an implemented rule that decides nothing is furniture"*.
+
+### B112 — T-0023's producer scan cannot tell a PRODUCER from a MENTION, so documenting the gap turns it red
+
+**Filed by Execute 2026-08-16, T-0024, against a guard from the previous task. Found by my diff
+failing it, which is the guard doing roughly its job and costing more than it should.**
+
+`test_nothing_in_the_engine_produces_an_institutional_destination` scans every `*.py` under `app/`
+for the substrings `institutional_destination` and `active_destination`, excluding two files by
+NAME, and fails if any other file contains one. **It is a substring scan, so it cannot distinguish
+code that PRODUCES the destination from prose that merely NAMES it.**
+
+**The instance:** `gate_032_risk_matrix.py` explained its own `CANNOT_FIRE_WITHOUT` by noting that
+TARGET-001 declares its absent producer the same way. **That comment — which produces nothing —
+turned the guard red.**
+
+**Resolved by rewording MY module, not by widening the guard,** and that direction was deliberate:
+the exclusion list is keyed on filenames, so adding an entry to it is a permanent hole any later
+edit to that file can hide in, and the guard's crudeness is exactly what makes it a tripwire worth
+having. The comment lost nothing by referring to TARGET-001's producer without spelling it.
+
+**What it could break:** the next rule that documents the same gap — which is likely, because
+"declared unable to fire, like TARGET-001" is the idiom this project now uses — will hit the same
+red and may fix it the easy way. **A filename exclusion added here silently retires the guard for
+that whole file.** The narrow fix, if someone wants one, is to scan for ASSIGNMENT to the name via
+AST rather than for the substring; `test_t0024_position_sizing.py`'s banned-vector check is a worked
+example of that shape.
+
 ### B110 — `GRADE-019` tells a consumer to refuse and a reader to ship, in the same rule
 
 **Filed by Execute 2026-08-16. Found by the Manager while checking T-0024's plan against `1d0f74a`.
@@ -1959,6 +2085,26 @@ disposition about what *could* ship. Three supporting reasons:
 
 **Not fixed here — `triage_note` is left contradicting `output` on purpose**, because reconciling it
 is a contract edit outside T-0027's authority and inside T-0024's scope.
+
+**T-0024 UPDATE, 2026-08-16 by Execute — THE IMPLEMENTATION IS DONE AND THE FIELD IS STILL
+CONTRADICTORY, AND THOSE ARE TWO DIFFERENT ITEMS.**
+
+**The behaviour half is closed.** `GRADE-019` is implemented as a refusal following `output`:
+an altcoin yields `outcome=REFUSED`, `risk_pct=None` — **`None`, never `0.0`**, because "the
+doctrine says zero" and "the doctrine says nothing" must not share a value — with the named reason
+`ALTCOIN_RISK_UNDEFINED`. The `triage_note`'s scale `{0.0075, 0.005, 0.0025}` never reaches a
+`risk_pct`, and a test asserts that for each of the three values.
+
+**The registry half is NOT closed and was NOT mine to close.** The line above said reconciling
+`triage_note` was inside T-0024's scope; **it is not inside T-0024's AUTHORITY.** The Execute seat is
+explicitly barred from editing the rule registry, and this is a contract edit rather than a code
+change. **Escalated to the Manager rather than performed** — the seat implementing a ruling should
+not also be the only seat rewriting the field the ruling adjudicated. That is the same reasoning
+T-0027 used when it escalated criterion 3 instead of resolving it, and it was right then.
+
+**So the rule still tells a consumer to refuse and a reader to ship.** Two tests pin the
+contradiction as PRESENT — if either goes red, the registry was edited and this ruling needs
+re-reading rather than the test relaxing. Related: **B114** (the corrupt cell in the same rule).
 
 ### B102 — `ENTRY-004`'s closure is owed to code that does not exist, and the patch's own arithmetic assumes it landed
 

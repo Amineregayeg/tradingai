@@ -127,6 +127,22 @@ from app.services.rules.gate_017_analysis_only_tfs import (  # noqa: F401
     normalise_tf,
 )
 from app.services.rules.gate_023_timezone import NewYorkTimestamps  # noqa: F401
+from app.services.rules.gate_032_risk_matrix import (  # noqa: F401
+    ALTCOIN_REFUSAL_REASON,
+    BOX_GRADES,
+    DISTURBANCE_GRADES,
+    HEAVY_SKIP_REASON,
+    LEGAL_RISK_PCTS,
+    RISK_MATRIX,
+    SIZER_IMPLEMENTATION,
+    UNGRADED_REASON,
+    AltcoinRiskUndefined,
+    InstrumentClass,
+    RiskCeilingConformance,
+    RiskMatrix,
+    RiskSizing,
+    SizingOutcome,
+)
 from app.services.rules.gate_036_stand_aside import Decision, StandAside  # noqa: F401
 from app.services.rules.gate_037_no_premium_discount import (  # noqa: F401
     NoPremiumDiscountOrOTEFilter,
@@ -182,6 +198,12 @@ __all__ = [
     "AbsoluteCountNotRatio",
     "AlignmentForms",
     "AlignmentTimeframe",
+    "AltcoinRiskUndefined",
+    "RiskCeilingConformance",
+    "RiskMatrix",
+    "RiskSizing",
+    "RISK_MATRIX",
+    "LEGAL_RISK_PCTS",
     "Bar",
     "BoxEvidence",
     "BoxGradeLadder",
