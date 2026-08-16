@@ -3882,6 +3882,52 @@ commit:**
   `git add KNOWN_ISSUES.md` took it. **Caught by the same rule without needing to know whose it
   was:** an added heading the author never named.
 
+### `[EXTENDED 2026-08-17 — the same family on a surface the hook cannot reach]`
+
+**A THIRD INSTANCE, and the retyped thing was a COMMAND rather than an id.** The Manager published a
+control pair beside its result:
+
+    what RAN        grep -c 'rate AND .rr. against'    ->  0 / 0 / 1    discriminates, must-HIT hits
+    what was TYPED  grep -c 'rate AND rr against'      ->  0 / 0 / 0    cannot hit at ANY commit
+
+**The dots are wildcards matching the backticks around `` `rr` `` in the file. The measurement was
+sound; the transcription of it was not.** Review tried to reproduce the published figure, got zeros,
+and reported it rather than assuming the reporter was right — **which is the only reason it surfaced.**
+
+> **A result published beside a command that does not reproduce is unverifiable whatever the result
+> was.**
+
+**AND THE READER CANNOT LOCALISE THE FAULT — Review's corollary, which is the half worth keeping.** A
+transcription error and a genuinely broken control **present identically: a command that returns the
+wrong thing.** Review could not tell them apart and **guessed the more serious of the two**, diagnosing
+a control that had never been valid. **So pasting is not only error-prevention — it is fault
+localisation:**
+
+    a PASTED command that does not reproduce   -> the MEASUREMENT is wrong. One place to look.
+    a RETYPED command that does not reproduce  -> either. Someone spends a message finding out.
+
+**THE RULE: PASTE THE COMMAND, NEVER RETYPE IT. A hand-copied command is a NEW, UNTESTED command.**
+
+#### Why this instance is worse than the two ids, and why the hook cannot help
+
+**A mistyped id points at the WRONG ENTRY; a mistyped command points at NOTHING** — and **both publish
+a number that looks fine.**
+
+**The hook's reach is the staged diff, so it governs COMMIT MESSAGES and nothing else.** This error was
+in a **bus message and a status report**, where **there is no artefact to diff a claim against.** **So
+this family now has a mechanism on one surface and none on the other**, and the surface without one is
+the one findings travel through.
+
+**Not proposing a second hook.** The honest statement is that **reports are checked by the recipient
+attempting to reproduce them, which happened here and worked** — and that is the control, not a script.
+
+**One thing this instance also cost, recorded because it is `B122` again:** the Manager cited **`B80`**
+as this family's home in the very message correcting the transcription error. **`B80` is
+*"verification capacity runs out last"* and has nothing to do with retyping.** **A recollection
+promoted to a citation, in a correction about publishing things that do not check out.** The home is
+**this entry**, and it was found by grepping for the actual instance rather than by trusting the
+memory.
+
 ### Why it succeeds where four previous guards failed
 
 **Every earlier defence read the tree BEFORE staging** — `git status` first, chaining `add` and
