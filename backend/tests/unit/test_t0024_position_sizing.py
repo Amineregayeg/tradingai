@@ -15,6 +15,20 @@ which are in this repository:
        column in decimals: 0.015 / 0.0075 / 0 · ...")
 
 against the fourth, `values`, which is what the code loads. A typo in any one of them fails.
+
+WHAT THAT CROSS-CHECK CANNOT DO, WHICH A READER WILL OTHERWISE ASSUME IT DOES. It verifies the
+INTERNAL CONSISTENCY of the registry's own renderings — that the table the code loads matches
+the table the registry describes, in prose and in `values`. **It is silent on FIDELITY to
+`053_untitled.md`**, the source database the ruling declares authoritative, which is in the 84%
+of citations this machine cannot follow (B108). Three renderings authored in one pass can be
+consistently wrong together.
+
+AND A SECOND THING NONE OF THE ABOVE CAN SEE: THAT THE CODE READS THE TABLE AT ALL.
+Every multiplicative test below operates on `RISK_MATRIX` **as data** — it proves the TABLE is
+not multiplicatively decomposable. A defect implemented at the LOOKUP rather than in the table
+leaves `RISK_MATRIX` byte-identical and passes all of them. That is what
+`test_the_public_sizing_path_returns_the_table_value_for_every_one_of_the_nine_cells` is for,
+and it is the only test here that pins the code path rather than the doctrine.
 """
 from __future__ import annotations
 
@@ -101,6 +115,51 @@ def test_the_nine_cells_match_three_independent_transcriptions_of_the_statement(
 
     assert set(RISK_MATRIX) == set(EXPECTED_CELLS)
     assert len(RISK_MATRIX) == 9
+
+
+@pytest.mark.parametrize(
+    "box_grade,disturbance_grade",
+    [(box, dist) for box in BOX_GRADES for dist in DISTURBANCE_GRADES],
+)
+def test_the_public_sizing_path_returns_the_table_value_for_every_one_of_the_nine_cells(
+    box_grade: str, disturbance_grade: str
+) -> None:
+    """THE ONLY TEST HERE THAT PINS THE CODE PATH. Every other one pins the doctrine.
+
+    Review found the gap by mutating the LOOKUP instead of the table:
+
+        risk_pct = RISK_MATRIX[(box_grade, "NONE")] * {"NONE":1.0,"LIGHT":0.5,"HEAVY":0.0}[dist]
+
+    `RISK_MATRIX` stays byte-identical, so *no single multiplicative modifier can reproduce the
+    table*, *all three rows are needed* and *exact_relation as an invariant* all still PASS —
+    they are assertions about data, and the data did not move. Only two cells change
+    (`SUPER/LIGHT` 0.005 -> 0.00625, `STANDARD/LIGHT` 0.0025 -> 0.005), and before this test the
+    single red was `test_no_outcome_carrying_zero_or_no_risk_is_ever_tradeable` — **named for
+    TRADEABILITY, so a reader chasing it goes to the tradeable logic and not to the lookup.**
+
+    That is B81 — something goes red and it is the wrong thing — inside the task whose whole
+    purpose is to prevent the multiplicative reading. Proving the TABLE is not multiplicative
+    is not the same as proving THE CODE READS THE TABLE, and nothing in the language makes the
+    two agree.
+
+    Nine cases, driven through the public `size()` entry point rather than the module constant.
+    """
+    sizing = RiskMatrix.size(box_grade=box_grade, disturbance_grade=disturbance_grade)
+
+    expected = EXPECTED_CELLS[(box_grade, disturbance_grade)]
+    assert sizing.risk_pct == expected, (
+        f"{box_grade}/{disturbance_grade}: the sizing path returned {sizing.risk_pct}, the "
+        f"table says {expected}. The table itself may be untouched — check the LOOKUP."
+    )
+    assert sizing.risk_pct == RISK_MATRIX[(box_grade, disturbance_grade)]
+    assert sizing.matrix_cell == f"{box_grade}_{disturbance_grade}"
+
+    # ...and the same value survives into the record, so telemetry cannot drift from the path.
+    ev = RiskMatrix.evaluate(sizing)
+    assert ev.values["risk_pct"] == expected
+    assert ev.values["matrix_cell"] == f"{box_grade}_{disturbance_grade}"
+    assert ev.values["sizer_implementation"] == "LOOKUP_TABLE"
+    assert sizing.as_risk_assessment()["risk_pct"] == expected
 
 
 def test_no_single_multiplicative_modifier_can_reproduce_the_table() -> None:
