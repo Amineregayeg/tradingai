@@ -12,6 +12,9 @@
     },
     {
       "$ref": "#/$defs/scan_census"
+    },
+    {
+      "$ref": "#/$defs/evaluation_unavailable"
     }
   ],
   "$defs": {
@@ -909,6 +912,20 @@
         },
         "evidence": {
           "$ref": "#/$defs/evidence_ref"
+        },
+        "data_available": {
+          "type": "boolean",
+          "description": "False when this panel's data was missing, stale, or too short to score structure. A false value MUST map onto the disturbance ladder as a disturbed correlate (065_Magic_Alignment_Entry.md:87 — “this can create another disturbance”), never be treated as ALIGNED or NEUTRAL, and never silently reduce disturbed_count. A missing correlate currently reads as a calm, aligned one, which fails toward LARGER positions. NOT YET IN `required`, deliberately: the correlate panels are not wired (B11) and no producer can state availability honestly yet."
+        },
+        "unavailable_reason": {
+          "type": "string",
+          "enum": [
+            "FEED_MISSING",
+            "FEED_STALE",
+            "INSUFFICIENT_HISTORY",
+            "NOT_APPLICABLE"
+          ],
+          "description": "Present when data_available is false. NOT_APPLICABLE otherwise."
         }
       }
     },
@@ -1036,17 +1053,16 @@
         },
         "locatable": {
           "type": "boolean",
-          "description": "false is a legitimate and important value — GATE-027 note (a): QML's pattern shape is drawn nowhere in the corpus, so rung 3 may be genuinely unlocatable. Recording that is honest; silently skipping it is not. BUT `locatable:false` is also the cheapest way to truncate the ladder until only the engine's preferred rung survives, after which the GATE-028 selector trivially agrees with itself (K-10 passes). HG-28 therefore requires the reason to be a closed-enum value backed by `search_evidence`."
+          "description": "false is a legitimate and important value, but it is also the cheapest way to truncate the ladder until only the engine's preferred rung survives, after which the GATE-028 selector trivially agrees with itself (K-10 passes). HG-28 therefore requires the reason to be a closed-enum value backed by `search_evidence`. Round-2 P1: rung 3 is NO LONGER presumed unlocatable — the QML requirement was withdrawn at source (026_Stop_Loss_Decision.md:46), rung 3 is a swept liquidity level, and `ladder_truncation_rate` should now be near-zero on EVERY rung."
         },
         "unlocatable_reason": {
           "type": "string",
           "enum": [
-            "QML_SHAPE_UNDEFINED_IN_SOURCE",
             "NO_SUCH_PRIMITIVE_IN_SEARCH_WINDOW",
             "PRIMITIVE_BEYOND_DECISION_BAR",
             "PRIMITIVE_ON_WRONG_SIDE_OF_ENTRY"
           ],
-          "description": "HG-28. Closed set. QML_SHAPE_UNDEFINED_IN_SOURCE is admissible ONLY on rung 3."
+          "description": "HG-28. Closed set of REAL search failures. Each value requires `search_evidence`, so an auditor can contradict the claim from the record alone. Round-2 P1 removed QML_SHAPE_UNDEFINED_IN_SOURCE: the trader withdrew the QML requirement himself — “it does not have to be QML, any old liquidity sweep level can act as SL level for me” (026_Stop_Loss_Decision.md:46) — so rung 3 is a swept liquidity level and is locatable. An engine may no longer excuse itself from the rung its own worked example selects. The anchor token LIQUIDITY_SWEEP_QML is deliberately UNCHANGED: the pack's id/enum policy is stability, and only the excuse value goes."
         },
         "search_evidence": {
           "type": "object",
@@ -1678,7 +1694,7 @@
               "type": "array",
               "items": {
                 "type": "object",
-                "description": "GATE-038 / ENTRY-004 — confidence only, never a trade creator.",
+                "description": "GATE-038 / ENTRY-004 — confidence only, never a trade creator. GATE-038's hard guarantee holds throughout: amplifier output is telemetry and confidence ONLY and MUST NOT flip an accept/reject decision, so none of these fields may reach a sizing or accept path.",
                 "properties": {
                   "type": {
                     "type": "string",
@@ -1693,10 +1709,12 @@
                     "type": "string"
                   },
                   "price": {
-                    "$ref": "#/$defs/price"
+                    "$ref": "#/$defs/price",
+                    "description": "Present when geometry == LEVEL."
                   },
                   "distance_pct": {
-                    "type": "number"
+                    "type": "number",
+                    "description": "Signed, measured from the zone's NEAREST EDGE. Always stored alongside the boolean so the tolerance choice stays reversible across stored history. Zero when the amplifier is inside the zone."
                   },
                   "colliding": {
                     "type": "boolean"
@@ -1707,7 +1725,33 @@
                       "ZONE_MIDPOINT",
                       "NEAREST_EDGE",
                       "POI_PRICE"
-                    ]
+                    ],
+                    "description": "Declared basis. Default NEAREST_EDGE. Stamped on every record; [ENGINEERING], never presented as the trader's rule."
+                  },
+                  "geometry": {
+                    "type": "string",
+                    "enum": [
+                      "LEVEL",
+                      "ZONE"
+                    ],
+                    "description": "Key levels and round numbers are LEVEL. S/R flips and old-imbalance flips are ZONE (PRIM-006 makes flips “ZONES, never lines”)."
+                  },
+                  "zone_low": {
+                    "type": "number",
+                    "description": "Present when geometry == ZONE."
+                  },
+                  "zone_high": {
+                    "type": "number",
+                    "description": "Present when geometry == ZONE."
+                  },
+                  "collision_test": {
+                    "type": "string",
+                    "enum": [
+                      "INTERVAL_CONTAINS",
+                      "INTERVAL_OVERLAP",
+                      "EDGE_TOLERANCE"
+                    ],
+                    "description": "Which test fired. INTERVAL_CONTAINS / INTERVAL_OVERLAP are doctrine (images/Magic_Amplifiers/0813_6b653ec8.png, 0817_3baffc72.png). EDGE_TOLERANCE is the [ENGINEERING] “or very close to” branch (067_Magic_Amplifiers.md:46) and must carry the tolerance used."
                   }
                 }
               }
@@ -2299,6 +2343,15 @@
         },
         "notes": {
           "type": "string"
+        },
+        "main_asset_state": {
+          "type": "string",
+          "enum": [
+            "SETUP_VALID",
+            "SETUP_INVALID",
+            "UNREADABLE"
+          ],
+          "description": "GATE-004 / GRADE-016, CORPUS_ANSWERS §D-1 Step 6. The main asset's own structural verdict, kept strictly separate from the correlate disturbance count. SETUP_INVALID = the main asset's LTF structure does not shift toward the concerning liquidity; the evaluation must stop here and never reach grading. UNREADABLE = its data was not available (see evaluation_unavailable). Neither value may ever be counted as a disturbance. NOT YET IN `required`, deliberately: the round-2 patch specifies it as required, but no producer computes this verdict — MAIN_ASSET_COUNTS=False has run ungated since 2026-08-08 (fd52295) and the compensating gate does not exist. Making it required before a producer exists would force every emitted record to assert a verdict the engine did not compute. Promotion to `required` is owed to the task that implements the gate."
         }
       }
     },
@@ -2703,7 +2756,8 @@
         "window_to_ny",
         "bars_observed",
         "evaluations_emitted",
-        "unemitted_bars"
+        "unemitted_bars",
+        "data_gaps"
       ],
       "additionalProperties": false,
       "properties": {
@@ -2803,10 +2857,115 @@
               }
             }
           },
-          "description": "Feed outages. Bars missing to a data gap are excluded from bars_observed and must appear here, so an outage cannot be used to hide a suppression."
+          "description": "Feed outages. Bars missing to a data gap are excluded from bars_observed and must appear here, so an outage cannot be used to hide a suppression. REQUIRED as of round-2 §4: while optional, “we had no gaps” and “we never reported gaps” were indistinguishable. Emit [] when clean."
         },
         "notes": {
           "type": "string"
+        },
+        "evaluation_coverage": {
+          "$ref": "#/$defs/evaluation_coverage"
+        }
+      }
+    },
+    "evaluation_unavailable": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A bar the engine COULD NOT evaluate, as distinct from one it CHOSE not to evaluate. Infrastructure failure, never a strategy decision. Excluded from the fidelity denominator; counted in evaluation_coverage. rule_id is forbidden by construction: no rule in the registry has an infrastructure input, so no rule can authorise this state. Filing an infrastructure failure as a rule-authorised skip makes fidelity go UP while the engine goes blind, which is the failure this record type exists to prevent.",
+      "required": [
+        "record_type",
+        "bar_close_time_ny",
+        "instrument",
+        "cause",
+        "scope",
+        "trading_action_taken"
+      ],
+      "properties": {
+        "record_type": {
+          "const": "evaluation_unavailable"
+        },
+        "bar_close_time_ny": {
+          "$ref": "#/$defs/iso_ny"
+        },
+        "instrument": {
+          "type": "string"
+        },
+        "cause": {
+          "type": "string",
+          "enum": [
+            "PRIMARY_FEED_MISSING",
+            "PRIMARY_FEED_STALE",
+            "CORRELATE_FEED_MISSING",
+            "INSUFFICIENT_HISTORY",
+            "PERSISTENCE_FAILURE",
+            "INTERNAL_ERROR"
+          ]
+        },
+        "affected_symbols": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Which panels were dark. Required in practice for CORRELATE_FEED_MISSING."
+        },
+        "scope": {
+          "type": "string",
+          "enum": [
+            "BAR",
+            "INSTRUMENT_SESSION"
+          ],
+          "description": "How far the non-evaluation extended."
+        },
+        "trading_action_taken": {
+          "type": "string",
+          "enum": [
+            "BLOCKED_BAR",
+            "BLOCKED_INSTRUMENT_SESSION"
+          ],
+          "description": "What the engine actually did. Default BLOCKED_BAR: no evaluation on a bar means no new order on that bar for that instrument. Never escalate to BLOCKED_INSTRUMENT_SESSION without a ruling. Open positions are unaffected — exits and the session close keep running. Per-bar abstention with a condition-based resume, never a human-in-the-loop lock: “if the chart is messy stay away and wait” (068_Entry_Confluences.md:5) means re-evaluated, not latched."
+        },
+        "detection_detail": {
+          "type": "string"
+        },
+        "declared_parameters": {
+          "description": "Same declared-config block as every other record type, so the unreadability criteria in force are recoverable.",
+          "$ref": "#/$defs/declared_parameters"
+        }
+      }
+    },
+    "evaluation_coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Availability, reported BESIDE the fidelity score and never folded into it. Fidelity is computed over the bars the engine saw, so bars it never got cannot lower it — which is what makes a broken feed read as a quiet market. NO coverage floor gates trading: none exists anywhere in the pack and inventing one would be inventing a number.",
+      "required": [
+        "bars_expected",
+        "bars_evaluated",
+        "bars_unavailable",
+        "coverage_pct"
+      ],
+      "properties": {
+        "bars_expected": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "bars_evaluated": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "bars_unavailable": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "coverage_pct": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "unavailable_by_cause": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
         }
       }
     }

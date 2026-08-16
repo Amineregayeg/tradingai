@@ -1,7 +1,7 @@
 {
   "meta": {
     "contract_name": "Magic Strategy Engine Contract — Rule Registry",
-    "version": "1.2.0",
+    "version": "1.2.1",
     "generated": "2026-07-31",
     "purpose": "Machine-readable registry of every documented rule the execution engine must cite. The objective of this contract is FIDELITY, NOT PROFIT: it exists so that (a) every automated decision can cite the documented rule that produced it, (b) the engine can emit telemetry proving what it detected and which rules fired, and (c) conformance to the documented strategy can be tested from that telemetry alone.",
     "source_of_truth": {
@@ -19,7 +19,7 @@
         "§9 image-derived doctrine IM1–IM119",
         "§10 TRADER RULINGS 10.A–10.F"
       ],
-      "corpus": "Notion workspace files 000–213 plus 1,258 chart screenshots; trader rulings from engine-answers.pdf (30 pp) as quarantined in §10"
+      "corpus": "Notion workspace files 000–213 plus 1,186 chart screenshots; trader rulings from engine-answers.pdf (30 pp) as quarantined in §10 CORRECTED in v1.2.1: 1,186 chart images on disk, not 1,258; and 213 numbered corpus pages, not 220 — 220 counted derived analysis documents. CAVEAT, and it matters more than the numbers: the round-2 MANIFEST deliberately EXCLUDED the images, so every negative finding this registry holds about the image corpus (“drawn nowhere in the images”, “none of the 16 amplifier images annotates a distance”) is INHERITED from the adjudication package, not independently verified here. Asserting that something appears in none of the images requires the images."
     },
     "id_policy": "STABLE. Rule ids are the citation tokens the engine embeds in its decision records. They MUST NOT be renumbered, reused or repurposed across contract versions. A rule that is withdrawn is marked status=WITHDRAWN and kept; a rule that is superseded points at its successor. New rules take the next free number in their family.",
     "families": {
@@ -37,11 +37,7 @@
         "SOFT_PREFERENCE": "Documented preference. A deviation is a FLAG recorded in the deviation register, not a failure.",
         "ADVISORY": "Context, reading discipline or regression fixture. Never gates a trade."
       },
-      "status": {
-        "READY": "Implementable as written from the documented sources.",
-        "OPEN": "The trader explicitly declined to fix a value, or the sources leave the rule undecidable. The engine MUST NOT invent a value; it must expose the choice as declared configuration and log it.",
-        "DEFECT": "The source is internally inconsistent or arithmetically wrong. Ship nothing silently; carry the defect."
-      },
+      "status": "One of the five values in meta.status_vocabulary, which is the single authority: READY = Implementable and testable as written. · OPEN = Blocked on a decision the trader declined to give. NEVER invent a value. · CALIBRATED = Fitted to the trader's own annotated charts, not stated by him. Carries proxy/n. Never presented as doctrine. · WITHDRAWN = Rule retired — the object it described has no basis in the corpus. · DEFECT = (now empty) Source self-contradiction. All 8 cleared by the corpus triage with zero trader input. — merged in v1.2.1. This field previously defined only READY / OPEN / DEFECT while three rules use CALIBRATED or WITHDRAWN, so a validator reading this block would have rejected its own file.",
       "authority_class": {
         "documentary": "Traces to a workspace page (000–213) or a chart screenshot. §1–§9.",
         "R": "Trader ruling. Authoritative; beats the workspace where they conflict.",
@@ -65,15 +61,8 @@
       "note": "READY counts rules that SHIP. 'of_which_partial' ship with a named unresolved half — see open_half_note. DEFECT is now 0: all 8 cleared by corpus triage with zero trader input."
     },
     "blockers": {
-      "description": "DEFECT rules that must be resolved by the trader before any sizing or stop-selection code is written. Each is a known arithmetic or logical error in the source, deliberately surfaced rather than silently fixed.",
-      "ids": [
-        "GATE-028",
-        "GATE-033",
-        "GATE-034",
-        "GRADE-006",
-        "GRADE-018",
-        "GRADE-033"
-      ],
+      "ids": [],
+      "note": "Emptied in v1.2.1. This list named six ids as “DEFECT rules that must be resolved by the trader before any sizing or stop-selection code is written”. All six are now READY or WITHDRAWN and all 8 defects cleared with ZERO trader input, which is the corpus triage's own headline. Kept as a historical record rather than deleted.",
       "the_three_named_defects": [
         {
           "id": "GATE-033",
@@ -92,45 +81,34 @@
           "name": "largest stop whose R:R is closest to 3R is self-contradictory",
           "effect": "R:R falls monotonically as the stop widens, so the largest survivor always has the lowest R:R. The two readings select different stops and different position sizes on the source's own worked example."
         }
-      ]
+      ],
+      "historical_stale_ids": {
+        "GATE-028": "READY",
+        "GATE-033": "READY",
+        "GATE-034": "WITHDRAWN",
+        "GRADE-006": "READY",
+        "GRADE-018": "READY",
+        "GRADE-033": "WITHDRAWN"
+      },
+      "historical_status": "RESOLVED — retained for provenance, not active blockers."
     },
     "open_items": {
       "description": "Rules where the trader explicitly declined to fix a number, or the sources leave the decision undecidable. The engine must expose each as declared, versioned configuration and record the value used on every evaluation, so a later ruling can be applied retroactively to stored telemetry.",
       "ids": [
-        "GATE-003",
-        "GATE-004",
-        "GATE-011",
-        "GATE-014",
-        "GATE-016",
-        "GATE-018",
-        "GATE-020",
-        "GATE-024",
-        "GATE-029",
-        "GATE-036",
-        "GATE-039",
-        "GATE-040",
-        "GATE-041",
-        "GATE-043",
-        "GATE-047",
-        "GRADE-008",
-        "GRADE-009",
-        "GRADE-013",
-        "GRADE-016",
-        "GRADE-019",
-        "GRADE-025",
-        "GRADE-029",
-        "GRADE-031",
-        "GRADE-035",
-        "GRADE-039",
-        "TARGET-002",
-        "TARGET-004",
-        "TARGET-007",
-        "TARGET-009",
         "ENTRY-002",
         "ENTRY-004",
         "ENTRY-005",
         "ENTRY-006",
-        "EXIT-003"
+        "EXIT-003",
+        "GATE-011",
+        "GATE-014",
+        "GATE-043",
+        "GRADE-025",
+        "GRADE-039",
+        "TARGET-002",
+        "TARGET-004",
+        "TARGET-007",
+        "TARGET-009"
       ],
       "trader_declined_explicitly": [
         "concerning liquidity distance (GATE-035, TARGET-001)",
@@ -138,7 +116,8 @@
         "liquidity hierarchy weighting (TARGET-002, TARGET-004)",
         "fake-MSB detection windows (GRADE-008)",
         "forward-vs-reverse quorum (GATE-041, GRADE-029, GRADE-031)"
-      ]
+      ],
+      "note": "Synced in v1.2.1. Previously listed 34 ids of which 20 were no longer OPEN, while meta.counts.OPEN in the same file said 14. These are the 14 rules whose status is actually OPEN, verified against the status fields rather than transcribed. REGISTRY_PATCH.md Priority 4 says to reduce this to 13 by also closing ENTRY-004; that closure is CONDITIONAL on the GATE-038 interval test existing and nothing implements it, so ENTRY-004 stays OPEN and this list carries 14. A deliberate divergence from the patch's stated endpoint, not an arithmetic error — see ENTRY-004's notes and KNOWN_ISSUES.md B102."
     },
     "reconstructed_rules": {
       "description": "The extracted-rule payload was truncated mid-statement at GRADE-037. These entries were rebuilt from the cited codex sections so that downstream references (GRADE-036 consumes GRADE-039) resolve. Re-verify before shipping.",
@@ -151,7 +130,22 @@
     "notation": "Inner quotation marks in `statement` and `notes` fields are typographic (curly) so the JSON needs no escaping. Wording is otherwise verbatim from the codex.",
     "outcome_evidence_warning": "The source corpus contains FOUR executed trades (February: 3 trades, 1 win, 2 losses, ROI 0.0173, per 077_untitled.md; plus March's ETH long, per 154_untitled.md). All other journal rows dated 2024-02-02 are byte-identical copied templates and are NOT trades (§7.1.9). Fidelity is measurable now. Expectancy is not.",
     "changelog": [
-      "1.1.0 — traceability audit. (a) GATE-048 ADDED: negative-correlate agreement inversion (§10.D D-6/D-7 collision) was a codex-flagged HARD hazard with no rule. (b) banned_inputs added to GATE-006 and GATE-037, the two HARD negative gates that declared a 'conformance assertion' output with nothing enumerated for the assertion to run against. (c) GATE-044 scoped: it is evaluated only when a range object is emitted, and its pixel census is corpus calibration, not a live-data test. No rule id renumbered, reused or withdrawn."
+      "1.1.0 — traceability audit. (a) GATE-048 ADDED: negative-correlate agreement inversion (§10.D D-6/D-7 collision) was a codex-flagged HARD hazard with no rule. (b) banned_inputs added to GATE-006 and GATE-037, the two HARD negative gates that declared a 'conformance assertion' output with nothing enumerated for the assertion to run against. (c) GATE-044 scoped: it is evaluated only when a range object is emitted, and its pixel census is corpus calibration, not a live-data test. No rule id renumbered, reused or withdrawn.",
+      {
+        "version": "1.2.1",
+        "date": "2026-08-16",
+        "summary": "1.2.1 — prose sync. Statuses were already correct; notes, statements and meta blocks brought into line with the corpus triage. No status changed. OFF_4 unblocked as a level-state comparison. ENTRY-004 closed by the GATE-038 interval ruling. QML skip licence removed from the suite, scorecard and telemetry enum. Answers-document register rule recorded.",
+        "applied_by": "T-0027, from MagicStrategy_Round2_Rulings.zip (sha256 704afd7e9c7a8407…), 7/7 files verified against its MANIFEST.md before application.",
+        "status_changes": "NONE. All 117 status fields are byte-identical to v1.2.0.",
+        "deliberate_divergences_from_the_patch": [
+          "ENTRY-004 stays OPEN. The patch proposes OPEN -> READY but conditions it on accepting the GATE-038 ruling, and the operative condition is that the interval test exists in code — nothing implements it. meta.open_items.ids therefore carries 14 ids where REGISTRY_PATCH.md Priority 4 says 13. Deliberate; tracked as B102.",
+          "GATE-004 / GRADE-016 main_asset_counted is applied as a DECLARED PARAMETER carrying authority=ENGINEERING and ratified=false, not as the bare `values: {main_asset_counted: false}` the patch specifies. A `values` block is read by tools and nothing parses `notes`; applied literally, the patch would promote an inference to doctrine by the act of applying it, violating its own hard rule 1 (never present ours as his)."
+        ],
+        "not_applied_here": [
+          "CONFORMANCE_SUITE.md:204 and FIDELITY_SCORECARD.md:173 — the other two P1 targets. Neither file exists in this repository; they belong to the MagicStrategy_EngineKnowledge pack. Recorded as NOT APPLICABLE HERE rather than counted as done.",
+          "open_rule_exposure / defect_exposure recomputation — lives in FIDELITY_SCORECARD.md, not held here."
+        ]
+      }
     ],
     "team_lead_adjudications": [
       "GATE-042: block_reason removed; scope=advisory_flag_only; stays SOFT_PREFERENCE",
@@ -165,7 +159,64 @@
       "WITHDRAWN": "Rule retired — the object it described has no basis in the corpus.",
       "DEFECT": "(now empty) Source self-contradiction. All 8 cleared by the corpus triage with zero trader input."
     },
-    "triage": "Corpus triage applied; see CORPUS_ANSWERS.md. Critic demotions included (GRADE-039 held OPEN)."
+    "triage": "Corpus triage applied; see CORPUS_ANSWERS.md. Critic demotions included (GRADE-039 held OPEN).",
+    "answers_document_registers": {
+      "why": "engine-answers.pdf is not written in one voice. Reading it by register decided round-2 items 6 and 8 and will decide future ones, so the rule lives in the registry rather than only in the adjudication package.",
+      "registers": {
+        "TRADER_FIRST_PERSON": {
+          "markers": [
+            "my strategy",
+            "I use manually",
+            "not part of my entry criteria"
+          ],
+          "authority": "HIS RULING. Attributable."
+        },
+        "PRIOR_AI_ASSISTANT": {
+          "markers": [
+            "your strategy",
+            "your developer",
+            "I would tell your developer this",
+            "My suggestion",
+            "Option 2 (What I recommend)"
+          ],
+          "authority": "NONE. Never quote as doctrine."
+        },
+        "IMPERSONAL_SPEC_PROSE": {
+          "markers": [
+            "The engine should…",
+            "no pronouns either way"
+          ],
+          "authority": "AMBIGUOUS. Cannot be attributed on register alone."
+        }
+      },
+      "precedence": "Where impersonal spec prose conflicts with his teaching pages or his drawn slides, THE PAGES AND DRAWINGS WIN — those are unambiguously his."
+    },
+    "source_availability": {
+      "why": "Most citations in this registry CANNOT BE FOLLOWED FROM THIS REPOSITORY, and that is a redistribution boundary rather than a defect. Measured on the round-2 package: 47 of 56 source locators (84%) are unfollowable here. Without this table every future reader either re-derives that measurement or files an unfollowable citation as a registry bug.",
+      "verification_label": {
+        "label": "UNVERIFIABLE_HERE",
+        "meaning": "The cited material was never redistributed to this repository, so the citation was not checked and COULD NOT HAVE BEEN. Distinct from UNVERIFIED, which implies we tried and failed. The remedy is to request the corpus, NOT to file a defect.",
+        "why_a_third_label": "The adjudication package contradicts itself: its CLAUDE.md hard rule 2 says an unfollowable citation must be treated as UNVERIFIED, while SOURCE_INDEX.md item 2 says DO NOT treat an uncheckable citation as unverified doctrine. Both are right about different things — hard rule 2 guards against assuming a ruling whose evidence we COULD have checked and did not; SOURCE_INDEX guards against dismissing a ruling because the author did not redistribute his primary material, which at 84% would make the package unusable. Ruling: UNVERIFIABLE_HERE for structurally-absent material, UNVERIFIED (hard rule 2) for anything checkable we have not checked."
+      },
+      "held": {
+        "ENGINE_CONTRACT/RULE_REGISTRY.json": "this file",
+        "ENGINE_CONTRACT/TELEMETRY_SCHEMA.json": "held, alongside this file"
+      },
+      "named_by_the_package_but_NOT_in_this_repository": {
+        "ENGINE_CONTRACT/CONFORMANCE_SUITE.md": "78 assertions; line 204 needs deleting (P1)",
+        "ENGINE_CONTRACT/FIDELITY_SCORECARD.md": "line 173 needs deleting (P1); no coverage metric",
+        "KNOWLEDGE/EXPERTISE_CODEX.md": "derived analysis, not his words",
+        "OPEN_ITEMS/CORPUS_ANSWERS.md": "the six already-answered round-2 items live here",
+        "OPEN_ITEMS/TRADER_QUESTIONS.md": "its 'What we are NOT asking' table settled two of nine"
+      },
+      "not_redistributed_at_all": {
+        "His 213 numbered Notion pages": "NNN_Page.md:LINE locators — not redistributed",
+        "His 1,186 chart images": "images/Dir/NNNN_hash.png locators — excluded by MANIFEST",
+        "engine-answers.pdf (30pp)": "'answers Qn' / 'answers Cn' locators — not redistributed",
+        "CHART_ANALYSIS/ batch files (122)": "excluded by MANIFEST"
+      },
+      "consequence": "Every NEGATIVE finding this registry states about the image corpus — “drawn nowhere in the images”, “none of the 16 amplifier images annotates a distance”, “the main pane is never tagged” — is INHERITED from the adjudication package and is UNVERIFIABLE_HERE. Asserting that something appears in none of the images requires the images."
+    }
   },
   "rules": [
     {
@@ -195,7 +246,7 @@
       "enforceability": "HARD_GATE",
       "layer": "alignment",
       "statement": "Count the correlated assets in the layout that are 'disturbed'. 0 disturbed → NONE. Exactly 1 → LIGHT. 2 or more → HEAVY (“or the market no longer exhibits a coherent directional alignment”). An asset is disturbed when “it is no longer supporting the expected trade direction while the majority of correlated assets still are”, per any of the trader's six named off-conditions: (1) order flow opposite to what the correlation implies; (2) fails the expected MSB/BOS while others confirmed; (3) moving toward a completely different liquidity objective; (4) reacts significantly before or after the others; (5) different momentum profile; (6) creates a structural reversal while others trend.",
-      "inputs": "Per-correlate structural read at the execution TF (same TF as the main asset, GATE-007): order-flow direction, MSB/BOS state, current liquidity objective, relative timing of reaction, momentum profile, structural-reversal flag.",
+      "inputs": "Per-correlate structural read at the execution TF (same TF as the main asset, GATE-007): order-flow direction, MSB/BOS state, current liquidity objective, LEVEL-STATE comparison of objective progress across assets (has this asset swept or reached its objective while the others have not, or did it react before reaching it — NOT relative timing, NOT a clock, round-2 OFF_4), momentum profile, structural-reversal flag.",
       "output": "disturbance_grade ∈ {NONE, LIGHT, HEAVY}; per-asset state; which off-condition fired for each disturbed asset (required telemetry).",
       "citation": "§2 F5 [R] (PDF Q9, pp.20–21); drawn correlates at §9.F IM36 — 0281 shows ONE offending pane = Light, 0287 shows TWO = Heavy",
       "authority_class": "R",
@@ -205,7 +256,7 @@
         "light_disturbed_count": 1,
         "heavy_min_disturbed": 2
       },
-      "notes": "This is the first hard boundary anywhere in the corpus. The drawn six of IM36 are compatible but NOT identical: the PDF adds “different momentum profile” and “creates a structural reversal” and drops IM36's “never swept LIQ before MSB”. Neither list is declared exhaustive — keep both. Canonical grade reference images: 053_untitled.md's “Capture d'écran 2024-02-02 22xxxx/23xxxx” series (§9.K IM119)."
+      "notes": "This is the first hard boundary anywhere in the corpus. The drawn six of IM36 are compatible but NOT identical: the PDF adds “different momentum profile” and “creates a structural reversal” and drops IM36's “never swept LIQ before MSB”. Neither list is declared exhaustive — keep both. The two lists are ONE PREDICATE WITH TWO ENUMERATIONS: every drawn slide in both families closes “It causes DISTURBANCE (Reduce the RISK)”. Keep both. The CAUSES axis is OPEN — his framing is a sampler (065_Magic_Alignment_Entry.md:79 “all kinds of possible examples”, :85 “what else can we talk about”, :91 “here's another idea”) and the governing rule is a DEFINITION at 065_Magic_Alignment_Entry.md:83 — “if the correlated asset do not act the way they are supposed to act i call it magic disturbance”. The SEVERITY axis IS CLOSED and stated: none / light / heavy. OFF_4 IS NOW IMPLEMENTABLE and comes off NOT_EVALUATED: lead/lag is a LEVEL STATE to him, never a clock — “having reaction before sweeping the close liquidity” (065_Magic_Alignment_Entry.md:85), “already swept the liquidity but other assets are still trying to reach the liquidity” (065_Magic_Alignment_Entry.md:89), “most Altcoins lag, they will have open targets to clear” (066_Magic_Quadrant_For_Altcoins.md:9). NEGATIVE CASE, to prevent false positives: being further along the MSB->BOS sequence is explicitly NOT a disturbance — “it is fine it makes no difference for me” (065_Magic_Alignment_Entry.md:19). Uses no correlation coefficient, no candle count and no clock, so it complies with his own bans. OFF_5 (different momentum profile) STAYS NOT_EVALUATED — it depends on the un-fittable momentum-regime boundary. [ENGINEERING] to pin: the shared evaluation instant, and what counts as swept/cleared (wick touch vs close-through) applied identically to every asset. DO NOT gate detectors behind a “majority of other panels aligned” precondition: on a 3-correlate roster with 2 disturbed it suppresses both detections, drops the grade from HEAVY to NONE, and sizes a full-risk trade in a market the trader would skip. Canonical grade reference images: 053_untitled.md's “Capture d'écran 2024-02-02 22xxxx/23xxxx” series (§9.K IM119)."
     },
     {
       "id": "GATE-003",
@@ -214,7 +265,7 @@
       "enforceability": "HARD_GATE",
       "layer": "alignment",
       "statement": "The '≥2 → HEAVY' threshold is an ABSOLUTE count stated without reference to how many correlates the layout holds. 2-of-2 (the IM31 Essential layout) = 100% disagreement and is sensible; 2-of-3 (the fixed BTC layout) grades HEAVY; but §2 F1/106 permits five positive and five negative correlates and calls that layout STRONGER — 2-of-10 would also grade HEAVY and the trade would be skipped, penalising exactly the layout the workspace calls stronger. The engine MUST NOT silently substitute a ratio threshold. Interim requirement: freeze the layout to the four-panel BTC roster (GATE-008) so 2-of-3 is the only heavy case, and log layout_size with every disturbance grade so the eventual ruling can be applied retroactively to stored telemetry.",
-      "inputs": "layout_size (count of correlates), disturbed_count",
+      "inputs": "layout_size (COUNT OF PANELS — the main asset plus its correlates; pinned round 2, [ENGINEERING], so the four-panel BTC roster is 4, not 3), disturbed_count",
       "output": "telemetry fields layout_size and disturbed_count alongside every disturbance_grade.",
       "citation": "§2 F5 ⚠ caveat; §10.F.1 defect D5b; §10.C disturbance-counts row (PDF Q9, pp.20–21)",
       "authority_class": "R",
@@ -223,8 +274,15 @@
         "GATE-002",
         "GATE-008"
       ],
-      "notes": "“The PDF freezes nothing” — a ratio threshold is needed, or the layout size must be frozen.",
-      "resolution": "RESOLVED_FROM_CORPUS"
+      "notes": "RESOLVED round 2: the roster is FROZEN to the four-panel layout; the absolute >=2 threshold stands; the engine REFUSES TO GRADE if the layout differs; and layout_size and disturbed_count are emitted with every grade so an eventual ratio ruling can be applied retroactively to stored telemetry. THE UNIT COLLISION IS RESOLVED BY DECLARATION: `inputs` previously said “layout_size (count of correlates)” while the triage text said “refuse to grade at all if layout_size != 4” (panels) — two different units, one name. PINNED HERE to PANELS, i.e. the main asset plus its correlates, so the four-panel BTC roster (BTCUSDT.P + USDT.D + TOTAL + ETHUSDT.P) has layout_size = 4 and the conformance assertion must agree. [ENGINEERING] — this is our declaration, not his; he froze nothing.",
+      "resolution": "RESOLVED_FROM_CORPUS",
+      "values": {
+        "layout_size_unit": "PANELS",
+        "layout_size_frozen_at": 4,
+        "layout_size_unit_authority": "ENGINEERING",
+        "layout_size_unit_ratified": false,
+        "heavy_min_disturbed": 2
+      }
     },
     {
       "id": "GATE-004",
@@ -232,7 +290,7 @@
       "kind": "gate",
       "enforceability": "HARD_GATE",
       "layer": "alignment",
-      "statement": "Unstated whether the main asset is scored for disturbance. Q7's directional score includes BTC; Q9 says “Each CORRELATED asset receives one of three states”. If the main asset is scored, a disturbed main asset counts toward the ≥2 HEAVY threshold — but a main asset that disagrees with its own setup is not a disturbance, it is an absent setup. The engine must pick one behaviour and record which.",
+      "statement": "RULED: the main asset is NOT scored for disturbance. Q7's directional score includes BTC; Q9 says “Each CORRELATED asset receives one of three states”. A main asset that disagrees with its own setup is not a disturbance — it is an ABSENT SETUP, and must stop the evaluation upstream via main_asset_state = SETUP_INVALID rather than being counted toward the >=2 HEAVY threshold. The engine records main_asset_counted as a declared parameter on every evaluation.",
       "inputs": "main_asset_state; correlate_states",
       "output": "telemetry flag main_asset_counted: bool",
       "citation": "§10.F.2 item 11; §2 F5 [R] (PDF Q7, p.17; Q9, p.20)",
@@ -241,7 +299,17 @@
       "depends_on": [
         "GATE-002"
       ],
-      "resolution": "RESOLVED_FROM_CORPUS"
+      "resolution": "RESOLVED_FROM_CORPUS",
+      "notes": "TWO COUNTS OVER TWO DIFFERENT SETS. ALIGNMENT includes the main panel — his own handwritten note card “PERFECT MAGIC ALIGNMENT! / 4 MSB + 4 BPR = 4 Assets ALIGNED! / ZERO DISTURBANCE!” on a 4-panel BTCUSDT.P + USDT.D/TOTAL/ETHUSDT.P screenshot (images/Putting_All_Together/0443_05509bb4.png). DISTURBANCE is tagged on correlates only: the main pane is never tagged across the drawn slides (images/Questionnaire/0280-0287, images/Magic_Alignment_Setup/). SHIPS AS INFERENCE, NOT AS HIS RULE — the corpus prints no explicit exemption sentence, so main_asset_counted is a DECLARED PARAMETER carrying authority=ENGINEERING and ratified=false in `values`, never a bare doctrine value. THE COMPENSATING GATE IS REQUIRED AND DOES NOT YET EXIST: emit main_asset_state = SETUP_INVALID as a hard upstream skip that never reaches grading. NOT OPTIONAL — exclusion alone lowers disturbed_count, lightens the grade and RAISES the risk cell, so it is a systematic tilt toward LARGER positions rather than a neutral gap. STATE OF PLAY, recorded rather than smoothed over: MAIN_ASSET_COUNTS=False has been live in shadow since commit fd52295 on 2026-08-08 (gate_002_disturbance.py:356, wired at evaluator.py:351), so the exclusion has run WITHOUT its gate. main_asset_state was added to TELEMETRY_SCHEMA.json by T-0027 but is NOT yet in setup_evaluation.required, because no producer computes the verdict; SETUP_INVALID is emitted by nothing. THIS ROW IS NOT SETTLED until the gate exists — tracked in KNOWN_ISSUES.md. Layout authority: 064_Magic_Alignment_Setup.md:19 “there's no trading without the setup, i cannot take a single trade without the setup”; 064_Magic_Alignment_Setup.md:23 the +/-80% correlate rule; images/Magic_Alignment_Setup/0738_5da5632d.png “3+ Layout System”.",
+      "values": {
+        "main_asset_counted": false,
+        "main_asset_counted_authority": "ENGINEERING",
+        "main_asset_counted_ratified": false,
+        "main_asset_counted_provenance": "DECLARED_PARAMETER",
+        "main_asset_counted_basis": "INFERENCE from two counts over two different sets — the corpus prints no explicit exemption sentence. Confidence: medium-high.",
+        "required_compensating_gate": "main_asset_state = SETUP_INVALID",
+        "required_compensating_gate_implemented": false
+      }
     },
     {
       "id": "GATE-005",
@@ -567,7 +635,7 @@
       "values": {
         "session_close_ny": "19:00"
       },
-      "notes": "OPEN sub-question: 19:00 enters this codex ONLY through the algo / HT v2.0 EURUSD strand — “70% of position 2RR, 30% (EOD; 19:00)” (046) and the tested `19:00 stop` column (138). BTC trades 24/7 and the Magic Strategy has no session-end concept; C2 imports 19:00 without explanation and the two-strand question is answered by adoption, never by argument (§7.1.8, §10.F.2 item 22). Also unstated: whether new ENTRIES are barred before 19:00 (no entry cutoff is given anywhere)."
+      "notes": "NOT OPEN. The trader ruled it in his own first-person register for the live system (answers C2: “an alternative discretionary trade management technique that I use manually”; “We can always add the ladder exit later”). Ships HARD_GATE. PROVENANCE, recorded rather than hidden: every 19:00 in his 213 Notion pages belongs to one 2023 EURUSD program — 046_untitled.md:8, 047_untitled.md:8 (duplicate), 138_untitled.md:6/11/29, 144_untitled.md:6/11/29, including a literal “19:00 stop” column, 26 rows, EURUSD and NZDUSD, pip-denominated. ZERO crypto pages mention it. His method contains no exit-timing step; 036_Single_Trade_Management.md is empty (title only). COUNTER-INSTANCE: images/Examples/1197_663b46b1.png + 1198_64a1e91d.png — BTCUSDT.P 1m, New York axis (header “Oct 11, 2023 03:53 UTC-4”), mid-day entry, his annotated 27000 “AMPLIFIED TARGET” reached ~22:30 NY; a 19:00 flatten cuts it ~3.5h early. This is going back to him with the two charts, so implement the flatten AND log would_have_been_flattened_at_1900 and time_in_trade on every trade, so a reversal applies retroactively to stored telemetry. Fires on ANY remaining position, partial taken or not. Resolve 19:00 DST-aware from the tz database, never a fixed offset. Also unstated and NOT implied: whether new entries are barred before 19:00. Default: not barred, and flag."
     },
     {
       "id": "GATE-023",
@@ -667,7 +735,9 @@
           "INNER_MSB"
         ]
       },
-      "notes": "Two unresolved sub-items. (a) QML/Quasimodo is candidate #3 and the PDF's own worked example SELECTS it, but QML's pattern shape is drawn NOWHERE in the 1,258 images and defined nowhere in the text — an engine cannot locate a QML stop (§10.F.2 item 18, §7.3(c)). (b) The wide-cover variant (“my SL is way above… because i am covering the imbalance above with the BB level”, 049/116) and §9.J IM79/IM86's rule that a stop at a flip zone must cover the WHOLE zone are not among the five — folded into “Momentum Imbalance” or dropped, unstated (§10.F.2 item 19). The pictorial ranking of candidates is drawn at §9.J IM63 (“Most Ideal / Second most Ideal / Least Ideal”, the tightest annotated “Stopped Out Already”)."
+      "notes": "RESOLVED round 2. (a) Anchor #3 is a SWEPT LIQUIDITY LEVEL — swept prior swing / SFP tip / PDL-sweep level. The trader removed the QML requirement himself: “it does not have to be QML, any old liquidity sweep level can act as SL level for me, i do not have perfect standards for this” (026_Stop_Loss_Decision.md:46, dup 075_Stop_Loss_Decision.md:46). SHIP NO QML DETECTOR. Rung 3 is locatable and the skip licence is withdrawn from TELEMETRY_SCHEMA.json. Exact placement of the stop on the level is [ENGINEERING] — declare it. (b) The wide-cover case is a ZONE-COVERAGE MODIFIER APPLIED AFTER ANCHOR SELECTION, not a sixth anchor: if the chosen stop lands inside a zone object, extend to the far edge of the whole zone (075 Choice 4; 049_Examples.md:5; 116_Examples.md:5; PRIM-006, zones never lines). Residual [ENGINEERING]: the snap tolerance for the adjacent-but-not-intersecting case, and whether the widening runs before or after the 2R floor and before sizing. The pictorial ranking of candidates is drawn at §9.J IM63 (“Most Ideal / Second most Ideal / Least Ideal”, the tightest annotated “Stopped Out Already”).",
+      "resolution": "RESOLVED_FROM_CORPUS",
+      "triage_note": "Round-2 P2: this row uniquely lacked the resolution and triage_note fields its neighbours GATE-028 and GATE-029 received in the same pass. Both sub-items are now ruled; the residuals are [ENGINEERING] placement questions, not doctrine gaps."
     },
     {
       "id": "GATE-028",
@@ -911,18 +981,23 @@
       "kind": "gate",
       "enforceability": "HARD_GATE",
       "layer": "entry",
-      "statement": "Negative gate. “Amplifiers never create a trade by themselves. They only increase the confidence of an already valid setup. A valid trade is always based on market structure, liquidity, imbalance, momentum, and forward/reverse trading logic.” Collision test, for confidence scoring only: within approximately 0.2% of the entry zone — “If the entry POI is at 100.00, any amplifier between 99.80 and 100.20 is considered to be colliding” (i.e. ±0.2%, a 0.4%-wide corridor; arithmetic verified). “The 0.2% value is an engineering guideline, not a strict market rule.” All amplifier types are weighted equally: institutional key levels (PDH, PDL, PWH, PWL, PMH, PML, DO, WO, EQ), round numbers, S/R flip areas, and any future types.",
+      "statement": "Negative gate. “Amplifiers never create a trade by themselves. They only increase the confidence of an already valid setup. A valid trade is always based on market structure, liquidity, imbalance, momentum, and forward/reverse trading logic.” COLLISION TEST, for confidence scoring only, ruled round 2 as an INTERVAL INTERSECTION: a level-type amplifier collides when zone_low <= amp_price <= zone_high; an area-type amplifier collides on any interval overlap. No percentage is consulted on this primary test. A secondary “or very close to” branch is [ENGINEERING] — see values.amplifier_edge_tolerance_pct, measured from the zone's NEAREST EDGE. All amplifier types are weighted equally: institutional key levels (PDH, PDL, PWH, PWL, PMH, PML, DO, WO, EQ), round numbers, S/R flip areas, and any future types.",
       "inputs": "entry POI price; amplifier level prices.",
       "output": "amplifier_count and types (telemetry / confidence only) — MUST NOT flip an accept/reject decision.",
       "citation": "§2 E16 [R]; §3.4 item 5 [R]; §10.C amplifier-collision row (PDF Q8, p.19); 067_Magic_Amplifiers.md",
       "authority_class": "R",
       "status": "READY",
       "values": {
-        "collision_corridor_pct": 0.2,
+        "collision_test": "INTERVAL_INTERSECTION",
+        "amplifier_edge_tolerance_pct": 0.2,
+        "amplifier_edge_tolerance_ratified": false,
+        "amplifier_edge_tolerance_authority": "ENGINEERING",
+        "amplifier_edge_tolerance_measured_from": "NEAREST_EDGE",
+        "comparison_form": "band_inclusive",
         "corridor_is_two_sided": true,
         "corridor_total_width_pct": 0.4
       },
-      "notes": "Two open sub-items. (a) “Of the entry ZONE” is applied to a POINT (the POI price) while the weighting note refers to the zone's CENTRE — three incompatible measurement bases (zone midpoint / nearest edge / nominal POI price) whenever the zone is wide (§10.F.1 defect D4). (b) Volume Profile HVN appears on the slides' own KEY LEVELS panel (§9.J IM58 Part 5) but is silently dropped from the PDF's amplifier list while it claims to treat “all” amplifiers equally — deliberate or oversight, unstated (§10.F.2 item 16). The [D] amplifier count-to-strength scale (none/one/two/three+) has no workspace basis: 067 says only “at least twice”, 111/113 say “double amplifiers”."
+      "notes": "RESOLVED round 2 — the three-bases question DISSOLVES. His own material never states any distance: 067_Magic_Amplifiers.md is the complete lesson and its only proximity formulation is “colliding or very close to my entry area” (067_Magic_Amplifiers.md:46); no percentage appears in any of the 213 pages or in any of the 16 amplifier images. His DRAWINGS define collision as an interval intersection: in images/Magic_Amplifiers/0813_6b653ec8.png the AMP line runs through the interior of the dashed “POI ENTRY AREA” box (note card “All we care the COLLISION!”); in images/Magic_Amplifiers/0817_3baffc72.png the amplifier is a band fully CONTAINING the POI box. PRIMARY TEST: interval intersection, no percentage. SECONDARY [ENGINEERING] BRANCH: tolerance from the zone's NEAREST EDGE, not its centre — amplifier_edge_tolerance_pct, default 0.2, declared and stamped. AUTHORITY: the 0.2%, the 99.80/100.20 worked example and the “closer to the center of the entry zone” weighting exist ONLY in answers Q8, which is IMPERSONAL SPEC PROSE rather than the trader's voice, and which self-labels the number “an engineering guideline, not a strict market rule”. COMPARISON FORM: band, inclusive — lo = anchor*(1-pct), hi = anchor*(1+pct), lo <= amp <= hi. The subtraction form abs(amp-anchor) <= 0.002*anchor fails the spec's own worked example at BOTH endpoints in float64 (0.20000000000000284 > 0.2), with < or <=. NON-DECISIONAL: output is telemetry/confidence only and MUST NOT flip an accept/reject decision, so none of this can change a trade. LARGER OPEN ITEM, now carried in the schema: every amplifier is modelled as a scalar price, but S/R flips are ZONES (PRIM-006); zone-vs-zone overlap had no representation — see TELEMETRY_SCHEMA.json amplifier.geometry / zone_low / zone_high / collision_test. Volume Profile HVN remains silently dropped from the PDF's amplifier list while it claims to treat “all” amplifiers equally (§10.F.2 item 16, unruled)."
     },
     {
       "id": "GATE-039",
@@ -962,9 +1037,11 @@
           24,
           48
         ],
-        "ruled_minimum": null
+        "ruled_minimum": null,
+        "cool_off_min_hours": null,
+        "cool_off_is_structural_not_temporal": true
       },
-      "notes": "The PDF reduces this hard prerequisite to the qualitative “Price slows down after reaching the destination” and drops the durations — it does NOT retire them, it OMITS them, so 24H / ~2 days stand unopposed as the only quantities the corpus has. Cool-off is also absent from the Momentum Score's components and from the named transition conditions.",
+      "notes": "RESOLVED round 2 — TWO DIFFERENT LISTS SHARE ONE PHRASE, which is what produced the alleged contradiction. “Price slows down after reaching the destination” is the FIRST of the Q6 SEVEN (answers Q6) and is ALIVE: c1_price_slows is a required telemetry boolean, asserted by K-13/K-27. What cool-off (D7) is absent from is the Q5 FIVE “named transition conditions” (answers Q5: score drops · imbalance failures appear · opposite imbalances form · failed imbalances flip to S/R · opposite structure writes) AND the Momentum Score's components — and the Momentum Score is WITHDRAWN regardless. Dropped from the score: yes. From the Q6 seven: no. From the decision: no. SCOPE: this is a MODE-LAYER gate. Output is a direction defaulting to FORWARD (K-12 scopes the assertion to direction_mode == “REVERSE”). It gates the Forward->Reverse transition and NEVER BLOCKS A FORWARD SETUP — blocking forward setups costs real trades. DURATION: cool_off_min_hours = null. It is a STRUCTURAL test with no time term; emit elapsed_hours as evidence rather than gating on it. Exactly two durations exist in the corpus, both narrated observations on single dated frames — 100_Examples.md:21 (~2 days) and 104_Examples.md:11 (~24H); “the next morning” is the tail of the 24H sentence, NOT a third data point. The PDF does not retire the durations, it OMITS them, so they stand unopposed as the only quantities the corpus has.",
       "resolution": "RESOLVED_FROM_CORPUS"
     },
     {
@@ -1355,10 +1432,10 @@
       "citation": "§2 F5 [R] (PDF Q9, p.20 — the six named 'off' conditions); §9.F IM36 (the drawn taxonomy: ENTRY ALIGNMENT DISTURBANCE 0281/0282/0283 vs TARGET ALIGNMENT DISTURBANCE 0284/0285/0286); §9.F IM37 (glyph/colour grammar: red 'LIQ OPEN' = liquidity un-swept before an MSB ⇒ invalid break precondition)",
       "authority_class": "R",
       "status": "READY",
-      "notes": "The two lists are compatible but not identical — the PDF adds 'different momentum profile' and 'structural reversal' and DROPS the drawn 'never swept LIQ before MSB'. Neither list is declared exhaustive, and 'reacts significantly before or after' is unquantified while the source simultaneously bans candle-count and time-delay proxies.",
+      "notes": "The two lists are compatible but not identical — the PDF adds 'different momentum profile' and 'structural reversal' and DROPS the drawn 'never swept LIQ before MSB'. Neither list is declared exhaustive. The two lists are ONE PREDICATE WITH TWO ENUMERATIONS: every drawn slide in both families closes “It causes DISTURBANCE (Reduce the RISK)”. Keep both. The CAUSES axis is OPEN — his framing is a sampler (065_Magic_Alignment_Entry.md:79 “all kinds of possible examples”, :85 “what else can we talk about”, :91 “here's another idea”) and the governing rule is a DEFINITION at 065_Magic_Alignment_Entry.md:83 — “if the correlated asset do not act the way they are supposed to act i call it magic disturbance”. The SEVERITY axis IS CLOSED and stated: none / light / heavy. OFF_4 IS NOW IMPLEMENTABLE and comes off NOT_EVALUATED: lead/lag is a LEVEL STATE to him, never a clock — “having reaction before sweeping the close liquidity” (065_Magic_Alignment_Entry.md:85), “already swept the liquidity but other assets are still trying to reach the liquidity” (065_Magic_Alignment_Entry.md:89), “most Altcoins lag, they will have open targets to clear” (066_Magic_Quadrant_For_Altcoins.md:9). NEGATIVE CASE, to prevent false positives: being further along the MSB->BOS sequence is explicitly NOT a disturbance — “it is fine it makes no difference for me” (065_Magic_Alignment_Entry.md:19). Uses no correlation coefficient, no candle count and no clock, so it complies with his own bans. OFF_5 (different momentum profile) STAYS NOT_EVALUATED — it depends on the un-fittable momentum-regime boundary. [ENGINEERING] to pin: the shared evaluation instant, and what counts as swept/cleared (wick touch vs close-through) applied identically to every asset. DO NOT gate detectors behind a “majority of other panels aligned” precondition: on a 3-correlate roster with 2 disturbed it suppresses both detections, drops the grade from HEAVY to NONE, and sizes a full-risk trade in a market the trader would skip.",
       "resolution": "RESOLVED_FROM_CORPUS",
       "has_open_half": true,
-      "open_half_note": "Ships 4 of 6 conditions; conditions 4 and 5 emit NOT_EVALUATED."
+      "open_half_note": "Ships 4 of 6 conditions today. Round 2 unblocked OFF_4 (condition 4) — it is now implementable as a level-state comparison and must come off NOT_EVALUATED; that is its own task. Only OFF_5 (condition 5, different momentum profile) remains genuinely unevaluable."
     },
     {
       "id": "GRADE-014",
@@ -1394,14 +1471,24 @@
       "kind": "grader",
       "enforceability": "HARD_GATE",
       "layer": "alignment",
-      "statement": "The count is absolute and does not scale with the number of correlates, and the source never says whether the MAIN asset counts toward it. 2-of-2 (the Essential layout) is 100% disagreement and sensible; 2-of-3 (the BTC layout) is Heavy; but the workspace explicitly permits five positive and five negative correlates and calls that layout STRONGER — under the absolute count, 2-of-10 would still grade Heavy and skip the trade, penalising exactly the layout the trader prefers. Either freeze the layout size at four panels or convert to a ratio; the engine must not silently invent either.",
+      "statement": "The count is absolute and does not scale with the number of correlates. RULED round 2: the MAIN asset does NOT count toward it (see GATE-004). 2-of-2 (the Essential layout) is 100% disagreement and sensible; 2-of-3 (the BTC layout) is Heavy; but the workspace explicitly permits five positive and five negative correlates and calls that layout STRONGER — under the absolute count, 2-of-10 would still grade Heavy and skip the trade, penalising exactly the layout the trader prefers. The roster is therefore FROZEN to the four-panel layout (GATE-003) rather than converted to a ratio, and the engine must not silently invent either.",
       "inputs": "n/a — specification-level blocker on GRADE-010.",
       "output": "A declared, versioned policy: layout_size_frozen (bool) and main_asset_counts (bool), recorded in telemetry.",
       "citation": "§10.F.1 defect D5b; §10.F.2 item 11; §2 F5 [R] caveat; §2 F1 (106_Examples.md — 'you can find five positive and five negative correlated assets which will make your entry even stronger')",
       "authority_class": "R",
       "status": "READY",
       "alias_of": "GATE-003",
-      "resolution": "RESOLVED_FROM_CORPUS"
+      "resolution": "RESOLVED_FROM_CORPUS",
+      "notes": "TWO COUNTS OVER TWO DIFFERENT SETS. ALIGNMENT includes the main panel — his own handwritten note card “PERFECT MAGIC ALIGNMENT! / 4 MSB + 4 BPR = 4 Assets ALIGNED! / ZERO DISTURBANCE!” on a 4-panel BTCUSDT.P + USDT.D/TOTAL/ETHUSDT.P screenshot (images/Putting_All_Together/0443_05509bb4.png). DISTURBANCE is tagged on correlates only: the main pane is never tagged across the drawn slides (images/Questionnaire/0280-0287, images/Magic_Alignment_Setup/). SHIPS AS INFERENCE, NOT AS HIS RULE — the corpus prints no explicit exemption sentence, so main_asset_counted is a DECLARED PARAMETER carrying authority=ENGINEERING and ratified=false in `values`, never a bare doctrine value. THE COMPENSATING GATE IS REQUIRED AND DOES NOT YET EXIST: emit main_asset_state = SETUP_INVALID as a hard upstream skip that never reaches grading. NOT OPTIONAL — exclusion alone lowers disturbed_count, lightens the grade and RAISES the risk cell, so it is a systematic tilt toward LARGER positions rather than a neutral gap. STATE OF PLAY, recorded rather than smoothed over: MAIN_ASSET_COUNTS=False has been live in shadow since commit fd52295 on 2026-08-08 (gate_002_disturbance.py:356, wired at evaluator.py:351), so the exclusion has run WITHOUT its gate. main_asset_state was added to TELEMETRY_SCHEMA.json by T-0027 but is NOT yet in setup_evaluation.required, because no producer computes the verdict; SETUP_INVALID is emitted by nothing. THIS ROW IS NOT SETTLED until the gate exists — tracked in KNOWN_ISSUES.md. Layout authority: 064_Magic_Alignment_Setup.md:19 “there's no trading without the setup, i cannot take a single trade without the setup”; 064_Magic_Alignment_Setup.md:23 the +/-80% correlate rule; images/Magic_Alignment_Setup/0738_5da5632d.png “3+ Layout System”.",
+      "values": {
+        "main_asset_counted": false,
+        "main_asset_counted_authority": "ENGINEERING",
+        "main_asset_counted_ratified": false,
+        "main_asset_counted_provenance": "DECLARED_PARAMETER",
+        "main_asset_counted_basis": "INFERENCE from two counts over two different sets — the corpus prints no explicit exemption sentence. Confidence: medium-high.",
+        "required_compensating_gate": "main_asset_state = SETUP_INVALID",
+        "required_compensating_gate_implemented": false
+      }
     },
     {
       "id": "GRADE-017",
@@ -1467,7 +1554,8 @@
       "resolution": "RESOLVED_FROM_CORPUS",
       "triage_note": "PARTIAL: ship risk_pct(altcoin) = f(box_grade) = {0.0075, 0.005, 0.0025}, disturbance-invariant. The Heavy-override half stays open (trader Q).",
       "has_open_half": true,
-      "open_half_note": "Ships the altcoin box-grade scale; the Heavy-override half is unresolved (trader Q)."
+      "open_half_note": "Ships the altcoin box-grade scale; the Heavy-override half is unresolved (trader Q).",
+      "notes": "ROUND 2 — THE CONSTANT IS FLAT, NON-GATING, AND CARRIES THE TRADER'S OWN HEDGE. No scaling rule exists in either source, IN EITHER DIRECTION — flatness is an INFERENCE from the numbers being stated unqualified, not a ruling. His hedges, in his own words: 0.30% is “an initial calibration value and may be refined during validation” (answers Q4); ~1% are “approximate calibration values and should only be used as supporting information” (answers Q6); ~0.2% is “an engineering guideline, not a strict market rule” (answers Q8); the news rule “does not use a fixed number of minutes”. THE COUNTER-ARGUMENT IS NOT HIS: the “BTC on the 1H chart and BTC on the Weekly chart have completely different imbalance sizes” sentence is PRIOR-AI-ASSISTANT REGISTER (bracketed by “Option 2 (What I recommend)”, “For example, tell him:”, “I would tell your developer this:”, “My suggestion”) and is scoped to momentum-imbalance SIZE classification, where no fixed percentage was ever adopted. It does not bear on these constants. His actual bans and their scope: momentum is “not defined by candle body size, ATR ratios, or a fixed number” (answers Q5); a disturbance is “not determined by correlation coefficients, a fixed number of candles, or a time delay” (answers Q9). EACH PERCENTAGE'S DENOMINATOR IS UNSTATED and must be declared by the implementer and stamped on every record. [ENGINEERING] GRADE-019 SPECIFICALLY: this row's own gap is the Risk Altcoin column, not a percentage constant. The altcoin box-grade scale ships disturbance-invariant {0.0075, 0.005, 0.0025}; the Heavy-override half stays open and needs the trader. The engine must REFUSE to size an altcoin trade rather than interpolate."
     },
     {
       "id": "GRADE-020",
@@ -1863,7 +1951,7 @@
         "weak_sweep_penetration_pct": 1.0,
         "pct_of_what": "UNSTATED — level price? swing range? never said"
       },
-      "notes": "The ~1% figure appears in NO workspace page and in NONE of the 1,258 images. It is asset- and timeframe-agnostic: 1% ≈ 108 pips on EURUSD @1.0800 and ≈ $600 on BTC @60,000. Neither wick-tip-vs-close nor single-candle-vs-cumulative penetration is specified (§10.F.1 defect D4)."
+      "notes": "The ~1% figure appears in NO workspace page and in NONE of the chart images. It is asset- and timeframe-agnostic: 1% ≈ 108 pips on EURUSD @1.0800 and ≈ $600 on BTC @60,000. ROUND 2 — THE CONSTANT IS FLAT, NON-GATING, AND CARRIES THE TRADER'S OWN HEDGE. No scaling rule exists in either source, IN EITHER DIRECTION — flatness is an INFERENCE from the numbers being stated unqualified, not a ruling. His hedges, in his own words: 0.30% is “an initial calibration value and may be refined during validation” (answers Q4); ~1% are “approximate calibration values and should only be used as supporting information” (answers Q6); ~0.2% is “an engineering guideline, not a strict market rule” (answers Q8); the news rule “does not use a fixed number of minutes”. THE COUNTER-ARGUMENT IS NOT HIS: the “BTC on the 1H chart and BTC on the Weekly chart have completely different imbalance sizes” sentence is PRIOR-AI-ASSISTANT REGISTER (bracketed by “Option 2 (What I recommend)”, “For example, tell him:”, “I would tell your developer this:”, “My suggestion”) and is scoped to momentum-imbalance SIZE classification, where no fixed percentage was ever adopted. It does not bear on these constants. His actual bans and their scope: momentum is “not defined by candle body size, ATR ratios, or a fixed number” (answers Q5); a disturbance is “not determined by correlation coefficients, a fixed number of candles, or a time delay” (answers Q9). EACH PERCENTAGE'S DENOMINATOR IS UNSTATED and must be declared by the implementer and stamped on every record. [ENGINEERING] TARGET-005 SPECIFICALLY: penetration is measured to the WICK TIP — his metric is “wick penetration… beyond the liquidity level”. Body-close is a DIFFERENT RULE (ENTRY-003) and K-17 forbids collapsing them. Single-vs-cumulative is unspecified: emit BOTH a per-bar maximum and an episode maximum, and declare which the flag reads. [ENGINEERING]"
     },
     {
       "id": "TARGET-006",
@@ -1881,7 +1969,7 @@
         "relative_equals_max_diff_pct": 0.3,
         "self_labelled": "initial calibration value and may be refined during validation"
       },
-      "notes": "NUMBER IS NEW — nowhere in the workspace text or the 1,258 images; the workspace allows sloped relative equals with no bound. Asset/TF-agnostic: 0.30% = 32.4 pips on EURUSD @1.0800, $180 on BTC @60,000 (§10.F.1 defect D4)."
+      "notes": "NUMBER IS NEW — nowhere in the workspace text or the chart images; the workspace allows sloped relative equals with no bound. Asset/TF-agnostic: 0.30% = 32.4 pips on EURUSD @1.0800, $180 on BTC @60,000. ROUND 2 — THE CONSTANT IS FLAT, NON-GATING, AND CARRIES THE TRADER'S OWN HEDGE. No scaling rule exists in either source, IN EITHER DIRECTION — flatness is an INFERENCE from the numbers being stated unqualified, not a ruling. His hedges, in his own words: 0.30% is “an initial calibration value and may be refined during validation” (answers Q4); ~1% are “approximate calibration values and should only be used as supporting information” (answers Q6); ~0.2% is “an engineering guideline, not a strict market rule” (answers Q8); the news rule “does not use a fixed number of minutes”. THE COUNTER-ARGUMENT IS NOT HIS: the “BTC on the 1H chart and BTC on the Weekly chart have completely different imbalance sizes” sentence is PRIOR-AI-ASSISTANT REGISTER (bracketed by “Option 2 (What I recommend)”, “For example, tell him:”, “I would tell your developer this:”, “My suggestion”) and is scoped to momentum-imbalance SIZE classification, where no fixed percentage was ever adopted. It does not bear on these constants. His actual bans and their scope: momentum is “not defined by candle body size, ATR ratios, or a fixed number” (answers Q5); a disturbance is “not determined by correlation coefficients, a fixed number of candles, or a time delay” (answers Q9). EACH PERCENTAGE'S DENOMINATOR IS UNSTATED and must be declared by the implementer and stamped on every record. [ENGINEERING]"
     },
     {
       "id": "TARGET-007",
@@ -1988,7 +2076,8 @@
       "depends_on": [
         "GATE-038"
       ],
-      "triage_note": "NOT ADJUDICATED in the corpus-triage pass — listed explicitly so silence is not mistaken for resolution."
+      "triage_note": "Round 2 adjudicated the measurement-basis question (see GATE-038). Status stays OPEN pending the implementation the proposed closure is conditional on — B102.",
+      "notes": "ROUND 2 RULED THE SUBSTANCE AND THIS ROW STAYS OPEN ON PURPOSE. The three-bases question is answered by GATE-038: his drawings use the entry zone as an INTERVAL, not a point or a centre, so the primary test is interval intersection and no percentage is consulted. REGISTRY_PATCH.json proposes closing this row OPEN -> READY, but conditionally — “apply only if you accept the GATE-038 ruling above” — and the condition is that the interval test EXISTS. Nothing implements it: no module under backend/app/services/rules/ references ENTRY-004. A status is a claim about the code, and setting READY here would be a ratified-looking row over a behaviour that does not exist. The patch's documented if_not_accepted branch is therefore taken. This is why meta.open_items.ids carries 14 ids where REGISTRY_PATCH.md Priority 4 says 13 — a deliberate divergence, not an arithmetic error. The closure is owed to whichever task implements GATE-038's interval test, tracked as B102 in KNOWN_ISSUES.md; the trigger is that implementation landing, not a further ruling."
     },
     {
       "id": "ENTRY-005",
@@ -2011,7 +2100,8 @@
           30
         ]
       },
-      "triage_note": "NOT ADJUDICATED in the corpus-triage pass — listed explicitly so silence is not mistaken for resolution."
+      "triage_note": "NOT ADJUDICATED in the corpus-triage pass — listed explicitly so silence is not mistaken for resolution.",
+      "notes": "ROUND 2 — THE CONSTANT IS FLAT, NON-GATING, AND CARRIES THE TRADER'S OWN HEDGE. No scaling rule exists in either source, IN EITHER DIRECTION — flatness is an INFERENCE from the numbers being stated unqualified, not a ruling. His hedges, in his own words: 0.30% is “an initial calibration value and may be refined during validation” (answers Q4); ~1% are “approximate calibration values and should only be used as supporting information” (answers Q6); ~0.2% is “an engineering guideline, not a strict market rule” (answers Q8); the news rule “does not use a fixed number of minutes”. THE COUNTER-ARGUMENT IS NOT HIS: the “BTC on the 1H chart and BTC on the Weekly chart have completely different imbalance sizes” sentence is PRIOR-AI-ASSISTANT REGISTER (bracketed by “Option 2 (What I recommend)”, “For example, tell him:”, “I would tell your developer this:”, “My suggestion”) and is scoped to momentum-imbalance SIZE classification, where no fixed percentage was ever adopted. It does not bear on these constants. His actual bans and their scope: momentum is “not defined by candle body size, ATR ratios, or a fixed number” (answers Q5); a disturbance is “not determined by correlation coefficients, a fixed number of candles, or a time delay” (answers Q9). EACH PERCENTAGE'S DENOMINATOR IS UNSTATED and must be declared by the implementer and stamped on every record. [ENGINEERING] THIS ROW STAYS OPEN: round 2 ruled that the four constants are flat and non-gating, which removes the blocker framing, but the per-asset / per-timeframe normalisation question it was raised about is NOT ruled — it is refused as un-fittable. What is required is unchanged: expose them as declared config and record the value used on every evaluation, so a later normalisation applies retroactively to stored telemetry."
     },
     {
       "id": "ENTRY-006",
@@ -2073,7 +2163,9 @@
       "depends_on": [
         "EXIT-001"
       ],
-      "triage_note": "NOT ADJUDICATED in the corpus-triage pass — listed explicitly so silence is not mistaken for resolution."
+      "triage_note": "NOT ADJUDICATED in the corpus-triage pass — listed explicitly so silence is not mistaken for resolution.",
+      "priority": "HIGH",
+      "notes": "RAISED in v1.2.1 — round 2 calls this “the largest unremarked gap in the exit model”. The trader's exit ruling delegates the 30% runner to 'the active trade management rules', which were never specified for the engine. No trailing rule, no partial ladder, nothing between the 2R partial and the final target. His written management notes (034_Research.md:14-38) are price-based and do not cover it; 036_Single_Trade_Management.md is empty (title only). This is the largest unremarked gap in the exit model and it is neither ruled nor safely defaultable — it belongs on the next trader round. It is unresolved IN BOTH DIRECTIONS: neither ruled nor safely defaultable, so it belongs on the next trader round rather than being defaulted by the engine. Status stays OPEN deliberately; only the priority moved. Bears directly on the 30% runner T-0022 already shipped."
     },
     {
       "id": "EXIT-004",

@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-16 (T-0026: B93 CLOSED — the AST guard measures the invariant the failure message always claimed, catching 26/26 against the clean-interpreter guard's 11/26, and all three guards are kept because they ask three different questions. Earlier, T-0023, target selection — EXIT-004 / TARGET-001 / TARGET-003, SHADOW ONLY like every rules task. B93 — a test can make a guard vacuous just by importing what the guard checks for: `test_every_rule_module_on_disk_is_imported` was vacuous for 23 of the 26 modules in its own domain; FIXED by a clean-interpreter guard, whose own limit is measured at 15 of 26 still reachable through a sibling and is NOT fixed. B95 — TARGET-001 and TARGET-003 are three levels, not two, and 'ignore size entirely' is the wrong implementation that looks safe. B96 — the active institutional destination has NO producer, so TARGET-001 registers unable to fire. B97 — `target_object_type` is lossier than PRIM-003's pool classes and INSTITUTIONAL_CANDLESTICK must never map to INSTITUTIONAL_LEVEL. Earlier, B90 CLOSED: EXIT-001 now reports `ticks_seen`, so an unobserved path and a long quiet one are no longer one record. Earlier, T-0022, the v1 exit model EXIT-001/EXIT-002 — the first rules in this programme that govern what happens AFTER a trade is taken, and SHADOW ONLY: nothing under `live/` or `broker/` imports them and `paper.py` still closes positions whole. B86 — `PaperPosition` has one `units`/`sl`/`tp` and `__slots__`, so it cannot represent a tranched position and the wiring task is a broker-layer change, not a call site. B87 — the 19:00 New York close is ours and UNRATIFIED, defaulted ON so shadow generates the evidence the ruling needs, and the wiring task must re-surface the question rather than inherit it. B88 — `ExitEvent` refuses `LIQUIDATION`, which is what makes criterion 1 enforceable at all, and becomes a hazard the moment a real liquidation can reach the exit path. B89 — a target at or inside 2R is refused outright because GATE-031 cannot run without GATE-025. Earlier, T-0021: B54 CLOSED — both tools collapse aliases and agree; every coverage figure now carries its space, and the script refuses to print an impossible set. B58 — the other tool is outside the repo, so half the agreement cannot be CI-enforced. Earlier, T-0016: the partially-evaluable requirements are enforced by script over the whole registry — B56, eleven emitted fields that cannot say where they came from, baselined not fixed and needing a task id; B57, the two of six standing requirements that script can actually enforce, so a green run is not read as six. Earlier the same day, T-0007: ENTRY_TF 1H -> 5m, the first live behaviour change. B37 CLOSED — the lookahead is out of production. B33 gained the instance it predicted: every legal execution timeframe would have broken the shadow; GATE-017 closed on the live path; B38 — GATE-018 stays OPEN; B39 — a conditional edit that matches nothing succeeds; B40 — the correlate margin is now 1.5x and nothing reports it shrinking)
+Last updated: 2026-08-16 (T-0027: Salim's round-2 rulings applied to the pinned contract — RULE_REGISTRY 1.2.0 -> 1.2.1, prose only, ZERO status fields changed, plus six TELEMETRY_SCHEMA additions including the fourth record type `evaluation_unavailable`. NOTHING was implemented and nothing deployed. B82 SUPERSEDED — the wide-cover stop is a zone-coverage modifier applied after anchor selection, not a sixth anchor, and rung 3 is a swept liquidity level because Salim withdrew the QML requirement himself. B102 — ENTRY-004's closure is owed to code that does not exist, so the row stays OPEN and our open_items carries 14 where the patch's arithmetic says 13. B103 — the main-asset exclusion has run UNGATED in live shadow since 2026-08-08 and T-0027 could NOT fix it: `main_asset_state` is in the schema but deliberately NOT required, because no producer computes the verdict and faking it in the fixture would be a vacuous green. B104 — a missing correlate still reads as a calm aligned one, same direction of failure. B105 — `data_gaps` is now required and the ambiguity moved to the caller rather than disappearing. B106 — THREE round-2 rows could not be applied here and are NOT done: two P1 targets live in a pack we do not hold, and HG-29 does not exist in this repo at all. B107 — the schema changed content with no version bump; a sha pin is the only tripwire. B108 — 84% of our citations cannot be followed from this repo, so every negative image-corpus finding is INHERITED, labelled UNVERIFIABLE_HERE. Earlier, T-0026: B93 CLOSED — the AST guard measures the invariant the failure message always claimed, catching 26/26 against the clean-interpreter guard's 11/26, and all three guards are kept because they ask three different questions. Earlier, T-0023, target selection — EXIT-004 / TARGET-001 / TARGET-003, SHADOW ONLY like every rules task. B93 — a test can make a guard vacuous just by importing what the guard checks for: `test_every_rule_module_on_disk_is_imported` was vacuous for 23 of the 26 modules in its own domain; FIXED by a clean-interpreter guard, whose own limit is measured at 15 of 26 still reachable through a sibling and is NOT fixed. B95 — TARGET-001 and TARGET-003 are three levels, not two, and 'ignore size entirely' is the wrong implementation that looks safe. B96 — the active institutional destination has NO producer, so TARGET-001 registers unable to fire. B97 — `target_object_type` is lossier than PRIM-003's pool classes and INSTITUTIONAL_CANDLESTICK must never map to INSTITUTIONAL_LEVEL. Earlier, B90 CLOSED: EXIT-001 now reports `ticks_seen`, so an unobserved path and a long quiet one are no longer one record. Earlier, T-0022, the v1 exit model EXIT-001/EXIT-002 — the first rules in this programme that govern what happens AFTER a trade is taken, and SHADOW ONLY: nothing under `live/` or `broker/` imports them and `paper.py` still closes positions whole. B86 — `PaperPosition` has one `units`/`sl`/`tp` and `__slots__`, so it cannot represent a tranched position and the wiring task is a broker-layer change, not a call site. B87 — the 19:00 New York close is ours and UNRATIFIED, defaulted ON so shadow generates the evidence the ruling needs, and the wiring task must re-surface the question rather than inherit it. B88 — `ExitEvent` refuses `LIQUIDATION`, which is what makes criterion 1 enforceable at all, and becomes a hazard the moment a real liquidation can reach the exit path. B89 — a target at or inside 2R is refused outright because GATE-031 cannot run without GATE-025. Earlier, T-0021: B54 CLOSED — both tools collapse aliases and agree; every coverage figure now carries its space, and the script refuses to print an impossible set. B58 — the other tool is outside the repo, so half the agreement cannot be CI-enforced. Earlier, T-0016: the partially-evaluable requirements are enforced by script over the whole registry — B56, eleven emitted fields that cannot say where they came from, baselined not fixed and needing a task id; B57, the two of six standing requirements that script can actually enforce, so a green run is not read as six. Earlier the same day, T-0007: ENTRY_TF 1H -> 5m, the first live behaviour change. B37 CLOSED — the lookahead is out of production. B33 gained the instance it predicted: every legal execution timeframe would have broken the shadow; GATE-017 closed on the live path; B38 — GATE-018 stays OPEN; B39 — a conditional edit that matches nothing succeeds; B40 — the correlate margin is now 1.5x and nothing reports it shrinking)
 
 ---
 
@@ -1829,6 +1829,188 @@ traded. PRIM-002 feeds ENTRY-001, which is every admissible entry object in the 
 
 **NOT fixed, and it is its own entry:** see **B75**. Related: **B74**.
 
+### B102 — `ENTRY-004`'s closure is owed to code that does not exist, and the patch's own arithmetic assumes it landed
+
+**Filed by Execute 2026-08-16 during T-0027, on the Manager's ruling `3-0-i`.**
+
+`REGISTRY_PATCH.json` proposes the patch's **one** status change — `ENTRY-004` `OPEN -> READY` — and
+conditions it: *"apply only if you accept the `GATE-038` ruling above."* **We accept the ruling.**
+What is missing is not agreement, it is **the interval test**: nothing under
+`backend/app/services/rules/` references `ENTRY-004`, so setting `READY` would be a
+ratified-looking row over a behaviour that does not exist.
+
+**A status is a claim about the code, and the code is not there.** So the row stays `OPEN` and the
+patch's documented `if_not_accepted` branch was taken.
+
+**The half of that branch NOT taken, said plainly:** `if_not_accepted` reads *"leave OPEN **and ship
+the interval test behind a declared flag**."* T-0027 implements nothing, so only the first clause
+landed. **Both clauses are actions; declining the second is a deferral, not a null.**
+
+### What this breaks if nobody picks it up
+
+`REGISTRY_PATCH.md` Priority 4 reduces `meta.open_items.ids` to 14 and then says *"then remove
+`ENTRY-004` → **13**."* **We carry 14.** A seat diffing the applied registry against the patch sees
+14 where the patch says 13 and reads it as a misapplication. The reason is recorded in
+`meta.open_items.note`, in the `1.2.1` changelog entry and in `ENTRY-004`'s own `notes` — **in the
+registry rather than only in a work report**, because the report stops being read and the registry
+is what gets diffed. That is `B82`'s shape and this is the third time it has been caught.
+
+**Trigger: the task that implements `GATE-038`'s interval test closes this row in the same commit.**
+Not *"when we accept the ruling"* — that already happened.
+
+### B103 — the main-asset exclusion has run UNGATED since 2026-08-08, and T-0027 could not fix that
+
+**Filed by Execute 2026-08-16 during T-0027. This is the one on this list that moves real money.**
+
+    gate_002_disturbance.py:356   MAIN_ASSET_COUNTS = False   RATIFIED = False
+    gate_002_disturbance.py:286   counted = [v for v in verdicts if main_asset_counts or v.role != "MAIN"]
+    evaluator.py:351              wired in — behavioural, not declarative
+    landed                        fd52295, 2026-08-08 — from the ORIGINAL pack, not the round-2 rulings
+
+Excluding the main asset **lowers** `disturbed_count` → **lightens** the grade → **raises** the risk
+cell. The compensating gate the corpus requires — `main_asset_state = SETUP_INVALID` as a hard
+upstream skip — **does not exist**: before T-0027 the string appeared exactly once in the whole
+repository, as an input *name* in `GATE-004`'s registry row, produced by nothing.
+
+### What T-0027 did and did not do
+
+**Did:** added `main_asset_state` to `TELEMETRY_SCHEMA.json` with its three-value enum, and recorded
+in `GATE-004`/`GRADE-016` that the row is **NOT SETTLED** until the gate exists, including how long
+it has run without one.
+
+**Did NOT:** add it to `setup_evaluation.required`, which is what the round-2 patch specifies.
+**No producer computes the verdict.** Requiring it would force every emitted record to assert a
+structural verdict the engine did not compute, and the only way to keep the suite green would be to
+teach the fixture to fake it — **a vacuous green, which is worse than the gap it hides**.
+
+`test_main_asset_state_exists_but_is_deliberately_not_required_yet` asserts the field is present and
+**not** required, so the deferral is visible rather than silent. **When the gate lands that test
+fails on purpose:** promote the field, emit it from the producer, delete the test.
+
+**This is a live-shadow risk tilt, not a documentation gap.** It has been running for eight days.
+
+### B104 — a missing correlate still reads as a calm, aligned one
+
+**Filed by Execute 2026-08-16 during T-0027.** Same direction of failure as **B103**, same reason it
+could not be closed.
+
+The trader rules this case himself, so the mapping is his: *"some other asset has no target at
+all… **This can create another disturbance**"* (`065_Magic_Alignment_Entry.md:87`). A correlate that
+yields nothing to read is a **disturbance**, never a neutral.
+
+`data_available` and `unavailable_reason` were added to `correlate_state.properties` by T-0027 and
+**deliberately not added to `required`**: the correlate panels are not wired (**B11**), so no
+producer can state availability honestly yet. Until then a broken ETH feed is indistinguishable from
+an ETH that was read and found fine, and it **lowers** `disturbed_count` — again toward larger
+positions.
+
+### B105 — `data_gaps` is now required, and the ambiguity moved rather than disappeared
+
+**Filed by Execute 2026-08-16 during T-0027, against my own change.**
+
+The round-2 patch made `data_gaps` required so that *"we had no gaps"* and *"we never reported
+gaps"* stop being the same record. Applied. But `records.scan_census()` defaults it to `[]`,
+mirroring `unemitted_bars`, **so a caller that never computed gaps now positively asserts there were
+none.** The schema-level ambiguity is gone and a caller-level one replaced it.
+
+**Why it was still the right change:** the previous state had no way to express the claim at all.
+**Why it is filed anyway:** this register's default failure is an output that does not discriminate
+between working and broken, and defaulting a required honesty field is exactly that shape. The fix
+is a caller that computes gaps rather than a builder that assumes none.
+
+### B106 — three round-2 rows could not be applied in this repository, and are NOT done
+
+**Filed by Execute 2026-08-16 during T-0027.** An unapplied row silently counted as applied is this
+register's opening sentence, so these are recorded rather than reported as complete.
+
+| row | target | why not |
+|---|---|---|
+| P1 (1 of 3) | `CONFORMANCE_SUITE.md:204` — delete the QML caveat | **file not in this repo** |
+| P1 (2 of 3) | `FIDELITY_SCORECARD.md:173` — delete the QML caveat | **file not in this repo** |
+| P3 / criterion 6-i | mark `HG-29` `xfail(strict=True)` | **the assertion does not exist here** |
+
+The first two live in the `MagicStrategy_EngineKnowledge` pack, which this machine does not hold.
+**The third is the one worth reading twice:** `HG-29` has zero references anywhere in `backend/`, so
+there was nothing to mark. Marking it would have meant **first writing the assertion** — and the
+round-2 ruling is that `HG-29` **as written fails an engine that implements `GRADE-013` correctly**.
+Writing a known-broken assertion in order to mark it expected-to-fail is worse than not having it.
+
+### The risk criterion 6 exists to prevent is ALREADY GUARDED — so do not close this by writing the assertion
+
+**Review's finding, and it shrinks this entry to its real size.** Criterion 6 exists to stop **one**
+thing: the engine being bent to satisfy `HG-29`. Neither an absent test nor an `xfail`'d broken
+assertion prevents that. **This does:**
+
+    backend/tests/unit/test_graders.py:176
+    test_an_off_condition_disturbs_a_panel_whose_order_flow_agrees
+        assert panel.agreement_state == "ALIGNED"
+        assert panel.disturbed is True
+        assert "OC2_FAILED_EXPECTED_BREAK" in panel.off_conditions
+
+**That is exactly the combination `HG-29` forbids, pinned as CORRECT behaviour.** Bend `GRADE-013`
+to satisfy `HG-29` and it goes red. **Criterion 6's PURPOSE is met while its stated MECHANISM cannot
+be, and those are different facts** — *"6-i NOT MET"* alone reads as an uncovered gap, and the next
+seat closes it by writing the broken assertion, which everyone here agrees is worse than nothing.
+
+**What genuinely remains uncovered is much smaller: nothing in this repo will notice when `HG-29` is
+reconciled upstream.** That is a contract-side gap, not an engine-side one.
+
+**Also not recomputed:** `open_rule_exposure` and `defect_exposure`, which live in
+`FIDELITY_SCORECARD.md`. Same reason.
+
+### B107 — the telemetry schema changed content without a version bump, and only a sha pin notices
+
+**Filed by Execute 2026-08-16 during T-0027.**
+
+`RULE_REGISTRY.json` went `1.2.0 -> 1.2.1` because the patch says to. **`TELEMETRY_SCHEMA.json`
+gained a fourth record type, two new `$defs`, four amplifier fields and a required field — and
+`TELEMETRY_PATCH.md` specifies no version bump at all.** Its `$id` still reads the same version it
+did before.
+
+So the *only* thing standing between a changed schema and a silent swap is
+`test_the_vendored_artefacts_are_byte_for_byte_the_ones_analysed`, which pins a sha256 prefix. That
+test did its job here — it went red, was read, and was updated deliberately. **But a schema whose
+declared version cannot distinguish two different schemas is relying entirely on a test somebody
+could update without reading.**
+
+**Related and deliberately left alone:** the schema still pins `engine.rule_registry_version` to
+`"1.1.0"` while the registry is now `1.2.1`, so the delivered artefacts remain mutually
+incompatible. T-0027 did **not** touch that `const` — the round-2 patch says nothing about it, and
+editing it would have silently resolved a delivered-package defect nobody ruled on and removed the
+tripwire that fires when a regenerated schema arrives.
+
+### B108 — every negative finding we hold about the image corpus is INHERITED, and 84% of our citations cannot be followed from this repo
+
+**Filed by Execute 2026-08-16 during T-0027, on the Manager's ruling `3-0-iii`/`3-0-iv`; measurement
+Review's.**
+
+    source locators in the round-2 package        56
+    unfollowable from this repository             47   (84%)
+    EngineKnowledge pack files held here           0   (of 19)
+    Notion pages held                              0   (of 213)
+    chart images held                              0   (of 1,186)
+
+The registry now asserts things like *"drawn nowhere in the images"*, *"none of the 16 amplifier
+images annotates a distance"* and *"the main pane is never tagged across the drawn slides"*.
+**Every one of those is second-hand.** `MANIFEST.md` deliberately excluded the images, so **asserting
+that something appears in none of the images requires the images.**
+
+### The label, because the package contradicts itself about it
+
+`CLAUDE.md` hard rule 2 says an unfollowable citation is **UNVERIFIED**; `SOURCE_INDEX.md` item 2
+says **do NOT** treat an uncheckable citation as unverified doctrine. **Ruled: neither alone.**
+A third label, `UNVERIFIABLE_HERE`, is now recorded in `meta.source_availability` along with the
+held / not-held table.
+
+> ***"Unverified" implies we tried and failed. We did not try, because there is nothing on this
+> machine to try against.*** **Different fact, different remedy: ask Malek for the corpus, not file
+> a defect.**
+
+Hard rule 2 still governs anything checkable we have not checked.
+
+**Two of our own counts were also wrong and are corrected in `1.2.1`:** 1,186 images on disk, not
+1,258; 213 numbered corpus pages, not 220 (220 counted derived analysis documents).
+
 ### B101 — `ci_range.py` measured the distinguishing fact and dropped it on one branch of three
 
 **Filed by Review 2026-08-16, against my own tool, found by Execute during the T-0026 verdict. The
@@ -2954,7 +3136,29 @@ and reading that as the rule being satisfied. **It is the same reading either wa
 standing family: an output that does not discriminate between working and broken. Related: **B82**
 (the same rule's other unresolved sub-item), **B79**, **B52**.
 
-### B82 — `GATE-027`'s five-anchor ladder is KNOWN-INCOMPLETE, and nobody has decided the sixth
+### B82 — SUPERSEDED 2026-08-16 by T-0027: the sixth anchor is decided, and it was never a sixth anchor
+
+> **SUPERSEDED, NOT CLOSED, and the distinction is the entry's own point.** Salim's round-2 rulings
+> answered the question this entry was filed to keep alive, so the *gap* is gone. What remains is the
+> implementation, which belongs to `T-0025`.
+>
+> **The ruling:** the wide-cover case is **not a sixth anchor**. It is a **zone-coverage modifier
+> applied AFTER anchor selection** — if the chosen stop lands inside a zone object, extend to the far
+> edge of the whole zone (`075` Choice 4, `049_Examples.md:5`, `116_Examples.md:5`, `PRIM-006`:
+> zones, never lines). **And rung 3 is not unlocatable either:** the QML requirement was withdrawn
+> at source — *"it does not have to be QML, any old liquidity sweep level can act as SL level for
+> me"* (`026_Stop_Loss_Decision.md:46`) — so anchor #3 is a swept liquidity level and **no QML
+> detector ships**.
+>
+> **Residual `[ENGINEERING]`, genuinely open:** the snap tolerance for the adjacent-but-not-
+> intersecting zone case, and **whether the widening runs before or after the 2R floor** — which
+> changes the stop, the R:R and therefore the position size.
+>
+> **Applied to `GATE-027`'s `notes` in registry v1.2.1 by T-0027.** The original entry is kept below
+> because its filing reason — a gap recorded only in a task's *Out of scope* section stops being read
+> the moment that task goes DONE — is still true and is the reason this text is here at all.
+
+### B82 (original, 2026-08-15) — `GATE-027`'s five-anchor ladder is KNOWN-INCOMPLETE, and nobody has decided the sixth
 
 **Filed 2026-08-15 at Review's insistence, and the reason it is here rather than in a task is the
 entry's own point.** It was written in `T-0025`'s **Out of scope** section, which was correct

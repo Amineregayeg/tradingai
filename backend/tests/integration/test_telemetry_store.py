@@ -159,7 +159,7 @@ async def test_query_columns_mirror_the_payload(db_session, declared):
     assert row.decision == "TAKE"
     assert row.deciding_rule_id == "GATE-012"
     assert row.timestamp_ny.endswith("-04:00"), "the NY offset was normalised away"
-    assert row.rule_registry_version == "1.2.0"
+    assert row.rule_registry_version == "1.2.1"  # T-0027: registry 1.2.0 -> 1.2.1
 
 
 async def test_a_record_id_cannot_be_reused(db_session, declared):

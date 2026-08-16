@@ -297,6 +297,7 @@ def scan_census(
     bars_observed: int,
     evaluations_emitted: int,
     unemitted_bars: list[dict[str, Any]] | None = None,
+    data_gaps: list[dict[str, Any]] | None = None,
     scan_id: str | None = None,
     **optional: Any,
 ) -> dict[str, Any]:
@@ -309,6 +310,13 @@ def scan_census(
 
     Under our emission policy (`every-closed-bar-roster-v1`) `unemitted_bars` should always
     be empty. If it is ever not, that is the finding.
+
+    `data_gaps` became REQUIRED in the round-2 telemetry patch (T-0027) for the same reason
+    `unemitted_bars` already was: while it was optional, "we had no gaps" and "we never
+    reported gaps" were the same record. It defaults to `[]` here, mirroring
+    `unemitted_bars`, which means a caller that never computed gaps still reports none —
+    the ambiguity moves from the schema to the caller rather than disappearing. That
+    residue is tracked in KNOWN_ISSUES.md.
     """
     record: dict[str, Any] = {
         "record_type": "scan_census",
@@ -323,6 +331,7 @@ def scan_census(
         "bars_observed": bars_observed,
         "evaluations_emitted": evaluations_emitted,
         "unemitted_bars": unemitted_bars or [],
+        "data_gaps": data_gaps or [],
     }
     record.update({k: v for k, v in optional.items() if v is not None})
     return record

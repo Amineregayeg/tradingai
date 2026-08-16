@@ -96,9 +96,15 @@ def test_the_vendored_artefacts_are_byte_for_byte_the_ones_analysed():
     """
     import hashlib
 
+    # Updated by T-0027, deliberately, applying MagicStrategy_Round2_Rulings.zip
+    # (package sha256 704afd7e9c7a8407…, 7/7 files verified against its MANIFEST.md).
+    # Registry v1.2.0 -> v1.2.1, prose only: no status field changed. Schema gained the
+    # fourth record type and lost the QML skip licence. This is the ONLY authorised reason
+    # these hashes have ever moved — a drop that changes them without a reviewed patch is
+    # still the failure this test exists to catch.
     expected = {
-        "RULE_REGISTRY.json": "d85f979078815202",
-        "TELEMETRY_SCHEMA.json": "1364ab11ae0703e7",
+        "RULE_REGISTRY.json": "7ca2cdebcc0c055a",
+        "TELEMETRY_SCHEMA.json": "c5c86c67c305fdff",
     }
     for name, prefix in expected.items():
         got = hashlib.sha256((contract.CONTRACT_DIR / name).read_bytes()).hexdigest()[:16]
@@ -107,9 +113,13 @@ def test_the_vendored_artefacts_are_byte_for_byte_the_ones_analysed():
 
 def test_the_pinned_registry_is_the_one_we_analysed():
     """Guards against a package drop changing the rules underneath the engine."""
-    assert contract.registry_version() == "1.2.0"
+    assert contract.registry_version() == "1.2.1"
     assert len(contract.known_rule_ids()) == 117
     assert len(contract.ids_with_enforceability("HARD_GATE")) == 91
+    # Still 14 after the round-2 patch, and that is the point: the patch changes prose
+    # only. REGISTRY_PATCH.md P4 would have made this 13 by closing ENTRY-004, but that
+    # closure is conditional on an interval test nothing implements (B102), so it stayed
+    # OPEN. If this ever reads 13, the closure landed — check the code landed with it.
     assert len(contract.ids_with_status("OPEN")) == 14
 
 
@@ -129,7 +139,12 @@ def test_the_delivered_artefacts_are_mutually_incompatible_and_we_say_so():
     """
     skew = contract.contract_version_skew()
     assert skew is not None, "skew resolved — remove the version relaxation in validate.py"
-    assert "1.1.0" in skew and "1.2.0" in skew
+    # T-0027 widened the gap rather than closing it: the registry moved 1.2.0 -> 1.2.1 and
+    # the schema's `const` was deliberately NOT touched. The round-2 telemetry patch says
+    # nothing about the pin, and editing it would have silently resolved a delivered-package
+    # defect nobody ruled on — and removed the tripwire that fires when a regenerated schema
+    # finally arrives.
+    assert "1.1.0" in skew and "1.2.1" in skew
 
 
 def test_records_report_the_registry_actually_in_force():
@@ -138,7 +153,7 @@ def test_records_report_the_registry_actually_in_force():
     Writing "1.1.0" into telemetry while running 1.2.0 would make stored evidence claim a
     registry it was never evaluated against — which defeats the only purpose of the field.
     """
-    assert rec.engine_identity()["rule_registry_version"] == "1.2.0"
+    assert rec.engine_identity()["rule_registry_version"] == "1.2.1"
 
 
 # ---------------------------------------------------------------------------
