@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-17 (B137 — LIVE READ-ONLY AUDIT against production while Execute built T-0030: the engine is running but has taken NO SIGNAL IN 55.3 HOURS, because SYMBOLS is exactly two and both hold a position, so _has_position blocks every bar — roughly 1326 bar-closes skipped, 40 of 40 activity entries "already in a position, skipped", 2 positions open, 0 closed trades, equity 4975.29 on a 5000 start. That is T-0011's criterion 6a observed live, the criterion passing on the defect it exists to catch. The shadow half is GOOD NEWS: evaluations are current to the latest bar, so the fix moving shadow above the entry gates works and B34's bias is mitigated on that path. But the corpus it produces cannot validate anything — 50 records, ONE outcome (STAND_ASIDE x50), ONE decider (GATE-036 x50), 4 distinct rules exercised out of 49 implemented, because GATE-036 short-circuits before the roster is reached: the implemented-versus-effective gap made concrete in production, and the endpoint's own docstring already says "is the platform running Salim's strategy yet — it is not". An alarm I did NOT file: /api/engine/decisions being 55 hours stale is EXPECTED, because it is one row per TAKEN signal, and reading its docstring cost one sed — same class as the requirements-prod.txt false alarm. Two open questions left as questions: rules_blocked is EMPTY where the docstring says the whole roster layer should appear, and the good branch (panels wired) is indistinguishable from the bad one (counter stopped) from this output; and two positions have been open 55 hours with nobody able to see their stops, since B67 means no endpoint publishes sl/tp and /api/positions returns [] because "no broker connected" and "zero positions" are the same output. B127 AT A THIRD PIN — Review closed the hole I left open in requirement 6 and it costs no new number: requirement 6 said SOMETHING must cross a threshold SOMEWHERE in the sweep but not that the crossing lie in the region the rate is read from, so an active extreme could launder an inert middle. The fix is a COLUMN, not a threshold — put rr in the table requirement 2 already demands, so inertness is visible PER ROW rather than asserted globally, with the per-row rule that rr must differ between every adjacent pair of rows because identical rr on consecutive rows means those two targets are one experiment run twice. It closes completely rather than moving because the licensed claim is about every point in the range, a table carrying rr per row supports or refutes it point by point, and there is no aggregate left to be inert about. B121's move: an observable instead of a claim. Also added to the default-failure section, and it is the more durable half — Review's account of WHY fix 3 gets skipped: "is the answer right" has an obvious method, "could this have produced a different answer" has none, the two look identical in prose, so the second is skipped by default rather than by decision, which is why every one of the six instances between two seats today was caught by another seat checking the premise rather than by its author re-reading. The 50% threshold is STILL unchanged across all three pins. B127 AMENDED AT A NEW PIN by Review, and the added residue is the one neither of us named: "stays on one side of 50%" tests whether the RATE crosses, not whether the SWEEP COULD HAVE MOVED IT — a sweep flat because rr is large everywhere and the flag never fires produces the same clean table as a genuinely robust rate, they are indistinguishable from the output, and the reader defaults to the flattering one. That is fix 3 turned on the instrument fix 3 was written for. So: report min(rr) and max(rr) across the range, and require that SOMETHING crosses a threshold somewhere in the sweep (a candidate crossing the 2R floor, or the selected rung changing) — if no intermediate quantity changes anywhere, the sweep is INERT and reports UNMEASURED however flat it is, because the most inert possible sweep otherwise produces the most reassuring possible result. Also: the RANGE is measured from the corpus and its derivation stated, NOT pinned by me — Review refused my proposal to pin it using this entry's own B124 argument, since I cannot derive a plausible-target range without the data either and pinning one just moves the arbitrariness. And the range belongs in the FIGURE'S NAME rather than as a caveat beside it, because a caveat disappears on the first requote, which is 54 corpora -> 54 setups exactly. The 50% criterion itself is unchanged; the first pin 4a2ed17 holds the unamended text and is superseded rather than edited, per this entry's own revision rule. B127 — ruling on Execute's pre-build escalation for T-0030, and the plan defect is mine: rr = |target-entry|/|entry-stop| and NOTHING IN THE ENGINE PRODUCES A TARGET, so criteria 4b, 5b/7b and 6b's corpus rate are undeliverable while 7a survives intact because it reads CUSHION rather than rr — verified by slicing each ladder locator precisely, all four containing zero target references, after a first sed-range attempt over-captured and reported 4 for all four, which is the tell that the instrument rather than the code was wrong. Execute correctly declined to extend 7a's labelled-proxy grant to the target and I have REFUSED it: the order-block proxy supplies a candidate's PRESENCE in a structural question, a target proxy sets the DENOMINATOR OF EVERY rr which IS the measured quantity, and TARGET-003's own docstring calls collapsing the destination levels 'the defect' — a proxy that supplies a point is not a proxy that supplies the scale. The sensitivity sweep replaces it, with its FLATNESS criterion pinned here before it runs because 'flat enough' is otherwise decided after the data is seen: reportable iff the swept rate stays on ONE SIDE OF 50% across the declared range, 50% being where 4b's noise-or-signal question changes answer, B124's mechanism applied a second time. B126 — the calendar's impact default fails OPEN, twice over, in a SAFETY filter whose job is to make the engine stand aside: finnhub.py:262 defaults a missing impact AND importance to "low", finnhub.py:263 defaults an UNRECOGNISED value to "low", and finnhub.py:188 skips anything that is not "high" — so two independent routes lead to an event we could not classify being treated as harmless and the trade being TAKEN. Not a neutral gap but a systematic tilt, B103's shape, and the tilt is toward acting during news. Dormant as a GATE (B125's consumer is unwired) but LIVE as data: the parse path feeds the hourly cron and GET /calendar/today, so an unreadable event is already served to the UI as unimportant. Fix is to stop answering "should we trade through an event we do not understand?" in a default argument: UNKNOWN rather than "low", its handling declared and recorded, and the firing count measured before choosing. Owned by T-0031 criterion 1a, filed now because the entry must exist before the seat that fixes it decides how. B125 AMENDED by Review, and the amendment makes it worse: the false alert does NOT fire today because nothing sets the key, and that is the more dangerous reading — populating news_blackout is the natural FIRST step of wiring the calendar in while enforcing the block is separate work, so the defect activates on the first half of its own fix, and that half looks safe because it only populates a field. The rule that follows: populate the key and enforce the block in the SAME change, or populate neither. It is also B116's exact inverse — B116 is an implementation without a producer (coverage overstates), B125 is a producer without consumers (live, hourly, populated, and nothing acts on it) — and neither is visible to check_rule_coverage.py, which measures whether a rule id appears in source rather than whether anything reaches it or reads what it produces: two opposite defects, one blind spot, and the blind spot is in the tool we quote coverage from. B125 — the economic calendar is live and running (Finnhub, initialised at main.py:106, refreshed hourly by cron, served at GET /calendar/today), but everything that would ACT on it is unwired: is_in_blackout() is never called outside its own module, candle["news_blackout"] appears exactly once in all of app/ and that occurrence is a READ so nothing ever sets the key, and the branch reading it appends an alert rather than blocking anything — while the alert's text says "High-impact news event imminent — trading suspended", naming an action the code does not perform, so if the key ever starts being set the platform will announce a suspension and keep trading. The five rules governing news (GATE-012 through GATE-016, five of the thirty distinct HARD_GATEs remaining) are all unimplemented and no rule module consumes the calendar; the planning consequence is good news, because they are NOT in the cannot-fire-for-want-of-a-producer bucket that has blocked four other rules — the producer exists and is populated. Every claim carries a control pair. B124 — "declare the floor before you see n" is a claim about a mental state and no artefact can carry it, so T-0030's corpus-size criterion was a self-report, B116's shape one layer up: commit ordering cannot establish it because computing n locally and committing the floor first produces a history identical to honest ordering; Review's fix is to take the number away from the seat that measures, so the floor n >= 30 setups is fixed IN THIS ENTRY, committed before any Execute seat branches, git-verifiable by merge-base rather than asserted, derived by the rule of three from the 10% inversion rate at which the tie-break decision actually changes — and the stronger half is that every rate carries a 95% interval so n travels inside the number and cannot hide behind a percentage. B122 — CORRECTED WITHIN THE HOUR BY EXECUTE AND CONFIRMED BY REVIEW: its first version claimed "there is no corpus at all" on the strength of `find -name "*corpus*"` returning empty, and the file is spelled corpoRA — an entry about promoting unverified claims, filed on an unverified negative of its own, with no control pair. The corpus is real: 54 sliding windows of 863 bars, validate_over_corpora() at consolidation.py:270, green. What survives is a UNIT hazard rather than a fabrication — "54 corpora" is measured and real, "54 setups" is a denominator that does not exist, and 1b-i silently equated them; a real number carried across a unit boundary survives every check for fabrication. Review's framing: every earlier instance in this register was one quantity wearing several counts, this is one count wearing two quantities, and no existing guard looks for it because there is only ever one figure to compare. The T-0030-before-T-0029 ordering is UNAFFECTED and stands. Execute's B120/B121 analogy-to-citation half is unaffected. Third fix added: a negative result gets a control pair or it is not evidence. B123 — B116's opposite direction, behaviour in the tree that no rule id authorises and that no coverage figure can see: `instrument_class: "ALIGNED_MAJOR"` hardcoded at two live sites for the very field B116 records as having no producer, and a complete order-block detector at `ict/detector.py:192` for an object no rule in 117 defines; B116's gap announces itself as `missing_producer` while this one has no id to be missing. T-0025a — the stop pipeline's first half. B121 — an anchor assertion proves a mutation was APPLIED and never that it was VALID: Review applied one mutation three times, the anchor passed all three, two were semantically invalid, and BOTH OVER-FIRED (7 and 23 failures against the correct 1) so the wrong answers looked like unusually thorough coverage; the pair is anchor-count plus a diff of the emitted record. Also: GATE-027 the five-rung ladder, GATE-025 the 2R floor and the full candidate table, GATE-026 `best_rr` and the terminal skip, GATE-028 the selector as `argmin |RR - 3.0|` with ties to the LARGER stop. The task was SPLIT on Execute's proposal — GATE-029/030/031, the zone-coverage modifier and both corpus measurements are T-0030 — and GATE-026/GATE-028 were added because `stop_evaluation.required` names `best_rr`, so the original four-rule scope could not emit a valid record at all. SHADOW ONLY: nothing under `live/` imports it and `crypto_loop` still stops from the pre-contract ICT path; nothing deployed. B117 — `locatable: false` with NO reason and NO evidence VALIDATES against the schema today, because neither `unlocatable_reason` nor `search_evidence` is in `stop_candidate.required` while three separate descriptions call them mandatory; found by the seat that would have benefited from the shortcut and refused rather than used. B118 — the workspace's printed ladder runs ORDER_BLOCK third and QML fourth and is the more findable source, and the doctrine's own 4R row cannot be reproduced because rung 4 has no producer. B119 — four more rules that can reach a verdict and that NOTHING CALLS; effective coverage moved 47->50 while live behaviour changed by nothing. B120 — a tie-break fixture built on a MONOTONIC ladder cannot test the tie-break: measured both ways, the doctrine's own tie passes identically for the correct implementation and for one resolving ties by list position, so the guard needs a non-monotonic case. Ruling (c) was WITHDRAWN after escalation — it would have added a no-evidence value to an enum whose own description reads "closed set of REAL search failures" — and rung 4 instead declares CANNOT_FIRE_WITHOUT. Earlier the same day, T-0024 PASSED at cycle 0, `c6b0eb4`. B116 — 41 of 45 implemented rule classes are counted ABLE TO FIRE purely because nobody declared otherwise: the cannot-fire bucket is a SELF-REPORT and nothing verifies it, which is exposure rather than a defect. The cheap instrument that would replace it was TRIED AND FAILS — `depends_on` sees only 12 of 45 classes and cannot tell "consumes that rule's runtime output" from "reads that rule's registry constants", so its one hit (PRIM-004 -> TARGET-005) is a false positive; marked do-not-rebuild so T-0029 does not spend a cycle rediscovering it. The programme's recurring blocker is implementations without PRODUCERS, now four instances. Earlier the same day, T-0024: position sizing — GATE-032 as a LITERAL 9-cell lookup, SIZE-004's two-part conformance assertion, GRADE-019 as a REFUSAL. SHADOW ONLY: nothing under `live/` imports the sizer and `crypto_loop` still sizes from the flat `RISK_PCT = 0.01`; nothing deployed. B113 — SIZE-004's 2% ceiling was retired BY OMISSION rather than by argument, recorded because the rule's own last clause requires it, and stamped on every evaluation as `retired_ceiling` + `retirement_by_omission`. B114 — the altcoin Heavy `0.05` is a dropped decimal on three independent signatures and is left UNRECONCILED on purpose; the vector is never INDEXED, enforced by an AST walk that caught its own module on the first run. B115 — `RISK_PCT = 0.01` is EXACTLY the matrix's `STANDARD/NONE` cell, so the matrix moves live sizing UP for better boxes, and `fixed_config.py:35` says in prose that this value "was never settable", denying the premise of the rule; not edited, because this task is shadow-only. B112 — T-0023's producer scan is a substring match and cannot tell a producer from a mention, so documenting the gap turned it red; fixed by rewording MY module rather than widening the guard. B110 UPDATED — the behaviour half is closed, the registry half is NOT, and reconciling `triage_note` is outside the Execute seat's authority; escalated rather than performed. Earlier, T-0027: Salim's round-2 rulings applied to the pinned contract — RULE_REGISTRY 1.2.0 -> 1.2.1, prose only, ZERO status fields changed, plus six TELEMETRY_SCHEMA additions including the fourth record type `evaluation_unavailable`. NOTHING was implemented and nothing deployed. B82 SUPERSEDED — the wide-cover stop is a zone-coverage modifier applied after anchor selection, not a sixth anchor, and rung 3 is a swept liquidity level because Salim withdrew the QML requirement himself. B102 — ENTRY-004's closure is owed to code that does not exist, so the row stays OPEN and our open_items carries 14 where the patch's arithmetic says 13. B103 — the main-asset exclusion has run UNGATED in live shadow since 2026-08-08 and T-0027 could NOT fix it: `main_asset_state` is in the schema but deliberately NOT required, because no producer computes the verdict and faking it in the fixture would be a vacuous green. B104 — a missing correlate still reads as a calm aligned one, same direction of failure. B105 — `data_gaps` is now required and the ambiguity moved to the caller rather than disappearing. B106 — THREE round-2 rows could not be applied here and are NOT done: two P1 targets live in a pack we do not hold, and HG-29 does not exist in this repo at all. B107 — the schema changed content with no version bump; a sha pin is the only tripwire. B108 — 84% of our citations cannot be followed from this repo, so every negative image-corpus finding is INHERITED, labelled UNVERIFIABLE_HERE. Earlier, T-0026: B93 CLOSED — the AST guard measures the invariant the failure message always claimed, catching 26/26 against the clean-interpreter guard's 11/26, and all three guards are kept because they ask three different questions. Earlier, T-0023, target selection — EXIT-004 / TARGET-001 / TARGET-003, SHADOW ONLY like every rules task. B93 — a test can make a guard vacuous just by importing what the guard checks for: `test_every_rule_module_on_disk_is_imported` was vacuous for 23 of the 26 modules in its own domain; FIXED by a clean-interpreter guard, whose own limit is measured at 15 of 26 still reachable through a sibling and is NOT fixed. B95 — TARGET-001 and TARGET-003 are three levels, not two, and 'ignore size entirely' is the wrong implementation that looks safe. B96 — the active institutional destination has NO producer, so TARGET-001 registers unable to fire. B97 — `target_object_type` is lossier than PRIM-003's pool classes and INSTITUTIONAL_CANDLESTICK must never map to INSTITUTIONAL_LEVEL. Earlier, B90 CLOSED: EXIT-001 now reports `ticks_seen`, so an unobserved path and a long quiet one are no longer one record. Earlier, T-0022, the v1 exit model EXIT-001/EXIT-002 — the first rules in this programme that govern what happens AFTER a trade is taken, and SHADOW ONLY: nothing under `live/` or `broker/` imports them and `paper.py` still closes positions whole. B86 — `PaperPosition` has one `units`/`sl`/`tp` and `__slots__`, so it cannot represent a tranched position and the wiring task is a broker-layer change, not a call site. B87 — the 19:00 New York close is ours and UNRATIFIED, defaulted ON so shadow generates the evidence the ruling needs, and the wiring task must re-surface the question rather than inherit it. B88 — `ExitEvent` refuses `LIQUIDATION`, which is what makes criterion 1 enforceable at all, and becomes a hazard the moment a real liquidation can reach the exit path. B89 — a target at or inside 2R is refused outright because GATE-031 cannot run without GATE-025. Earlier, T-0021: B54 CLOSED — both tools collapse aliases and agree; every coverage figure now carries its space, and the script refuses to print an impossible set. B58 — the other tool is outside the repo, so half the agreement cannot be CI-enforced. Earlier, T-0016: the partially-evaluable requirements are enforced by script over the whole registry — B56, eleven emitted fields that cannot say where they came from, baselined not fixed and needing a task id; B57, the two of six standing requirements that script can actually enforce, so a green run is not read as six. Earlier the same day, T-0007: ENTRY_TF 1H -> 5m, the first live behaviour change. B37 CLOSED — the lookahead is out of production. B33 gained the instance it predicted: every legal execution timeframe would have broken the shadow; GATE-017 closed on the live path; B38 — GATE-018 stays OPEN; B39 — a conditional edit that matches nothing succeeds; B40 — the correlate margin is now 1.5x and nothing reports it shrinking)
+Last updated: 2026-08-17 (T-0030, the stop pipeline's second half — B138: the two rr-derived firing rates were swept rather than fitted, under B127's criterion read from its THIRD pin, and all three flags came out REPORTABLE with their range inside the figure's name — TIGHTER_THAN_NECESSARY fires on 0 of 529 setups at EVERY target in [0.05, 2022.55] (95% CI 0.0-0.7%), not because the selector prefers the cushion but because most setups have exactly ONE survivor to choose among, while RR_ABOVE_ACCEPTABLE_BAND fires on 84%+ of them, the opposite failure. T-0030, the stop pipeline's second half — GATE-029, GATE-030, GATE-031, GATE-027's zone-coverage modifier, and the two corpus measurements. SHADOW ONLY: nothing under live/ imports any of it. B128 — GATE-027 says the ladder "is cushion-monotonic" and it is FALSE on real data, 20.3% of setups carrying an inversion (106 of 521, 95% CI 17.1-24.0%) against B124's 10% decision boundary, so real data CAN now supply the conformance case for GATE-028's tie-break that B120 said had to be constructed. B129 — rung 2 CANNOT LOCATE IN PRODUCTION because nothing supplies momentum_min_width, and it reports as NO_SUCH_PRIMITIVE_IN_SEARCH_WINDOW, so a missing ARGUMENT is indistinguishable in the record from an empty market. B130 — GATE-029 is HARD_GATE and blocks nothing, recorded not resolved. B131 — eps is ours at 0.0 and has no scale for the same reason 5d records: the runner's management rules are undefined and 036_Single_Trade_Management.md is empty. B132 — GATE-027's note (b) contradicts itself on the widening order, and the declared choice lets the zone modifier MANUFACTURE a DEGENERATE_RUNNER. B133 — ALLOW_SHARED_ID is an unconditional overwrite of the map check_rule_coverage reads, so taking the sanctioned hatch would have deleted rung 4's CANNOT_FIRE_WITHOUT from the coverage report while changing no behaviour; BL-3's shape, refused. B134 — the setup denominator is 529 SETUPS from 555 decision BARS, and the naive extraction returns exactly 54, the window count BY CONSTRUCTION, which is B122's collision landing inside the measurement B122 was filed to protect. B135 — T-0017's bar-windowing does not transfer to a setup rate: window occupancy runs 1 to 554. B136 — a must-miss control token stopped being absent because this register started quoting it, and the Manager's own stated control string for pin 3 does not reproduce because of backticks. B137 — LIVE READ-ONLY AUDIT against production while Execute built T-0030: the engine is running but has taken NO SIGNAL IN 55.3 HOURS, because SYMBOLS is exactly two and both hold a position, so _has_position blocks every bar — roughly 1326 bar-closes skipped, 40 of 40 activity entries "already in a position, skipped", 2 positions open, 0 closed trades, equity 4975.29 on a 5000 start. That is T-0011's criterion 6a observed live, the criterion passing on the defect it exists to catch. The shadow half is GOOD NEWS: evaluations are current to the latest bar, so the fix moving shadow above the entry gates works and B34's bias is mitigated on that path. But the corpus it produces cannot validate anything — 50 records, ONE outcome (STAND_ASIDE x50), ONE decider (GATE-036 x50), 4 distinct rules exercised out of 49 implemented, because GATE-036 short-circuits before the roster is reached: the implemented-versus-effective gap made concrete in production, and the endpoint's own docstring already says "is the platform running Salim's strategy yet — it is not". An alarm I did NOT file: /api/engine/decisions being 55 hours stale is EXPECTED, because it is one row per TAKEN signal, and reading its docstring cost one sed — same class as the requirements-prod.txt false alarm. Two open questions left as questions: rules_blocked is EMPTY where the docstring says the whole roster layer should appear, and the good branch (panels wired) is indistinguishable from the bad one (counter stopped) from this output; and two positions have been open 55 hours with nobody able to see their stops, since B67 means no endpoint publishes sl/tp and /api/positions returns [] because "no broker connected" and "zero positions" are the same output. B127 AT A THIRD PIN — Review closed the hole I left open in requirement 6 and it costs no new number: requirement 6 said SOMETHING must cross a threshold SOMEWHERE in the sweep but not that the crossing lie in the region the rate is read from, so an active extreme could launder an inert middle. The fix is a COLUMN, not a threshold — put rr in the table requirement 2 already demands, so inertness is visible PER ROW rather than asserted globally, with the per-row rule that rr must differ between every adjacent pair of rows because identical rr on consecutive rows means those two targets are one experiment run twice. It closes completely rather than moving because the licensed claim is about every point in the range, a table carrying rr per row supports or refutes it point by point, and there is no aggregate left to be inert about. B121's move: an observable instead of a claim. Also added to the default-failure section, and it is the more durable half — Review's account of WHY fix 3 gets skipped: "is the answer right" has an obvious method, "could this have produced a different answer" has none, the two look identical in prose, so the second is skipped by default rather than by decision, which is why every one of the six instances between two seats today was caught by another seat checking the premise rather than by its author re-reading. The 50% threshold is STILL unchanged across all three pins. B127 AMENDED AT A NEW PIN by Review, and the added residue is the one neither of us named: "stays on one side of 50%" tests whether the RATE crosses, not whether the SWEEP COULD HAVE MOVED IT — a sweep flat because rr is large everywhere and the flag never fires produces the same clean table as a genuinely robust rate, they are indistinguishable from the output, and the reader defaults to the flattering one. That is fix 3 turned on the instrument fix 3 was written for. So: report min(rr) and max(rr) across the range, and require that SOMETHING crosses a threshold somewhere in the sweep (a candidate crossing the 2R floor, or the selected rung changing) — if no intermediate quantity changes anywhere, the sweep is INERT and reports UNMEASURED however flat it is, because the most inert possible sweep otherwise produces the most reassuring possible result. Also: the RANGE is measured from the corpus and its derivation stated, NOT pinned by me — Review refused my proposal to pin it using this entry's own B124 argument, since I cannot derive a plausible-target range without the data either and pinning one just moves the arbitrariness. And the range belongs in the FIGURE'S NAME rather than as a caveat beside it, because a caveat disappears on the first requote, which is 54 corpora -> 54 setups exactly. The 50% criterion itself is unchanged; the first pin 4a2ed17 holds the unamended text and is superseded rather than edited, per this entry's own revision rule. B127 — ruling on Execute's pre-build escalation for T-0030, and the plan defect is mine: rr = |target-entry|/|entry-stop| and NOTHING IN THE ENGINE PRODUCES A TARGET, so criteria 4b, 5b/7b and 6b's corpus rate are undeliverable while 7a survives intact because it reads CUSHION rather than rr — verified by slicing each ladder locator precisely, all four containing zero target references, after a first sed-range attempt over-captured and reported 4 for all four, which is the tell that the instrument rather than the code was wrong. Execute correctly declined to extend 7a's labelled-proxy grant to the target and I have REFUSED it: the order-block proxy supplies a candidate's PRESENCE in a structural question, a target proxy sets the DENOMINATOR OF EVERY rr which IS the measured quantity, and TARGET-003's own docstring calls collapsing the destination levels 'the defect' — a proxy that supplies a point is not a proxy that supplies the scale. The sensitivity sweep replaces it, with its FLATNESS criterion pinned here before it runs because 'flat enough' is otherwise decided after the data is seen: reportable iff the swept rate stays on ONE SIDE OF 50% across the declared range, 50% being where 4b's noise-or-signal question changes answer, B124's mechanism applied a second time. B126 — the calendar's impact default fails OPEN, twice over, in a SAFETY filter whose job is to make the engine stand aside: finnhub.py:262 defaults a missing impact AND importance to "low", finnhub.py:263 defaults an UNRECOGNISED value to "low", and finnhub.py:188 skips anything that is not "high" — so two independent routes lead to an event we could not classify being treated as harmless and the trade being TAKEN. Not a neutral gap but a systematic tilt, B103's shape, and the tilt is toward acting during news. Dormant as a GATE (B125's consumer is unwired) but LIVE as data: the parse path feeds the hourly cron and GET /calendar/today, so an unreadable event is already served to the UI as unimportant. Fix is to stop answering "should we trade through an event we do not understand?" in a default argument: UNKNOWN rather than "low", its handling declared and recorded, and the firing count measured before choosing. Owned by T-0031 criterion 1a, filed now because the entry must exist before the seat that fixes it decides how. B125 AMENDED by Review, and the amendment makes it worse: the false alert does NOT fire today because nothing sets the key, and that is the more dangerous reading — populating news_blackout is the natural FIRST step of wiring the calendar in while enforcing the block is separate work, so the defect activates on the first half of its own fix, and that half looks safe because it only populates a field. The rule that follows: populate the key and enforce the block in the SAME change, or populate neither. It is also B116's exact inverse — B116 is an implementation without a producer (coverage overstates), B125 is a producer without consumers (live, hourly, populated, and nothing acts on it) — and neither is visible to check_rule_coverage.py, which measures whether a rule id appears in source rather than whether anything reaches it or reads what it produces: two opposite defects, one blind spot, and the blind spot is in the tool we quote coverage from. B125 — the economic calendar is live and running (Finnhub, initialised at main.py:106, refreshed hourly by cron, served at GET /calendar/today), but everything that would ACT on it is unwired: is_in_blackout() is never called outside its own module, candle["news_blackout"] appears exactly once in all of app/ and that occurrence is a READ so nothing ever sets the key, and the branch reading it appends an alert rather than blocking anything — while the alert's text says "High-impact news event imminent — trading suspended", naming an action the code does not perform, so if the key ever starts being set the platform will announce a suspension and keep trading. The five rules governing news (GATE-012 through GATE-016, five of the thirty distinct HARD_GATEs remaining) are all unimplemented and no rule module consumes the calendar; the planning consequence is good news, because they are NOT in the cannot-fire-for-want-of-a-producer bucket that has blocked four other rules — the producer exists and is populated. Every claim carries a control pair. B124 — "declare the floor before you see n" is a claim about a mental state and no artefact can carry it, so T-0030's corpus-size criterion was a self-report, B116's shape one layer up: commit ordering cannot establish it because computing n locally and committing the floor first produces a history identical to honest ordering; Review's fix is to take the number away from the seat that measures, so the floor n >= 30 setups is fixed IN THIS ENTRY, committed before any Execute seat branches, git-verifiable by merge-base rather than asserted, derived by the rule of three from the 10% inversion rate at which the tie-break decision actually changes — and the stronger half is that every rate carries a 95% interval so n travels inside the number and cannot hide behind a percentage. B122 — CORRECTED WITHIN THE HOUR BY EXECUTE AND CONFIRMED BY REVIEW: its first version claimed "there is no corpus at all" on the strength of `find -name "*corpus*"` returning empty, and the file is spelled corpoRA — an entry about promoting unverified claims, filed on an unverified negative of its own, with no control pair. The corpus is real: 54 sliding windows of 863 bars, validate_over_corpora() at consolidation.py:270, green. What survives is a UNIT hazard rather than a fabrication — "54 corpora" is measured and real, "54 setups" is a denominator that does not exist, and 1b-i silently equated them; a real number carried across a unit boundary survives every check for fabrication. Review's framing: every earlier instance in this register was one quantity wearing several counts, this is one count wearing two quantities, and no existing guard looks for it because there is only ever one figure to compare. The T-0030-before-T-0029 ordering is UNAFFECTED and stands. Execute's B120/B121 analogy-to-citation half is unaffected. Third fix added: a negative result gets a control pair or it is not evidence. B123 — B116's opposite direction, behaviour in the tree that no rule id authorises and that no coverage figure can see: `instrument_class: "ALIGNED_MAJOR"` hardcoded at two live sites for the very field B116 records as having no producer, and a complete order-block detector at `ict/detector.py:192` for an object no rule in 117 defines; B116's gap announces itself as `missing_producer` while this one has no id to be missing. T-0025a — the stop pipeline's first half. B121 — an anchor assertion proves a mutation was APPLIED and never that it was VALID: Review applied one mutation three times, the anchor passed all three, two were semantically invalid, and BOTH OVER-FIRED (7 and 23 failures against the correct 1) so the wrong answers looked like unusually thorough coverage; the pair is anchor-count plus a diff of the emitted record. Also: GATE-027 the five-rung ladder, GATE-025 the 2R floor and the full candidate table, GATE-026 `best_rr` and the terminal skip, GATE-028 the selector as `argmin |RR - 3.0|` with ties to the LARGER stop. The task was SPLIT on Execute's proposal — GATE-029/030/031, the zone-coverage modifier and both corpus measurements are T-0030 — and GATE-026/GATE-028 were added because `stop_evaluation.required` names `best_rr`, so the original four-rule scope could not emit a valid record at all. SHADOW ONLY: nothing under `live/` imports it and `crypto_loop` still stops from the pre-contract ICT path; nothing deployed. B117 — `locatable: false` with NO reason and NO evidence VALIDATES against the schema today, because neither `unlocatable_reason` nor `search_evidence` is in `stop_candidate.required` while three separate descriptions call them mandatory; found by the seat that would have benefited from the shortcut and refused rather than used. B118 — the workspace's printed ladder runs ORDER_BLOCK third and QML fourth and is the more findable source, and the doctrine's own 4R row cannot be reproduced because rung 4 has no producer. B119 — four more rules that can reach a verdict and that NOTHING CALLS; effective coverage moved 47->50 while live behaviour changed by nothing. B120 — a tie-break fixture built on a MONOTONIC ladder cannot test the tie-break: measured both ways, the doctrine's own tie passes identically for the correct implementation and for one resolving ties by list position, so the guard needs a non-monotonic case. Ruling (c) was WITHDRAWN after escalation — it would have added a no-evidence value to an enum whose own description reads "closed set of REAL search failures" — and rung 4 instead declares CANNOT_FIRE_WITHOUT. Earlier the same day, T-0024 PASSED at cycle 0, `c6b0eb4`. B116 — 41 of 45 implemented rule classes are counted ABLE TO FIRE purely because nobody declared otherwise: the cannot-fire bucket is a SELF-REPORT and nothing verifies it, which is exposure rather than a defect. The cheap instrument that would replace it was TRIED AND FAILS — `depends_on` sees only 12 of 45 classes and cannot tell "consumes that rule's runtime output" from "reads that rule's registry constants", so its one hit (PRIM-004 -> TARGET-005) is a false positive; marked do-not-rebuild so T-0029 does not spend a cycle rediscovering it. The programme's recurring blocker is implementations without PRODUCERS, now four instances. Earlier the same day, T-0024: position sizing — GATE-032 as a LITERAL 9-cell lookup, SIZE-004's two-part conformance assertion, GRADE-019 as a REFUSAL. SHADOW ONLY: nothing under `live/` imports the sizer and `crypto_loop` still sizes from the flat `RISK_PCT = 0.01`; nothing deployed. B113 — SIZE-004's 2% ceiling was retired BY OMISSION rather than by argument, recorded because the rule's own last clause requires it, and stamped on every evaluation as `retired_ceiling` + `retirement_by_omission`. B114 — the altcoin Heavy `0.05` is a dropped decimal on three independent signatures and is left UNRECONCILED on purpose; the vector is never INDEXED, enforced by an AST walk that caught its own module on the first run. B115 — `RISK_PCT = 0.01` is EXACTLY the matrix's `STANDARD/NONE` cell, so the matrix moves live sizing UP for better boxes, and `fixed_config.py:35` says in prose that this value "was never settable", denying the premise of the rule; not edited, because this task is shadow-only. B112 — T-0023's producer scan is a substring match and cannot tell a producer from a mention, so documenting the gap turned it red; fixed by rewording MY module rather than widening the guard. B110 UPDATED — the behaviour half is closed, the registry half is NOT, and reconciling `triage_note` is outside the Execute seat's authority; escalated rather than performed. Earlier, T-0027: Salim's round-2 rulings applied to the pinned contract — RULE_REGISTRY 1.2.0 -> 1.2.1, prose only, ZERO status fields changed, plus six TELEMETRY_SCHEMA additions including the fourth record type `evaluation_unavailable`. NOTHING was implemented and nothing deployed. B82 SUPERSEDED — the wide-cover stop is a zone-coverage modifier applied after anchor selection, not a sixth anchor, and rung 3 is a swept liquidity level because Salim withdrew the QML requirement himself. B102 — ENTRY-004's closure is owed to code that does not exist, so the row stays OPEN and our open_items carries 14 where the patch's arithmetic says 13. B103 — the main-asset exclusion has run UNGATED in live shadow since 2026-08-08 and T-0027 could NOT fix it: `main_asset_state` is in the schema but deliberately NOT required, because no producer computes the verdict and faking it in the fixture would be a vacuous green. B104 — a missing correlate still reads as a calm aligned one, same direction of failure. B105 — `data_gaps` is now required and the ambiguity moved to the caller rather than disappearing. B106 — THREE round-2 rows could not be applied here and are NOT done: two P1 targets live in a pack we do not hold, and HG-29 does not exist in this repo at all. B107 — the schema changed content with no version bump; a sha pin is the only tripwire. B108 — 84% of our citations cannot be followed from this repo, so every negative image-corpus finding is INHERITED, labelled UNVERIFIABLE_HERE. Earlier, T-0026: B93 CLOSED — the AST guard measures the invariant the failure message always claimed, catching 26/26 against the clean-interpreter guard's 11/26, and all three guards are kept because they ask three different questions. Earlier, T-0023, target selection — EXIT-004 / TARGET-001 / TARGET-003, SHADOW ONLY like every rules task. B93 — a test can make a guard vacuous just by importing what the guard checks for: `test_every_rule_module_on_disk_is_imported` was vacuous for 23 of the 26 modules in its own domain; FIXED by a clean-interpreter guard, whose own limit is measured at 15 of 26 still reachable through a sibling and is NOT fixed. B95 — TARGET-001 and TARGET-003 are three levels, not two, and 'ignore size entirely' is the wrong implementation that looks safe. B96 — the active institutional destination has NO producer, so TARGET-001 registers unable to fire. B97 — `target_object_type` is lossier than PRIM-003's pool classes and INSTITUTIONAL_CANDLESTICK must never map to INSTITUTIONAL_LEVEL. Earlier, B90 CLOSED: EXIT-001 now reports `ticks_seen`, so an unobserved path and a long quiet one are no longer one record. Earlier, T-0022, the v1 exit model EXIT-001/EXIT-002 — the first rules in this programme that govern what happens AFTER a trade is taken, and SHADOW ONLY: nothing under `live/` or `broker/` imports them and `paper.py` still closes positions whole. B86 — `PaperPosition` has one `units`/`sl`/`tp` and `__slots__`, so it cannot represent a tranched position and the wiring task is a broker-layer change, not a call site. B87 — the 19:00 New York close is ours and UNRATIFIED, defaulted ON so shadow generates the evidence the ruling needs, and the wiring task must re-surface the question rather than inherit it. B88 — `ExitEvent` refuses `LIQUIDATION`, which is what makes criterion 1 enforceable at all, and becomes a hazard the moment a real liquidation can reach the exit path. B89 — a target at or inside 2R is refused outright because GATE-031 cannot run without GATE-025. Earlier, T-0021: B54 CLOSED — both tools collapse aliases and agree; every coverage figure now carries its space, and the script refuses to print an impossible set. B58 — the other tool is outside the repo, so half the agreement cannot be CI-enforced. Earlier, T-0016: the partially-evaluable requirements are enforced by script over the whole registry — B56, eleven emitted fields that cannot say where they came from, baselined not fixed and needing a task id; B57, the two of six standing requirements that script can actually enforce, so a green run is not read as six. Earlier the same day, T-0007: ENTRY_TF 1H -> 5m, the first live behaviour change. B37 CLOSED — the lookahead is out of production. B33 gained the instance it predicted: every legal execution timeframe would have broken the shadow; GATE-017 closed on the live path; B38 — GATE-018 stays OPEN; B39 — a conditional edit that matches nothing succeeds; B40 — the correlate margin is now 1.5x and nothing reports it shrinking)
 
 ---
 
@@ -1968,6 +1968,363 @@ denominator asserted inside the test rather than beside it.**
 
 **So this family has a fix and not only a diagnosis, which is more than most of this register
 carries.** Related: **B81**, **B84**, **B93**.
+
+### B138 — `TIGHTER_THAN_NECESSARY` fires on ZERO of 529 setups at EVERY plausible target, and `RR_ABOVE_ACCEPTABLE_BAND` fires on 84%+ of them
+
+**Measured by Execute 2026-08-17, `T-0030` criteria 4b and 7b, under `B127`'s flatness criterion read
+from its THIRD pin — `git show 1d85ca8:KNOWN_ISSUES.md`.** No target was supplied; the target was swept
+across its observed range and the table carries every row.
+
+    range        [0.05, 2022.55] price units from entry, DERIVED: min and max distance from entry to a
+                 candidate objective (unresolved PRIM-003 pools and unfilled PRIM-002 imbalances in the
+                 trade direction — the objects TARGET-001 selects among), measured over the setups
+    rows         25.  rr differs between every adjacent pair (requirement 7: 0 duplicate pairs)
+    moved        admission changed on 529 setups, selection on 130.  rr spanned 2.00 - 40451
+
+    TIGHTER_THAN_NECESSARY     0 of 521-529 SETUPS at EVERY row.  95% CI 0.0-0.7%   -> REPORTABLE
+    DEGENERATE_RUNNER (eps 0)  0 of 521-529 SETUPS at EVERY row.  95% CI 0.0-0.7%   -> REPORTABLE
+    RR_ABOVE_ACCEPTABLE_BAND   >= 84.3% at every row                                -> REPORTABLE
+
+**All three stay on one side of 50% across the whole range and all three moved, so all three are
+REPORTABLE under the pinned criterion. THE FIGURES CARRY THEIR RANGE IN THEIR NAME** — *"across targets
+in [0.05, 2022.55] price units from entry, TIGHTER_THAN_NECESSARY fires on 0.0% of setups with a
+selected stop"* — and the code has no accessor returning the bare rate, because a caveat beside a number
+disappears on the first requote (`B127` requirement 5).
+
+#### WHY THE FLAG NEVER FIRES, and it is NOT that the selector prefers the cushion
+
+**Two mechanisms, and the first is the larger:**
+
+    accepted candidates per setup with a selection   1.00 - 1.34 across the sweep
+
+**MOST SETUPS HAVE EXACTLY ONE SURVIVOR**, so there is nothing wider to have been passed over and the
+flag cannot fire on them at all. **On the minority that do have two or more, the widest was selected
+every time** — which follows from `fired = 0` rather than being asserted separately.
+
+**The second mechanism explains that minority.** Only rungs 1, 3 and 5 can locate (`B129`, `B118`), and
+their cushions are far apart, so the survivors' `rr` values are far apart too — 2.72 and 8428 in the
+same row. **The widest survivor is the lowest-`rr` one, and once the next survivor sits in the
+thousands, `argmin |rr - 3|` cannot prefer it.** So `GATE-030`'s reachability, which criterion 4
+established is governed by the SELECTOR, is in practice governed by **how many rungs survive at all**.
+
+> **This is a finding about the flag's usefulness, not a reason to change a threshold — the thresholds
+> are Salim's.** As implemented and over this corpus the flag is unreachable, and it will stay
+> unreachable until rung 2 has a declared momentum width and rung 4 has a producer. **It is not noise;
+> it is silent.**
+
+#### And the mirror finding, which is the one that should be looked at
+
+**`RR_ABOVE_ACCEPTABLE_BAND` fires on at least 84.3% of setups at every target in the range.** The
+selected stop is above 4R on the large majority of setups, which means the ladder as the engine builds
+it over this corpus produces stops that are **very tight relative to any plausible target**. `GATE-029`
+exists to flag exactly that and it is doing so almost always — **a flag that fires on 84% of setups
+carries little information per firing**, which is the opposite failure to `GATE-030`'s.
+
+**Bounds that travel with all three figures:** ONE symbol, 5.2 days, one direction, a three-rung ladder,
+and an entry placement that is ours and unratified (`B134`, `B128`).
+
+### B128 — `GATE-027` says the ladder "is cushion-monotonic" and it is FALSE on real data: 20.3% of setups carry an inversion, and that ANSWERS the question `B124`'s floor was derived to answer
+
+**Measured by Execute 2026-08-17 for `T-0030`'s criterion 7a — the first time the claim has been
+tested rather than repeated.** `GATE-027`'s statement asserts it in prose: *"This order reflects the
+natural preference of the strategy… the later options progressively reduce that cushion. It is
+cushion-monotonic."*
+
+    corpus            btcusdtp_5m_1500.csv, 1500 bars, 2026-08-09 21:25 -> 2026-08-15 02:20
+                      ONE symbol, 5.2 days, one direction (65111.0 -> 63079.2). ONE REGIME.
+    decision bars     638 attempted, 555 carried a setup            <- BARS
+    setups            529 distinct, by selected imbalance_id        <- SETUPS. Not the same unit.
+    usable            521 setups with >= 2 locatable rungs
+
+    INVERTED PAIRS    15.5% (113 of 727 comparable rung PAIRS, 95% CI 13.1-18.4%)
+    SETUPS INVERTED   20.3% (106 of 521 SETUPS with >= 2 locatable rungs, 95% CI 17.1-24.0%)
+    TIED PAIRS        0
+
+**One inversion anywhere falsifies the prose claim. There are 113.**
+
+#### What this decides, and it is the reason the floor existed
+
+**`B124` derived `n >= 30` from a decision: a CONSTRUCTED fixture is required for `GATE-028`'s
+tie-break whenever inversions are rarer than about one setup in ten, so 10% is where the answer
+changes.** The measured setup rate is **20.3% with a 95% interval of 17.1-24.0%** — **the whole
+interval lies above 10%**, so the answer does not depend on where in it the truth sits.
+
+> **REAL DATA CAN SUPPLY A CONFORMANCE CASE FOR THE TIE-BREAK.** `T-0025a`'s constructed Case B is no
+> longer the only option available, which is what `B120` left open.
+
+**`B120` is unaffected and still correct** — a fixture built on a monotonic ladder is still vacuous.
+What changes is that the non-monotonic case no longer has to be invented.
+
+#### Three things that bound this number, and they belong beside it
+
+1. **ONE SYMBOL, ONE REGIME.** 5.2 days of BTC in a downtrend. The rate is a statement about that.
+2. **Only rungs 1, 3 and 5 can locate at all** — see `B129` for rung 2 and `B118`/`T-0029` for rung 4
+   — so the measured ladder is three rungs wide, not five. **The pair count would rise with rung 4 and
+   the inversions might not.**
+3. **The entry placement in the POI band is OURS and unratified** (`B134`). Measured under all three:
+   MID 16.4%, FAR_EDGE 12.5%, NEAR_EDGE 15.9% of pairs at step 12 — **overlapping intervals, and the
+   channel is visible in the denominators (67 / 64 / 69 pairs), which is set MEMBERSHIP exactly as
+   predicted.** Cushion ORDER is shift-invariant, so membership is the only channel there is.
+
+### B129 — rung 2 CANNOT LOCATE IN PRODUCTION, and the cause is a missing ARGUMENT rather than a missing module — `B116`'s family with nothing to declare
+
+**Found by Execute 2026-08-17 while measuring `T-0030`'s criterion 7a.** The plan's PRIMARY rung set
+is *"rungs 1, 2, 3, 5"*, rung 4 being the known producer gap. **Rung 2 is also unreachable, and
+nothing anywhere says so.**
+
+    prim_002_imbalances.py:210   is_momentum_imbalance is set ONLY when momentum_min_width is not None
+    prim_002_imbalances.py:185   "declared momentum_min_width — the doctrine fixes no size for 'large'"
+    evaluator.py:229             momentum_min_width: float | None = None      <- the default
+    shadow.py                    never passes it                              <- the only caller
+
+    grep -rn 'momentum_min_width' app/   ->  3 hits, ALL in prim_002 and evaluator, NONE a supplier
+    grep -rn 'momentum_min_width' tests/ ->  3 hits, all passing 1.0          <- must-HIT control
+    grep -rn 'zzz_momentum_width' app/ tests/ -> 0                            <- must-MISS control
+
+**Measured consequence over 529 setups:** rung 1 located 106 times, rung 3 529, rung 5 518, **rung 2
+ZERO and rung 4 ZERO.**
+
+#### Why this is worse than rung 4's gap even though it is smaller
+
+**Rung 4 announces itself.** `StopCandidateLadder` emits `missing_producer: order_block_detector` and
+declares `CANNOT_FIRE_WITHOUT`, so the coverage report carries it. **Rung 2 emits
+`NO_SUCH_PRIMITIVE_IN_SEARCH_WINDOW` with search evidence** — *"the producer ran and found nothing"* —
+**which is the honest record of a search that was never capable of succeeding.** The producer DID run;
+it just cannot classify without a number nobody supplies.
+
+> **`unlocatable_reason` is a closed set of REAL search failures, and this passes as one.** A missing
+> ARGUMENT looks exactly like an empty market, and there is no vocabulary in the record for the
+> difference — the distinction `base.py:44` draws between `NOT_EVALUABLE` and `FALSE`, one level down
+> and invisible.
+
+**Not fixed here.** Declaring a momentum width is inventing a doctrine value ("the doctrine fixes no
+size for 'large'"), and it is not `T-0030`'s to declare. **The measurement states rungs 1/3/5 and says
+why.**
+
+### B130 — `GATE-029` is classified `HARD_GATE` and its output cannot refuse a trade
+
+**Recorded by Execute 2026-08-17 building `T-0030`'s criterion 3b. Stated, not resolved — no seat may
+edit the registry.**
+
+    GATE-029.enforceability   HARD_GATE
+    GATE-029.output           "flag RR_ABOVE_ACCEPTABLE_BAND when rr > 4.0; block only if a cut is
+                               later ruled."
+
+**Every other `HARD_GATE` can refuse. This one cannot, by its own text** — and blocking above 4R would
+contradict `GATE-025`, which accepts anything at or above 2R. The rule exists precisely because the
+algorithm as written TAKES the 10R trade: *"'Overly Tight' is a LABEL, not a rejection."*
+
+**So it is either a classification error in the registry or a `HARD_GATE` that means something else
+here.** The implementation flags, records, and takes the trade, and stamps
+`classification_tension` on every evaluation so the record carries the question rather than resolving
+it. **`GATE-031` has the same shape** — `HARD_GATE`, layer `exit`, output is a flag.
+
+### B131 — `eps` has NO SCALE, and the reason is that the thing it protects has no rules: `036_Single_Trade_Management.md` is EMPTY
+
+**Declared by Execute 2026-08-17 for `T-0030`'s criterion 5b. `eps` is OURS.**
+
+    GATE-031           carries NO `values` block at all           (verified: 'values' not in the rule)
+    grep -rn 'epsilon' app/services/rules/   ->  0                <- nothing declares one
+    grep -rn 'rr_floor' app/services/rules/  ->  present          <- must-HIT control, the scan works
+
+**DECLARED: `degenerate_runner_eps = 0.0`, `ratified: False`, authority ENGINEERING.**
+
+#### 0.0 is the only value that is not an invention, and that is an argument rather than a preference
+
+**`GATE-031`'s defect is an ARITHMETIC COLLISION:** at exactly 2R the 70% partial level IS the final
+target, so the runner has nothing to run into. **That happens at `rr == 2.0` exactly.** Any `eps > 0`
+asserts something the collision does not — that a runner with SOME room is still degenerate — **which
+is a claim about how much room a runner needs, and that is exactly *"the active trade management
+rules"* `GATE-031`'s own notes call NEVER DEFINED, whose only workspace page is empty.**
+
+> **So `eps` cannot be principled until the runner's rules exist.** Fitting one here would bury an
+> undefined subsystem inside a constant, which is `5c`'s prohibition arriving through the back door.
+
+**The plan's own hazard is real and is why the value is not the whole answer:** *"fires at 2R and not
+at 3R"* pins two points and says nothing about the interval — **an `eps` of 0.5R passes both
+assertions and flags every setup between 2R and 2.5R.** So the firing rate is reported as a CURVE over
+`eps`, and `eps` is a PARAMETER of the predicate rather than a module constant read inside it, so a
+sweep cannot leave the value changed for whatever runs next.
+
+**A separate constant, `FLOAT_TOLERANCE = 1e-9`, absorbs the arithmetic** — `rr` for a setup built at
+exactly 2R can arrive as `1.9999999999999998`. **Collapsing the two would mean raising a float
+tolerance silently widened a doctrinal flag.**
+
+### B132 — `GATE-027`'s note (b) contradicts itself about the widening's order, and the choice can MANUFACTURE a `DEGENERATE_RUNNER`
+
+**Found and declared by Execute 2026-08-17 building `T-0030`'s criterion 6.** Note (b), one sentence
+apart:
+
+    "a ZONE-COVERAGE MODIFIER APPLIED AFTER ANCHOR SELECTION"      <- fixes the order
+    "Residual [ENGINEERING]: … whether the widening runs before
+     or after the 2R floor and before sizing"                      <- calls the order open
+
+**These cannot both be fully true.** Selection is downstream of the floor — `GATE-025` admits,
+`GATE-028` chooses among survivors — **so "after anchor selection" already places the widening after
+the floor.** What is genuinely unstated is whether the WIDENED stop is re-tested, and what happens if
+it now fails.
+
+**DECLARED: `zone_widening_order = AFTER_SELECTION_FLOOR_RETESTED_NOT_REAPPLIED`, unratified.** The
+widened stop is re-tested and the result recorded as `widened_below_floor`; **nothing is re-selected
+and no setup is dropped, because admission belongs to `GATE-025`.** Competing reading recorded.
+
+#### The consequence nobody had stated, and it is asserted by a fixture rather than described
+
+**Widening always LOWERS `rr`.** A candidate admitted at `rr = 2.3` and widened to cover a zone lands
+at `rr = 1.875` — **below the floor it cleared, and inside `DEGENERATE_RUNNER`'s boundary.**
+
+> **THE ZONE MODIFIER CAN MANUFACTURE A `DEGENERATE_RUNNER`**, and whether it does depends on an
+> unratified engineering choice. `GATE-029` and `GATE-031` read the FINAL stop; `GATE-030` reads the
+> SELECTION, because it asks which candidate was chosen over which and that is settled before the
+> modifier runs.
+
+**Two more residuals, both declared:** the snap tolerance for the adjacent-but-not-intersecting case is
+**0.0 — it refuses to move a stop on a distance nobody stated** — and the ADJACENCY REPORTING window is
+**1.0 zone-heights**, deliberately a different parameter. **One decides whether a stop MOVES; the other
+decides whether a note is WRITTEN.** A single tolerance would force the reporting window to inherit
+0.0, the flag would never fire, and **an open residual would read as measured-at-zero.**
+
+### B133 — `ALLOW_SHARED_ID` is an unconditional overwrite of the coverage map, and its docstring reads narrower than the grant — `BL-3`'s shape, second instance
+
+**Found by Execute 2026-08-17, deciding where `T-0030`'s zone modifier should live. NOT TAKEN.**
+
+The zone modifier is `GATE-027`'s artefact by the registry's own words (note (b)), and `GATE-027` is
+already implemented by `StopCandidateLadder`. `base.py` offers the sanctioned hatch:
+
+    ALLOW_SHARED_ID: ClassVar[bool] = False
+    #: Set on a subclass only when a rule is legitimately implemented in more than one
+    #: place. Nothing uses it yet; it exists so that need is a deliberate, visible act
+    #: rather than a silent overwrite.
+
+**"A deliberate, visible act rather than a silent overwrite" describes the INTENT. The mechanism is
+this**, at the end of `__init_subclass__`:
+
+    _IMPLEMENTATIONS[claimed] = cls        <- unconditional. The LAST class defined wins.
+
+> **A second `GATE-027` class would REPLACE `StopCandidateLadder` in the map
+> `scripts/check_rule_coverage.py` reads** — and with it `CANNOT_FIRE_WITHOUT =
+> (ORDER_BLOCK_PRODUCER,)`, **which is the only channel by which rung 4's producer gap reaches the
+> coverage report at all.** No behaviour would change. The report would simply stop mentioning a gap
+> that still exists.
+
+**This is `BL-3` exactly** — the previous session refused `INLINE_EXEMPT` because one entry retired
+BOTH layers of a guard while its docstring read narrow. **Same shape, different hatch, one day later:
+the sanctioned escape whose name grants more than it says.**
+
+**What was done instead: plain functions, attributed to `GATE-027` via
+`from_registry("GATE-027", "notes")`, with `PRIM-006` recorded as corroboration.** No new rule id, no
+shared id, no borrowed id. **`test_gate_027_still_owns_its_own_coverage_entry` pins it over AST** —
+and the guard was re-attacked, because a guard that fires on its own module's docstring and is then
+rewritten is the register's most-filed defect. **Its first version DID fire on this module's own
+docstring**, which has to name `ALLOW_SHARED_ID` in order to explain the refusal.
+
+### B134 — the setup denominator is 529, and the NAIVE extraction returns exactly 54 — the window count, BY CONSTRUCTION
+
+**Measured by Execute 2026-08-17, `T-0030` criterion 1. This is `B122` one level down, and it lands on
+the exact number `B122` is about.**
+
+**A setup is not ours to define.** The existing entry path's own predicate is
+`setup_in_play = bool(imbalances) and bool(breaks)` at **`shadow.py:680`** — *"A setup is 'in play'
+only if the primitives produced something to judge"* — evaluated per bar close.
+**`test_the_shadow_setup_predicate_has_not_drifted` reads that line as TEXT and fails if it changes,
+which also keeps the dependency one-way: nothing here imports `live/`.**
+
+**THE EXTRACTION RULE, in one sentence:** a setup is a decision bar at which `setup_in_play` holds and
+`ENTRY-001.select(imbalances, at_price=close)` returns a POI, deduplicated by the selected
+`imbalance_id`, with the ladder built by `GATE-027`'s own `StopCandidateLadder.build`.
+
+    bars scanned      1500 BARS, btcusdtp_5m_1500.csv, 5.2 days, ONE symbol
+    windows           54 corpora of 863 bars, step 12, OVERLAPPING    <- T-0017's, not ours
+    decision bars     638 attempted at step 1, 555 with a setup       <- BARS
+    setups            529 SETUPS, distinct by selected imbalance_id   <- THE DENOMINATOR
+    usable            521 SETUPS with >= 2 locatable rungs
+
+#### Two units, and the second one is a trap that produces the collision number itself
+
+**`setup_in_play` counts BARS.** Consecutive bars share one imbalance and one break, so 555 qualifying
+bars are **one inventory seen 555 times**, not 555 setups. Dedup on the engine's own object identity
+gives 529.
+
+**And the other half is sharper. Calling `ENTRY-001.select` WITHOUT `at_price`** — which its own
+docstring calls *"the location"* — **returns a POI on EVERY window and yields exactly 54 setups.**
+
+> **`n` would have equalled the WINDOW COUNT BY CONSTRUCTION, and the figure would have been `54`** —
+> indistinguishable in print from `B122`'s 54 corpora, arriving in the denominator of the very
+> measurement `B122` was filed to protect. **No comparison catches it, because there is only ever one
+> figure.**
+
+**With the location supplied, 49 of 54 windows carry a POI at the decision price and 5 do not**, so
+`n` is a measurement rather than a restatement. `test_the_setup_count_is_not_the_window_count` asserts
+`len(setups) != window_count` for exactly this reason.
+
+**AND THE LOCATION CHOICE IS ITSELF DECLARED, which it nearly was not.** Two engine choices sit on the
+SAME `ENTRY-001` call one line apart — WHICH PRICE is "the location", and WHERE IN THE POI BAND the
+scalar entry sits. **The second was declared and the first was hardcoded**, which is precisely
+*"declaring one and hardcoding the other is worse than either choice alone"* — the asymmetry `GATE-027`
+was already caught on. Both are now `[ENGINEERING] ratified: False` with authorities and competing
+readings, and `extract_setup` RAISES rather than silently keeping the old reading if the declaration
+moves to one it does not implement.
+
+**529 clears `B124`'s floor of 30 comfortably. THAT IS A SEPARATE FACT FROM WHETHER THE RATES ARE
+COMPUTABLE, and the two are reported on separate lines** — the floor governs the SIZE of the
+denominator and says nothing about whether the quantity exists. Two of the three rates are unmeasurable
+for a reason the floor cannot see (`B127`): the follow-on for a small `n` is corpus data, and the
+follow-on here is a target producer.
+
+### B135 — `T-0017`'s bar-windowing does not transfer to a SETUP rate: window occupancy runs 1 to 554
+
+**Measured by Execute 2026-08-17, `T-0030` criterion 2b, which asked for a per-window distribution
+because "the windowing already exists, so this costs nothing".** It exists, and it does not transfer.
+
+**Assigning each of the 555 decision bars to the T-0017 windows that contain it:**
+
+    windows                54           every one produced a rate
+    per-window rate        0.0% - 19.4%
+    setups per window      1 … 554      <- window 0 holds ONE, window 53 holds 554
+
+**The windows are 863 bars long and step 12, so window `i` contains every decision bar from `12i` to
+`12i+862`.** Since decision bars only begin at index 862 — each needs a full 863-bar lookback — **the
+early windows contain almost none and the late ones contain almost all.** The 54 "estimates" are 54
+nested subsets of one another, with denominators differing by a factor of 554.
+
+> **A spread computed across them is not a spread across comparable samples.** The instrument was
+> built to window BARS for a rate over BARS; a rate over SETUPS inherits the overlap without inheriting
+> the equal weighting.
+
+**Reported as measured, with the occupancy range beside it, and NOT summarised into a single spread.**
+The pooled rate carries a Wilson interval instead, which is `B124`'s stronger mechanism and does not
+depend on the windows being comparable. **A second windowing structure was not built** — the plan
+forbids it, and the honest output is that the existing one answers a different question.
+
+### B136 — a must-miss control token stopped being absent because this register started quoting it
+
+**Found by Execute 2026-08-17, verifying a pinned commit. Small, and it is about the instrument this
+register now depends on everywhere.**
+
+`B122`'s third fix is house rule: **a negative result gets a control pair or it is not evidence.** The
+control needs a token that is genuinely absent. Checking `B127`'s third pin:
+
+    git show 1d85ca8:KNOWN_ISSUES.md | grep -c 'zzz_absent'         ->  1     <- MY MUST-MISS TOKEN, PRESENT
+    git show 1d85ca8:KNOWN_ISSUES.md | grep -c 'zzz_absent_token'   ->  0     <- still absent
+
+**The register has grown to quote the control tokens used against it**, because entries record the
+control pairs that produced them. **So a must-miss arm silently became a must-hit, and the check it
+guarded would have reported a broken instrument as a working one** — in the direction that reads as
+success.
+
+**The same run found the other half:** the Manager's own stated control for pin 3,
+`grep -c "rate AND rr against"`, **returns 0 here and was reported as 1.** The entry's text is
+``rate AND `rr` against`` — **backticks inside the quoted phrase.** Nothing was wrong with the ruling;
+the instrument quoted for it does not reproduce.
+
+> **Two failures of the same shape in one verification: a control token that aged into a hit, and a
+> control string that never hit because of markup.** Both are cheap to catch and only by RUNNING the
+> stated command rather than reading it.
+
+**Practice that follows:** a must-miss token must be checked for absence **in the artefact being
+searched, at the moment of use** — not reused from a previous entry. **Prefer a token containing the
+task id and a nonce over a shared house token like `zzz_absent`**, because a shared one accumulates
+citations until it is present everywhere.
 
 ### B137 — LIVE AUDIT: the engine has taken no signal in 55 hours because both symbols hold positions, and the corpus validating the rules contains ONE outcome repeated 50 times
 

@@ -51,7 +51,19 @@ RULES_PKG_DIR = Path(rules_pkg.__file__).parent
 #: disagreeing, and this would be two tools agreeing about different things — worse, because
 #: it looks correct.** It also belongs in tests rather than in `app/`, since it is an
 #: assertion about test exemption and production code should not carry one.
-NOT_RULES = {"__init__", "base", "consolidation"}
+#:
+#: `stop_ladder_corpus` was added by T-0030 and is the SAME CATEGORY AS `consolidation`,
+#: which is why it is exempted rather than made to register something. Both are corpus
+#: MEASUREMENT harnesses that live beside the rules they measure and define no
+#: `RuleImplementation` subclass: `consolidation` holds `validate_over_corpora()` for T-0017,
+#: `stop_ladder_corpus` holds the setup extractor and the inversion rate for T-0030. **The
+#: exemption grants exactly what its name says here — a module with no rule class cannot
+#: appear in `implementations()`, so all three guards are vacuous for it rather than
+#: weakened.** The alternative considered and rejected was moving the module out of `rules/`,
+#: which would have separated the measurement from what it measures and diverged from the
+#: precedent `consolidation` already sets. It is still imported by `rules/__init__.py`, as
+#: `consolidation` is.
+NOT_RULES = {"__init__", "base", "consolidation", "stop_ladder_corpus"}
 
 
 def rule_modules_on_disk() -> set[str]:
