@@ -6,6 +6,7 @@ WHAT THIS FILE CAN SEE, and it is deliberately less than "the patch was applied 
   * the ruling's citation anchors are PRESENT            — exact substring, no normalisation
   * NO status field moved                                — the patch declares status_changes: []
   * the 102 rules OUTSIDE the patch are byte-identical   — fingerprint pinned at f3bd716
+  * every rule NAMED below carries at least one of those concrete checks
 
 WHAT IT CANNOT SEE, stated so nobody mistakes green here for a verified application: it does
 not check the prose BETWEEN the anchors. A note that dropped the stale sentence, carried the
@@ -34,8 +35,8 @@ from app.services.telemetry import contract_loader as contract
 
 # The nine patch ENTRIES cover FOURTEEN distinct rules: six entries carry `rule_id`, three
 # carry `rule_ids`. A parser reading only `rule_id` returns 6 and silently drops 8 rules;
-# reading the markdown headings returns 8 or 14, never 9. Both counts are pinned.
-PATCH_ENTRIES = 9
+# reading the markdown headings returns 8 or 14, never 9. These are TRANSCRIPTIONS from a
+# file this repo does not hold — counting them proves nothing, so nothing counts them.
 THE_FOURTEEN = {
     "GATE-027", "GATE-022", "GATE-038", "ENTRY-004", "GATE-002", "GRADE-013",
     "GATE-004", "GRADE-016", "GATE-040", "GATE-003",
@@ -94,15 +95,37 @@ def _prose(rid: str) -> str:
 # ---------------------------------------------------------------------------
 # The denominator
 # ---------------------------------------------------------------------------
-def test_the_patch_covers_nine_entries_and_fourteen_rules():
-    """Both counts, because neither alone is the denominator.
+def test_every_rule_the_patch_names_carries_a_concrete_check():
+    """The denominator is load-bearing: you cannot list a rule without checking it.
 
-    Nine is the entry count in REGISTRY_PATCH.json; fourteen is the rule count. Six entries
-    key on `rule_id` and three on `rule_ids`, so an instrument that reads one key shape
-    checks two-thirds of the patch and reports success.
+    THE PREVIOUS VERSION OF THIS TEST WAS A PAIR OF TAUTOLOGIES — Review's finding, and it
+    was the test written to encode Review's own nine-versus-fourteen point. It asserted
+    `PATCH_ENTRIES == 9` against a module constant set to 9, and that a hand-written
+    14-element set has 14 elements. **Both restate literals and neither can fail.** The
+    finding survived into a constant; the check did not survive with it.
+
+    The cause is structural rather than careless: `REGISTRY_PATCH.json` is NOT in this
+    repository, so `THE_FOURTEEN`, `STALE_GONE` and `ANCHORS_PRESENT` are hand-transcribed
+    from a source no in-repo test can read. **Counting them proves nothing.**
+
+    What CAN be asserted here is coverage of the transcription by concrete checks: every
+    rule named in `THE_FOURTEEN` must carry at least one stale-fragment or citation-anchor
+    assertion. Adding a rule to the list without giving it a check now fails.
+
+    WHAT REMAINS OUT-OF-BAND, and is not claimed by any assertion in this file: that the
+    fourteen are the rules the patch actually names. Review verified that from outside at
+    `1d0f74a` — fourteen named, fourteen changed, none missed, none extra (plus `EXIT-003`
+    from Priority 5). **It cannot stay verified without repeating that read, which is the
+    argument for vendoring `REGISTRY_PATCH.json` — filed as B109, not done here.**
+
+    The load-bearing checks in this file are the untouched-rule fingerprint and the
+    stale-fragment / anchor pair, NOT any count.
     """
-    assert PATCH_ENTRIES == 9
-    assert len(THE_FOURTEEN) == 14
+    checked = set(STALE_GONE) | set(ANCHORS_PRESENT)
+    assert checked == THE_FOURTEEN, (
+        f"named but unchecked: {sorted(THE_FOURTEEN - checked)}; "
+        f"checked but not named: {sorted(checked - THE_FOURTEEN)}"
+    )
     for rid in TOUCHED:
         assert rid in contract.known_rule_ids(), f"{rid} is not in the registry at all"
 

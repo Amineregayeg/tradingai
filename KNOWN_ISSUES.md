@@ -1829,6 +1829,71 @@ traded. PRIM-002 feeds ENTRY-001, which is every admissible entry object in the 
 
 **NOT fixed, and it is its own entry:** see **B75**. Related: **B74**.
 
+### B109 — the T-0027 verification test's denominator cannot fail, because the patch is not in the repo
+
+**Filed by Execute 2026-08-16. Review's finding, against the test I wrote to encode Review's own
+nine-versus-fourteen point. The tautology is FIXED; the structural cause is NOT.**
+
+The original assertions were `PATCH_ENTRIES == 9` against a module constant set to `9`, and that a
+hand-written 14-element set has 14 elements. **Both restate literals and neither can ever fail.**
+**The finding survived into a constant and the check did not survive with it.**
+
+**Fixed** by asserting coverage instead: every rule named in `THE_FOURTEEN` must carry at least one
+stale-fragment or citation-anchor check, so a rule cannot be listed without being checked. Proven by
+mutation — adding `GATE-036` to the list turns it red.
+
+### What is still open, and it is the reason this has an id
+
+**`REGISTRY_PATCH.json` is not in this repository**, so `THE_FOURTEEN`, `STALE_GONE` and
+`ANCHORS_PRESENT` are **hand-transcribed from a source no in-repo test can read**. That the fourteen
+are the rules the patch actually names is verified **only out-of-band** — Review did it from outside
+at `1d0f74a` (fourteen named, fourteen changed, none missed, none extra, plus `EXIT-003` from
+Priority 5). **It cannot stay verified without somebody repeating that read.**
+
+**The fix is to vendor `REGISTRY_PATCH.json` (21 KB)** alongside `RULE_REGISTRY.json` and
+`TELEMETRY_SCHEMA.json`, which are themselves vendored contract artefacts, and derive the constants
+from it — then a mistranscription fails a test instead of surviving. **Not done in T-0027**: it is a
+redistribution decision about a delivered adjudication package, and the applying seat should not make
+it alone.
+
+**Until then, read a green run in `test_t0027_round2_patch.py` as: the prose landed on the rules WE
+LISTED. Not: we listed the right rules.**
+
+### B110 — `GRADE-019` tells a consumer to refuse and a reader to ship, in the same rule
+
+**Filed by Execute 2026-08-16. Found by the Manager while checking T-0024's plan against `1d0f74a`.
+The ruling is REFUSE. The contradiction is real and it PRE-DATES T-0027.**
+
+    output       "risk_pct for altcoins = UNDEFINED (refuse) until ruled."          unchanged since f3bd716
+    triage_note  "PARTIAL: ship risk_pct(altcoin) = {0.0075, 0.005, 0.0025},
+                  disturbance-invariant. The Heavy-override half stays open."       unchanged since f3bd716
+    notes        "The engine must REFUSE to size an altcoin trade rather than
+                  interpolate."                                                     ADDED by T-0027
+
+**Attribution corrected with evidence, because it changes what a reader thinks T-0027 did:** the
+Manager's note described this as the round-2 patch changing a `triage_note` without reconciling the
+`output` it contradicts. **T-0027 did not touch either field.** Both are byte-identical to `f3bd716`;
+the only field T-0027 wrote on this rule is `notes`, which says REFUSE — **so the patch moved the
+balance 2-to-1 toward refusing rather than creating the conflict.** The ruling is unaffected.
+
+### The ruling, and why
+
+**`output` governs.** It is what the rule EMITS and what a consumer reads; a `triage_note` is a
+disposition about what *could* ship. Three supporting reasons:
+
+* **Refusing fails toward SMALLER positions.** Shipping the scale means sizing altcoin trades from a
+  disturbance-invariant **inference** whose Heavy override is, in the rule's own words, *"only
+  ASSUMED"*.
+* **`values.risk_altcoin_heavy_as_written` carries `0.05`** — **threefold over `SIZE-004`'s 0.015
+  ceiling**, sitting in the column `GATE-032` sets to zero. Shipping part of a vector with one
+  corrupt cell is a bet that nobody indexes the wrong row.
+* A rule whose two fields give opposite instructions is this register's default failure in its
+  purest form: **the same shape as `ENTRY-004`'s conditional closure, in the same task, from the
+  same package.**
+
+**Not fixed here — `triage_note` is left contradicting `output` on purpose**, because reconciling it
+is a contract edit outside T-0027's authority and inside T-0024's scope.
+
 ### B102 — `ENTRY-004`'s closure is owed to code that does not exist, and the patch's own arithmetic assumes it landed
 
 **Filed by Execute 2026-08-16 during T-0027, on the Manager's ruling `3-0-i`.**
