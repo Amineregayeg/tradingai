@@ -1884,6 +1884,30 @@ to hit it should confirm the branch fires rather than assume it.**
 **Related:** **B92** (the guard family and its standing limit — it prevents recurrence, it cannot
 produce discovery), **B30** (why `cancelled` asserts nothing), **B93**, **B81**.
 
+### CLOSED, same day — the branch is now EXERCISED rather than correct-by-construction
+
+**Review filed this OPEN on exactly the right grounds: the new branch had never executed, its condition
+stopped holding the moment `07eb4c0` completed, and *"verifying two real ranges still report correctly
+is a regression check, not a test of the fix."* It refused to grade its own tool more softly than it
+graded `REASON_OUTSIDE_V1` and `TARGET-001`'s `CANNOT_FIRE` an hour earlier.**
+
+**Exercised by the Manager with the stubbing pattern from `landed_sweep`'s mutation: ONLY the CI fetch
+was replaced** — a real commit pair with genuinely identical code trees, its own run `cancelled`, its
+twin `in_progress`. **The tree comparison, the commit list and every other branch stayed real.**
+
+    2d48c7ae  SUPERSEDED  <-- own run CANCELLED and will NEVER complete; tree identical to
+                              07eb4c00, WHOSE RUN IS STILL IN PROGRESS — check THAT sha, not this one
+    07eb4c00  IN_PROGRESS <-- RUN IN PROGRESS — no verdict YET, and not 'unverified'
+
+**Both branches fire, distinctly, in one output.** The label is `SUPERSEDED` rather than `PENDING`, and
+the arrow names the sha to check — **which is the part a reader acts on, and the part the defect
+destroyed.**
+
+**What this does NOT establish:** that the condition arises in production the way the stub arranged it.
+**Review's prediction stands** — `03b18d6`, `ce12b88` and `07eb4c0` each cancelled the run before it, so
+three seats pushing in succession is the normal condition. **The next reviewer to meet it should confirm
+the branch fired rather than assume it**, and now has a known-good output to compare against.
+
 ### B86 — `PaperPosition` CANNOT REPRESENT A TRANCHED POSITION, and the v1 exit model needs one
 
 **Filed 2026-08-15 by Execute, T-0022. This is the plan's own named risk, measured rather than
