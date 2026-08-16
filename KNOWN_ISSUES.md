@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-15 (T-0023, target selection — EXIT-004 / TARGET-001 / TARGET-003, SHADOW ONLY like every rules task. B93 — a test can make a guard vacuous just by importing what the guard checks for: `test_every_rule_module_on_disk_is_imported` was vacuous for 23 of the 26 modules in its own domain; FIXED by a clean-interpreter guard, whose own limit is measured at 15 of 26 still reachable through a sibling and is NOT fixed. B95 — TARGET-001 and TARGET-003 are three levels, not two, and 'ignore size entirely' is the wrong implementation that looks safe. B96 — the active institutional destination has NO producer, so TARGET-001 registers unable to fire. B97 — `target_object_type` is lossier than PRIM-003's pool classes and INSTITUTIONAL_CANDLESTICK must never map to INSTITUTIONAL_LEVEL. Earlier, B90 CLOSED: EXIT-001 now reports `ticks_seen`, so an unobserved path and a long quiet one are no longer one record. Earlier, T-0022, the v1 exit model EXIT-001/EXIT-002 — the first rules in this programme that govern what happens AFTER a trade is taken, and SHADOW ONLY: nothing under `live/` or `broker/` imports them and `paper.py` still closes positions whole. B86 — `PaperPosition` has one `units`/`sl`/`tp` and `__slots__`, so it cannot represent a tranched position and the wiring task is a broker-layer change, not a call site. B87 — the 19:00 New York close is ours and UNRATIFIED, defaulted ON so shadow generates the evidence the ruling needs, and the wiring task must re-surface the question rather than inherit it. B88 — `ExitEvent` refuses `LIQUIDATION`, which is what makes criterion 1 enforceable at all, and becomes a hazard the moment a real liquidation can reach the exit path. B89 — a target at or inside 2R is refused outright because GATE-031 cannot run without GATE-025. Earlier, T-0021: B54 CLOSED — both tools collapse aliases and agree; every coverage figure now carries its space, and the script refuses to print an impossible set. B58 — the other tool is outside the repo, so half the agreement cannot be CI-enforced. Earlier, T-0016: the partially-evaluable requirements are enforced by script over the whole registry — B56, eleven emitted fields that cannot say where they came from, baselined not fixed and needing a task id; B57, the two of six standing requirements that script can actually enforce, so a green run is not read as six. Earlier the same day, T-0007: ENTRY_TF 1H -> 5m, the first live behaviour change. B37 CLOSED — the lookahead is out of production. B33 gained the instance it predicted: every legal execution timeframe would have broken the shadow; GATE-017 closed on the live path; B38 — GATE-018 stays OPEN; B39 — a conditional edit that matches nothing succeeds; B40 — the correlate margin is now 1.5x and nothing reports it shrinking)
+Last updated: 2026-08-16 (T-0026: B93 CLOSED — the AST guard measures the invariant the failure message always claimed, catching 26/26 against the clean-interpreter guard's 11/26, and all three guards are kept because they ask three different questions. Earlier, T-0023, target selection — EXIT-004 / TARGET-001 / TARGET-003, SHADOW ONLY like every rules task. B93 — a test can make a guard vacuous just by importing what the guard checks for: `test_every_rule_module_on_disk_is_imported` was vacuous for 23 of the 26 modules in its own domain; FIXED by a clean-interpreter guard, whose own limit is measured at 15 of 26 still reachable through a sibling and is NOT fixed. B95 — TARGET-001 and TARGET-003 are three levels, not two, and 'ignore size entirely' is the wrong implementation that looks safe. B96 — the active institutional destination has NO producer, so TARGET-001 registers unable to fire. B97 — `target_object_type` is lossier than PRIM-003's pool classes and INSTITUTIONAL_CANDLESTICK must never map to INSTITUTIONAL_LEVEL. Earlier, B90 CLOSED: EXIT-001 now reports `ticks_seen`, so an unobserved path and a long quiet one are no longer one record. Earlier, T-0022, the v1 exit model EXIT-001/EXIT-002 — the first rules in this programme that govern what happens AFTER a trade is taken, and SHADOW ONLY: nothing under `live/` or `broker/` imports them and `paper.py` still closes positions whole. B86 — `PaperPosition` has one `units`/`sl`/`tp` and `__slots__`, so it cannot represent a tranched position and the wiring task is a broker-layer change, not a call site. B87 — the 19:00 New York close is ours and UNRATIFIED, defaulted ON so shadow generates the evidence the ruling needs, and the wiring task must re-surface the question rather than inherit it. B88 — `ExitEvent` refuses `LIQUIDATION`, which is what makes criterion 1 enforceable at all, and becomes a hazard the moment a real liquidation can reach the exit path. B89 — a target at or inside 2R is refused outright because GATE-031 cannot run without GATE-025. Earlier, T-0021: B54 CLOSED — both tools collapse aliases and agree; every coverage figure now carries its space, and the script refuses to print an impossible set. B58 — the other tool is outside the repo, so half the agreement cannot be CI-enforced. Earlier, T-0016: the partially-evaluable requirements are enforced by script over the whole registry — B56, eleven emitted fields that cannot say where they came from, baselined not fixed and needing a task id; B57, the two of six standing requirements that script can actually enforce, so a green run is not read as six. Earlier the same day, T-0007: ENTRY_TF 1H -> 5m, the first live behaviour change. B37 CLOSED — the lookahead is out of production. B33 gained the instance it predicted: every legal execution timeframe would have broken the shadow; GATE-017 closed on the live path; B38 — GATE-018 stays OPEN; B39 — a conditional edit that matches nothing succeeds; B40 — the correlate margin is now 1.5x and nothing reports it shrinking)
 
 ---
 
@@ -2058,6 +2058,56 @@ different instruments, not two properties of one:** 23/26 is the OLD guard in a 
 (a test already imported it, so it never had a chance); 15/26 is the NEW guard in a clean one (a
 sibling re-imports it). The first is fixed; the second is not.
 
+---
+
+## CLOSED by T-0026 — the AST guard is built, and the numbers below are MEASURED, not projected
+
+**`test_every_rule_module_is_imported_BY_NAME_in_rules_init` parses `rules/__init__.py` and asserts
+every on-disk module appears in an `Import`/`ImportFrom` node.** Removing each of the 26 modules'
+import blocks in turn and running both guards on each:
+
+    AST guard catches                          26 / 26
+    clean-interpreter guard catches            11 / 26
+    AST catches where the subprocess does NOT  15        <- exactly the residue above, closed
+
+**11 + 15 = 26 reconciles against the T-0023 measurement**, which is the check that the two runs are
+measuring the same thing. **Not "it now catches everything" as a claim — every one of the 26 was
+mutated and observed**, because that sentence has been wrong twice in this entry's history.
+
+**And the failure message is TRUE for the first time.** It reads *"not imported by
+`rules/__init__.py`"* and the assertion has now actually opened that file. Demonstrated on a module
+a SIBLING imports (`exit_004_target_object`, imported by `target_001_concerning_objective`):
+**exactly one test fails, naming that module, while both runtime guards pass** — which is the
+difference between the syntactic question and the runtime one in a single observation.
+
+**ALL THREE GUARDS ARE KEPT, because they ask three different questions:**
+
+    is the import WRITTEN?          AST            syntactic, exact, no proxy
+    does importing WORK?            subprocess     catches a renamed class or broken decorator
+    registered in THIS process?     original       the weakest, and the one that was vacuous
+
+A module can be imported in the file and still fail to register, so the runtime check is not
+redundant with the AST one. **The original is kept and its message no longer claims what it cannot
+support.** `NOT_RULES` is now a single module-level constant read by all three rather than a local
+copy in each.
+
+**The first risk was measured rather than assumed: every import in `rules/__init__.py` is at module
+level.** The guard reads top-level nodes, so an import nested in a `try`, an `if` or a function body
+would be invisible to it while still being real. The test walks the whole tree and asserts the
+nested-only set is empty, so **the day someone adds a conditional import, the guard says its domain
+has narrowed instead of quietly under-reporting.**
+
+**WHAT REMAINS OPEN, AND IT IS THE PROXY POINT ONE LEVEL UP:** the AST check sees that a name appears
+in an import statement. It does not execute anything, so it cannot see a module that is imported and
+then fails to register for its own reasons — that is the subprocess guard's job, and that guard is
+still blind to the 15 by construction. **Neither guard alone is sufficient and neither is redundant;
+the pair is the coverage.** No further work is filed.
+
+---
+
+**Everything below is the record as it stood BEFORE T-0026, kept because the reasoning is the
+finding.**
+
 **THE CHEAP INSTRUMENT THAT WOULD CLOSE ALL 15, named here so whoever takes it does not re-derive
 it (Review's, and it is better than what was built).** Parse `rules/__init__.py` with `ast` and
 assert every module on disk appears in an import statement. No subprocess, no interpreter state.
@@ -2071,7 +2121,7 @@ assert every module on disk appears in an import statement. No subprocess, no in
 * Its one limit: it assumes `__init__.py` imports explicitly rather than looping with `importlib`.
   **True today**, and a conversion to a dynamic loop would break it loudly — the right direction.
 
-**A SMALL FOLLOW-UP TASK, not filed as done.** It was left out of T-0023 deliberately: that task
+**A SMALL FOLLOW-UP TASK — became T-0026 and is now DONE; see the closure block above.** It was left out of T-0023 deliberately: that task
 was three target-selection rules and this would have been its third expansion.
 
 **AND THE LESSON FROM HOW THE MEASUREMENT NEARLY WENT WRONG, which is not "check your numbers".**
@@ -2234,6 +2284,53 @@ of those it is.**
 **Cheapest honest fix:** require the whole-word form and drop the two bare substrings, or state in
 the docstring that the check applies only to derived strings and must not be run over supplied ones.
 **Either is a line. The point is that it stops being silent.** Related: **B97**, **B96**.
+
+### B100 — an entry filed against STALE PROSE is correctly filed and still wrong
+
+**Filed 2026-08-16 after Salim's round-2 rulings superseded `B82`. Review asked for it as its own line
+rather than a note on `B82`, and it is right: the register now contains entries whose subject is
+DOCUMENTATION LAG rather than defect, and nothing distinguishes them.**
+
+**`RULE_REGISTRY.json` v1.2.0 is half-migrated.** Every `status` field is correct — the corpus triage
+landed in full. **The prose around those statuses was never updated: nine rules carry a RESOLVED status
+with `notes` that still pose the question as open.**
+
+> **Six of the nine questions this loop sent Salim were re-asks of stale prose.**
+
+### `B82` is the worked example, and it was filed correctly
+
+**`B82` recorded that `GATE-027`'s five-anchor stop ladder is known-incomplete, citing its `notes`:
+*"the wide-cover variant … folded into 'Momentum Imbalance' or dropped, unstated."*** Review insisted
+it be filed rather than left in a task's Out-of-scope section, **on the correct grounds that an
+Out-of-scope paragraph stops being read when the task closes.** That reasoning still holds.
+
+**And the gap was already closed in the source.** The wide-cover stop is a **post-selection
+zone-coverage modifier**, cited twice in his own words. **The registry's prose had not caught up.**
+
+    the entry's reasoning     sound
+    the entry's citation      accurate — the notes really did say that
+    the entry's subject       a documentation gap, not a strategy gap
+    the entry's conclusion    wrong
+
+### Why this needs distinguishing rather than just fixing
+
+**A defect entry and a lag entry decay differently.** A defect entry stays true until someone fixes the
+code. **A lag entry is falsified by a document being updated somewhere else entirely** — and nothing in
+this repo watches the upstream contract's prose.
+
+**So `stale_sweep.py` cannot see it** (the cited code did not change), **`deferral_sweep.py` cannot see
+it** (an owner was named), and **`landed_sweep.py` cannot see it** (no task closed). **Three tools built
+to catch stale entries, and this class is invisible to all three** — because they all watch OUR
+artefacts and the falsifier is in someone else's.
+
+**The cheap discipline, and it costs a phrase: when an entry's evidence is a `notes` or `statement`
+field rather than code, SAY SO IN THE ENTRY.** *"Filed against `GATE-027`'s notes"* is checkable against
+a later contract version; *"the ladder is incomplete"* is not.
+
+**And the standing consequence for this loop: before filing a gap sourced from registry prose, check
+whether a patch supersedes it.** `CLAUDE.md` in the round-2 package says it directly — *"if you read a
+rule's notes or statement and it sounds like an open question, check `REGISTRY_PATCH.md` before treating
+it as one."*
 
 ### B99 — when the DATA validates the wrong hypothesis, and it does so on the row you check first
 
