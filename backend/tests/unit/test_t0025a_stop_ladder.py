@@ -38,8 +38,10 @@ import pytest
 
 from app.services.rules.base import implementations
 from app.services.rules.gate_027_stop_ladder import (
+    COMPETING_IMBALANCE_EDGE,
     COMPETING_READING,
     COMPETING_SWEEP_PLACEMENT,
+    DECLARED_IMBALANCE_EDGE,
     DECLARED_SWEEP_PLACEMENT,
     LADDER,
     ORDER_BLOCK_PRODUCER,
@@ -280,6 +282,66 @@ def test_the_placement_on_the_swept_level_is_declared_as_ours_and_unratified():
     emitted = StopCandidateLadder.evaluate(_inputs()).values
     assert emitted["stop_placement_on_swept_level_ratified"] is False
     assert emitted["competing_placement"] == COMPETING_SWEEP_PLACEMENT
+
+
+def test_the_imbalance_edge_is_declared_too_and_the_two_are_symmetric():
+    """Review's finding, and the asymmetry was worse than either choice alone.
+
+    `GATE-027.inputs` says "the DEEPER open momentum imbalance" — `deeper` selects WHICH
+    imbalance and is HIS; WHICH EDGE the stop sits on is stated nowhere and is OURS. That is
+    structurally identical to rung 3, where "any old liquidity sweep level" fixes the level
+    and not the placement on it.
+
+    Declaring one and hardcoding the other is the defect: a reader who finds
+    `DECLARED_SWEEP_PLACEMENT` reasonably infers the undeclared placements are doctrine, so
+    the one declaration makes the other look settled.
+    """
+    assert DECLARED_IMBALANCE_EDGE.ratified is False
+    assert DECLARED_IMBALANCE_EDGE.value == "FAR_EDGE"
+    assert COMPETING_IMBALANCE_EDGE == "NEAR_EDGE"
+    assert COMPETING_IMBALANCE_EDGE != DECLARED_IMBALANCE_EDGE.value
+
+    emitted = StopCandidateLadder.evaluate(_inputs()).values
+    assert emitted["stop_placement_on_momentum_imbalance"] == "FAR_EDGE"
+    assert emitted["stop_placement_on_momentum_imbalance_ratified"] is False
+    assert emitted["competing_imbalance_edge"] == COMPETING_IMBALANCE_EDGE
+
+    # THE SYMMETRY IS THE POINT. Both zone anchors carry the same four keys; if a later edit
+    # declares one and not the other, this fails.
+    for stem in ("stop_placement_on_swept_level", "stop_placement_on_momentum_imbalance"):
+        assert stem in emitted
+        assert emitted[f"{stem}_ratified"] is False
+        assert emitted[f"{stem}_source"]
+
+
+def test_only_the_zone_anchors_carry_a_declared_edge():
+    """Rungs 1 and 5 name POINTS — "deepest LL/HH", "inner MSB" — so there is no edge to
+    pick and declaring one would invent a choice the source never faced. The line is
+    anchor-is-a-zone, and it selects exactly rungs 2 and 3."""
+    emitted = StopCandidateLadder.evaluate(_inputs()).values
+    declared = [k for k in emitted if k.startswith("stop_placement_on_") and
+                not k.endswith(("_ratified", "_source"))]
+    assert sorted(declared) == [
+        "stop_placement_on_momentum_imbalance",
+        "stop_placement_on_swept_level",
+    ], "exactly the two zone anchors, no more and no fewer"
+
+
+def test_the_far_edge_is_the_deeper_edge_on_both_directions():
+    """FAR_EDGE must mean 'further from entry' on a short as well as a long, or the mirror
+    silently places the stop inside the zone."""
+    long_rung2 = StopCandidateLadder.build(_inputs())[1]
+    assert long_rung2.stop_price == pytest.approx(85.0), "LONG -> the imbalance's LOW"
+
+    short = _inputs(
+        entry=100.0, target=70.0, direction="SHORT",
+        imbalances=[Imbalance(id="IMB-S", tf="5m", bar_time=T0, price_high=115.0,
+                              price_low=112.0, type="FVG", direction="BEARISH",
+                              is_momentum_imbalance=True)],
+    )
+    assert StopCandidateLadder.build(short)[1].stop_price == pytest.approx(115.0), (
+        "SHORT -> the imbalance's HIGH, which is the far edge from entry"
+    )
 
 
 # ---------------------------------------------------------------------------

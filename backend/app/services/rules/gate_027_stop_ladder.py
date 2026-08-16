@@ -42,10 +42,11 @@ RUNG 4 HAS NO CONTRACT-SIDE PRODUCER AND SAYS SO IN THE HOUSE'S OWN VOCABULARY
 Six PRIM rules and none produces order blocks. `detect_order_blocks()` exists at
 `ict/detector.py:192` — the PRE-CONTRACT ICT strategy — and no rule module imports
 `services.ict`; reaching for it would adopt that detector's semantics as doctrine, which is
-the move TARGET-001 refuses. So rung 4 reports `ConditionReading(NOT_EVALUABLE,
-missing_producer=...)` from `base.py:44` — "NO PRODUCER EXISTS. Permanent until someone
-builds one" — which is deliberately NOT the same fact as "the producer ran and found
-nothing", and is NOT one of `unlocatable_reason`'s three values. Those are a "closed set of
+the move TARGET-001 refuses. So rung 4 reports `NOT_EVALUABLE` with the missing producer
+named — `base.py:44`'s vocabulary, "NO PRODUCER EXISTS. Permanent until someone builds one",
+though deliberately NOT its `ConditionReading` type; see `order_block_gap()`. That is
+deliberately NOT the same fact as "the producer ran and found nothing", and is NOT one of
+`unlocatable_reason`'s three values. Those are a "closed set of
 REAL search failures" each requiring `search_evidence`, and a producer gap is not a search
 failure: filing it as one rebuilds the fabricated-excuse shape the round-2 rulings deleted
 from rung 3. The producer is T-0029.
@@ -147,6 +148,37 @@ DECLARED_SWEEP_PLACEMENT = DeclaredPlacement(
 #: The placement NOT taken. Recorded for the same reason GATE-028 records its competing
 #: reading: an engineering choice with only one option written down reads as a fact.
 COMPETING_SWEEP_PLACEMENT = "AT_THE_SWEPT_LEVEL"
+
+#: OURS. Unratified. THE SAME CLASS OF CHOICE AS RUNG 3's, AND IT WAS A BARE LITERAL UNTIL
+#: Review pointed out the asymmetry.
+#:
+#: `GATE-027.inputs` says "the DEEPER open momentum imbalance" — which fixes WHICH imbalance
+#: and says nothing about WHICH EDGE of it the stop sits on. That is structurally identical
+#: to rung 3, where "any old liquidity sweep level" fixes the level and not the placement on
+#: it. Both anchors are ZONES with two defensible edges.
+#:
+#: Declaring one and hardcoding the other is worse than either choice alone: a reader who
+#: finds `DECLARED_SWEEP_PLACEMENT` reasonably infers that the undeclared placements are
+#: doctrine, so one declaration makes the other look settled.
+#:
+#: Rungs 1 and 5 need no equivalent and deliberately do not have one — "deepest LL/HH" and
+#: "inner MSB" name POINTS, not zones, so there is no edge to pick. The line is
+#: anchor-is-a-zone, and it selects exactly rungs 2 and 3.
+DECLARED_IMBALANCE_EDGE = DeclaredPlacement(
+    name="stop_placement_on_momentum_imbalance",
+    value="FAR_EDGE",
+    source=(
+        "GATE-027 inputs name 'the deeper open momentum imbalance' and stop there — WHICH "
+        "imbalance is his, WHICH EDGE is not stated anywhere. The far edge is declared here "
+        "because PRIM-006's printed rule is that these objects are ZONES and never lines, "
+        "and a stop at the near edge sits INSIDE the object it is meant to clear. That is a "
+        "real argument for the choice and it is still OUR choice, not his — which is exactly "
+        "why it is declared rather than reasoned in a comment."
+    ),
+)
+
+#: The edge NOT taken.
+COMPETING_IMBALANCE_EDGE = "NEAR_EDGE"
 
 
 class StopCandidateNotComparable(ValueError):
@@ -377,19 +409,24 @@ class StopCandidateLadder(RuleImplementation):
     def _momentum_imbalance(
         inputs: LadderInputs,
     ) -> tuple[float, str] | tuple[None, list[str]]:
-        """Rung 2 — the DEEPER open momentum imbalance, stopped at its far edge.
+        """Rung 2 — the DEEPER open momentum imbalance, at the DECLARED edge.
 
-        Far edge, not near edge: PRIM-006's zones-are-never-lines rule means an imbalance is
-        an interval, and a stop at the near edge sits inside the object it is meant to clear.
+        "The deeper open momentum imbalance" is GATE-027's own wording and is HIS: `deeper`
+        selects the imbalance. WHICH EDGE of it the stop sits on is stated nowhere, so it is
+        `DECLARED_IMBALANCE_EDGE` — ours, unratified, with the competing edge recorded.
         """
         considered = [i.id for i in inputs.imbalances]
         pool = [
             i for i in inputs.imbalances
             if i.is_momentum_imbalance is True and i.fill_state != "FILLED"
         ]
+        far_edge = DECLARED_IMBALANCE_EDGE.value == "FAR_EDGE"
         edges: list[tuple[float, str]] = []
         for imb in pool:
-            edge = imb.price_low if inputs.direction == "LONG" else imb.price_high
+            if inputs.direction == "LONG":
+                edge = imb.price_low if far_edge else imb.price_high
+            else:
+                edge = imb.price_high if far_edge else imb.price_low
             if inputs.is_on_stop_side(edge):
                 edges.append((edge, imb.id))
         if not edges:
@@ -536,6 +573,8 @@ class StopCandidateLadder(RuleImplementation):
             "workspace_order_superseded": True,
             **DECLARED_SWEEP_PLACEMENT.as_values(),
             "competing_placement": COMPETING_SWEEP_PLACEMENT,
+            **DECLARED_IMBALANCE_EDGE.as_values(),
+            "competing_imbalance_edge": COMPETING_IMBALANCE_EDGE,
         }
         provenance: dict[str, Any] = {
             "ladder_order": from_registry("GATE-027", "values.ladder"),
@@ -547,6 +586,10 @@ class StopCandidateLadder(RuleImplementation):
             f"{DECLARED_SWEEP_PLACEMENT.name}_ratified": derived("OURS, unratified"),
             f"{DECLARED_SWEEP_PLACEMENT.name}_source": derived("GATE-027 note (a)"),
             "competing_placement": derived("the placement not taken, recorded"),
+            DECLARED_IMBALANCE_EDGE.name: from_declared(DECLARED_IMBALANCE_EDGE.name),
+            f"{DECLARED_IMBALANCE_EDGE.name}_ratified": derived("OURS, unratified"),
+            f"{DECLARED_IMBALANCE_EDGE.name}_source": derived("GATE-027 inputs name the imbalance, not the edge"),
+            "competing_imbalance_edge": derived("the edge not taken, recorded"),
         }
         for candidate in ladder:
             if candidate.anchor_object_id:
