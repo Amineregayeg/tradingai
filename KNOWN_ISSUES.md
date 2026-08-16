@@ -51,7 +51,7 @@ names. **This section's own thesis, in the section stating it, within an hour of
 — and each wrong citation pointed at a real entry describing a real defect, which is why reading it
 did not feel wrong.
 
-### The two fixes that keep working
+### The three fixes that keep working
 
 **1. MAKE THE VALUE CARRY ITS OWN ANSWER.** A bare number cannot tell you where it came from, so
 provenance travels with it: `DeclaredQuorum` carries its rule id and version, `correlate_denominator`
@@ -61,6 +61,34 @@ whenever the question is *"was this value legitimate?"***
 **2. REPORT THE DENOMINATOR, AND NAME THE SET.** A flag count with no denominator cannot distinguish
 *clean* from *not looked at*. `examined 11 of 64` and `32 of 79 distinct` are honest;
 `6 flagged` and `40 implemented` are not.
+
+**3. NAME THE INPUT THAT WOULD MAKE THE CHECK FAIL — BEFORE RUNNING IT.** Review's formulation,
+2026-08-16, after the shape appeared four times in one day:
+
+> **A check is only evidence if you can state the input that would make it fail. If you cannot name
+> that input, you have written an assertion, not a test.**
+
+**This is the only one of the three that applies to CHECKS rather than to VALUES, and the only one
+that is decidable before anything runs.** Fixes 1 and 2 tell you how to emit a result; this tells you
+whether the thing producing it can produce any other result.
+
+    B120  a tie-break fixture built on a MONOTONIC ladder            correct impl and list-order
+                                                                     accident give identical output
+    B121  a mutation whose ANCHOR matched but whose semantics        the anchor assertion passed on
+          were invalid                                               all three, two were invalid
+    B122  an empty `find` with no must-hit control                   "0 hits" and "wrong glob" are
+                                                                     the same output
+    ----  a control PAIR whose two arms were THE SAME COMMIT         one measurement written twice
+
+**The fourth was self-caught by the Manager while verifying the fix for the third**, comparing a pin
+sha against `HEAD` when they were the same object. **`B111` inside the control designed to prevent
+`B111`.** A pair whose arms coincide is not a pair — **it returns the reassuring answer by
+construction.**
+
+> **Every one of the four looked like verification and performed none.** And the test separates them
+> cheaply: the failing input was nameable for the `e735959` arm (*a commit where the floor is absent*)
+> and **not nameable for the `HEAD` arm**, which is the whole difference and is visible without
+> executing anything.
 
 ### HOW IT PROPAGATES THROUGH CODE THAT IS INDIVIDUALLY CORRECT
 
