@@ -3918,8 +3918,25 @@ in a **bus message and a status report**, where **there is no artefact to diff a
 this family now has a mechanism on one surface and none on the other**, and the surface without one is
 the one findings travel through.
 
-**Not proposing a second hook.** The honest statement is that **reports are checked by the recipient
-attempting to reproduce them, which happened here and worked** — and that is the control, not a script.
+**Not proposing a second hook.** There is nothing to diff a bus message against — **a hook would have
+to check a claim against a world it cannot see.** The honest statement is that **reports are checked by
+the recipient attempting to reproduce them, which happened here and worked** — that is the control, not
+a script.
+
+> ## SO THE REPORT SURFACE IS GUARDED BY A HABIT, NOT A MECHANISM. Do not read the hook's existence as covering both.
+
+**And the habit has this register's own signature — Review's point, and it belongs here rather than
+anywhere flattering:**
+
+    a recipient who does NOT reproduce a figure   ->  silence
+    a recipient who reproduces it and agrees      ->  silence
+
+**Identical outputs. The habit has no failure mode that announces itself** — which is *an output that
+does not discriminate between working and broken*, **sitting inside the remedy for that exact family.**
+
+**It worked today only because two seats were reproducing each other's figures by default, and four
+findings surfaced that way.** **Nothing detects the day they stop.** **Not fixable by adding a check —
+recorded so that a later reader does not mistake today's four catches for a guarantee.**
 
 **One thing this instance also cost, recorded because it is `B122` again:** the Manager cited **`B80`**
 as this family's home in the very message correcting the transcription error. **`B80` is
