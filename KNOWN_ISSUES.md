@@ -2518,6 +2518,47 @@ Manager's.**
 **A check that flags the right behaviour teaches people to bypass it**, which is the credibility cost
 recorded above for over-tight guards.
 
+### THIRD BRANCH — a MODIFIED block, ratified after it was the one sweep of three the guard missed
+
+**Requested by Execute, recommended by Review, ratified and implemented by the Manager 2026-08-16
+because it changes every seat's commits.**
+
+**The argument is the asymmetry one extended:** an ADDED heading says *"here is a problem"*; a REMOVED
+heading says *"this problem is fixed"*; **a MODIFIED block flipping a verdict open → closed makes the
+same claim as a removal, in prose instead of on the index, with the same optimistic failure
+direction.**
+
+**The instance, and it is the Manager's — sixth sweep of the night:**
+
+    03b18d6  14:22  carried Execute's preamble edit reading "T-0026: B93 CLOSED — the AST guard
+                    ... catching 26/26", swept from the shared tree
+    ce12b88  14:25  landed the guard
+
+**For three minutes `main` claimed a closed defect with nothing behind it.** The hook saw only
+`+### B100` — the committing seat's own heading, correctly named. **Three sweeps tonight, two caught,
+one missed; the guard's hit rate was a fact about how the sweeps happened to be shaped.**
+
+### The narrowing matters as much as the branch
+
+**v1 of this branch took every `B<nnn>` in an added line. Against `03b18d6` that yielded TWENTY ids**,
+because the register's *"Last updated"* preamble names every entry ever written. **Requiring twenty ids
+in a message to fix a typo is the over-tight guard recorded above** — *"a guard that cries wolf on
+every legitimate change trains the project to loosen it, and the loosening happens under time pressure
+by someone whose attention is elsewhere."*
+
+> **The defect is not a MENTION. It is a VERDICT FLIP.** So the rule is: **closure claims present in
+> added text and ABSENT from removed text.**
+
+**Replayed:** `03b18d6` → `['B93']`, caught. `ce12b88`, `672b3db`, `b8ca332` → no new claims, all pass.
+**One true positive, zero false positives across four real commits.**
+
+**The honest cost, which Review stated rather than argued away:** an edit that genuinely closes an entry
+now needs its id in the message. **That is one token and a true statement about what the commit did.**
+
+**And Review's caveat belongs beside this branch rather than in prose: this is the THIRD branch added
+by a person after an incident, and none of the three came from the guard firing in normal operation.**
+It prevents recurrence; **it cannot produce discovery.**
+
 ### WHAT A GREEN HOOK IS EVIDENCE OF — read this before trusting it
 
 **Review's formulation, put here rather than left in a message because it is the thing a future seat
