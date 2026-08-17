@@ -253,10 +253,20 @@ from app.services.rules.grade_002_box_grade import (  # noqa: F401
 from app.services.rules.grade_008_fake_msb import FakeMSB, FakeMSBClassifier  # noqa: F401
 from app.services.rules.prim_001_swings import Bar, Swing, SwingPoints  # noqa: F401
 from app.services.rules.prim_002_imbalances import Imbalance, ImbalanceInventory  # noqa: F401
-from app.services.rules.prim_003_liquidity import LiquidityPool, LiquidityPools  # noqa: F401
+from app.services.rules.prim_003_liquidity import (  # noqa: F401
+    EqualsMeasurement, LiquidityPool, LiquidityPools,
+)
 from app.services.rules.prim_004_sweeps import SweepEvent, SweepEvents  # noqa: F401
 from app.services.rules.prim_005_breaks import BreakEvent, BreakEvents  # noqa: F401
 from app.services.rules.prim_006_sr_flips import SRFlip, SRFlipZones  # noqa: F401
+from app.services.rules.target_005_clearance import (  # noqa: F401
+    DECLARED_WEAK_SWEEP, PENETRATION_EPISODE_BASIS, REMOVAL_PROBE_VALUES,
+    ClearanceIsStructural, ClearanceObservation, DeclaredPercentage, RemovalProbe,
+    observe, penetration_removal_probe,
+)
+from app.services.rules.target_006_equals_ranking import (  # noqa: F401
+    DECLARED_RELATIVE_EQUALS, EQUALS_TIERS, EqualsConformance, EqualsRanking,
+)
 
 __all__ = [
     "AbsoluteCountNotRatio",
@@ -399,4 +409,20 @@ __all__ = [
     "target_sensitivity_sweep",
     "windows",
     "with_order_block_proxy",
+    # T-0028 — TARGET-005 / TARGET-006, both CONFORMANCE over primitives that already
+    # carried their mechanisms.
+    "DECLARED_RELATIVE_EQUALS",
+    "DECLARED_WEAK_SWEEP",
+    "EQUALS_TIERS",
+    "PENETRATION_EPISODE_BASIS",
+    "REMOVAL_PROBE_VALUES",
+    "ClearanceIsStructural",
+    "ClearanceObservation",
+    "DeclaredPercentage",
+    "EqualsConformance",
+    "EqualsMeasurement",
+    "EqualsRanking",
+    "RemovalProbe",
+    "observe",
+    "penetration_removal_probe",
 ]

@@ -116,6 +116,18 @@ GREP_EXEMPT: dict[str, str] = {
         "mean no quorum, and the record must not — so this module is expected to name the "
         "states textually while still deciding through the shared helper."
     ),
+    "app.services.rules.target_006_equals_ranking": (
+        "Third instance of the GATE-041/GATE-040 shape, and it is a REPORTING match rather "
+        "than a decision: the hit is a dict comprehension building "
+        "`values['unreadable_conditions']`, which names WHICH producer is missing or unread "
+        "so the absence is attributable. The verdict is decided by `quorum_blocked` with "
+        "TARGET-006's own default CLASSIFY_ONLY — the import check confirms the binding is "
+        "base's own object. The two absences are deliberately named separately here for "
+        "GATE-040's reason: this rule has one of EACH, a missing producer (v_shaped "
+        "liquidity, TARGET-007 OPEN) and an unread one (boosters, emitted with zero read "
+        "sites), and merging them would lose exactly the distinction that says which has an "
+        "owner."
+    ),
 }
 
 #: `values` keys that legitimately carry no provenance, keyed by (rule id, field).

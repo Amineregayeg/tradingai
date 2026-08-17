@@ -116,6 +116,41 @@ class LiquidityPool:
         return out
 
 
+@dataclass(frozen=True)
+class EqualsMeasurement:
+    """One swing pair's TARGET-006 tier and the difference that produced it.
+
+    NOT A POOL, DELIBERATELY. `TELEMETRY_SCHEMA.json:550` asks for the measured difference
+    *"even when the class is SEPARATE_POOLS"*, and the two levels in that tier are already in
+    the inventory as swing levels — so what was missing was a RECORD, not an object. Emitting
+    a pool here would double-count the liquidity and break
+    `test_equals_are_ranked_by_target_006_and_separate_pools_emit_nothing`, which has asserted
+    the count difference since before TARGET-006 was claimed.
+    """
+
+    id: str
+    tf: str
+    equals_class: EqualsClass
+    equals_diff_pct: float
+    #: HIGH or LOW — which side of the market the pair rests on.
+    kind: str
+    side: Side
+    #: The outer of the two levels: the one a sweep has to clear. Carried so a consumer of
+    #: the SEPARATE_POOLS tier can locate the pair without re-reading the swings.
+    outer_price: float
+    swing_ids: tuple[str, str]
+    formed_index: int
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "tf": self.tf,
+            "equals_class": self.equals_class,
+            "equals_diff_pct": self.equals_diff_pct,
+            "swing_ids": list(self.swing_ids),
+        }
+
+
 class LiquidityPools(RuleImplementation):
     """PRIM-003: the pool inventory, four of the seven classes."""
 
@@ -152,22 +187,30 @@ class LiquidityPools(RuleImplementation):
 
     # -- equal highs / lows ------------------------------------------------------------
     @staticmethod
-    def equal_highs_lows(swings: Sequence[Swing], *, tf: str) -> list[LiquidityPool]:
-        """Class 2, ranked by TARGET-006: perfect > relative (≤0.30%) > separate pools.
+    def equals_classification(
+        swings: Sequence[Swing], *, tf: str
+    ) -> list["EqualsMeasurement"]:
+        """Every swing pair's TARGET-006 tier, INCLUDING the one that emits no pool.
 
-        Above 0.30% the two levels are SEPARATE pools and no equals pool is emitted — they
-        are already in the inventory as swing levels, and emitting a third object would
-        double-count the same liquidity.
+        THE THIRD TIER WAS A TYPE VALUE WITH NO DATA BEHIND IT. `EqualsClass` has always
+        listed `SEPARATE_POOLS`, `TELEMETRY_SCHEMA.json:544` has always allowed it, and
+        `:550` says outright *"the measured difference that produced equals_class. Record it
+        even when the class is SEPARATE_POOLS."* Nothing ever assigned it: the classifier
+        reached the `> 0.30%` branch, `continue`d, and the measurement went nowhere. Over 54
+        windows of the pinned 5m fixture that discarded 519,046 measured differences spanning
+        0.3000% to 3.2893% — the majority tier, unrecorded.
 
-        BASIS. TARGET-006 says "price difference ≤ 0.30%" and never says of what. The measured
-        difference is carried in `equals_diff_pct` against the mean of the two levels, and the
-        basis is stated here rather than left for an auditor to infer — the same problem the
-        schema forces PRIM-004 to declare for `penetration_pct`.
+        **THIS CHANGES THE RECORD AND NOT THE PAIRING.** `equal_highs_lows` still emits
+        nothing above the threshold, because `continue` was the correct BEHAVIOUR: the two
+        levels are already in the inventory as swing levels and a third object would
+        double-count the same liquidity. The defect was evidentiary — the classifier
+        considered the pairing, rejected it, and left no trace that it had looked.
 
-        A relative equal is a QUALITY BOOSTER, never a destination selector, so the pool
-        carries `boosters: ["EQUALS"]` and nothing here promotes it to a target.
+        So this returns the classification for ALL pairs and `equal_highs_lows` builds pools
+        from the two tiers that have them. ONE classifier, still: the tier boundary is
+        decided here and nowhere else.
         """
-        pools: list[LiquidityPool] = []
+        out: list[EqualsMeasurement] = []
         for kind, side in (("HIGH", "HIGH"), ("LOW", "LOW")):
             same = sorted(
                 (s for s in swings if s.kind == kind), key=lambda s: s.bar_index
@@ -183,19 +226,53 @@ class LiquidityPools(RuleImplementation):
                     elif diff_pct <= RELATIVE_EQUALS_MAX_DIFF_PCT:
                         eq_class = "RELATIVE"
                     else:
-                        continue  # SEPARATE_POOLS — not equals, nothing to emit
-                    pools.append(LiquidityPool(
-                        id=f"lq-{tf}-eq-{a.id}-{b.id}", tf=tf,
-                        pool_class="EQUAL_HIGHS_LOWS",
-                        # The pool sits at the level price is actually resting against: the
-                        # outer of the two, which is the one a sweep has to clear.
-                        price=max(a.price, b.price) if kind == "HIGH" else min(a.price, b.price),
-                        label=f"EQ{kind[0]}", side=side,  # type: ignore[arg-type]
+                        eq_class = "SEPARATE_POOLS"
+                    out.append(EqualsMeasurement(
+                        id=f"eqm-{tf}-{a.id}-{b.id}", tf=tf,
                         equals_class=eq_class, equals_diff_pct=round(diff_pct, 6),
-                        boosters=["EQUALS"],
+                        kind=kind, side=side,  # type: ignore[arg-type]
+                        outer_price=(
+                            max(a.price, b.price) if kind == "HIGH"
+                            else min(a.price, b.price)
+                        ),
+                        swing_ids=(a.id, b.id),
                         formed_index=max(a.bar_index, b.bar_index),
                     ))
-        return pools
+        return out
+
+    @staticmethod
+    def equal_highs_lows(swings: Sequence[Swing], *, tf: str) -> list[LiquidityPool]:
+        """Class 2, ranked by TARGET-006: perfect > relative (≤0.30%) > separate pools.
+
+        Above 0.30% the two levels are SEPARATE pools and no equals pool is emitted — they
+        are already in the inventory as swing levels, and emitting a third object would
+        double-count the same liquidity. **The measurement behind that rejection is no
+        longer thrown away** — `equals_classification` returns it — but the pool inventory is
+        byte-for-byte what it was, because the schema asked for a record and not an object.
+
+        BASIS. TARGET-006 says "price difference ≤ 0.30%" and never says of what. The measured
+        difference is carried in `equals_diff_pct` against the mean of the two levels, and the
+        basis is stated here rather than left for an auditor to infer — the same problem the
+        schema forces PRIM-004 to declare for `penetration_pct`.
+
+        A relative equal is a QUALITY BOOSTER, never a destination selector, so the pool
+        carries `boosters: ["EQUALS"]` and nothing here promotes it to a target.
+        """
+        return [
+            LiquidityPool(
+                id=f"lq-{tf}-eq-{m.swing_ids[0]}-{m.swing_ids[1]}", tf=tf,
+                pool_class="EQUAL_HIGHS_LOWS",
+                # The pool sits at the level price is actually resting against: the outer of
+                # the two, which is the one a sweep has to clear.
+                price=m.outer_price,
+                label=f"EQ{m.kind[0]}", side=m.side,
+                equals_class=m.equals_class, equals_diff_pct=m.equals_diff_pct,
+                boosters=["EQUALS"],
+                formed_index=m.formed_index,
+            )
+            for m in LiquidityPools.equals_classification(swings, tf=tf)
+            if m.equals_class != "SEPARATE_POOLS"
+        ]
 
     # -- institutional candlesticks ----------------------------------------------------
     @staticmethod
