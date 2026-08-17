@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-17 (B147 — the `agents/` consistency checks are enforced by NOTHING: four have zero references in CI and zero in hooks, and the fifth runs from `.git/hooks/commit-msg`, which is not version controlled, exec'ing a script in `agents/`, which is not in the index — an installer with no representable TARGET, which is the 6c decision. Measured cost: the B93 guard's own docstring, whose first line is "Measured, not asserted", claims 29 `.py` and three NOT_RULES exclusions against a true 37 and four; it rotted 3h30m after being written, four commits made it wronger, and only ONE of them opened the file the figure lives in — so an attentional fix has nobody to attach to. Shared shape across B144/B146/B147: every instance is a check whose OUTPUT was inspected and whose EXECUTION was not, so the question is not "is the output right?" but "could this output have been produced by the check not running at all?". THIS LINE IS NOW ENFORCED — register_commit_check.py refuses any commit that ADDS an entry without naming it here, because B144 through B147 all landed while this line still said B143, four entries behind, and a header claiming to name what is newest while naming something older is worse than no header: a reader who trusts it stops looking.)
+Last updated: 2026-08-17 (B148 — `implemented_ids()` answers "what has THIS PROCESS imported?" and four assertions read it as "what exists in the codebase": a rule registers in `__init_subclass__` at class-definition time, so the helper is a snapshot of the IMPORT GRAPH. Measured both directions — a real RuleImplementation claiming GATE-014, planted at monitoring/news_resumption.py, reads False before import and True after, and the assertion at test_t0032_news_windows.py:456 did not fire (73 passed, 46 deselected); T-0023 already holds the mirror, where a reverted __init__.py left three rules reading as implemented while check_rule_coverage.py correctly reported 39/104. One helper, opposite false readings about the codebase, both correct about the process. The whole-tree check exists at check_rule_coverage.py:155's glob("app/**/*.py") and must not be retired as redundant — it is the only thing that answers whether a claiming implementation exists on disk, and NOTHING covers the built-but-UNCLAIMED case, which is what T-0032's volatility guard is a proxy for. General form: a registry populated by a side effect answers a question about the SIDE EFFECT, never about the world.)
 
 ---
 
@@ -2440,6 +2440,117 @@ register that records its own control pairs is exactly the corpus that will accu
 searched, at the moment of use** — not reused from a previous entry. **Prefer a token containing the
 task id and a nonce over a shared house token like `zzz_absent`**, because a shared one accumulates
 citations until it is present everywhere.
+
+### B148 — `implemented_ids()` answers *"what has THIS PROCESS imported?"* and four assertions read it as *"what exists in the codebase"* — one helper, opposite false readings in `T-0023` and `T-0032`
+
+**Filed by Review 2026-08-17, during `T-0032` cycle 2. Measured in a separate checkout, both
+directions, with the mirror instance already in this register.**
+
+## The mechanism, three lines
+
+    base.py:186   __init_subclass__            runs at CLASS-DEFINITION time
+    base.py:223       _IMPLEMENTATIONS[claimed] = cls
+    base.py:263   implemented_ids() -> frozenset(_IMPLEMENTATIONS)
+
+**A rule registers when its module is IMPORTED. So `implemented_ids()` is a snapshot of the import
+graph, and the import graph is a population nobody states.**
+
+## Both directions, and this register already held one of them
+
+**FALSE NEGATIVE — measured now.** A real `RuleImplementation` subclass with `RULE_ID = "GATE-014"`
+planted at `app/services/monitoring/news_resumption.py`:
+
+    WITHOUT importing it   "GATE-014" in implemented_ids()  ->  False
+    AFTER   importing it   "GATE-014" in implemented_ids()  ->  True
+
+    test_t0032_news_windows.py:456   assert "GATE-014" not in implemented_ids()
+      pytest -k "gate_014 or volatility"  ->  73 passed, 46 deselected.  IT DID NOT FIRE.
+
+**FALSE POSITIVE — `T-0023`, already recorded.** An `__init__.py` edit was reverted in the shared
+tree; `EXIT-004` / `TARGET-001` / `TARGET-003` still read as implemented because test modules
+imported them directly. **Fifty tests stayed green while `check_rule_coverage.py` correctly reported
+39/104.**
+
+> **One helper, two opposite false readings ABOUT THE CODEBASE, and both are correct statements
+> about the process. Nothing at the call site distinguishes the two questions.**
+
+## The correct instrument for the whole-tree question already exists
+
+    scripts/check_rule_coverage.py:155
+        for path in sorted(BACKEND.glob("app/**/*.py")):
+            RULE_ID_ASSIGNMENT.findall(...)
+
+    -> "every RULE_ID constant registers an implementation"
+
+**That is what caught the plant — 5 failures, all in `test_rule_coverage_counting.py`, none of them
+the assertion at `:456`.** **The glob is genuinely whole-tree; `implemented_ids()` is not, and the
+two are easy to mistake for each other because the glob's verdict is expressed by COMPARING against
+`implemented_ids()`.**
+
+## The four negative assertions differ, and the difference is which question is being asked
+
+    test_t0016_partial_rule_checks.py:306   DOUBLE_ID not in implemented_ids()
+        CORRECT USE. A leak check — "did this test's fixture register anything in THIS PROCESS."
+        The import graph IS the subject.
+
+    test_t0032_news_windows.py:456          "GATE-014" not in implemented_ids()
+        WRONG INSTRUMENT. The subject is the codebase. Demonstrated false-negative above.
+
+    test_rules_base.py:130                  rid not in implemented_ids()  (derived scratch id)
+        SAFE TODAY, BY INHERITANCE. `rules/__init__.py` imports every rule module and
+        `test_the_package_alone_registers_every_rule_module` asserts it does — so the import
+        graph and the directory coincide. The safety belongs to that guard, not to this call.
+
+    test_rules_base.py:398                  "GRADE-023" not in implemented_ids()
+        CONTEXTUAL — asserted either side of an explicit import in the same test.
+
+**Twelve files touch the helper. The two questions are one call away from each other and read
+identically.**
+
+## Why this is a register entry rather than one test's bug
+
+**The `T-0032` instance is one line and would be fixed in a line.** The entry exists because
+**the same helper produced the opposite error two tasks earlier and neither instance was recognised
+as the same defect**, and because **the safe uses are safe by inheritance from a guard elsewhere** —
+which is exactly the arrangement that breaks silently when the other guard moves.
+
+**And it is order-dependent by construction**: `_IMPLEMENTATIONS` is process-global, so a negative
+assertion's truth depends on what pytest collected before it. `isolate_registry`
+(`test_rules_base.py:75`, `autouse=True`) exists to contain that within one module and does nothing
+across modules.
+
+## Fix
+
+**1. Name the question at the call site.** A negative claim about the CODEBASE uses the filesystem
+scan; a negative claim about the PROCESS says so in its message. **`assert "GATE-014" not in
+implemented_ids()` should read `not in ids_declared_anywhere_in(app/)`** — the glob already exists
+and is already trusted.
+
+**2. Do not retire `check_rule_coverage.py`'s glob as redundant.** It is the only whole-tree check,
+and the reason it looks redundant is that its verdict is phrased in terms of `implemented_ids()`.
+**Nothing else answers "does a claiming implementation exist on disk."**
+
+**3. Neither check covers the built-but-UNCLAIMED case**, which is measured:
+
+    claiming impl, unimported    caught by the FILESYSTEM GLOB      not by implemented_ids()
+    NON-claiming impl            caught by NOTHING                  145 tests passed
+
+**`T-0032`'s volatility guard is the proxy for that third row, and this table is the argument for
+its existence** — it names which case each mechanism covers instead of asserting coverage in
+general.
+
+## The general form
+
+> **A registry populated by a side effect answers a question about the SIDE EFFECT, never about the
+> world.** `_IMPLEMENTATIONS` is populated by import, so it describes imports. **The reading that
+> feels natural — "which rules exist" — is available nowhere in the call and is wrong in both
+> directions.**
+
+**Same family as `B141` — the id probe answers *"is this rule CLAIMED"* and not *"is this rule
+BUILT"*, and `grep RULE_ID = "TARGET-006"` returning nothing was TRUE and useless. Here the probe
+answers *"was this module IMPORTED"* and not *"does this rule exist"*, and `False` is likewise true
+and useless. And `B147`'s question applies unchanged: could this output have been produced by the
+check not running at all?**
 
 ### B147 — the `agents/` checks are enforced by NOTHING, and a verification's absence has three grades: an artefact nobody read, no artefact at all, and an ANSWER-SHAPED artefact that occupies the place a reader checks
 
