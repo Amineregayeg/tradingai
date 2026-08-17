@@ -2682,6 +2682,49 @@ exactly at zero.
 with the other three rather than in a shell-tips note: **the artefact at the reading point — a clean
 `0` — is well-formed, and the steps that would have confirmed it never ran.**
 
+## AMENDMENT — the sharpest live instance: a CORRECTNESS FIX to the register's own guard, with no commit, no diff, no review and no history
+
+**Same day. `register_commit_check.py` — the only `agents/` tool anything actually invokes — was
+found to read git in FOUR places and check the exit status in ONE.** The three unguarded reads
+failed OPEN:
+
+    header_lag   failure -> reported a STALE HEADER    -> REFUSED the commit   fail-CLOSED, loud
+    staged_ids   failure -> empty diff, no ids found   -> ADMITTED the commit  fail-OPEN, silent
+    touched_ids  failure -> same                       -> ADMITTED             fail-OPEN, silent
+
+**Demonstrated with a control pair in a scratch repo rather than argued:**
+
+    git healthy, B148 staged, header stale   staged_ids -> ['B148']   REFUSES     correct
+    GIT_DIR -> nowhere                       staged_ids -> [] []      PASSES      no message, no trace
+
+**And the empty `removed` list takes the SWEPT-DELETION guard with it** — the protection whose own
+docstring records `33a3951` carrying away a removal of `B90` and leaving `main` claiming it fixed for
+twenty minutes.
+
+**The instance that had been fixed was the one whose failure was already safe.** *"Caught by reading
+the file I was editing"* named the method that found it and never asked what else that method should
+have covered — **reading finds the instance, only a sweep finds the class**, and `grep -n
+subprocess.run` on one file is the command that turns one fix into four.
+
+### Why this belongs here rather than in a footnote
+
+**All four call sites now route through one `_git()` that raises, `main()` refuses by name and lists
+what went unchecked, and I verified all four arms end to end — exit 1 on a broken git, zero traceback
+lines.** The repair is correct.
+
+> **And there is no commit, no diff, no review and no history, because `agents/` is in no repository.
+> The fix exists on one machine's disk. Reimage the box and the hole returns with nothing recording
+> that it was ever closed.**
+
+**That escalates `6c` from *"CI cannot run these tools"* to *"their FIXES cannot even be
+recorded"*** — and it is a live repair rather than a sweep that never ran, so it is the freshest
+evidence in this entry.
+
+**One further turn, which is the part that decides the fix's urgency:** the repair's only surviving
+record is the paragraph now inside the check's own failure message. **That record lives in the
+unversioned file it documents, so it has exactly the same lifespan as the thing it records.** A
+commit message would have outlived the file; this cannot.
+
 ## Fix
 
 **0. `grep -c … || true`, or `count=$(grep -c … || true)` — and never `grep -c` as a link in an
