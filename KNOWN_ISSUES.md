@@ -2441,6 +2441,65 @@ searched, at the moment of use** — not reused from a previous entry. **Prefer 
 task id and a nonce over a shared house token like `zzz_absent`**, because a shared one accumulates
 citations until it is present everywhere.
 
+### B144 — `status: completed` is not `conclusion: success`, and a CANCELLED CI run is indistinguishable from a passing one to everything this loop reads
+
+**Filed by Review 2026-08-17. Found by the Manager during T-0028's verification, measured by both of
+us, and it is sitting IN the evidence for that task.**
+
+    the four most recent runs on main
+      4e8a66a   status=completed   conclusion=success     attempt 2
+      123e8c7   status=completed   conclusion=CANCELLED   attempt 2
+      5c7208d   status=completed   conclusion=success     attempt 1
+      de7e88b   status=completed   conclusion=CANCELLED   attempt 1
+
+    last 20 runs:  success 14 · cancelled 5 · in-flight 1
+
+> **A cancelled run reports `status: completed`. Nothing alerts, no check turns red, and the loop's
+> habit is to treat "CI ran" as verification. A quarter of recent runs did not verify anything.**
+
+### The mechanism is OURS, not GitHub's
+
+    .github/workflows/ci.yml:18   concurrency:
+                            :19     group: ci-${{ github.ref }}
+                            :20     cancel-in-progress: true
+
+**Every seat pushes to `main`, so every push shares one concurrency group.** And the loop's own
+cadence — **commit the code, then immediately commit the register entry about it** — is precisely the
+pattern `cancel-in-progress` punishes.
+
+> **We built a push habit that reliably destroys our own CI verdicts. `123e8c7`'s Backend suite was
+> killed at step 6, five minutes in, by the register-only commit written ABOUT it — 35 lines of
+> markdown, +35/0, destroying the verification of the 2,028-line code commit beneath it.**
+
+### The concrete cost, which is worse than the mechanism
+
+**T-0028 is verified ONLY because a human-initiated re-run happened to fire while nothing else was
+pushing.** Attempt 1 was cancelled by the next commit; attempt 2 succeeded because the burst had
+ended.
+
+**Had nobody re-run it by hand, `123e8c7` and `4e8a66a` would both sit on `main` permanently
+unverified, reporting `completed`.**
+
+> **Only the last commit of a burst is ever verified — and `main` is what deploys.**
+
+### Why nothing caught it
+
+**Three readers, all blind in the same place:** `ci_range.py` handled `cancelled` correctly at the
+ROW level (**`B30`, `B101`**) and no consumer ever checked the SUMMARY the same way; a green check
+mark on three of four jobs reads as a green run; and **`status` is the field a reader reaches for
+because it is the one that sounds like the answer.**
+
+**This register's own shape, in the verification layer itself: an output that does not discriminate
+between *the suite passed* and *the suite never finished*.**
+
+### Not fixed, and the fix is a decision rather than a task
+
+**Narrow options: `paths-ignore` for docs-only pushes, or dropping `cancel-in-progress` on `main`.**
+Both are policy calls about CI minutes versus verified history and **neither is Review's to make.**
+
+**What is recorded here is the epistemic half: `completed` is not `success`, and nothing in this loop
+had ever checked the difference.** Related: **B30**, **B76**, **B101**.
+
 ### B143 — a rule id's ABSENCE is a true negative that hides a built mechanism: `TARGET-006`'s classifier was in `PRIM-003` all along, and its third tier was a declared value NO code path could produce
 
 **Found by Execute seat 11 pre-build on `T-0028`, verified independently by Review and by the
