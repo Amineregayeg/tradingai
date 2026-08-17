@@ -2728,20 +2728,50 @@ against `T-0030`'s committed harness (`SweepRow.selected_rungs`) and **not one l
     control  PRIMARY ladder rung 4 wins ZERO on all 24 observed rows; SECONDARY wins up to 259.
              Both ladders reproduce T-0030's 529-setup denominator exactly.
     B127     rr per row YES · adjacent identical rr 0 · MOVED (selection changed on 321 setups,
-             admission on 529) · one side of 50% YES · unobserved row (target 0.05) excluded BY NAME
-    verdict  REPORTABLE_OVER_A_SUBSET
+             admission on 529) · unobserved row (target 0.05) excluded BY NAME
+    verdict  NO VERDICT AGAINST 50% IS ISSUED FOR THIS QUANTITY — see below. The table stands;
+             the pass/fail against 50% does not.
 
 **THE `rr`-DERIVED BOUND THE PLAN ONCE DEMANDED REMAINS UNMEASURABLE AND NO TARGET WAS INVENTED**
 (`B127`): `rr` needs a target, nothing produces one, and a target proxy would set the denominator of
 the measured quantity.
 
-**TWO WARNINGS ON THAT FIGURE, both of which a reader will otherwise lose.** **(1) "Below 50%" passes
-by 0.3 percentage points — `259 of 521 = 49.71%`. Two more setups and it CROSSES and reports
-`TARGET_DEPENDENT`.** The count saturates at 257–259 across five rows, so it is a plateau against the
-boundary rather than a trend that stopped short; read it as *"reaches essentially half"*. **(2) The 50%
-boundary was pinned in `B127` for a FLAG FIRING RATE's noise-or-signal question and is reused here for
-a WIN RATE**, as `T-0029`'s plan directs. A pinned number reused across a change of quantity is this
-register's most repeated failure, so it is named rather than passed over. **Manager's call.**
+### AND THE VERDICT AGAINST 50% IS WITHHELD, BECAUSE TWO SEPARATE PROBLEMS COMPOUND INTO A COINCIDENCE
+
+**`B122` WITH A THRESHOLD INSTEAD OF A COUNT — Review's framing, and it is the durable half of this
+entry.** Execute raised the two problems separately and Review established that together they are
+disqualifying rather than merely worth naming.
+
+**(1) THE BOUNDARY WAS DERIVED FOR A DIFFERENT QUANTITY.** `B127`'s 50% was derived from criterion
+`4b`'s noise-or-signal question about a **FLAG FIRING RATE** — *"50% is where the answer changes"* was
+a statement about **that** decision, and that derivation is the entire reason the number was pinnable.
+**A WIN RATE is a different quantity and the derivation does not transfer. Nothing establishes that
+50% is where the answer changes for *does the missing rung matter*. Reusing the number keeps the digits
+and discards the argument.**
+
+**(2) THE RATE DOES NOT APPROACH THE BOUNDARY, IT PLATEAUS AGAINST IT.** The peak is
+`259 of 521 = 49.71%`, and the count **saturates at 257–259 across five separate rows** while the
+threshold sits at 261. **A trend that stopped short would be evidence the rate is genuinely below. A
+count bounded by something structural that happens to land near 50% is not** — the two numbers are
+unrelated.
+
+> **So "REPORTABLE, below 50%" would be decided by a 0.3-point gap between a structural plateau and a
+> threshold imported from a different question. Either problem alone would be tolerable; together they
+> make the verdict an artefact of a coincidence.** **NO VERDICT AGAINST 50% IS ISSUED FOR THIS
+> QUANTITY** until a boundary is derived for the decision it actually feeds. **The TABLE, the figure,
+> the plateau and the control pair all stand and are reportable on their own terms** — what is withheld
+> is only the pass/fail.
+
+**THE PIN'S OWN PROTECTION WORKS AGAINST IT HERE, AND THAT IS THE NEW RESIDUE.** `B124` and `B127` both
+instruct: *argue with the boundary and re-derive it; do not nudge the number.* **Applied to a quantity
+the number was never derived for, that instruction enforces an arbitrary threshold instead of a
+reasoned one.** Every earlier instance in this register was **one count wearing two quantities**; this
+is **one THRESHOLD wearing two quantities**, and **no guard looks for it, because a pinned number is
+precisely the thing every seat has been taught not to move.**
+
+**`T-0029`'s plan directs applying `B127`'s criterion here, so this is a DEVIATION FROM THE PLAN and
+the Manager's to rule on.** It is recorded rather than performed quietly: the deviation is to withhold
+a verdict, never to substitute a friendlier one.
 
 ### TWO STALE STATEMENTS THIS TASK FOUND AND DID NOT EDIT
 
