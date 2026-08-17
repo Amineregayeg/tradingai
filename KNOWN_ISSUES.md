@@ -2771,7 +2771,43 @@ precisely the thing every seat has been taught not to move.**
 
 **`T-0029`'s plan directs applying `B127`'s criterion here, so this is a DEVIATION FROM THE PLAN and
 the Manager's to rule on.** It is recorded rather than performed quietly: the deviation is to withhold
-a verdict, never to substitute a friendlier one.
+a verdict, never to substitute a friendlier one. **RULED AND UPHELD at `de7e88b`** — a pinned threshold
+is pinned to the QUESTION it was derived from, and reuse on a different quantity needs a NEW
+DERIVATION rather than a citation.
+
+> ### `[ADDENDUM 2026-08-17, AFTER PASS — a THIRD reason, from Review's reproduction, and it is the same disease one level down]`
+>
+> **Review reproduced the sweep and got the same COUNTS at a different PERCENTAGE.** Its peak was
+> `260 of 546 = 47.62%`; mine is `259 of 521 = 49.71%`. **The counts agree — 259/260 at the peak — so
+> the curve reproduced; the DENOMINATOR did not.**
+>
+> **Review diagnosed it as its own error and it is, but it is a more interesting one than "I forgot to
+> dedup".** Its 555/546 is **exactly `T-0030`'s `NONE` arm**, verified against that report's own line:
+> `NONE (every qualifying bar) n = 555, 112 of 546`. **So the accidental run was not an arbitrary
+> denominator — it was one of the THREE DECLARED alternatives**, named in
+> `DECLARED_SETUP_DEDUP(value="FIRST_SELECTION", competing="LAST_SELECTION, or NONE")`.
+>
+> **AND THAT IS WHAT MAKES IT WORTH RECORDING. The dedup axis WAS swept — against the WRONG QUANTITY.**
+>
+>     the SAME definitional axis, swept by T-0030 against the INVERSION RATE:
+>         FIRST 20.3% · LAST 20.6% · NONE 20.5%          spread 0.3 points  -> "does not rest on my choice"
+>     the SAME axis, against the WIN RATE (measured here):
+>         FIRST 49.71% · NONE 47.62%                     spread 2.09 points -> SEVEN TIMES further
+>
+> **`T-0030`'s conclusion that the definitional choice does not matter was TRUE — for the inversion
+> rate — and was silently inherited by a quantity nobody swept it against.** That is **exactly the
+> failure this entry already records one level up**: `B127`'s 50% was derived for a flag firing rate and
+> reused for a win rate. **Two borrowed results in one figure — a borrowed THRESHOLD and a borrowed
+> STABILITY — and neither announced that it had changed quantity.**
+>
+> **So the distance from 50% is itself a function of a declared-but-unratified choice: 49.71% invites
+> *"just under"*, 47.62% invites *"comfortably under"*, and neither is more true.** The withdrawal
+> already covers it; this is the third independent reason and the one a reader would have been bitten
+> by hardest.
+>
+> **GENERAL FORM, and it is the transferable line: a SENSITIVITY RESULT is scoped to the quantity it was
+> measured on, exactly as a THRESHOLD is scoped to the question it was derived from. "I swept that axis
+> already" needs the same challenge as "that number is pinned" — swept against WHAT?**
 
 ### TWO STALE STATEMENTS THIS TASK FOUND AND DID NOT EDIT
 
