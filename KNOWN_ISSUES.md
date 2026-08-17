@@ -2639,6 +2639,132 @@ Related: **B92** (the same disease one layer down), **B122**, **B127**, and this
 default-failure section, whose fix 3 asks *"can you state the input that would make this fail"* — **for
 a mechanism claim, that input is the line at the sha.**
 
+### B141 — NO rule defines an order block, FOUR reference one, and the missing producer costs an ENTRY input as well as rung 4 — plus: a control pair validates the INSTRUMENT, never the VOCABULARY
+
+**Found by Execute 2026-08-17 running `T-0029`, which builds nothing by design. Measured at `60addf1`.
+The task's central claim SURVIVES and is stronger than its plan; the plan's supporting LIST is wrong.**
+
+**No rule in 117 DEFINES an order block and none says how to FIND one — re-verified, not inherited.**
+`RULE_REGISTRY.json` parsed as JSON, every field of every rule searched, controls in the same command:
+`'imbalance'` → **41** rules (must-hit, reproducing the plan's own stated control), `'zzz_T0029_absent'`
+→ **0** (must-miss, and counted absent from the artefact **at the moment of the search** — `B136`).
+
+    spelled order[\s_-]?block   GATE-027 (statement, values) · GATE-028 (statement) · PRIM-006 (citation)
+    bare OB, alnum-bounded      GATE-027 (inputs) · ENTRY-001 (statement, inputs, citation)
+    -------------------------------------------------------------------------------------------------
+    UNION                       FOUR: ENTRY-001, GATE-027, GATE-028, PRIM-006
+
+    classification   GATE-027 RANKS it 4th of 5 and names the COORDINATES ("the OB high/low")
+                     GATE-028 RANKS it at 4R in the worked table
+                     PRIM-006 defines only the BREAKER, in terms of the order block, in a CITATION
+                     ENTRY-001 RANKS it below imbalance, and CONSUMES it as a declared input
+                     NONE defines one. NONE locates one.
+
+**THE LIST WAS CORRECTED ONCE AND THE CORRECTION INTRODUCED A NEW ERROR.** Original: four —
+`GATE-027`, `GATE-028`, `ENTRY-001`, `GATE-043`. Corrected: three — `GATE-027`, `GATE-028`, `PRIM-006`.
+**Measured: four — `GATE-027`, `GATE-028`, `PRIM-006`, `ENTRY-001`.** The correction was right to add
+`PRIM-006` and right to drop `GATE-043` (**0** hits of `block` in any casing, **0** of bare `OB` —
+checked). **It was wrong to drop `ENTRY-001`**, whose stated reason was *"its `BLOCK_KINDS` tuple lives
+in `entry_001_imbalance_poi.py` — I conflated a CODE CONSTANT with REGISTRY TEXT"*. **`ENTRY-001` has
+BOTH**: the constant at `entry_001_imbalance_poi.py:75`, and registry text in `statement`
+(*"we do not use OBs or BBs to enter"*, *"collisions with OB/BB UPGRADE the entry"*), `inputs`
+(*"any colliding OB/BB zones"*) and `citation` (*"OB+IMB+MSB/BOS"*).
+
+> ### THE TRANSFERABLE HALF, AND IT IS A NEW RESIDUE ON `B122`'s THIRD FIX RATHER THAN A BREACH OF IT
+>
+> **The correction DID carry a control pair. The control pair PASSED.** `'imbalance'` hit 41,
+> `'zzz_absent'` hit 0, the instrument ran and could tell a hit from a miss — **and the answer was
+> still incomplete, because the search term was the literal `"order block"` and `ENTRY-001` never
+> spells it.** It says `OB` and `BB` throughout.
+>
+> **A CONTROL PAIR ESTABLISHES THAT THE INSTRUMENT RUNS. IT ESTABLISHES NOTHING ABOUT WHETHER THE
+> SEARCH TERM COVERS THE CONCEPT — both arms are equally blind to a synonym or an abbreviation.**
+> `B122`'s fix asks for a must-hit and a must-miss; **it does not ask "what else is this object
+> called?", and nothing in this register did until now.** The must-hit is what hides it: a term that
+> returns 41 rules feels comprehensive, and comprehensiveness of RESULTS is not coverage of MEANINGS.
+>
+> **Cheap fix, and it is a question rather than a tool: before a vocabulary search, list the object's
+> other names — abbreviation, plural, underscore form, the trader's shorthand — and probe each
+> separately, printing the per-probe counts rather than a union.** The per-probe print is what makes
+> the gap visible; a union would have shown four and hidden which probe found what.
+>
+> **My own instrument failed the same family DURING this scan and I caught it by reading the ids:**
+> `(?<![A-Za-z])BB(?![A-Za-z])` excludes letters but not DIGITS, so the hex in the image filename
+> `0443_05509bb4.png` matched and the scan reported `GATE-004` and `GRADE-016` as carrying
+> breaker-block references. Both false. Fixed to `(?<![A-Za-z0-9])`. **`B140`'s subject exactly: a
+> wrong instrument returning plausible rule ids.**
+
+### THE GAP IS NOT ONLY RUNG 4 — `ENTRY-001` CONSUMES THE OBJECT AND NOTHING PRODUCES IT
+
+**`ENTRY-001`'s OB/BB collision UPGRADE is fully implemented and permanently inert.** `Block(kind,
+price_high, price_low, id)`, `EntryPOI.colliding_blocks`, the `_overlaps` band test at
+`entry_001_imbalance_poi.py:170`, and the emitted `colliding_blocks` / `block_kinds_never_eligible`
+fields all exist. **Established from the CALL GRAPH, never from a log line:**
+
+    MUST-MISS   Block(...) constructed anywhere in app/       0
+    MUST-MISS   blocks= passed at any call site in app/       0
+    MUST-HIT    Imbalance(...) constructed in app/            5     <- same pattern, working
+    MUST-MISS   zzz_T0029_absent in app/                      0
+
+**The only call of `ENTRY-001` in `app/` is `stop_ladder_corpus.py:320`, and it passes no blocks.**
+Every call that does pass blocks is a test.
+
+> **AND IT FAILS IN `B129`'s SHAPE, WHICH IS THE WORSE ONE — third instance in this register.** Rung 4
+> announces itself (`missing_producer`, `CANNOT_FIRE_WITHOUT`, visible in the coverage report).
+> **`ENTRY-001` emits `colliding_blocks: []` with a `derived` provenance note, which is
+> indistinguishable from "this setup genuinely had no colliding block".** A missing producer wearing
+> the costume of an empty market. **Salim's own "BEST IDEAL ENTRY = DRAGON FRUIT = OB+IMB+MSB/BOS" can
+> never be recognised by this platform, and nothing in our records says so.**
+
+### THE COST IS MEASURED, AND IT IS TARGET-DEPENDENT RATHER THAN A SINGLE NUMBER
+
+**Locatability, cited from `T-0030` and not recomputed: the labelled ICT proxy located on 500 of 529
+setups (94.5%); the ladder runs THREE of five rungs in production.** New in `T-0029`, as a QUERY
+against `T-0030`'s committed harness (`SweepRow.selected_rungs`) and **not one line of new code**:
+
+    figure   across targets in [84.32, 2022.55], the ICT-proxy rung WINS between 0.0% and 49.7% of
+             SELECTIONS WITH A SELECTED STOP (489-529 setups/row, n=529), under
+             smartmoneyconcepts==0.0.27's definition
+    control  PRIMARY ladder rung 4 wins ZERO on all 24 observed rows; SECONDARY wins up to 259.
+             Both ladders reproduce T-0030's 529-setup denominator exactly.
+    B127     rr per row YES · adjacent identical rr 0 · MOVED (selection changed on 321 setups,
+             admission on 529) · one side of 50% YES · unobserved row (target 0.05) excluded BY NAME
+    verdict  REPORTABLE_OVER_A_SUBSET
+
+**THE `rr`-DERIVED BOUND THE PLAN ONCE DEMANDED REMAINS UNMEASURABLE AND NO TARGET WAS INVENTED**
+(`B127`): `rr` needs a target, nothing produces one, and a target proxy would set the denominator of
+the measured quantity.
+
+**TWO WARNINGS ON THAT FIGURE, both of which a reader will otherwise lose.** **(1) "Below 50%" passes
+by 0.3 percentage points — `259 of 521 = 49.71%`. Two more setups and it CROSSES and reports
+`TARGET_DEPENDENT`.** The count saturates at 257–259 across five rows, so it is a plateau against the
+boundary rather than a trend that stopped short; read it as *"reaches essentially half"*. **(2) The 50%
+boundary was pinned in `B127` for a FLAG FIRING RATE's noise-or-signal question and is reused here for
+a WIN RATE**, as `T-0029`'s plan directs. A pinned number reused across a change of quantity is this
+register's most repeated failure, so it is named rather than passed over. **Manager's call.**
+
+### TWO STALE STATEMENTS THIS TASK FOUND AND DID NOT EDIT
+
+* **`T-0029`'s plan bullet *"no rule module imports `services.ict`* — verified strictly, **the one
+  match** in `rules/` being a comment"* is now wrong in its parenthetical. **There are TWO matches at
+  `60addf1`:** `gate_027_stop_ladder.py:44` (the comment) and **`stop_ladder_corpus.py:1091`, a REAL
+  function-local import** inside `order_block_proxy_anchor()` (*"A PROXY. Never for selection."*),
+  added by `T-0030` after the bullet was written. **The CLAIM survives under the repo's operative
+  definition** — `NOT_RULES = {"__init__", "base", "consolidation", "stop_ladder_corpus"}` at
+  `tests/unit/test_rules_base.py:66`, and `stop_ladder_corpus.py` defines no rule class, only
+  dataclasses. **It is false under the naive reading "any file under `rules/`", so a seat re-running
+  the check as written reports a violation that is last cycle's approved work.** Correct form: **no NEW
+  import, and the existing one stays inside the proxy function.**
+* **`test_rules_base.py:299`'s docstring has three stale figures in one sentence** — *"29 `.py` in
+  `rules/` minus the three `NOT_RULES` exclusions at `test_rules_base.py:157`"*. Actually **33** files,
+  **four** exclusions, at line **66**; the derived *"26 modules in the guard's own domain"* is now 29.
+  **Not a behavioural defect — the test reads the set, not its own prose** — but it is a measured
+  figure that went stale silently, which is this register's subject. Left for the owning seat.
+
+Related: **`B129`** (the same producer-gap-as-empty-market shape, rung 2), **`B116`** and **`B125`**
+(implementation without producer, producer without consumer), **`B123`** (which already recorded
+`ict/detector.py:192` as behaviour no rule id authorises), **`B122`** and **`B140`**.
+
 ### B139 — an ADMINISTRATIVE force-close and a STRATEGY exit are the same row in `DecisionRecord`, and the feedback loop eats both
 
 **Found by the Manager 2026-08-17, immediately after Malek stopped the engine. Two rows of contaminated
