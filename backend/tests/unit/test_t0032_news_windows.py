@@ -21,6 +21,7 @@ cooldown and the tests say that instead.
 from __future__ import annotations
 
 import ast
+import re
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -39,23 +40,111 @@ from app.services.rules.gate_015_calendar_scope import (
 from app.services.telemetry import contract_loader as contract
 from app.services.telemetry.ny_time import NY
 
-#: THE POPULATION THIS TASK'S GUARDS ARE MEASURED OVER, ENUMERATED BY PATH.
-#:
-#: Not a glob. A directory pattern that silently stops matching is how a must-not-exist
-#: assertion goes vacuous in six months — and if a later seat adds `news_volatility.py`, this
-#: list either covers it or VISIBLY does not, which is the whole point.
-NEWS_MODULES: tuple[str, ...] = (
-    "app/services/rules/gate_012_news_blackout.py",
-    "app/services/rules/gate_015_calendar_scope.py",
-)
+BACKEND = Path(__file__).resolve().parents[2]
+
+
+def _news_modules() -> tuple[str, ...]:
+    """The population the volatility guard is measured over, DERIVED from three sources.
+
+    ## THE HAND-WRITTEN TUPLE WAS THE SEVENTH FINDING, AND ITS IRONY IS THE ARGUMENT
+
+    Cycle 2 derived the guard's POSITIONS and left its POPULATION a literal tuple whose
+    comment claimed a later seat adding `news_volatility.py` *"either covers it or VISIBLY
+    does not, which is the whole point."* **It did not. Review planted
+    `app/services/monitoring/news_resumption.py` containing a working numeric threshold and
+    145 tests passed silently.**
+
+    > **The guard exists to stop `GATE-014` being implemented — and a `GATE-014`
+    > implementation would live in `gate_014_*.py`, which the tuple excluded BY
+    > CONSTRUCTION.** GATE-012/013/016 are in one file and GATE-015 in another, so the one
+    > file the guard most needed to watch was the one file it could never contain.
+
+    **That is the same defect as the positions boundary, one layer up: a stated boundary
+    whose stated property does not hold.** So the population is derived too:
+
+        1. every module implementing a rule whose registry `layer` is `news`
+        2. every file under `app/` whose NAME contains "news"
+        3. every file under `app/` named `gate_01[2-6]*` — the news gates' own numbering,
+           which is what makes a future `gate_014_*.py` a MEMBER rather than an omission
+
+    **`assert path.exists()` in the guard already refuses a STALE entry; this is its missing
+    converse — a MISSING entry.** A new news module joins the population automatically, and
+    `test_the_watched_population_is_derived_not_asserted` fails by name if the two ever
+    disagree.
+
+    ## THE RESIDUE, STATED AS A PROPERTY RATHER THAN AS A GAP — AND THE DISTINCTION MATTERS
+
+    **NO DERIVATION CAN COVER A FILE THAT DOES NOT YET EXIST.** A `GATE-014` implementation
+    could be written into any new module under any name, and volatility maths legitimately
+    lives elsewhere in this codebase — `test_the_volatility_probe_finds_those_terms_where_
+    they_legitimately_exist` measures 84 `atr` identifiers outside the news modules. **So a
+    guard keyed on volatility vocabulary can never be both complete and quiet. An unbounded
+    population is unboundable, and that is a property of the problem rather than a defect in
+    this test.**
+
+    **THIS IS STATED AS FINISHED, NOT AS SOMETHING A LATER CYCLE SHOULD CLOSE** — and that is
+    the difference between this limit and the one at cycle 1, which claimed *"dynamic or
+    textual"* about six static bindings. **A limit whose reason does not hold invites the
+    next seat to trust it; a limit whose reason does hold tells them where to stop.**
+
+    ## WHOLE-TREE COVERAGE FOR THE *CLAIMED* CASE LIVES ELSEWHERE — AND NOT WHERE IT LOOKS
+
+    The obvious candidate is `assert "GATE-014" not in implemented_ids()`. **MEASURED, and it
+    is NOT whole-tree: `implemented_ids()` is IMPORT-BOUND.** `base.py:186`'s
+    `__init_subclass__` populates the map at CLASS-DEFINITION time, so the set describes the
+    IMPORT GRAPH rather than the codebase — which is a population too, just a less visible one
+    than this tuple ever was:
+
+        a claiming `RuleImplementation` planted and NOT imported
+          "GATE-014" in implemented_ids()   ->  False      the assertion PASSES
+        after importing it                  ->  True
+
+    **This register holds the mirror image at `T-0023`** — an `__init__.py` edit reverted while
+    fifty tests stayed green because test modules imported the rules directly. **Imports made
+    something look IMPLEMENTED there; here they make a claiming implementation look ABSENT.**
+
+    **The check that IS whole-tree is `scripts/check_rule_coverage.py:155`**, a filesystem glob
+    over `app/**/*.py` for `RULE_ID` assignments, compared against the registry. It caught the
+    planted implementation — exit 1 — while this file's own GATE-014 test passed.
+
+    > **So the division of labour is: the CLAIMED case is covered whole-tree by
+    > `check_rule_coverage.py`'s glob; the UNCLAIMED case — a mechanism built without its rule
+    > id — is covered by NOTHING ELSE, and that is this guard's whole job.** It is `B143`'s and
+    > `B133`'s shape and the most-repeated finding in this register: `TARGET-005` and
+    > `TARGET-006` were both fully built behind unclaimed ids. Review's first plant passed 145
+    > tests precisely because it claimed nothing.
+
+    **DO NOT RETIRE THE GLOB ON THE STRENGTH OF THE `implemented_ids()` ASSERTION.** They cover
+    different populations, and crediting the import-bound one with filesystem completeness would
+    delete the check that works while believing the other covers it.
+    """
+    from app.services.rules.base import implementations
+
+    news_ids = sorted(
+        rid for rid in contract.known_rule_ids()
+        if contract.rule(rid).get("layer") == "news"
+    )
+    impl = implementations()
+    found: set[str] = set()
+    for rid in news_ids:
+        cls = impl.get(rid)
+        if cls is not None:
+            found.add(cls.__module__.replace(".", "/") + ".py")
+
+    for path in (BACKEND / "app").rglob("*.py"):
+        rel = str(path.relative_to(BACKEND)).replace("\\", "/")
+        if "news" in path.name.lower() or re.match(r"gate_01[2-6]", path.name):
+            found.add(rel)
+    return tuple(sorted(found))
+
+
+#: Materialised once so the guard and its assertions read the same set.
+NEWS_MODULES: tuple[str, ...] = _news_modules()
 
 #: Identifiers that would betray an invented numeric volatility test. GATE-014: "The engine
 #: MUST NOT invent a numeric volatility test; it must expose the resumption decision as an
 #: explicit, logged state transition."
 VOLATILITY_TERMS: tuple[str, ...] = ("atr", "stdev", "percentile", "sigma", "zscore")
-
-BACKEND = Path(__file__).resolve().parents[2]
-
 
 def ev(
     minute_time: datetime, *, impact: str = "high", currency: str = "USD", eid: str = "e1"
@@ -248,6 +337,117 @@ def test_the_walker_does_not_fire_on_prose(term):
     )
 
 
+#: A GRAMMAR SAMPLE, because `backend/app` is a SAMPLE and not the language.
+#:
+#: Review's finding: the corpus exercises 13 of the surface's positions and Python has more.
+#: The WALKER covers them all — the field loop makes that true by construction — but the
+#: REGRESSION GUARD was short: rewrite the walk back to node types, omit `Nonlocal.names`,
+#: and the coverage test still passes because that position never occurs in `app/`.
+#:
+#: Measured here, absent from `backend/app` and present in the language:
+#:   MatchAs.name · MatchClass.kwd_attrs · MatchMapping.rest · MatchStar.name ·
+#:   Nonlocal.names · TypeVar.name
+#:
+#: Python 3.12 exposes no field TYPES at runtime — `__annotations__` is empty on all 132 node
+#: classes — so a corpus or a grammar sample is the only way to derive this surface at all,
+#: which is precisely why the sample's completeness is the thing that has to be guarded.
+GRAMMAR_SAMPLE: str = """
+match command:
+    case {"key": value, **rest_mapping}: pass
+    case Point(x=0, y=0): pass
+    case [first, *rest_star]: pass
+    case SomeName() as bound_alias: pass
+
+
+def outer():
+    shadowed = 1
+
+    def inner():
+        nonlocal shadowed
+        shadowed = 2
+
+
+def generic_fn[TeeVar](a: TeeVar) -> TeeVar:
+    return a
+"""
+
+#: `except*` cannot share a `try` with `except`, so it needs its own snippet.
+GRAMMAR_SAMPLE_STAR: str = """
+try:
+    pass
+except* ValueError as star_err:
+    raise
+"""
+
+
+def _grammar_surface() -> set[tuple[str, str]]:
+    """The surface of constructs the real corpus does not happen to contain."""
+    import tempfile
+
+    out: set[tuple[str, str]] = set()
+    with tempfile.TemporaryDirectory() as tmp:
+        for i, src in enumerate((GRAMMAR_SAMPLE, GRAMMAR_SAMPLE_STAR)):
+            path = Path(tmp) / f"grammar_{i}.py"
+            path.write_text(src, encoding="utf-8")
+            out |= _identifier_surface([path])
+    return out
+
+
+def test_the_watched_population_is_derived_not_asserted():
+    """THE SEVENTH FINDING — the positions were derived and the POPULATION was hand-written.
+
+    Review planted `app/services/monitoring/news_resumption.py` with a working numeric
+    threshold and 145 tests passed. **The tuple's own comment claimed a later seat adding
+    such a file would be VISIBLY uncovered. It was invisibly uncovered.**
+
+    And the irony is the argument: **a `GATE-014` implementation would live in
+    `gate_014_*.py`, which a two-entry tuple listing 012 and 015 excludes BY CONSTRUCTION.**
+    The one file the guard most needed to watch was the one it could never contain.
+
+    So this asserts the derivation against its three sources independently — if a news module
+    ever exists that the derivation misses, this fails NAMING it rather than the guard going
+    quietly narrow.
+    """
+    from app.services.rules.base import implementations
+
+    news_ids = sorted(
+        rid for rid in contract.known_rule_ids()
+        if contract.rule(rid).get("layer") == "news"
+    )
+    assert news_ids == ["GATE-012", "GATE-013", "GATE-014", "GATE-015", "GATE-016"], (
+        "the news layer changed; the population's first source is now different"
+    )
+
+    impl = implementations()
+    implementing = {
+        impl[rid].__module__.replace(".", "/") + ".py" for rid in news_ids if rid in impl
+    }
+    assert implementing <= set(NEWS_MODULES), (
+        f"a module implements a news rule and is not watched: {implementing - set(NEWS_MODULES)}"
+    )
+
+    by_name = {
+        str(p.relative_to(BACKEND)).replace("\\", "/")
+        for p in (BACKEND / "app").rglob("*.py")
+        if "news" in p.name.lower() or re.match(r"gate_01[2-6]", p.name)
+    }
+    assert by_name <= set(NEWS_MODULES), (
+        f"a news-named module is not watched: {by_name - set(NEWS_MODULES)}"
+    )
+    assert set(NEWS_MODULES) == implementing | by_name, (
+        "NEWS_MODULES has drifted from its derivation — it is computed, not typed, so this "
+        "can only mean the derivation changed under it"
+    )
+
+    # GATE-014 IS THE MEMBER THE OLD LIST WAS MISSING. Nothing implements it (that is the
+    # whole task), so this asserts the RULE that would catch it the moment something did.
+    assert "GATE-014" not in impl
+    assert re.match(r"gate_01[2-6]", "gate_014_exceptional_events.py"), (
+        "the naming rule must admit a future gate_014_*.py, or the guard is blind to exactly "
+        "the file it exists to watch"
+    )
+
+
 def test_the_walker_covers_the_measured_identifier_surface():
     """THE BOUNDARY IS DERIVED, NOT ENUMERATED — and that is the whole repair.
 
@@ -268,7 +468,11 @@ def test_the_walker_covers_the_measured_identifier_surface():
     corpus = sorted((BACKEND / "app").rglob("*.py"))
     assert len(corpus) > 100, "the surface must be derived from a non-trivial corpus"
 
-    surface = _identifier_surface(corpus)
+    # THE CORPUS IS A SAMPLE, NOT THE LANGUAGE — Review's second finding. Six positions exist
+    # in Python and never occur in `app/`, so a rewrite back to node types omitting any of
+    # them would pass this test on the corpus alone.
+    surface = _identifier_surface(corpus) | _grammar_surface()
+    assert ("Nonlocal", "names") in surface, "the grammar sample is not being unioned in"
     assert ("Constant", "value") in surface, "the declared exclusion must actually occur"
     assert ("AsyncFunctionDef", "name") in surface, (
         "the position that broke v2 must be present in the corpus, or this test cannot "
@@ -285,9 +489,14 @@ def test_the_walker_covers_the_measured_identifier_surface():
     )[1]
     assert ("AsyncFunctionDef", "name") in async_consumed
 
+    # The walker must be EXERCISED on the grammar sample too, not merely credited with it —
+    # `consumed` records what it actually read. Running it only over the corpus is what made
+    # this assertion pass while five positions of the language were never touched.
     consumed: set[tuple[str, str]] = set()
     for path in corpus:
         consumed |= _walk_identifiers(path.read_text(encoding="utf-8"))[1]
+    for src in (GRAMMAR_SAMPLE, GRAMMAR_SAMPLE_STAR):
+        consumed |= _walk_identifiers(src)[1]
 
     missed = surface - consumed - set(EXCLUDED_FIELDS)
     assert not missed, (
