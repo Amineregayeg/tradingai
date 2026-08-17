@@ -73,12 +73,34 @@ def at(h: int, m: int, d: int = 17) -> datetime:
 # GATE-014 — THE GUARD THAT REPLACES THE IMPLEMENTATION
 # ===========================================================================
 def _identifiers(source: str) -> list[str]:
-    """Every NAME an AST carries: variables, attributes, arguments, functions, classes.
+    """Every NAME-LIKE POSITION an AST carries — not merely every identifier node.
 
     ONE walker, used by the guard AND by the falsifiability tests below, so the tests
     exercise the code path the guard uses rather than a reconstruction of it. A second copy
-    here would be B140's middle layer — running your own rebuild and showing it as the
-    code's.
+    here would be B140's middle layer — running your own rebuild and showing it as the code's.
+
+    THE FIRST VERSION COVERED FOUR POSITIONS AND MISSED FOUR, AND THE INJECTION TESTS COULD
+    NOT SEE THE GAP — found by Review, which planted a real threshold config in a news module
+    and watched all 62 tests pass:
+
+        _VOL = {"atr_period": 14, "sigma_mult": 2.0}          <- dict STRING keys, BLIND
+        _measure(series, window=cfg["atr_period"])            <- keyword AT A CALL, BLIND
+
+    **Those are how a threshold actually gets configured** — arguably likelier than a bare
+    identifier. The must-fire control that proved the instrument itself worked was the same
+    smuggle with one term rewritten as a plain `Name`, which DID go red.
+
+    WHY THE PER-TERM FIX DID NOT REACH IT, which is the transferable half: every injection
+    planted its term as a `FunctionDef` name, so five injections proved the walker sees ONE
+    node type five times. **The per-TERM gap was closed and the per-POSITION gap was never
+    opened.** That is Review's own T-0028 narrowing one level up — `BinOp` without `Compare`,
+    where the control proved the walker saw arithmetic and nothing about whether arithmetic
+    covered *derives*. **A control validates the INSTRUMENT, never the VOCABULARY; an
+    injection validates the POSITION, never the positions.**
+
+    STRING CONSTANTS ARE INCLUDED ONLY IN NAME-LIKE POSITIONS — dict keys and annotations —
+    and never as bare values. Taking every string would fire on the docstrings these modules
+    use to FORBID the thing, which is the failure the AST approach exists to avoid.
     """
     names: list[str] = []
     for node in ast.walk(ast.parse(source)):
@@ -88,38 +110,149 @@ def _identifiers(source: str) -> list[str]:
             names.append(node.attr)
         elif isinstance(node, ast.arg):
             names.append(node.arg)
+            if isinstance(node.annotation, ast.Constant) and isinstance(
+                node.annotation.value, str
+            ):
+                names.append(node.annotation.value)
         elif isinstance(node, (ast.FunctionDef, ast.ClassDef)):
             names.append(node.name)
+        elif isinstance(node, ast.keyword) and node.arg:
+            # `f(atr_period=14)` and `@configure(atr_mult=2.0)` — a keyword at a CALL is an
+            # `ast.keyword`, not an `ast.arg`, and the two are easy to conflate by name.
+            names.append(node.arg)
+        elif isinstance(node, ast.Dict):
+            # `{"atr_period": 14}` — a dict key is a name-like position. Only KEYS, never
+            # values, so a message string cannot trip the guard.
+            for key in node.keys:
+                if isinstance(key, ast.Constant) and isinstance(key.value, str):
+                    names.append(key.value)
+        elif isinstance(node, ast.AnnAssign):
+            if isinstance(node.annotation, ast.Constant) and isinstance(
+                node.annotation.value, str
+            ):
+                names.append(node.annotation.value)
     return names
 
 
+#: The POSITIONS a forbidden term can occupy, as source templates taking one `{term}`.
+#:
+#: PARAMETRISED SO THE NEXT NARROWING CANNOT BE INVISIBLE. Injecting five terms into one
+#: position proves one node type five times; the cross product proves the walker's DOMAIN.
+#: Every entry below except the first four was BLIND before Review's finding.
+INJECTION_POSITIONS: dict[str, str] = {
+    "function_def_name": "def compute_{term}_threshold(series):\n    return series\n",
+    "plain_name": "{term}_period = 14\n",
+    "attribute": "cfg.{term}_period\n",
+    "def_arg": "def f({term}_period=14):\n    return {term}_period\n",
+    "keyword_at_call": "compute(series, {term}_period=14)\n",
+    "dict_string_key": '_VOL = {{"{term}_period": 14}}\n',
+    "decorator_keyword": "@configure({term}_mult=2.0)\ndef f():\n    pass\n",
+    "string_annotation": 'def f(x: "{term}_series") -> None:\n    pass\n',
+}
+
+#: POSITIONS THIS GUARD DOES **NOT** COVER, named so the table above cannot read as exhaustive.
+#:
+#: A table of shapes implies completeness exactly the way five terms implied it — which is the
+#: mistake that produced this whole finding. These are asserted as KNOWN-UNCOVERED below, so a
+#: later seat that closes one moves it up rather than discovering the hole the way Review did.
+#:
+#: All four are dynamic or textual: the term never appears in a name-like AST position, so no
+#: identifier walker can see it. Closing them needs a different instrument, not a wider walk.
+UNCOVERED_POSITIONS: dict[str, str] = {
+    "getattr_string": 'v = getattr(cfg, "{term}_period")\n',
+    "subscript_string": 'v = cfg["{term}_period"]\n',
+    "fstring_fragment": 'v = cfg[f"{{prefix}}_{term}"]\n',
+    "assembled_at_runtime": 'v = cfg["{term}"[:3] + "_period"]\n',
+}
+
+
+@pytest.mark.parametrize("position", sorted(INJECTION_POSITIONS))
 @pytest.mark.parametrize("term", VOLATILITY_TERMS)
-def test_the_volatility_walker_can_see_each_forbidden_term(term):
-    """PER-TERM FALSIFIABILITY, BY DEMONSTRATION RATHER THAN BY ARGUMENT.
+def test_the_volatility_walker_can_see_each_term_in_each_position(term, position):
+    """FALSIFIABILITY OVER THE CROSS PRODUCT — terms x POSITIONS, not terms alone.
 
-    The repo-wide control arm below can only exercise `atr` — it is the one forbidden term
-    that occurs as an identifier anywhere else in the tree. That left four terms whose
-    must-miss assertion nothing had shown could ever go red, and "falsifiable for one of
-    five" is a materially weaker guard than "falsifiable for five, occurring in the wild for
-    one".
+    The first version parametrised over terms and planted every one of them as a
+    `FunctionDef` name, so it proved the walker sees one node type five times while the
+    guard's real exposure is WHERE a threshold gets written. Review demonstrated the gap by
+    planting a working volatility config in a news module — `{"atr_period": 14}` plus
+    `window=cfg["atr_period"]` — and watching all 62 tests pass.
 
-    So each term is INJECTED into a synthetic module and the walker must find it. That
-    closes the gap directly: every one of the five can now be shown to turn the guard red,
-    and the repo-wide arm below is then a measurement of what exists rather than the only
-    evidence the instrument works.
+    So the domain is asserted rather than assumed. If a later seat narrows `_identifiers`,
+    this goes red in the specific position that was narrowed instead of silently covering
+    four positions and calling it five terms.
     """
-    planted = f"def compute_{term}_threshold(series):\n    return series\n"
+    planted = INJECTION_POSITIONS[position].format(term=term)
 
     assert any(term in n.lower() for n in _identifiers(planted)), (
-        f"the walker cannot see {term!r} even when it is planted as an identifier, so the "
-        "must-miss assertion for this term could never go red"
+        f"the walker cannot see {term!r} in position {position!r}, so a threshold written "
+        "that way would pass the guard silently — which is how it passed before"
     )
-    # And the same walker must NOT fire on a module that merely discusses the term in prose,
-    # which is exactly the shape of the news modules' own docstrings.
-    prose_only = f'"""This module must never compute {term}."""\nx = 1\n'
+
+
+@pytest.mark.parametrize("term", VOLATILITY_TERMS)
+def test_the_walker_does_not_fire_on_prose(term):
+    """The must-NOT-fire arm, and it is why the guard is an AST walk rather than a grep.
+
+    These modules discuss volatility at length in order to forbid it. A text probe would
+    fail on the prose that exists to prevent the thing — and a walker that took every string
+    constant would do the same, which is why string constants are admitted only in
+    NAME-LIKE positions (dict keys, annotations) and never as bare values.
+    """
+    prose_only = (
+        f'"""This module must never compute {term}."""\n'
+        f'MESSAGE = "do not use {term} here"\n'
+    )
     assert not any(term in n.lower() for n in _identifiers(prose_only)), (
-        f"the walker fires on {term!r} in a DOCSTRING, so the guard would fail on the prose "
-        "that exists to forbid the thing"
+        f"the walker fires on {term!r} in a docstring or a message string, so the guard "
+        "would fail on the prose that exists to forbid the thing"
+    )
+
+
+@pytest.mark.parametrize("position", sorted(UNCOVERED_POSITIONS))
+def test_the_guard_does_NOT_cover_these_positions_and_says_so(position):
+    """THE GUARD'S BOUNDARY, ASSERTED — because a shape table reads as exhaustive.
+
+    That is precisely how this finding happened: five terms in one position read as five
+    terms covered. So the positions the walker CANNOT see are named and pinned, and the
+    assertion is deliberately inverted — it goes red the day one becomes covered, which
+    forces the entry to move to `INJECTION_POSITIONS` rather than the coverage silently
+    growing without anyone noticing which cells changed.
+
+    ALL FOUR ARE DYNAMIC OR TEXTUAL. `cfg["atr_period"]` as a SUBSCRIPT is a bare string
+    VALUE, not a dict key or a keyword, and admitting bare strings would fire on the
+    docstrings these modules use to forbid the thing. **So this is a real limit of the
+    approach and not an oversight in the walk:** closing it needs a different instrument.
+    """
+    planted = UNCOVERED_POSITIONS[position].format(term="atr")
+
+    assert not any("atr" in n.lower() for n in _identifiers(planted)), (
+        f"{position!r} is now COVERED by the walker — good. Move it from "
+        "UNCOVERED_POSITIONS to INJECTION_POSITIONS so the guard's boundary stays stated "
+        "rather than drifting"
+    )
+
+
+def test_the_guard_catches_a_realistic_smuggled_threshold():
+    """THE MUST-FIRE ARM AT MODULE SCALE, and it is Review's fixture rather than mine.
+
+    A per-position injection proves the walker sees each position in isolation. This proves
+    the GUARD — the whole assemble-and-compare path — fires on a plausible violation written
+    the way someone would actually write it. It is the exact code Review planted in
+    `gate_012_news_blackout.py`, where 62 tests passed and none of the 8 volatility tests
+    noticed.
+    """
+    smuggled = (
+        '_VOL = {"atr_period": 14, "sigma_mult": 2.0, "percentile_cut": 95}\n'
+        "\n"
+        "def resume_when_calm(series, cfg=_VOL):\n"
+        '    """Decides resumption from a numeric threshold. GATE-014 forbids this."""\n'
+        '    return _measure(series, window=cfg["atr_period"], mult=cfg["sigma_mult"])\n'
+    )
+    names = _identifiers(smuggled)
+    caught = sorted({t for t in VOLATILITY_TERMS if any(t in n.lower() for n in names)})
+
+    assert caught == ["atr", "percentile", "sigma"], (
+        f"the guard must catch every forbidden term in a realistic threshold config: {names}"
     )
 
 
@@ -249,6 +382,10 @@ def test_his_constants_are_never_stamped_as_ours():
     ev_pre = PreEventBlackout.evaluate(at(9, 0), [])
     ev_post = PostEventBlackout.evaluate(at(9, 0), [])
     for record in (ev_pre.values, ev_post.values):
+        # `for key in record` passes trivially on an empty record. Review measured 8 and 12
+        # keys, so the loop has a real denominator TODAY — this makes it true by
+        # construction rather than by today's shape.
+        assert record, "an empty record would satisfy the loop below vacuously"
         for key in record:
             assert not key.endswith("_ratified"), (
                 f"{key} stamps a ratification flag on a news constant — these are HIS, "
@@ -415,31 +552,91 @@ def test_the_m15_term_binds_on_an_off_grid_release():
     assert (permitted - cooldown_end) == timedelta(minutes=14)
 
 
-def test_the_thirty_minute_term_binds_on_a_grid_release():
-    """THE CONVERSE, or the `max()` has only ever been tested on one of its arguments.
+def test_on_a_grid_release_the_two_terms_COINCIDE_rather_than_one_winning():
+    """~~THE CONVERSE~~ — STRUCK. There is no converse, and claiming one was the defect.
 
-    "The M15 close is an extra condition, not a substitute for the 30 minutes."
+    This test asserted `permitted == cooldown_end` and called it *"the 30 minutes must be
+    the term that bound"*. On a grid release the two terms are EQUAL, so
+    `permitted == m15_close` is equally true: **the assertion named a winner where there is
+    no contest.** Found by Review, which deleted the `max()` entirely and watched all 44
+    tests pass — including the one whose message read *"both arms must win somewhere or
+    max() is untested"*.
     """
     permitted, cooldown_end, m15_close, _ = first_permitted_entry_time(at(8, 30))
 
-    assert cooldown_end == at(9, 0) and m15_close == at(9, 0)
-    assert permitted == cooldown_end, "the 30 minutes must be the term that bound"
+    assert cooldown_end == m15_close == at(9, 0), "a grid release makes the terms COINCIDE"
+    assert permitted == cooldown_end and permitted == m15_close, (
+        "both equalities hold, which is why 'the 30 minutes bound' was never a finding"
+    )
 
 
-def test_both_arms_of_the_max_are_exercised_across_the_release_minutes():
-    """The generalisation, asserted rather than described: the M15 term binds on 56 of 60
-    release minutes and is inert on exactly the four grid minutes — which is where every
-    realistic macro release sits, and why the natural fixture proves nothing."""
-    bound = inert = 0
+def test_the_permitted_time_IS_the_m15_close_and_the_cooldown_is_a_floor_it_cannot_undercut():
+    """THE HONEST PROPERTY, replacing a `max()` whose first argument was unreachable.
+
+    `first_m15_close_at_or_after(moment)` returns `>= moment` on ALL THREE of its paths and
+    is called with `moment = cooldown_end`, so `m15_close >= cooldown_end` always. The
+    `max()` the registry's prose implies could never select its first argument, and the
+    Manager ruled it out: a `max()` over a comparison true by construction is noise, and its
+    own criterion — *both arms must win once* — was unsatisfiable.
+
+    MEASURED over 180 release times (60 minutes x 3 second-offsets): the M15 term strictly
+    wins 176, the two COINCIDE 4, the cooldown term strictly wins ZERO. So `56 / 4` was the
+    right pair of counts under the wrong label — strict wins and COINCIDENCES, not two arms
+    winning.
+
+    What replaces it is falsifiable: the permitted time IS the M15 close, and the cooldown is
+    a floor the ratchet can never fall below.
+    """
     for minute in range(60):
-        permitted, cooldown_end, _, _ = first_permitted_entry_time(at(8, minute))
-        if permitted > cooldown_end:
-            bound += 1
-        else:
-            inert += 1
+        for second in (0, 17, 59):
+            moment = at(8, minute).replace(second=second)
+            close, _ = first_m15_close_at_or_after(moment)
+            assert close >= moment, (
+                "the M15 lookup is no longer monotone in its argument, so max() has become "
+                "load-bearing on a path nothing exercises — re-read this whole test"
+            )
 
-    assert (bound, inert) == (56, 4)
-    assert bound > 0 and inert > 0, "both arms must win somewhere or max() is untested"
+    strict_m15 = coincide = below_floor = 0
+    for minute in range(60):
+        permitted, cooldown_end, m15_close, _ = first_permitted_entry_time(at(8, minute))
+        # THE PROPERTY, on every release minute: the answer IS the M15 close.
+        assert permitted == m15_close
+        if m15_close > cooldown_end:
+            strict_m15 += 1
+        elif m15_close == cooldown_end:
+            coincide += 1
+        else:                                        # pragma: no cover - unreachable today
+            below_floor += 1
+
+    assert (strict_m15, coincide, below_floor) == (56, 4, 0), (
+        "56 STRICT WINS and 4 COINCIDENCES — not 'both arms winning'. A non-zero third "
+        "count means the ratchet has fallen below its floor and the whole reading is wrong"
+    )
+
+
+def test_the_m15_close_is_measured_from_the_cooldown_end_not_from_the_release():
+    """THE CHANGE THAT WOULD MAKE `max()` LOAD-BEARING, pinned before it happens.
+
+    *"The first M15 close after the event"* is a plausible misreading of GATE-013, and under
+    it the M15 close could land BEFORE `release + 30` — at which point `max()` starts
+    deciding on a path nothing has ever exercised. Same shape as T-0025's 4R row going live
+    the moment T-0029 landed.
+
+    So the call site's argument is pinned. If a later task re-anchors it to the release, this
+    goes red and the seat is sent to the test above rather than discovering it in production.
+    """
+    release = at(8, 31)
+    _, cooldown_end, m15_close, _ = first_permitted_entry_time(release)
+
+    from_cooldown, _ = first_m15_close_at_or_after(cooldown_end)
+    from_release, _ = first_m15_close_at_or_after(release)
+
+    assert m15_close == from_cooldown == at(9, 15)
+    assert from_release == at(8, 45), "the misreading would permit entry 30 minutes early"
+    assert from_release < cooldown_end, (
+        "and it lands BEFORE the cooldown ends, which is exactly when max() would start to "
+        "decide — the reason this rule keeps max() rather than returning m15_close"
+    )
 
 
 def test_a_new_entry_is_blocked_until_the_first_permitted_time():
@@ -492,6 +689,45 @@ def test_the_unread_m15_series_is_reported_as_not_read_never_not_evaluable():
         at(9, 5), [ev(at(8, 31))], m15_closes=[at(9, 15)]
     )
     assert read.values["conditions"]["m15_series_read"] == "TRUE"
+
+
+def test_the_not_applicable_verdict_OVERLOADS_no_news_with_blocking_news():
+    """REVIEW'S FINDING 3, pinned as a property rather than left for whoever wires this up.
+
+    Routing an unreadable condition through `quorum_blocked` is the house convention and six
+    other rule modules do the same. **What is different here is that the exception has become
+    the only state:** no production path supplies an M15 series, so `NOT_APPLICABLE` is the
+    sole verdict `GATE-013` will ever emit in deployment.
+
+    The consequence is a collision, and it is total:
+
+        no events at all, no series          NOT_APPLICABLE   decision ALLOW
+        inside the post-window, no series    NOT_APPLICABLE   decision BLOCK
+
+    **Same verdict, opposite behaviour.** Anything reading verdicts cannot separate "no news"
+    from "news, inside the window, blocking" — so the blocking outcome exists only in
+    `decision` / `news_window_outcome`, and `news_window_outcome` has ZERO readers outside
+    the emitting module. Harmless while nothing under `live/` imports this; a trap for the
+    seat that wires it.
+
+    THE STRICTNESS IS NOT THE DEFECT AND IS NOT CHANGED. The grid can only permit entry
+    EARLIER than the truth, so BLOCK is the right default and refusing to assert an
+    unverified window is right. What needed narrowing was the CLAIM, and this is it.
+    """
+    quiet = PostEventBlackout.evaluate(at(9, 0), [])
+    blocking = PostEventBlackout.evaluate(at(9, 5), [ev(at(8, 31))])
+
+    assert quiet.verdict == blocking.verdict == "NOT_APPLICABLE"
+    assert quiet.values["decision"] == "ALLOW"
+    assert blocking.values["decision"] == "BLOCK"
+    assert blocking.values["news_window_outcome"] == "BLOCK"
+
+    # And FAIL is reachable ONLY when an observed series is supplied — which production never
+    # does. "Effective" and "effective in the fixtures" are different counts (B111's family).
+    with_series = PostEventBlackout.evaluate(
+        at(9, 5), [ev(at(8, 31))], m15_closes=[at(9, 15)]
+    )
+    assert with_series.verdict == "FAIL"
 
 
 def test_first_m15_close_is_not_a_resampler():

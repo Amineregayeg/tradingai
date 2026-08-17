@@ -149,13 +149,39 @@ def first_permitted_entry_time(
 
     Returns `(permitted, cooldown_end, m15_close, basis)` — all four, not just the answer,
     because *"the M15 close is an extra condition, not a substitute for the 30 minutes"* is
-    only checkable if both terms are visible. A record carrying the `max()` alone cannot show
-    which term won, and the whole failure mode of this rule is one term silently never
-    winning.
+    only checkable if both terms are visible in the record.
+
+    ## THE `max()` IS GONE, AND ITS ABSENCE IS LOAD-BEARING
+
+    The registry writes this as `max(release + 30min, first M15 close at or after
+    release + 30min)`, and the first version copied that literally. **The second argument is
+    computed FROM the first, and `first_m15_close_at_or_after` returns `>= moment` on all
+    three of its paths — so `m15_close >= cooldown_end` ALWAYS and the `max()` could never
+    select its first argument.** Review deleted it and all 44 tests passed, including the one
+    whose message read *"both arms must win somewhere or `max()` is untested"*. Measured over
+    180 release times: the M15 term strictly wins 176, the two COINCIDE 4, **and the cooldown
+    term strictly wins zero.**
+
+    **The Manager ruled it out because a `max()` over a comparison that is true by
+    construction is noise, and a criterion requiring both its arms to win is unsatisfiable.**
+    There is a second reason, which is why removing it is better than keeping it as
+    documentation:
+
+    > *"The first M15 close after the EVENT"* is a plausible misreading of GATE-013, and
+    > under it the close lands BEFORE `release + 30`. **With the `max()` present, that
+    > misreading is SILENTLY ABSORBED — the wrong anchor produces the right answer and
+    > nothing goes red. Without it, the same mistake changes behaviour visibly.** The `max()`
+    > was not protecting against that change; it was hiding it.
+
+    So the relationship is stated as what it is — **the M15 close is a RATCHET on the
+    cooldown, never a substitute for it** — and `test_the_m15_close_is_measured_from_the_
+    cooldown_end_not_from_the_release` pins the anchor that makes the ratchet hold.
     """
     cooldown_end = release_ny + timedelta(minutes=POST_EVENT_COOLDOWN_MINUTES)
+    # The ratchet: measured FROM the cooldown end, so it can only ever push later. Anchoring
+    # this to `release_ny` instead would permit entry up to 30 minutes early.
     m15_close, basis = first_m15_close_at_or_after(cooldown_end, m15_closes=m15_closes)
-    return max(cooldown_end, m15_close), cooldown_end, m15_close, basis
+    return m15_close, cooldown_end, m15_close, basis
 
 
 @dataclass(frozen=True)
@@ -336,8 +362,17 @@ class PostEventBlackout(RuleImplementation):
         "supplied, observed closes decide and the basis is OBSERVED_M15_SERIES; absent, the "
         "scheduled grid is used, the basis says so, and the condition reports NOT_READ "
         "naming the producer that exists — never NOT_EVALUABLE. Measured: the M15 term binds "
-        "on 56 of 60 release minutes and is inert on the four grid minutes, where every real "
-        "macro release sits. NOT WIRED into the live path."
+        "on 56 of 60 release minutes and COINCIDES with the cooldown on the four grid "
+        "minutes, where every real macro release sits; it can never fall below the cooldown, "
+        "so it is a RATCHET and there is no max(). "
+        "REACHES A VERDICT ONLY IN THE FIXTURES, AND THAT IS THE HONEST FIGURE: no "
+        "production path supplies an observed M15 series, so PASS/FAIL are reachable only "
+        "when a test hands one over and NOT_APPLICABLE is the sole verdict deployment will "
+        "ever see. That also OVERLOADS the verdict — 'no news at all' and 'inside the "
+        "window, blocking' are both NOT_APPLICABLE with opposite `decision` — so whatever "
+        "wires this must read `decision`/`news_window_outcome`, not the verdict. Pinned by "
+        "test_the_not_applicable_verdict_OVERLOADS_no_news_with_blocking_news. "
+        "NOT WIRED into the live path."
     )
 
     @classmethod
