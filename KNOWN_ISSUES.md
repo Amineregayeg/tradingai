@@ -2658,7 +2658,36 @@ precondition that could silently stop holding.**
 > the fix is `B47` — and doing it inside the entry that is about `B47` is how the family survives
 > being named.**
 
+## AMENDMENT — instance 4, and it is the one that fires most often: `grep -c` exits 1 on a count of zero
+
+**Found by Execute during T-0032's verification, where it snapped an `&&` chain mid-check. Verified
+here rather than taken on report:**
+
+    grep -c alpha probe.txt   ->  prints 1   exit 0
+    grep -c zzz   probe.txt   ->  prints 0   exit 1      <- a SUCCESSFUL count, reported as failure
+
+    grep -c zzz probe.txt >/dev/null && echo "STEP 2 RAN"
+      -> "STEP 2 RAN" never prints. Chain exit 1. Nothing says a step was skipped.
+
+**Counting zero occurrences IS a successful count.** `grep`'s exit status answers *"did you find
+anything?"*, the caller's `&&` reads it as *"did the command work?"*, and the two questions differ
+exactly at zero.
+
+> **And zero is the answer this register most often WANTS. Every must-not-exist check here is a
+> `grep -c` expecting `0` — removed headings, stale task references, forbidden identifiers, imports
+> under `live/`. So the single result that silently cancels the rest of the chain is the one that
+> means CLEAN.**
+
+**A verification that stops early looks identical to one that finished.** That is why this belongs
+with the other three rather than in a shell-tips note: **the artefact at the reading point — a clean
+`0` — is well-formed, and the steps that would have confirmed it never ran.**
+
 ## Fix
+
+**0. `grep -c … || true`, or `count=$(grep -c … || true)` — and never `grep -c` as a link in an
+`&&` chain.** Better: `count=$(grep -c … || echo 0)` so the variable is always set. **The general
+rule is the same one the three exit-status incidents today share: READ THE OUTPUT, NEVER THE STATUS,
+whenever zero is a legitimate answer.**
 
 **1. The watcher reports one of THREE things and only one is a verdict** — and the words *"this is
 not a pass"* belong in the other two, at the moment of absence, because the habit being interrupted
