@@ -2504,6 +2504,43 @@ conclusion.** Agreeing with the conclusion is what makes the wrong mechanism inv
 right about the conclusion. **The defect is publishing the mechanism at the same confidence as the
 conclusion**, when only one of them was tested.
 
+### THE WORST VARIANT: A READING DRESSED AS AN EXPERIMENT — Review, naming its own instance
+
+**Review did not merely read the code and describe it. It RECONSTRUCTED the mechanism in its own harness
+and published that harness's output as an observation of the real code.**
+
+    what it genuinely observed     res.verdict  and  opportunities
+    what it PRINTED as measured    a `measured` list it had rebuilt itself from
+                                   `rate_over_opportunities` — the code's own line used `r.rate`
+
+> **"My reading wearing the clothes of a measurement."** — and in its own words, **the most expensive
+> form, because it survives the question *"did you measure it?"*** **You did run something. Just not the
+> thing you are describing.**
+
+**Verified at both commits before this was filed, per this entry's own rule:**
+
+    0c1f32d   the ONLY `measured =` site, line 899:
+                  measured = [r.rate.rate for r in rows if r.rate.rate is not None]
+              and at 722-726 a DIFFERENT variable in a DIFFERENT scope:
+                  rates = [r.rate_over_opportunities.rate for r in self.rows if ...]
+              ^ grepping `measured` and reading the nearby match is how the two were conflated
+    d2f1cc7   measured = [ r.rate_over_opportunities.rate for r in rows if ... ]   <- cycle 2's fix
+
+**Why this variant needs naming separately: the ordinary form is caught by asking whether it was run.
+This one is not.** The defence is narrower — **the artefact you show must be the artefact the code
+produced, not one you assembled to the same specification.** A reconstruction is a hypothesis about the
+code with a table attached.
+
+**AND THE DEFECT IT WAS OBSCURING GETS ITS OWN SENTENCE, Review's:** *"a pinned criterion applied to an
+unpublished quantity is worse than a loosening — **it is a pin attached to nothing.**"* `B127`'s 50%
+governed the selections denominator while every published figure used the opportunity denominator.
+
+**Cycle 2 closes the real mechanism AND the predicted one, and they are different defects at different
+commits** — the predicted path only becomes live once `measured` reads `rate_over_opportunities`, which
+cycle 2 anticipated with the subset verdict rather than inheriting. **Established by reading the
+committed line at both shas rather than the diff, which is the only way to separate those two after the
+fact.**
+
 Related: **B92** (the same disease one layer down), **B122**, **B127**, and this register's
 default-failure section, whose fix 3 asks *"can you state the input that would make this fail"* — **for
 a mechanism claim, that input is the line at the sha.**
