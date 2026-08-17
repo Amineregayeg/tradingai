@@ -2441,6 +2441,68 @@ searched, at the moment of use** — not reused from a previous entry. **Prefer 
 task id and a nonce over a shared house token like `zzz_absent`**, because a shared one accumulates
 citations until it is present everywhere.
 
+### B142 — "SHADOW ONLY: nothing under `live/` imports it" is TRUE of every task and FALSE of the architecture — and `live/` imports ELEVEN rule modules
+
+**Found by Review 2026-08-17 pre-reviewing `T-0028`; verified independently by the Manager, who had
+asserted the false form to Malek twice.** **It changes what a phrase in seven verdicts has meant.**
+
+    grep -rhoE "app\.services\.rules\.[a-z0-9_]+" app/services/live/*.py | sort -u   ->  ELEVEN
+
+      evaluator             gate_002_disturbance   gate_008_roster
+      gate_023_timezone     gate_036_stand_aside
+      prim_001_swings       prim_002_imbalances    prim_003_liquidity
+      prim_004_sweeps       prim_005_breaks        prim_006_sr_flips
+
+    all eleven from ONE file: live/shadow.py
+    CONTROL must-hit   prim_001_swings imported at shadow.py:44 — a rule module that IS there
+    CONTROL must-miss  gate_027 / stop_ladder_corpus / gate_029 under live/  ->  0, as their
+                       verdicts claim
+
+#### Both halves separately, because only one of them was ever wrong
+
+    crypto_loop.py — the loop that PLACES ORDERS — imports NO rule module.
+      It trades via strategy_step -> services.ict, the pre-contract path.        TRUE.
+    live/shadow.py — the same directory — imports ELEVEN.                        SO live/ IS
+                                                                                A RULES CONSUMER.
+
+**The per-task claim is sound and was verified per task: `T-0025a`'s and `T-0030`'s modules are not
+under `live/`.** **What is false is the sentence's apparent scope.** *"Nothing under `live/` imports it"*
+reads as *"the rules layer is unwired"*, and eleven modules contradict that.
+
+> **The accurate form: THE NEW RULES ARE NOT WIRED. ELEVEN OLDER ONES ARE.**
+
+#### The Manager stated both sides hours apart and did not notice
+
+**`B137` reports `GATE-023`, `GATE-008`, `GATE-007` and `GATE-002` evaluating on 50 of 50 production
+records.** **Rules cannot evaluate in production without being wired.** Then, hours later, the same seat
+told Malek *"the live loop imports no rule module at all"* — **twice, as the reason a restart would not
+advance Salim's strategies.**
+
+**The conclusion it supported was still right** (a restart does not advance them, because the ORDER path
+is `services.ict`). **The stated reason was wrong.** `B140`'s shape: right conclusion, wrong mechanism —
+**and here the mechanism was contradicted by the seat's own entry filed the same night.**
+
+#### Why it matters beyond tidiness
+
+**Read across seven verdicts, "shadow only" implies a cutover is a bigger step than it is.** Eleven
+modules already run on live bars in production; the shadow IS the rules layer executing. **A reader
+budgeting the cutover from those verdicts would over-estimate what remains and mis-locate the risk** —
+the risk is not "nothing is connected", it is "eleven things are connected and eleven more are not, and
+the boundary is one import line wide."
+
+**And it makes the per-task criterion MORE meaningful, not less** — Review's point. *"Nothing under
+`live/` may import these"* is a live constraint **precisely because the boundary is porous.** A
+criterion forbidding a crossing in a directory where eleven crossings already exist is doing work; the
+same criterion on a sealed directory would be decoration.
+
+**REQUIREMENT for future verdicts and plans: write the scope, not the slogan.** *"`T-00NN`'s modules are
+not imported under `live/`; eleven older rule modules are"* — and **the check needs a must-hit arm from
+the eleven**, because a grep for an absent module returns empty whether the module is absent or the grep
+is wrong.
+
+Related: **B125** (a claim true of the thing measured, false of the thing it appears to describe),
+**B140**, **B137**.
+
 ### B140 — a claim about code derived from READING it rather than RUNNING it: right conclusion, wrong mechanism, three seats in one day — and the fix for a misdiagnosed mechanism LOOKS correct
 
 **Named by Execute 2026-08-17 while fixing `T-0030` cycle 2, and filed because it is the generalisation
