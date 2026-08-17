@@ -2542,6 +2542,41 @@ wrong path, not a clean result: the directory is `app/services/live/`. Re-run at
 `live/shadow.py:46` imports `PRIM-003` — **the module this task edited.** The notes now say the
 narrower true thing: **the edit is INERT on the live path, not absent from it.**
 
+#### 6. AMENDED after Review widened its instrument — the episode maximum is discharged at the WRONG LAYER
+
+**Review's structural check reported `target_005_clearance.py` as containing ZERO arithmetic BinOps,
+with a working control arm (`prim_004_sweeps.py` = 12), and concluded the conformance modules cannot
+be recomputing what they assert.** Execute refused the clean result and told Review the term did not
+cover the concept. **Widened, it came back non-zero:**
+
+    module                        BinOp   Compare   agg calls
+    target_005_clearance.py           0        17           7      <- max() at :255
+    target_006_equals_ranking.py      2        17           4
+    prim_004_sweeps.py               13        23           6      <- CONTROL
+
+**`B141` inside a tool rather than inside a grep: the instrument ran, the control proved it
+discriminated, and the TERM did not cover the CONCEPT.** `episode_class_disagrees` classifies by
+`Compare` and aggregates by `Call` — **neither is a `BinOp`, so a module could derive a full
+classification and score zero.** Review then found a SECOND narrowing nobody had flagged: its walker
+covered `Div/Mult/Sub` and excluded `Add`, so 2 real BinOps in `target_006` had also read as zero.
+**Both turned out to be string concatenation at :354 — so the original conclusion held FOR THE WRONG
+REASON, which is the outcome that leaves an instrument un-fixed.**
+
+**THE SUBSTANTIVE FINDING UNDERNEATH, and it is Review's:**
+
+    PRIM-004, grep "episode"    NOTHING — the producer emits no episode concept at all
+    TARGET-005:253             episode_max_pct = max(EMITTED per-excursion pcts)
+    TARGET-005:294             emits penetration_pct_per_bar_max AND penetration_pct_episode_max
+
+**The registry requirement is SATISFIED — both maxima are emitted, and `max()` aggregates emitted
+values rather than recomputing them, so this is NOT the two-homes trap.** But it is **discharged at
+the CONFORMANCE layer because the producer has no episode concept**: *the rule that READS is doing
+the aggregation the rule that MEASURES should own.* **An episode is a `PRIM-004`-level object — the
+excursions of one pool — so the natural home for its maximum is `PRIM-004`, and the honest fix is a
+producer extension exactly like the `PRIM-003` one in §2.** NOT FIXED, not this task's, and recorded
+here rather than left in the bus. The derived class **decides nothing**: reported, never enforced, no
+verdict branches on it.
+
 ### B142 — "SHADOW ONLY: nothing under `live/` imports it" is TRUE of every task and FALSE of the architecture — and `live/` imports ELEVEN rule modules
 
 **Found by Review 2026-08-17 pre-reviewing `T-0028`; verified independently by the Manager, who had
