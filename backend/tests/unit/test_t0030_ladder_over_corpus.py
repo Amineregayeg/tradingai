@@ -380,11 +380,14 @@ def test_the_sweep_reports_inert_when_nothing_moves_between_adjacent_rows():
     would return REPORTABLE — which is the exact laundering B127 requirement 6 was written
     for and requirement 7 closed.
     """
-    # A single-rung ladder at cushion 25, swept from 10 to 100. Below R = 50 nothing clears
-    # 2R, so the first four rows have no selection and no rr at all — four different targets
-    # producing one identical experiment. Above it the rate is flat at 0.0. The whole table
-    # is on one side of 50% and would read REPORTABLE under the second pin.
-    corpus = [_setup_with([25.0], index=i, distances=(10.0, 100.0)) for i in range(10)]
+    # A TWO-rung ladder at cushions 40 and 20, swept from 5 to 200. Below R = 40 nothing
+    # clears 2R, so the first rows have no selection and no rr at all — different targets
+    # producing one identical experiment. Above R = 80 both rungs are accepted, so the flag
+    # HAD opportunities to fire and did not: this arm must fail on INERTNESS, not on the
+    # opportunity gate, and the opportunity assertion below is what keeps the two apart.
+    #
+    # A single-rung version of this corpus is UNREACHABLE instead, which is the next test.
+    corpus = [_setup_with([40.0, 20.0], index=i, distances=(5.0, 200.0)) for i in range(10)]
     result = target_sensitivity_sweep(corpus, flag="TIGHTER_THAN_NECESSARY", steps=8)
     rates = [r.rate.rate for r in result.rows if r.rate.rate is not None]
     assert rates and len(set(rates)) == 1, "the measured rows are perfectly flat"
@@ -392,6 +395,10 @@ def test_the_sweep_reports_inert_when_nothing_moves_between_adjacent_rows():
         "and they are all on ONE SIDE of 50%, which is what would have passed"
     )
     assert result.duplicate_adjacent_rows, "the duplicate adjacent rows must be reported"
+    assert sum(r.opportunities for r in result.rows) > 0, (
+        "this arm must reach the INERTNESS test — a corpus with zero opportunities would be "
+        "refused one branch earlier and would prove something else"
+    )
     assert result.verdict == "INERT", (
         "a flat rate from a sweep that could not move must NOT be reportable"
     )
@@ -647,3 +654,95 @@ def test_both_halves_of_the_extraction_choice_are_declared_not_just_one():
         "the declaration records the measured consequence — omitting at_price makes n equal "
         "the window count by construction"
     )
+
+
+def test_a_flag_that_never_had_two_survivors_reports_unreachable_not_zero_percent():
+    """REVIEW'S FINDING, AND IT IS THE DENOMINATOR RATHER THAN THE RATE.
+
+    `TIGHTER_THAN_NECESSARY` fires when something tighter is chosen over something wider that
+    ALSO cleared 2R, so it needs TWO accepted candidates to fire at all. A rate over
+    SELECTIONS cannot distinguish:
+
+        no selection ever had two survivors   -> 0% is VACUOUS, the flag could not fire
+        a third of them did and none fired    -> 0% is a FINDING about the flag
+
+    **Both print 0%, both sit on one side of 50%, and both passed every pin.** The report said
+    "accepted-per-selection runs 1.00-1.34" — a MEAN, which is compatible with either.
+
+    This is `1b-iv`'s report-both-units rule one level over: FIRINGS and OPPORTUNITIES, the
+    way the monotonicity rate already reports PAIRS and SETUPS.
+
+    FAILING INPUT: count opportunities as `setups_with_a_selection` instead of "selections
+    with >= 2 accepted". The single-rung corpus below then reports REPORTABLE at 0%, which is
+    exactly the vacuous answer this gate exists to refuse.
+    """
+    single_rung = [_setup_with([25.0], index=i, distances=(10.0, 100.0)) for i in range(10)]
+    result = target_sensitivity_sweep(single_rung, flag="TIGHTER_THAN_NECESSARY", steps=8)
+
+    rates = [r.rate.rate for r in result.rows if r.rate.rate is not None]
+    assert rates and all(r == 0.0 for r in rates), (
+        "the rate over SELECTIONS is a flat 0% — the flattering, uninterpretable answer"
+    )
+    assert sum(r.opportunities for r in result.rows) == 0, (
+        "and no selection anywhere had two accepted candidates"
+    )
+    assert result.verdict == "UNREACHABLE"
+    assert "could not have fired" in result.reason
+    assert "UNMEASURED" in result.figure_name()
+
+    # THE MUST-NOT-FIRE ARM. Without it, a gate hardwired to UNREACHABLE would pass above and
+    # would silently suppress every real result in the task.
+    two_rung = [
+        _setup_with([60.0, 30.0, 10.0], index=i, distances=(20.0, 120.0)) for i in range(10)
+    ]
+    other = target_sensitivity_sweep(two_rung, flag="TIGHTER_THAN_NECESSARY", steps=9)
+    assert sum(r.opportunities for r in other.rows) > 0
+    assert other.verdict == "REPORTABLE", (
+        "a corpus that DID give the flag opportunities must still be reportable"
+    )
+    assert "SELECTIONS WITH >= 2 ACCEPTED CANDIDATES" in other.figure_name(), (
+        "the reportable figure must name the OPPORTUNITY denominator, not the selection one"
+    )
+
+
+def test_no_firing_rate_can_exceed_one_hundred_percent():
+    """THE INVARIANT THAT CAUGHT MY OWN FIX, promoted from "a reader noticed" to a test.
+
+    Adding the opportunity denominator, I applied GATE-030's — "selections with >= 2 ACCEPTED
+    candidates" — to ALL THREE flags. GATE-029 and GATE-031 read `selected_stop.rr` alone and
+    fire on a single accepted candidate, so their numerator counted firings the denominator
+    excluded: `RR_ABOVE_ACCEPTABLE_BAND` reported a firing rate of **1425%**.
+
+    An impossible rate is the cheapest failure there is, and it was caught by reading the
+    figure rather than by anything mechanical. That is the gap this closes.
+
+    FAILING INPUT: set every entry of `MIN_ACCEPTED_TO_FIRE` to 2. The two single-candidate
+    flags then divide by a subset of their own numerator and this fails on the first of them.
+    """
+    from app.services.rules.stop_ladder_corpus import MIN_ACCEPTED_TO_FIRE
+
+    corpus = [
+        _setup_with([60.0, 30.0, 10.0], index=i, distances=(20.0, 200.0)) for i in range(12)
+    ]
+    saw_a_nonzero_rate = False
+    for flag in MIN_ACCEPTED_TO_FIRE:
+        result = target_sensitivity_sweep(corpus, flag=flag, steps=9)
+        for row in result.rows:
+            for interval in (row.rate, row.rate_over_opportunities):
+                assert interval.successes <= interval.trials, (
+                    f"{flag} at reward {row.reward:.2f}: fired {interval.successes} of "
+                    f"{interval.trials} — a numerator outside its own denominator"
+                )
+                if interval.rate is not None:
+                    assert 0.0 <= interval.rate <= 1.0, f"{flag}: rate {interval.rate}"
+                    saw_a_nonzero_rate |= interval.rate > 0.0
+    assert saw_a_nonzero_rate, (
+        "CONTROL: at least one flag must actually fire somewhere in this corpus, or the "
+        "bound above holds vacuously and would pass a numerator that is always zero"
+    )
+
+    assert MIN_ACCEPTED_TO_FIRE["TIGHTER_THAN_NECESSARY"] == 2, (
+        "GATE-030 needs a WIDER accepted candidate to have been passed over"
+    )
+    assert MIN_ACCEPTED_TO_FIRE["DEGENERATE_RUNNER"] == 1
+    assert MIN_ACCEPTED_TO_FIRE["RR_ABOVE_ACCEPTABLE_BAND"] == 1

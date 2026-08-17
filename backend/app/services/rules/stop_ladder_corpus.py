@@ -421,7 +421,36 @@ def extract_setups(
     return out
 
 
-def distinct_setups(setups: Sequence[Setup]) -> list[Setup]:
+#: OURS. Unratified. THE THIRD FREE AXIS ON THIS MEASUREMENT, and the one whose uncertainty
+#: the 95% interval does NOT cover.
+#:
+#: A Wilson interval quantifies SAMPLING uncertainty from `n`. It says nothing about
+#: DEFINITIONAL uncertainty, and the definition is ours: `setup_in_play` holds on many
+#: consecutive bars, so which of them counts as "the setup" is a choice. Three are
+#: defensible — the FIRST bar a POI is selected on, the LAST, or every qualifying bar with no
+#: deduplication at all.
+#:
+#: FIRST is operative because a setup is first decidable when it first appears; the engine
+#: holds no information at the last bar that it lacked at the first. **The inversion rate is
+#: reported under all three**, so the definitional axis is measured rather than assumed —
+#: Review's finding, and the reason is that the decision this rate feeds is whether the
+#: interval clears 10%, which a sampling-only interval cannot establish on its own.
+DECLARED_SETUP_DEDUP = DeclaredEngineering(
+    name="setup_deduplication_rule",
+    value="FIRST_SELECTION",
+    authority="ENGINEERING — this engine, T-0030. Not ratified by Salim.",
+    source=(
+        "setup_in_play holds on consecutive bars sharing one imbalance and one break, so "
+        "the bar that counts as the setup is a choice. FIRST is declared because a setup is "
+        "first decidable when it first appears. The inversion rate is reported under FIRST, "
+        "LAST and NONE so the definitional uncertainty is visible beside the sampling "
+        "interval, which does not cover it."
+    ),
+    competing="LAST_SELECTION, or NONE (every qualifying decision bar counts)",
+)
+
+
+def distinct_setups(setups: Sequence[Setup], *, keep: str = "FIRST") -> list[Setup]:
     """Deduplicated by the ENGINE'S OWN object identity: the selected `imbalance_id`.
 
     DECISION BARS ARE NOT SETUPS. Consecutive bars re-select the same POI, so counting bars
@@ -430,14 +459,18 @@ def distinct_setups(setups: Sequence[Setup]) -> list[Setup]:
     `len()` at the call site. The first bar at which a POI is selected is kept, because a
     setup is first decidable when it first appears.
     """
-    seen: set[str] = set()
-    out: list[Setup] = []
+    if keep == "NONE":
+        # No deduplication: every qualifying decision bar counts. Reported as one arm of the
+        # definitional sweep, never as the headline — it counts BARS wearing the word SETUPS.
+        return list(setups)
+    if keep not in ("FIRST", "LAST"):
+        raise ValueError(f"keep must be FIRST, LAST or NONE, got {keep!r}")
+    chosen: dict[str, Setup] = {}
     for setup in setups:
-        if setup.imbalance_id in seen:
+        if keep == "FIRST" and setup.imbalance_id in chosen:
             continue
-        seen.add(setup.imbalance_id)
-        out.append(setup)
-    return out
+        chosen[setup.imbalance_id] = setup
+    return list(chosen.values())
 
 
 @dataclass(frozen=True)
@@ -559,6 +592,24 @@ def inversion_report(
 #: number to move: disagreement argues with the 50% in a new pinned commit.
 FLATNESS_THRESHOLD: float = 0.5
 
+#: WHAT COUNTS AS AN OPPORTUNITY IS A PROPERTY OF THE FLAG, NOT OF THE SWEEP.
+#:
+#: `TIGHTER_THAN_NECESSARY` fires only when something tighter was chosen over something wider
+#: THAT ALSO CLEARED 2R, so it needs >= 2 ACCEPTED candidates before it can fire at all. The
+#: other two read `selected_stop.rr` alone and can fire on a single accepted candidate, so
+#: every selection is an opportunity for them.
+#:
+#: THIS TABLE EXISTS BECAUSE THE FIRST VERSION DID NOT HAVE IT and applied GATE-030's
+#: denominator to all three — which made `RR_ABOVE_ACCEPTABLE_BAND` report a firing rate of
+#: 1425%. An impossible rate is the cheapest possible failure and it was caught by reading
+#: the figure; `test_no_firing_rate_can_exceed_one_hundred_percent` makes it a test rather
+#: than something a reader has to notice.
+MIN_ACCEPTED_TO_FIRE: dict[str, int] = {
+    "TIGHTER_THAN_NECESSARY": 2,
+    "DEGENERATE_RUNNER": 1,
+    "RR_ABOVE_ACCEPTABLE_BAND": 1,
+}
+
 
 @dataclass(frozen=True)
 class SweepRow:
@@ -573,8 +624,36 @@ class SweepRow:
     min_selected_rr: float | None
     max_selected_rr: float | None
     accepted_candidates: int
+    #: THE FLAG'S OPPORTUNITY DENOMINATOR, and it is not the same as `setups_with_a_selection`.
+    #:
+    #: `TIGHTER_THAN_NECESSARY` fires when something tighter was chosen over something wider
+    #: THAT ALSO CLEARED 2R, so it needs at least TWO accepted candidates to have any chance
+    #: of firing at all. A rate over selections cannot distinguish "no selection ever had two
+    #: survivors, so 0% is vacuous" from "a third of them did and it still never fired, which
+    #: is a finding" — and `accepted_candidates` is a SUM, so the per-selection MEAN it
+    #: implies is compatible with both. Review found this; it is `1b-iv`'s report-both-units
+    #: rule one level over, FIRINGS and OPPORTUNITIES rather than PAIRS and SETUPS.
+    opportunities: int
     #: Which rung won, per setup. A sweep in which this never changes moved nothing.
     selected_rungs: tuple[int, ...]
+
+    #: How many accepted candidates this row's flag needs before it can fire. Carried so the
+    #: denominator can NAME itself rather than assuming every flag has the same one.
+    min_accepted_to_fire: int = 1
+
+    @property
+    def rate_over_opportunities(self) -> Interval:
+        """The firing rate over selections that COULD have fired. The honest denominator."""
+        unit = (
+            f"SELECTIONS with >= {self.min_accepted_to_fire} ACCEPTED candidates"
+            if self.min_accepted_to_fire > 1
+            else "SELECTIONS with a selected stop (any selection can fire this flag)"
+        )
+        return Interval(
+            successes=self.fired, trials=self.opportunities,
+            numerator_unit="SELECTIONS where the flag fired",
+            denominator_unit=unit,
+        )
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -585,6 +664,8 @@ class SweepRow:
             "min_selected_rr": self.min_selected_rr,
             "max_selected_rr": self.max_selected_rr,
             "accepted_candidates": self.accepted_candidates,
+            "opportunities": self.opportunities,
+            "rate_over_opportunities": self.rate_over_opportunities.as_dict(),
         }
 
 
@@ -614,7 +695,7 @@ class SweepResult:
     reward_min: float
     reward_max: float
     range_derivation: str
-    verdict: Literal["REPORTABLE", "TARGET_DEPENDENT", "INERT", "EMPTY"]
+    verdict: Literal["REPORTABLE", "TARGET_DEPENDENT", "INERT", "UNREACHABLE", "EMPTY"]
     reason: str
     #: What moved, so a reader can check the sweep was live rather than trust that it was.
     rr_span: tuple[float, float] | None
@@ -636,18 +717,26 @@ class SweepResult:
             return (
                 f"{self.flag}: UNMEASURED ({self.verdict}) — {self.reason}"
             )
-        rates = [r.rate.rate for r in self.rows if r.rate.rate is not None]
+        # THE DENOMINATOR IN THE NAME IS THE OPPORTUNITY ONE, not the selection one. A rate
+        # over selections includes selections the flag could never have fired on, which is
+        # the difference between "never fired" and "never could have".
+        rates = [
+            r.rate_over_opportunities.rate for r in self.rows
+            if r.rate_over_opportunities.rate is not None
+        ]
+        total = sum(r.opportunities for r in self.rows)
         return (
             f"across targets in [{self.reward_min:.2f}, {self.reward_max:.2f}] price units "
-            f"from entry, {self.flag} fires on {min(rates):.1%}-{max(rates):.1%} of setups "
-            f"with a selected stop"
+            f"from entry, {self.flag} fires on {min(rates):.1%}-{max(rates):.1%} of "
+            f"{self.rows[0].rate_over_opportunities.denominator_unit.upper()} "
+            f"({total} such selections across the sweep)"
         )
 
     def table_text(self) -> str:
         lines = [
             f"{self.flag} firing rate vs target reward (price units from entry)",
             f"  range [{self.reward_min:.2f}, {self.reward_max:.2f}] — {self.range_derivation}",
-            "   reward   fired /  sel     rate        95% CI        rr min-max   accepted",
+            "   reward   fired /  sel     rate        95% CI        rr min-max   accepted  OPPTY",
         ]
         for row in self.rows:
             interval = row.rate.wilson
@@ -661,7 +750,7 @@ class SweepResult:
             )
             lines.append(
                 f"  {row.reward:8.2f} {row.fired:5d} / {row.setups_with_a_selection:4d}"
-                f"  {rate}{ci}{rr}  {row.accepted_candidates:6d}"
+                f"  {rate}{ci}{rr}  {row.accepted_candidates:6d} {row.opportunities:6d}"
             )
         lines.append(
             f"  MOVED: rr span {self.rr_span}, selection changed on "
@@ -725,6 +814,8 @@ def target_sensitivity_sweep(
     re-derivation here could disagree with the engine, and the sweep would then be a
     measurement of this function.
     """
+    if flag not in MIN_ACCEPTED_TO_FIRE:
+        raise ValueError(f"unknown flag {flag!r}")
     low, high = reward_range if reward_range is not None else observed_target_range(setups)
     derivation = (
         "min and max distance from entry to a candidate objective — unresolved liquidity "
@@ -749,6 +840,7 @@ def target_sensitivity_sweep(
         fired = 0
         selections = 0
         accepted_total = 0
+        opportunities = 0
         rrs: list[float] = []
         rungs: list[int] = []
         for index, setup in enumerate(setups):
@@ -769,6 +861,8 @@ def target_sensitivity_sweep(
             if selected is None:
                 continue
             selections += 1
+            if sum(1 for c in table if c.accepted) >= MIN_ACCEPTED_TO_FIRE[flag]:
+                opportunities += 1
             selection_history.setdefault(index, set()).add(selected.rung)
             rungs.append(selected.rung)
             if selected.rr is not None:
@@ -794,6 +888,8 @@ def target_sensitivity_sweep(
             min_selected_rr=min(rrs) if rrs else None,
             max_selected_rr=max(rrs) if rrs else None,
             accepted_candidates=accepted_total,
+            opportunities=opportunities,
+            min_accepted_to_fire=MIN_ACCEPTED_TO_FIRE[flag],
             selected_rungs=tuple(rungs),
         ))
 
@@ -801,6 +897,7 @@ def target_sensitivity_sweep(
     admission_changed = sum(1 for v in admission_history.values() if len(v) > 1)
     rr_span = (min(all_rrs), max(all_rrs)) if all_rrs else None
     measured = [r.rate.rate for r in rows if r.rate.rate is not None]
+    total_opportunities = sum(r.opportunities for r in rows)
 
     # B127 REQUIREMENT 7, THE THIRD PIN: `rr` must DIFFER between every adjacent pair of
     # rows. Requirement 6 asked whether the sweep moved SOMEWHERE, which lets an active
@@ -818,8 +915,25 @@ def target_sensitivity_sweep(
     # INERTNESS IS CHECKED BEFORE FLATNESS, because a flat line from a sweep that could not
     # move is indistinguishable from robustness and reads as the flattering answer.
     if not measured:
-        verdict: Literal["REPORTABLE", "TARGET_DEPENDENT", "INERT", "EMPTY"] = "EMPTY"
+        verdict: Literal["REPORTABLE", "TARGET_DEPENDENT", "INERT", "UNREACHABLE", "EMPTY"] = "EMPTY"
         reason = "no row produced a selection, so there is no rate to judge"
+    elif total_opportunities == 0:
+        # REVIEW'S FINDING, AND IT IS A STRICTER GATE RATHER THAN A MOVED THRESHOLD.
+        #
+        # The flag needs TWO accepted candidates to fire at all. If no selection anywhere in
+        # the range ever had two, the rate is 0% BY CONSTRUCTION and says nothing about the
+        # flag — it is the vacuous twin of a genuinely robust 0%, and the two print
+        # identically. This is B127's own "flat because inert" hazard one level down, in the
+        # DENOMINATOR rather than in the sweep.
+        #
+        # IT CANNOT MANUFACTURE A FAVOURABLE RESULT: adding it can only turn REPORTABLE into
+        # UNMEASURED, never the reverse, and the pinned 50% is untouched.
+        verdict = "UNREACHABLE"
+        reason = (
+            "no selection anywhere in the range had two or more ACCEPTED candidates, so "
+            f"{flag} could not have fired at any target. The 0% is a property of the corpus "
+            "and not a measurement of the flag"
+        )
     elif duplicate_adjacent:
         verdict = "INERT"
         reason = (
@@ -839,16 +953,18 @@ def target_sensitivity_sweep(
     elif all(r < FLATNESS_THRESHOLD for r in measured):
         verdict = "REPORTABLE"
         reason = (
-            f"every row sits below {FLATNESS_THRESHOLD:.0%} (max {max(measured):.1%}) and "
-            f"the sweep moved: admission changed on {admission_changed} setups, selection "
-            f"on {selection_changed}"
+            f"every row sits below {FLATNESS_THRESHOLD:.0%} (max {max(measured):.1%}) over "
+            f"{total_opportunities} SELECTIONS WITH >= 2 ACCEPTED CANDIDATES, and the sweep "
+            f"moved: admission changed on {admission_changed} setups, selection on "
+            f"{selection_changed}"
         )
     elif all(r > FLATNESS_THRESHOLD for r in measured):
         verdict = "REPORTABLE"
         reason = (
-            f"every row sits above {FLATNESS_THRESHOLD:.0%} (min {min(measured):.1%}) and "
-            f"the sweep moved: admission changed on {admission_changed} setups, selection "
-            f"on {selection_changed}"
+            f"every row sits above {FLATNESS_THRESHOLD:.0%} (min {min(measured):.1%}) over "
+            f"{total_opportunities} SELECTIONS WITH >= 2 ACCEPTED CANDIDATES, and the sweep "
+            f"moved: admission changed on {admission_changed} setups, selection on "
+            f"{selection_changed}"
         )
     else:
         verdict = "TARGET_DEPENDENT"
