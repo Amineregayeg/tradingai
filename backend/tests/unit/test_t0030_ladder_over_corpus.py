@@ -420,10 +420,14 @@ def test_a_reportable_sweep_must_have_moved_and_carries_its_range_in_the_figure_
     # enter the accepted set as the target grows — and the widest accepted candidate is
     # always the one nearest 3R, so the flag never fires and the rate is flat at 0% on ONE
     # SIDE of 50%. This is the genuinely-robust case, and it must come out REPORTABLE.
+    # The range starts at 60 = 2 x the middle cushion, so EVERY row admits two candidates and
+    # the flag is observable on all of them. Starting at 20 leaves four unobservable rows and
+    # correctly returns REPORTABLE_OVER_A_SUBSET — which is a different claim.
     corpus = [
-        _setup_with([60.0, 30.0, 10.0], index=i, distances=(20.0, 120.0)) for i in range(10)
+        _setup_with([60.0, 30.0, 10.0], index=i, distances=(60.0, 200.0)) for i in range(10)
     ]
     result = target_sensitivity_sweep(corpus, flag="TIGHTER_THAN_NECESSARY", steps=9)
+    assert not result.unobservable_rows, "every row must be observable for a plain REPORTABLE"
     assert result.verdict == "REPORTABLE", f"{result.verdict} — {result.reason}"
     assert result.selection_changed_on_setups and result.admission_changed_on_setups, (
         "REPORTABLE requires the sweep to have MOVED, and this records what moved"
@@ -693,7 +697,7 @@ def test_a_flag_that_never_had_two_survivors_reports_unreachable_not_zero_percen
     # THE MUST-NOT-FIRE ARM. Without it, a gate hardwired to UNREACHABLE would pass above and
     # would silently suppress every real result in the task.
     two_rung = [
-        _setup_with([60.0, 30.0, 10.0], index=i, distances=(20.0, 120.0)) for i in range(10)
+        _setup_with([60.0, 30.0, 10.0], index=i, distances=(60.0, 200.0)) for i in range(10)
     ]
     other = target_sensitivity_sweep(two_rung, flag="TIGHTER_THAN_NECESSARY", steps=9)
     assert sum(r.opportunities for r in other.rows) > 0
@@ -746,3 +750,77 @@ def test_no_firing_rate_can_exceed_one_hundred_percent():
     )
     assert MIN_ACCEPTED_TO_FIRE["DEGENERATE_RUNNER"] == 1
     assert MIN_ACCEPTED_TO_FIRE["RR_ABOVE_ACCEPTABLE_BAND"] == 1
+
+
+def test_the_verdict_judges_the_denominator_it_publishes():
+    """REVIEW'S CYCLE-1 FINDING, AND IT DISPROVES A CLAIM I MADE.
+
+    I told the Manager the `UNREACHABLE` gate "can only turn REPORTABLE into UNMEASURED,
+    never the reverse". Review refused to accept that and was right — though by a different
+    mechanism than it proposed, which is why this test exists rather than a note.
+
+    Cycle 1 computed the verdict from `r.rate` (denominator: SELECTIONS) while
+    `figure_name()` published `r.rate_over_opportunities` (denominator: SELECTIONS WITH >= 2
+    ACCEPTED). **B127's 50% was being applied to a figure no reader ever sees.**
+
+    The corpus below is 30 single-rung setups (which can never give GATE-030 an opportunity)
+    plus 6 two-rung setups (which can). Under the old code:
+
+        verdict computed on SELECTIONS rates     max 16.7%  -> all below 50% -> REPORTABLE
+        figure published on OPPORTUNITY rates    0% - 100%  -> straddles 50%
+
+    A REPORTABLE verdict on a figure that ranges from nothing to everything. That is a
+    LOOSENING, and no test covered it because the only opportunity test was the all-zero case.
+
+    FAILING INPUT: build `measured` from `r.rate` instead of `r.rate_over_opportunities`.
+    This returns REPORTABLE and the assertion below fails.
+    """
+    corpus = (
+        [_setup_with([25.0], index=i, distances=(40.0, 120.0)) for i in range(30)]
+        + [_setup_with([30.0, 20.0], index=100 + i, distances=(40.0, 120.0)) for i in range(6)]
+    )
+    result = target_sensitivity_sweep(corpus, flag="TIGHTER_THAN_NECESSARY", steps=25)
+
+    by_selections = [r.rate.rate for r in result.rows if r.rate.rate is not None]
+    by_opportunity = [
+        r.rate_over_opportunities.rate for r in result.rows
+        if r.rate_over_opportunities.rate is not None
+    ]
+    assert all(r < FLATNESS_THRESHOLD for r in by_selections), (
+        "premise: on the SELECTIONS denominator this corpus looks flat and reportable"
+    )
+    assert min(by_opportunity) < FLATNESS_THRESHOLD < max(by_opportunity), (
+        "premise: on the denominator actually PUBLISHED it straddles 50%"
+    )
+    assert result.verdict == "TARGET_DEPENDENT", (
+        "the verdict must judge the number it publishes, not a different one"
+    )
+    assert "UNMEASURED" in result.figure_name()
+
+
+def test_a_row_the_flag_could_not_fire_on_is_named_rather_than_dropped():
+    """A ROW WITH ZERO OPPORTUNITIES WAS NOT OBSERVED; IT DID NOT OBSERVE ZERO.
+
+    Review's second half, and it is requirement 7's move applied to observability: inertness
+    became a per-row test because an aggregate could hide an inert interval. Observability
+    needs the same, because a row the flag could not fire on cannot support a point-by-point
+    claim across the range.
+
+    FAILING INPUT: drop the unobservable rows from the table and describe the remainder as
+    the range. `unobservable_rows` empties, the verdict reads plain REPORTABLE, and the
+    figure claims a range it did not cover — which is `54 corpora` -> `54 setups` again.
+    """
+    # every setup has two rungs, but the smallest targets admit only the tighter one
+    corpus = [_setup_with([40.0, 20.0], index=i, distances=(45.0, 400.0)) for i in range(12)]
+    result = target_sensitivity_sweep(corpus, flag="TIGHTER_THAN_NECESSARY", steps=12)
+
+    assert result.unobservable_rows, (
+        "premise: the low-target rows give the flag no opportunity to fire"
+    )
+    assert result.verdict == "REPORTABLE_OVER_A_SUBSET"
+    name = result.figure_name()
+    assert "gave it no opportunity and are excluded by name" in name
+    assert f"{len(result.unobservable_rows)} rows" in name
+    assert "of" in name and "swept targets" in name, (
+        "the figure must say how much of the range it actually covers"
+    )

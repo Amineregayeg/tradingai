@@ -2001,14 +2001,51 @@ across its observed range and the table carries every row.
     rows         25.  rr differs between every adjacent pair (requirement 7: 0 duplicate pairs)
     moved        admission changed on 529 setups, selection on 130.  rr spanned 2.00 - 40451
 
-    TIGHTER_THAN_NECESSARY     0 of 2680 SELECTIONS WITH >= 2 ACCEPTED CANDIDATES   -> REPORTABLE
+    TIGHTER_THAN_NECESSARY     0 of 2680 SELECTIONS WITH >= 2 ACCEPTED CANDIDATES
                                31-157 opportunities per row; 95% CI 0.00-0.14% pooled
-    DEGENERATE_RUNNER (eps 0)  0 of 12490 SELECTIONS WITH A SELECTED STOP           -> REPORTABLE
-    RR_ABOVE_ACCEPTABLE_BAND   84.3%-100.0% of 12490 SELECTIONS WITH A SELECTED STOP -> REPORTABLE
+    DEGENERATE_RUNNER (eps 0)  0 of 12490 SELECTIONS WITH A SELECTED STOP
+    RR_ABOVE_ACCEPTABLE_BAND   84.3%-100.0% of 12490 SELECTIONS WITH A SELECTED STOP
 
-**All three stay on one side of 50% across the whole range and all three moved. THE FIGURES CARRY THEIR
-RANGE AND THEIR DENOMINATOR IN THEIR NAME**, and `SweepResult` has no accessor returning a bare rate,
-because a caveat beside a number disappears on the first requote (`B127` requirement 5).
+    ALL THREE: REPORTABLE_OVER_A_SUBSET, over [84.32, 2022.55] and NOT over the declared
+    [0.05, 2022.55]. The lowest row admitted no candidate at all, so no flag could fire on it.
+
+**THE DECLARED RANGE IS NOT THE OBSERVED RANGE, AND THE FIGURE NAMES THE ONE IT MEASURED.** One row of
+25 — the `0.05` reward at the bottom of the derived range — gave every flag ZERO opportunity to fire.
+**Counting it as `0%` would be a rate over zero trials; dropping it silently would let the figure claim
+a range it never observed.** So it is excluded BY NAME and the range in the figure narrows to the part
+that was actually swept:
+
+    "across the 24 of 25 swept targets in [84.32, 2022.55] at which the flag COULD fire —
+     1 row gave it no opportunity and is excluded by name — TIGHTER_THAN_NECESSARY fires on
+     0.0%-0.0% of SELECTIONS WITH >= 2 ACCEPTED CANDIDATES"
+
+**`SweepResult` has no accessor returning a bare rate**, because a caveat beside a number disappears on
+the first requote (`B127` requirement 5) — and the range that disappears first is the one that was
+narrowed.
+
+#### THE VERDICT WAS JUDGING A NUMBER IT DID NOT PUBLISH — Review, cycle 2, and MY CLAIM WAS FALSE
+
+**I told the Manager the new `UNREACHABLE` gate "can only turn REPORTABLE into UNMEASURED, never the
+reverse". Review refused to accept that. It was right, and by a mechanism neither of us predicted.**
+
+    the verdict was computed from   r.rate                    denominator: SELECTIONS
+    the figure was published from   r.rate_over_opportunities denominator: SELECTIONS WITH >= 2 ACCEPTED
+
+**So `B127`'s 50% was being applied to a figure no reader ever sees.** Constructed and run — 30
+single-rung setups plus 6 two-rung setups over `[40, 120]`:
+
+    verdict computed on SELECTIONS   max 16.7%   -> all below 50%  -> REPORTABLE
+    figure published on OPPORTUNITY  0% - 100%   -> straddles 50%
+
+**A `REPORTABLE` verdict on a published figure ranging from nothing to everything.** `measured` is now
+built from the denominator that gets published, and `UNREACHABLE` now precedes `EMPTY` — because with
+the denominator changed, a flag that could never fire has no measurable rows and would otherwise land
+in `EMPTY`, whose reason reads *"no row produced a selection"*, which is FALSE there: the selections
+existed and the opportunities did not.
+
+> **A ROW THE SWEEP COULD NOT OBSERVE IS NOT A ROW THAT OBSERVED ZERO.** Review's wording, adopted
+> verbatim. It is requirement 7's move — aggregate to per-row — applied to observability instead of to
+> inertness, and both errors point the same way: toward the flattering answer.
 
 #### THE DENOMINATOR IS A PROPERTY OF THE FLAG, AND THE FIRST VERSION OF THIS ENTRY GOT IT WRONG
 

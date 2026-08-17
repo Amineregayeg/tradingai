@@ -695,7 +695,10 @@ class SweepResult:
     reward_min: float
     reward_max: float
     range_derivation: str
-    verdict: Literal["REPORTABLE", "TARGET_DEPENDENT", "INERT", "UNREACHABLE", "EMPTY"]
+    verdict: Literal[
+        "REPORTABLE", "REPORTABLE_OVER_A_SUBSET", "TARGET_DEPENDENT", "INERT",
+        "UNREACHABLE", "EMPTY",
+    ]
     reason: str
     #: What moved, so a reader can check the sweep was live rather than trust that it was.
     rr_span: tuple[float, float] | None
@@ -704,6 +707,8 @@ class SweepResult:
     #: B127 requirement 7 — adjacent rows whose selected rr is IDENTICAL. Any such pair is
     #: two targets that are one experiment, and its presence makes the sweep INERT.
     duplicate_adjacent_rows: tuple[tuple[float, float], ...] = ()
+    #: Rewards at which the flag had NO opportunity to fire. Named rather than dropped.
+    unobservable_rows: tuple[float, ...] = ()
 
     def figure_name(self) -> str:
         """THE RANGE IS PART OF THE NAME, NOT A CAVEAT BESIDE IT — B127 requirement 5.
@@ -713,9 +718,24 @@ class SweepResult:
         exactly. So the reportable figure is only ever produced WITH its range attached, and
         there is no accessor on this object that returns the bare number.
         """
-        if self.verdict != "REPORTABLE":
+        if self.verdict not in ("REPORTABLE", "REPORTABLE_OVER_A_SUBSET"):
             return (
                 f"{self.flag}: UNMEASURED ({self.verdict}) — {self.reason}"
+            )
+        if self.verdict == "REPORTABLE_OVER_A_SUBSET":
+            observable = [
+                r for r in self.rows if r.rate_over_opportunities.rate is not None
+            ]
+            rates = [r.rate_over_opportunities.rate for r in observable]
+            return (
+                f"across the {len(observable)} of {len(self.rows)} swept targets in "
+                f"[{observable[0].reward:.2f}, {observable[-1].reward:.2f}] at which the flag "
+                f"COULD fire — {len(self.unobservable_rows)} "
+                f"{'row' if len(self.unobservable_rows) == 1 else 'rows'} gave it no "
+                f"opportunity and {'is' if len(self.unobservable_rows) == 1 else 'are'} "
+                f"excluded by name — {self.flag} fires on {min(rates):.1%}-"
+                f"{max(rates):.1%} of "
+                f"{observable[0].rate_over_opportunities.denominator_unit.upper()}"
             )
         # THE DENOMINATOR IN THE NAME IS THE OPPORTUNITY ONE, not the selection one. A rate
         # over selections includes selections the flag could never have fired on, which is
@@ -896,8 +916,23 @@ def target_sensitivity_sweep(
     selection_changed = sum(1 for v in selection_history.values() if len(v) > 1)
     admission_changed = sum(1 for v in admission_history.values() if len(v) > 1)
     rr_span = (min(all_rrs), max(all_rrs)) if all_rrs else None
-    measured = [r.rate.rate for r in rows if r.rate.rate is not None]
+    # THE VERDICT MUST JUDGE THE NUMBER THAT GETS PUBLISHED. Cycle 1 computed it from
+    # `r.rate` — the SELECTIONS denominator — while `figure_name()` published the OPPORTUNITY
+    # one, so B127's 50% was being applied to a figure no reader ever sees. Measured on a
+    # constructed corpus: verdict REPORTABLE at "max 16.7%" while the published figure read
+    # "fires on 0.0%-100.0%". That is a LOOSENING, and it disproves the "can only tighten"
+    # claim this seat made in cycle 1. Review refused to accept that claim; it was right to.
+    measured = [
+        r.rate_over_opportunities.rate for r in rows
+        if r.rate_over_opportunities.rate is not None
+    ]
     total_opportunities = sum(r.opportunities for r in rows)
+    # A ROW WITH ZERO OPPORTUNITIES WAS NOT OBSERVED, AND THAT IS NOT THE SAME AS OBSERVING
+    # ZERO. Under the selections denominator such a row contributed a full 0% to the flatness
+    # test — "never measured" collapsed into "measured and empty", which is this register's
+    # oldest shape. Requirement 7 moved inertness from an aggregate to a per-row test for the
+    # same reason; this does it for observability.
+    unobservable = tuple(r.reward for r in rows if r.opportunities == 0)
 
     # B127 REQUIREMENT 7, THE THIRD PIN: `rr` must DIFFER between every adjacent pair of
     # rows. Requirement 6 asked whether the sweep moved SOMEWHERE, which lets an active
@@ -914,10 +949,13 @@ def target_sensitivity_sweep(
 
     # INERTNESS IS CHECKED BEFORE FLATNESS, because a flat line from a sweep that could not
     # move is indistinguishable from robustness and reads as the flattering answer.
-    if not measured:
-        verdict: Literal["REPORTABLE", "TARGET_DEPENDENT", "INERT", "UNREACHABLE", "EMPTY"] = "EMPTY"
-        reason = "no row produced a selection, so there is no rate to judge"
-    elif total_opportunities == 0:
+    # UNREACHABLE IS CHECKED BEFORE EMPTY, AND THE ORDER IS THE DIFFERENCE BETWEEN TWO TRUE
+    # STATEMENTS. With the verdict now computed on the OPPORTUNITY denominator, a corpus where
+    # the flag could never fire has no measurable rows at all — so it would fall into EMPTY,
+    # whose reason reads "no row produced a selection". That is FALSE here: the selections
+    # existed and the opportunities did not, which is a fact about the flag rather than about
+    # the market, and the two have different follow-ons.
+    if total_opportunities == 0:
         # REVIEW'S FINDING, AND IT IS A STRICTER GATE RATHER THAN A MOVED THRESHOLD.
         #
         # The flag needs TWO accepted candidates to fire at all. If no selection anywhere in
@@ -928,11 +966,20 @@ def target_sensitivity_sweep(
         #
         # IT CANNOT MANUFACTURE A FAVOURABLE RESULT: adding it can only turn REPORTABLE into
         # UNMEASURED, never the reverse, and the pinned 50% is untouched.
-        verdict = "UNREACHABLE"
+        verdict: Literal[
+            "REPORTABLE", "REPORTABLE_OVER_A_SUBSET", "TARGET_DEPENDENT", "INERT",
+            "UNREACHABLE", "EMPTY",
+        ] = "UNREACHABLE"
         reason = (
             "no selection anywhere in the range had two or more ACCEPTED candidates, so "
             f"{flag} could not have fired at any target. The 0% is a property of the corpus "
             "and not a measurement of the flag"
+        )
+    elif not measured:
+        verdict = "EMPTY"
+        reason = (
+            "no row produced a selection the flag could be evaluated on, so there is no "
+            "rate to judge"
         )
     elif duplicate_adjacent:
         verdict = "INERT"
@@ -949,6 +996,26 @@ def target_sensitivity_sweep(
             "no candidate crossed the 2R floor and no selected rung changed anywhere in "
             f"the range; selected rr spanned {rr_span}. The sweep could not have moved the "
             "rate, so its flatness is a property of the sweep and not of the rate"
+        )
+    elif not (all(r < FLATNESS_THRESHOLD for r in measured)
+              or all(r > FLATNESS_THRESHOLD for r in measured)):
+        verdict = "TARGET_DEPENDENT"
+        reason = (
+            f"the swept rate spans {min(measured):.1%}-{max(measured):.1%} over its OWN "
+            f"denominator and touches or crosses {FLATNESS_THRESHOLD:.0%}, so the answer is "
+            "an artefact of a target nobody produces"
+        )
+    elif unobservable:
+        # Named, not dropped. "What it must not do is drop them and describe the remainder as
+        # the range" — Review, and it is requirement 5's rule about the range being part of
+        # the figure's name, applied to the rows the range does not actually cover.
+        verdict = "REPORTABLE_OVER_A_SUBSET"
+        reason = (
+            f"{len(unobservable)} of {len(rows)} rows gave the flag NO opportunity to fire "
+            f"(rewards {unobservable[0]:.2f} to {unobservable[-1]:.2f}), so the table cannot "
+            f"support a point-by-point claim across the whole range. On the "
+            f"{len(rows) - len(unobservable)} observable rows the rate stays on one side of "
+            f"{FLATNESS_THRESHOLD:.0%}"
         )
     elif all(r < FLATNESS_THRESHOLD for r in measured):
         verdict = "REPORTABLE"
@@ -967,11 +1034,10 @@ def target_sensitivity_sweep(
             f"{selection_changed}"
         )
     else:
-        verdict = "TARGET_DEPENDENT"
+        verdict = "REPORTABLE"
         reason = (
-            f"the swept rate spans {min(measured):.1%}-{max(measured):.1%} and touches or "
-            f"crosses {FLATNESS_THRESHOLD:.0%}, so the answer is an artefact of a target "
-            "nobody produces"
+            f"every row sits above {FLATNESS_THRESHOLD:.0%} (min {min(measured):.1%}) over "
+            f"{total_opportunities} observable selections, and the sweep moved"
         )
 
     return SweepResult(
@@ -980,6 +1046,7 @@ def target_sensitivity_sweep(
         rr_span=rr_span, selection_changed_on_setups=selection_changed,
         admission_changed_on_setups=admission_changed,
         duplicate_adjacent_rows=tuple(duplicate_adjacent),
+        unobservable_rows=unobservable,
     )
 
 
