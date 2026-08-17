@@ -2865,6 +2865,44 @@ every commit. **Reading the message back is not the check; parsing it is.**
 documentation of an intention. **This entry exists so that the next seat quoting one of those tools
 as evidence finds the reason it is not.**
 
+## AMENDMENT — THE BENEFIT SIDE: a snapshot noticed a fix that NO HUMAN STEP PERFORMED
+
+**Everything above argues from the COST of not running these tools. This is a benefit only running
+them can deliver, and it was found by running one.**
+
+`landed_sweep` had been carrying one SNAPSHOT VIOLATION for days: a `T-0028` reference at
+`KNOWN_ISSUES.md:9` — the `Last updated:` preamble. Two seats flagged it as inherited and neither
+fixed it. **It is now discharged, and nobody discharged it:**
+
+    header at 4261687~1   contains T-0028   x2
+    header now            contains T-0028   x0
+
+    landed_sweep  ->  EXIT 0, zero snapshot violations
+
+**`4261687` was the commit that made `Last updated:` name `B147` and made the line enforced.** It
+rewrote the line for an entirely different reason **and carried the stale pointer away with it.**
+
+> **A prose line carrying a stale pointer was cleared by rewriting the line for an unrelated reason.
+> Nobody would find that by reading either commit — the fix has no diff of its own, no author, and
+> no message. It is the BENIGN TWIN of this register's rot mechanism, and equally unattributable.**
+
+**Which is the argument for a snapshot over a memory, and it is the inverse of everything else in
+this entry: the tool noticed a repair no step aimed at.** A human tracking the item would still be
+tracking it. **`B93`'s figure rotted because four commits made it wronger and only one opened the
+file; this cleared because one commit opened the file and was not trying to.** **Same mechanism,
+opposite sign, and only an instrument that re-measures can see either.**
+
+**And the tool prices its own noise rather than hiding it**, which is why the exit code stayed
+trustworthy while its advisory bucket filled up:
+
+    banner:  "the word-list bucket has 0 true positives in 15 flagged and its noise RISES
+              as the loop does the right thing. The EXIT CODE follows the SNAPSHOT only."
+
+**A tool that publishes its own false-positive rate and excludes that bucket from its verdict is
+doing what fix 0 above asks of `grep -c`: it separates the number from the judgement.** **That is
+the shape the rest of `agents/` should copy — and it is worth nothing until `6c` makes any of it
+runnable by someone who is not on this machine.**
+
 ## The general form, which is the only part worth carrying to a different codebase
 
 > **Every instance here is a check whose OUTPUT was inspected and whose EXECUTION was not.** The
