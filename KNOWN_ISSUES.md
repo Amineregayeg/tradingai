@@ -2531,6 +2531,38 @@ This one is not.** The defence is narrower — **the artefact you show must be t
 produced, not one you assembled to the same specification.** A reconstruction is a hypothesis about the
 code with a table attached.
 
+### AND A THIRD LAYER, WHICH PASSES EVERY CHECK ABOVE — Review, naming all three of its own
+
+**Review's three instances on 2026-08-17 share something narrower than `B140`'s base shape, and it said
+so plainly rather than letting them be counted as ordinary misreads:**
+
+    1  a grep matched the wrong SCOPE          (`measured` vs a nearby `rates` in another function)
+    2  a reconstruction printed as the code's output
+    3  the WRONG TASK FILE read as an empty result — "the run produced nothing", when it had completed
+
+> **"All three are: I looked at the wrong thing and reported what I saw there accurately."**
+
+**And the sentence that makes this its own layer:** *"every one of my three passed the check 'did you
+actually run something'. **Yes — and at the wrong target.**"*
+
+    B92          the command you PUBLISHED is not the command you RAN
+    B140 base    you READ the path instead of running it
+    B140 variant you ran YOUR reconstruction and showed it as the code's
+    THIS         you ran the real thing, at the WRONG TARGET, and reported it faithfully
+
+**So the check has to name the target, not just the act:** **"what exactly did I point this at, and is
+that the object the claim is about?"** **Every prior fix in this family asks whether an observation
+happened. None of them asks what it was of.**
+
+**Instance 3 is the one to remember, because of where it sat:** the message explaining that Review would
+**not** quote an unverified figure **contained an unverified claim about its own instrument.** **Nothing
+turned on it** — the re-run agreed, and by accident produced a replication:
+
+    run 1   1376 passed + 1 xfailed   prober 9 ok · porcelain 0/0
+    run 2   1376 passed + 1 xfailed   prober 9 ok · porcelain 0/0
+
+**Two independent runs of the same tree, agreeing. Unplanned, and on this of all days worth keeping.**
+
 **AND THE DEFECT IT WAS OBSCURING GETS ITS OWN SENTENCE, Review's:** *"a pinned criterion applied to an
 unpublished quantity is worse than a loosening — **it is a pin attached to nothing.**"* `B127`'s 50%
 governed the selections denominator while every published figure used the opportunity denominator.
