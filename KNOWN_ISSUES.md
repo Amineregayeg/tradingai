@@ -2326,6 +2326,76 @@ searched, at the moment of use** — not reused from a previous entry. **Prefer 
 task id and a nonce over a shared house token like `zzz_absent`**, because a shared one accumulates
 citations until it is present everywhere.
 
+### B139 — an ADMINISTRATIVE force-close and a STRATEGY exit are the same row in `DecisionRecord`, and the feedback loop eats both
+
+**Found by the Manager 2026-08-17, immediately after Malek stopped the engine. Two rows of contaminated
+evidence now exist, and every future stop adds more.** Controls in the same commands.
+
+#### What happens when the engine stops, which is correct engineering
+
+`crypto_loop.py:1108` `stop()` → `paper.close_all_positions()`. **Its docstring is well-reasoned and I
+am not disputing it:**
+
+> *"OPEN POSITIONS ARE CLOSED, not abandoned. A stopped engine marks no prices, so an open position's
+> stop-loss and take-profit would never be checked again — it would sit at whatever it was worth the
+> moment the engine stopped, and the run's result would be missing a trade that never resolved."*
+
+**Closing at the mark goes through the normal settle path, so each close persists against the run with
+its real P&L. That is the right call.** The defect is what the row then looks like.
+
+#### `DecisionRecord` HAS NO FIELD FOR HOW THE TRADE CLOSED
+
+    fields present    signal_sl · signal_tp · fill_price · expected_r · realized_r · gap_r · outcome
+    exit_reason / close_reason / exit_kind / forced        ZERO hits
+                     (control: the Mapped[...] field list prints 20+ lines from the same file)
+
+**So these three are one row shape:**
+
+    closed by STOP-LOSS            a strategy outcome. Evidence.
+    closed by TAKE-PROFIT          a strategy outcome. Evidence.
+    force-closed on engine STOP    an ADMINISTRATIVE event at an arbitrary mark. NOT evidence.
+
+#### The first-ever realized figures are contaminated, and they read as strategy failure
+
+**Before tonight `closed_trades` was `0` for the platform's entire history. The stop produced the first
+two**, and the newest record now reads:
+
+    ETH/USD   expected_r 1.9166   realized_r -0.433   outcome LOSS   gap_r ~ -2.35
+
+> **That is not the strategy underperforming by 2.35R. It is a trade terminated at an arbitrary moment
+> by an operator action** — and **nothing in the row says so.**
+
+**`wins 1 / losses 1` is likewise not a 50% win rate.** It is where two marks happened to sit at
+`00:35:25Z`.
+
+#### AND THE FEEDBACK LOOP CONSUMES THEM UNFILTERED
+
+`/api/engine/feedback` pulls **the last 2000 `DecisionRecord` rows** and passes them to
+`analyze(records, params, min_evidence=30)`. **There is no filter for administrative closes and no field
+to filter on.**
+
+    today            2 contaminated rows of 2 closed. min_evidence=30, so nothing fires yet.
+    after 15 stops   30 rows, and corrections begin deriving from administrative events.
+
+**Every stop/start cycle injects rows that look like strategy failures, invisibly.** **`gap_r` is the
+learning signal, and a force-close manufactures a large spurious gap.**
+
+#### The fix, and it is two separate changes
+
+1. **Add an exit-reason to `DecisionRecord`** — at minimum `SL` / `TP` / `ADMIN_CLOSE`, set on the
+   settle path so it cannot be forgotten by a caller. **`close_all_positions()` is the only producer of
+   the third value.**
+2. **Exclude `ADMIN_CLOSE` from the feedback set**, and **report how many were excluded** rather than
+   silently dropping them — otherwise *"evidence: 30"* and *"evidence: 30 of 45, 15 administrative"* are
+   the same output, which is the failure this register is named for.
+
+**NOT FIXED. Filed before any restart, because a restart is what generates more of them** — and the two
+existing rows should be labelled retroactively if that is possible, or their ids recorded here if it is
+not.
+
+Related: **B67** (no endpoint publishes `sl`/`tp`, so the stops these trades never reached are still
+unobservable), **B137**, **B31**.
+
 ### B137 — LIVE AUDIT: the engine has taken no signal in 55 hours because both symbols hold positions, and the corpus validating the rules contains ONE outcome repeated 50 times
 
 **Read-only audit against production 2026-08-17 by the Manager, while Execute built `T-0030`. Nothing
