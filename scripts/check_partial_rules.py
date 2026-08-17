@@ -116,6 +116,18 @@ GREP_EXEMPT: dict[str, str] = {
         "mean no quorum, and the record must not — so this module is expected to name the "
         "states textually while still deciding through the shared helper."
     ),
+    "app.services.rules.gate_012_news_blackout": (
+        "Fourth instance of the GATE-041/GATE-040 shape, and a REPORTING match rather than a "
+        "decision: the hit is `if condition.state == \"NOT_READ\"` guarding the construction "
+        "of `values['unreadable_conditions']`, which names the producer that exists and was "
+        "not called so the absence is attributable. The verdict is decided by "
+        "`quorum_blocked` with GATE-013's own default BLOCK — the import check confirms the "
+        "binding is base's own object. The state is named textually for GATE-040's reason: "
+        "the PAYLOAD must keep NOT_READ and NOT_EVALUABLE apart even though quorum_blocked "
+        "merges them, because for this rule the distinction is the whole finding — the M15 "
+        "series EXISTS and was not wired, which has a different owner and a different fix "
+        "from a producer nobody has built."
+    ),
     "app.services.rules.target_006_equals_ranking": (
         "Third instance of the GATE-041/GATE-040 shape, and it is a REPORTING match rather "
         "than a decision: the hit is a dict comprehension building "

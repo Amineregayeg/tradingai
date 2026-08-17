@@ -2441,6 +2441,116 @@ searched, at the moment of use** — not reused from a previous entry. **Prefer 
 task id and a nonce over a shared house token like `zzz_absent`**, because a shared one accumulates
 citations until it is present everywhere.
 
+### B145 — `GATE-014` IS DELIBERATELY UNBUILT: its resumption condition is undefined, and C-05 makes every implementable path invent a governance decision on Malek's behalf
+
+**Established by Execute during `T-0032`, on Review's finding, ruled by the Manager. Filed because a
+gap that is not recorded gets rediscovered and then FILLED by someone who does not know why it was
+left.** This is the third time the programme has taken this disposition and the first time it is
+written down as one.
+
+#### The two facts, measured rather than argued
+
+    GATE-014  status OPEN · values None · enforceability HARD_GATE
+              title: "Exceptional-event indefinite disable — RESUMPTION CONDITION UNDEFINED"
+    GATE-012 / GATE-013 / GATE-015 / GATE-016   all READY
+
+**`GATE-014` is the only OPEN rule of the five in `T-0032`.** Its statement says the event CLASS is
+enumerable and the resumption condition is not: *"volatility has clearly normalized"*, *"abnormal
+volatility"* and *"normal market structure"* are all undefined, **"and the same document elsewhere
+forbids exactly the statistical shortcuts an implementer would reach for."** The rule then says it
+outright: ***"The engine MUST NOT invent a numeric volatility test."***
+
+#### THE MECHANISM THAT CLOSES THE TEMPTING MIDDLE PATH — and it is the part worth keeping
+
+The obvious compromise is to build the half that IS specified: the BLOCK is defined, only resumption
+is not. **`base.py:277` closes it.**
+
+    open_rule_requires_declared_parameter()  exempts ONLY verdict == "NOT_APPLICABLE"
+
+**So there is no verdict-bearing path for an OPEN rule that does not force a `declared_parameter_used`
+— and the only candidate here is the RESUMPTION AUTHORITY.** That is an operator/governance decision,
+not a strategy one. **Implementing `GATE-014` would mean declaring who may restart the platform,
+inside the one rule that exists to record that nobody has decided.**
+
+**And `values: null` means the event CLASS is not enumerated in the registry either**, so any
+enumeration would come from prose — the same invention one layer down. **The operational half is
+worse than the doctrinal half:** a state whose only exit is a human authorisation, shipped into a loop
+its owner runs unattended, is a platform that can enter a state it cannot leave. **That is a decision
+for Malek and it is not a seat's to make by default.**
+
+#### WHAT WAS BUILT INSTEAD, because "not built" must not mean "not guarded"
+
+`test_no_numeric_volatility_test_exists_in_the_news_modules` — an AST walk over an
+**explicitly enumerated** file list asserting that no identifier in the news modules names `atr`,
+`stdev`, `percentile`, `sigma` or `zscore`. **Identifiers, not text: the modules' own docstrings
+discuss volatility at length in order to forbid it, so a grep would fail on the prose that exists to
+prevent the thing.** `T-0024`'s precedent.
+
+> **AND THE GUARD STATES ITS OWN LIMIT, which is the half that nearly went unstated.** The must-hit
+> arm measured **`atr` = 84 identifiers elsewhere in the tree and ZERO for the other four.** A text
+> grep finds `percentile` in `ict/detector.py` and `consolidation.py` — **both occurrences are
+> PROSE.** So the guard is falsifiable for ONE term of five, and the test asserts the uncontrolled
+> set BY NAME so that a term gaining or losing a control arm is a deliberate update rather than a
+> silent change in strength. **The first version asserted `percentile > 0` and went red; that failure
+> is the arm working.**
+
+#### THE STANDING DISPOSITION, now recorded because it keeps being re-derived
+
+    T-0022  EXIT-003     not built — the model was never ruled
+    T-0029  order block  NO rule defines one, so the deliverable was a QUESTION and
+                         PRIM-007 must NOT be created
+    T-0032  GATE-014     resumption undefined, so the deliverable is the guard plus the question
+
+> **ESTABLISH THE GAP, DO NOT FILL IT. And the general form, which reverses the intuition: the
+> expensive mistake is NOT skipping an undefined rule — it is IMPLEMENTING one**, because a
+> placeholder is cited later as doctrine and nothing marks it as invented. *(Review's reversal of
+> Execute's risk direction; Execute had reasoned that a scope correction would be cheap now and
+> expensive after `GATE-014` was written, which is backwards.)*
+
+#### AND THE REPAIR SURFACED A LANDMINE UNDER EVERY FUTURE RULE TASK
+
+**Implementing `GATE-015` turned a test red that has nothing to do with `GATE-015`:**
+
+    tests/unit/test_rules_base.py::test_two_classes_cannot_claim_one_rule
+      used the LITERAL "GATE-015" as its stand-in for "an id nobody implements".
+      T-0032 implemented it, so the test's own SETUP raised and it failed for a reason
+      unrelated to what it asserts.
+
+> **Any hardcoded unimplemented rule id is a bet that the programme never reaches that rule —
+> and reaching every rule is the programme's entire purpose.** The test was correct when
+> written and had an expiry nobody could see.
+
+**FIXED BY DERIVING the scratch id at runtime** — the first unimplemented, non-alias id in the
+registry — **with an assert that fires if every rule is ever implemented**, naming the repair
+rather than passing vacuously. *(Aliases are excluded because claiming one raises `TypeError`,
+not `DuplicateRuleImplementation` — a different failure that would satisfy `pytest.raises` for
+the wrong reason.)* **Review's caveat, which belongs with it: the derivation is only safe
+inside a module that snapshot-restores the registry.**
+
+**SWEPT FOR THE SAME SHAPE. Two more, NOT FIXED because they are green today and are not this
+task's — but the seat that implements either rule will hit exactly this and will not know why:**
+
+    tests/unit/test_rules_base.py:401,416,420   RULE_ID = "GATE-046"
+    tests/unit/test_rules_base.py:411           RULE_ID = "GRADE-023"
+
+**THE TWO ARE NOT THE SAME FIX, and the distinction is load-bearing:** `GRADE-023` is
+`alias_of GATE-046`, so **two of those three tests need an unimplemented CANONICAL + ALIAS
+PAIR, not merely an unimplemented id** — the derive-at-runtime pattern transfers only to
+`test_a_second_class_cannot_claim_a_canonical_already_taken`.
+
+**A third apparent hit was MY OWN INSTRUMENT, and it is the same lesson twice in one hour:** a
+text regex for `RULE_ID = "..."` flagged `ENTRY-003` in `test_t0028_clearance_and_equals.py`,
+**which is a DOCSTRING quoting a grep command.** Re-run as an AST walk over real `Assign`
+nodes it disappears. **The same text-versus-identifier distinction the volatility guard is
+built on, rediscovered by falling into it.**
+
+#### WHAT WOULD UNBLOCK IT, AND IT IS NOT A SALIM QUESTION
+
+**Who may authorise resumption after an exceptional-event halt, and what an unattended platform does
+if nobody does.** That is operator governance rather than strategy, **so it goes to Malek and NOT
+into a Salim round** — filed by the Manager in `NEEDS_MALEK.md`. Until then `GATE-014` stays
+unimplemented and the coverage report counts it as such, which is the honest figure.
+
 ### B144 — `status: completed` is not `conclusion: success`, and a CANCELLED CI run is indistinguishable from a passing one to everything this loop reads
 
 **Filed by Review 2026-08-17. Found by the Manager during T-0028's verification, measured by both of

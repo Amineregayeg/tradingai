@@ -118,6 +118,16 @@ from app.services.rules.gate_008_roster import (  # noqa: F401
     LayoutRoster,
     Panel,
 )
+from app.services.rules.gate_012_news_blackout import (  # noqa: F401
+    M15_MINUTES, POST_EVENT_COOLDOWN_MINUTES, PRE_EVENT_BLACKOUT_MINUTES, THEN_WAIT_FOR,
+    NewsDecision, PostEventBlackout, PreEventBlackout, RedFolderDayFlag,
+    first_m15_close_at_or_after, first_permitted_entry_time,
+)
+from app.services.rules.gate_015_calendar_scope import (  # noqa: F401
+    CRYPTO_CURRENCY_SET, CRYPTO_OPTIONAL_CONFLUENCE, DECLARED_IMPACT_MAPPING,
+    DECLARED_UNKNOWN_POLICY, RED_FOLDER_CATEGORIES, CalendarScope, DeclaredMapping,
+    ScopedEvent,
+)
 from app.services.rules.gate_017_analysis_only_tfs import (  # noqa: F401
     ANALYSIS_ONLY_TFS,
     TRADING_MODE,
@@ -425,4 +435,24 @@ __all__ = [
     "RemovalProbe",
     "observe",
     "penetration_removal_probe",
+    # T-0032 — the news subsystem. GATE-014 is deliberately UNBUILT (OPEN, resumption
+    # condition undefined); a structural guard asserts no volatility heuristic exists.
+    "CRYPTO_CURRENCY_SET",
+    "CRYPTO_OPTIONAL_CONFLUENCE",
+    "DECLARED_IMPACT_MAPPING",
+    "DECLARED_UNKNOWN_POLICY",
+    "M15_MINUTES",
+    "POST_EVENT_COOLDOWN_MINUTES",
+    "PRE_EVENT_BLACKOUT_MINUTES",
+    "RED_FOLDER_CATEGORIES",
+    "THEN_WAIT_FOR",
+    "CalendarScope",
+    "DeclaredMapping",
+    "NewsDecision",
+    "PostEventBlackout",
+    "PreEventBlackout",
+    "RedFolderDayFlag",
+    "ScopedEvent",
+    "first_m15_close_at_or_after",
+    "first_permitted_entry_time",
 ]

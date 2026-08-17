@@ -20,6 +20,7 @@ from app.services import rules as rules_pkg
 from app.services.rules.base import (
     DuplicateRuleImplementation,
     RuleImplementation,
+    implemented_ids,
     open_rule_requires_declared_parameter,
 )
 from app.services.rules.gate_023_timezone import NewYorkTimestamps
@@ -111,15 +112,36 @@ def test_an_implementation_without_an_id_is_refused():
 
 def test_two_classes_cannot_claim_one_rule():
     """Two behaviours behind one id makes the attribution ledger ambiguous — outcomes
-    would accumulate against a rule that means different things in different places."""
+    would accumulate against a rule that means different things in different places.
+
+    THE SCRATCH ID IS DERIVED, NOT HARDCODED, AND THAT IS THE REPAIR RATHER THAN THE POINT.
+    This test used the literal `GATE-015` as a stand-in for "an id nobody implements", and
+    T-0032 implemented GATE-015 — so `First` itself started raising and the test went red for
+    a reason unrelated to what it asserts. Any hardcoded id has that fault: it is a bet that
+    the programme never gets to that rule, and the programme's whole purpose is to get to
+    every rule. Deriving an unimplemented id at runtime cannot go stale.
+
+    Aliases are excluded because claiming one raises TypeError, not
+    DuplicateRuleImplementation — a different failure that would pass `pytest.raises` for the
+    wrong reason if the match string were ever loosened.
+    """
+    unclaimed = sorted(
+        rid for rid in contract.known_rule_ids()
+        if rid not in implemented_ids() and contract.alias_target(rid) is None
+    )
+    assert unclaimed, (
+        "every rule in the registry is implemented, so this test can no longer construct "
+        "its own precondition — rewrite it rather than deleting it"
+    )
+    scratch = unclaimed[0]
 
     class First(RuleImplementation):
-        RULE_ID = "GATE-015"
+        RULE_ID = scratch
 
-    with pytest.raises(DuplicateRuleImplementation, match="GATE-015"):
+    with pytest.raises(DuplicateRuleImplementation, match=scratch):
 
         class Second(RuleImplementation):
-            RULE_ID = "GATE-015"
+            RULE_ID = scratch
 
 
 def test_the_emitted_id_comes_from_the_constant():
