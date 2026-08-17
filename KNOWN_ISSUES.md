@@ -3020,6 +3020,36 @@ not a proxy that supplies the scale.**
 
 > ## The swept firing rate is REPORTABLE iff it stays on ONE SIDE OF 50% across the whole declared target range. If the range straddles 50%, the rate is TARGET-DEPENDENT and reports as UNMEASURED.
 
+### `[SCOPE RULING 2026-08-17 — THE 50% IS PINNED TO THE QUESTION IT WAS DERIVED FOR, AND DOES NOT TRANSFER.]`
+
+**Execute seat 10 withheld this verdict on `T-0029`'s criterion 5 rather than applying it, and escalated
+the deviation instead of performing it quietly. UPHELD, and the reasoning is better than the plan's.**
+
+**Two caveats it raised, which Review established compound into a disqualifier:**
+
+    1  the 50% was DERIVED for a FLAG FIRING RATE — "50% is where 4b's noise-or-signal answer
+       changes". Criterion 5 measures a WIN RATE: how often a proxy rung would win selection.
+       There is no decision that flips at 50% of a win rate. The derivation does not transfer.
+    2  the rate PLATEAUS against the boundary rather than approaching it —
+       257-259 across five rows against a threshold of 261.
+
+> **So "REPORTABLE, below 50%" would have been decided by a 0.3-point gap between a structural plateau
+> and a threshold imported from a different question.** A coin flip wearing a pinned criterion.
+
+**THE GENERAL CONSTRAINT, and it binds every pin in this register:** **a pinned threshold is pinned to
+the QUESTION it was derived from.** Reusing it on a different quantity requires **a new derivation, not a
+citation** — and if no derivation exists for the new quantity, **the honest output is the table with no
+verdict**, which is what this seat produced.
+
+**This is `B122`'s shape at the level of a threshold rather than a count:** the number is real, its
+provenance checks out, and **it is being applied to the wrong quantity.** *"One count wearing two
+quantities"* becomes *"one threshold answering two questions."*
+
+**Note what the deviation was and was not.** The seat **withheld a verdict**; it did not substitute a
+friendlier one, and the table, the figure, the plateau and the control pair all stand. **A seat that
+declines to render a verdict it cannot justify, and says so, is doing the job** — the failure mode would
+have been reporting `REPORTABLE` and letting the 0.3 points pass unremarked.
+
 **Derived from the decision it feeds, not chosen as a round number.** `T-0030`'s criterion 4b exists to
 answer one question: **does `TIGHTER_THAN_NECESSARY` fire on most setups (noise) or not (signal)?** So
 **50% is where the answer changes.** A sweep that never crosses it answers the question whatever the
@@ -3634,8 +3664,31 @@ the module reads the order from the registry rather than retyping it (mutation M
 with rungs 3 and 4 swapped turns two tests red). **The workspace itself is not ours to correct.**
 
 **AND THE DOCTRINE'S WORKED TABLE CANNOT BE FULLY REPRODUCED, for an unrelated reason.**
-`GATE-028`'s table gives five rows; **this engine can produce four.** The `ORDER_BLOCK` row at 4R
-has no contract-side producer (**B116**, and `T-0029` owns it), so rung 4 is emitted unlocatable.
+`GATE-028`'s table gives five rows; ~~**this engine can produce four.**~~ The `ORDER_BLOCK` row at 4R
+has no contract-side producer (**B116**, and ~~`T-0029` owns it~~), so rung 4 is emitted unlocatable.
+
+> ## `[AMENDED 2026-08-17 BY THE MANAGER — two stale claims, struck rather than rewritten. This is another seat's entry; the reasoning is untouched.]`
+>
+> **1. "CAN PRODUCE FOUR" IS NOW THREE.** `T-0030` measured locatability over 529 real setups: **rung
+> 2 never locates either**, because nothing supplies a `momentum_min_width` (**B129**). So:
+>
+>     rung 1  106 of 529   20%      rung 3  529 of 529  100%      rung 5  518 of 529  98%
+>     rung 2    0 of 529   NEVER    rung 4    0 of 529  NEVER
+>
+> **Five rows specified, THREE produced, and one of the three fires on a fifth of setups.** The
+> Manager's `T-0029` plan carried the same *"four of five"* error and was corrected the same day —
+> **this entry is the second place that figure was stale.**
+>
+> **2. `T-0029` NO LONGER OWNS IT.** `T-0029` closed at `300a979` **deliberately without building a
+> producer** — that was its premise, not a shortfall. **Ownership passes to `NEEDS_MALEK` item `6k`
+> and Salim's answer**, which pairs rung 4's missing definition with rung 2's missing width because
+> they are the same question with a different noun.
+>
+> **Execute seat 10 found the stale pointer and correctly REFUSED to edit it**, on the grounds that
+> this is another seat's entry and **the commit-msg hook only inspects ADDED headings, so a modified
+> body passes silently.** *"I am not rewriting another seat's entry through a gap in the guard to
+> satisfy a sweep."* **That is the right call and the gap is real** — the Manager makes this amendment
+> openly, dated, with the original text struck rather than replaced.
 **The row that the PDF SELECTS — the 3R Liquidity Sweep — is reproducible**, which is the half
 that matters for conformance, and the 4R row's absence is recorded on every ladder rather than
 silently closing the gap.
