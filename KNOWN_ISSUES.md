@@ -2441,6 +2441,354 @@ searched, at the moment of use** — not reused from a previous entry. **Prefer 
 task id and a nonce over a shared house token like `zzz_absent`**, because a shared one accumulates
 citations until it is present everywhere.
 
+### B147 — the `agents/` checks are enforced by NOTHING, and a verification's absence has three grades: an artefact nobody read, no artefact at all, and an ANSWER-SHAPED artefact that occupies the place a reader checks
+
+**Filed by Review 2026-08-17, measured at `d01ef38`. The third instance was found by the Manager,
+against its own tool, and offered unprompted.**
+
+`B144` is the mild grade of this and should be read beside it: **a real field, present all along,
+that nobody read.** This entry is the two worse grades.
+
+## The scale, which is the entry
+
+    grade   what happened                              what a reader finds        recoverable by
+    1       the check RAN, its verdict went unread     an UNREAD artefact         reading it        (B144)
+    2       the check NEVER RAN, silently              NO artefact                nothing — no absence
+                                                                                  to notice
+    3       the check never ran and REPORTED anyway    an ANSWER-SHAPED artefact  nothing — the slot
+                                                                                  is already filled
+
+> **Grade 3 is strictly worse than silence. A blank verdict is not an absence of information, it is
+> an object shaped like an answer sitting in the place a reader checks — so the check gets ticked off
+> BY ITS OWN FAILURE.**
+
+## Instance 1 — grade 2. Nothing enforces anything under `agents/`.
+
+**Measured, not inferred:**
+
+    agents/ inside a git repo?          NO — "not a repository up to /mnt". Versioned by NOTHING.
+    tracked by tradingai?               0 files
+    referenced by any CI workflow?      0
+    core.hooksPath                      unset  -> hooks come from .git/hooks/
+    non-sample hooks present            commit-msg  (ONE)
+    is that hook tracked?               0 — .git/ is never tracked
+
+    .git/hooks/commit-msg, in full:
+        exec python3 /mnt/c/Users/malek/TradingAI/agents/register_commit_check.py "$@"
+
+**Three separate layers of unrepresentability, and naming them separately is what names the fix:**
+
+    the HOOK      lives in .git/hooks/ — a clone never carries it
+    the TARGET    lives OUTSIDE the worktree, in no repository at all
+    the PATH      is absolute and machine-specific
+
+**The correction that makes this precise: an INSTALLER is perfectly representable — `scripts/`
+could carry one and be reviewed like any other file. The TARGET is not, while it lives outside the
+index.** So an installer committed today would commit a pointer to something the repo cannot carry,
+**which is grade 2 with a manifest.**
+
+**And the failure directions are asymmetric, which is why this has never been felt:**
+
+    hook present, target missing   python3 exits non-zero -> COMMIT REJECTED   loud, fail-CLOSED
+    hook absent (a fresh clone)    nothing runs, nothing prints                SILENT, fail-OPEN
+
+**The loud direction is the one that does not occur. A fresh clone gets the silent one**, and
+`git commit --no-verify` is a documented bypass that leaves no trace in the commit either.
+
+## The measured cost of grade 2, and it is inside the codebase's own monument to measuring
+
+**Found by the Manager while checking `NOT_RULES`; every figure below re-measured by me, with a
+control pair on the instrument.** `test_rules_base.py:320`'s docstring opens *"Measured, not
+asserted."*
+
+    claimed by the docstring          measured, working tree     at d01ef38
+    "the three NOT_RULES exclusions"          FOUR                     four
+    "29 `.py` in rules/"                       37                       35
+    "26 modules in the guard's own domain"     33                       31
+    "23 are imported directly by a test"       30                        —
+    "at test_rules_base.py:157"       the set is at :67 — and :157 is an UNRELATED OPEN-rule test
+
+    control: gate_023_timezone found = True · ZZZ_absent_control found = False
+
+**And the arithmetic is internally consistent throughout — `29 − 3 = 26`, `26 − 23 = 3` — so nothing
+in the docstring reads as broken.** Every input is stale and the shape is intact.
+
+> **The residue the guard exists to report is `33 − 30 = 3`. The docstring's own stale arithmetic
+> also gives 3. So the CONCLUSION is still true, by coincidence, while every number supporting it has
+> rotted — the outcome that leaves an instrument unfixed, because the answer never looks wrong.**
+
+**Two aggravations, and each is this entry's own scale applied to itself:**
+
+**The dead pointer is GRADE 3, not grade 2.** `:157` does not 404 — it lands on
+`test_an_open_rule_reaching_a_verdict_without_a_declared_parameter_is_flagged`, a real test about
+OPEN rules. **A reader who follows it arrives somewhere plausible and wrong**, which is an
+answer-shaped object in the same sense as the blank verdict below.
+
+**And the figure has TWO homes while the LIST it derives from has one.** `:40-42` carries the same
+`29 − 3 = 26` as `:322` does. Its own rule — *"ONE COPY, MODULE LEVEL… a second copy of an allowlist
+is the same-claim-two-homes failure, the copy nothing checks is the one that rots"* — **was obeyed:
+`NOT_RULES` is defined once at `:67` and read at `:72`.**
+
+> **So the comment applied its one-copy rule to the ALLOWLIST, named the DERIVED FIGURE as "the
+> DENOMINATOR of every coverage number quoted about these guards" in the very next clause, and left
+> THAT duplicated and unchecked. It guarded the object it was thinking about, not the object it had
+> just called load-bearing.**
+
+**Which is why updating the prose is not the fix. The residue must be COMPUTED at guard time.**
+
+### The rot has a date, and the dating is the finding
+
+    ce12b88  08-16 14:25  T-0026   29 .py · NOT_RULES 3   "29 - 3 = 26" CORRECT, both copies
+    bd3cdc5  08-16 17:55  T-0024   29 -> 30               ROTS HERE — 3h30m after it was written
+    c326e8e  08-16 19:44  T-0025a  30 -> 31
+    e864998  08-17 00:51  T-0030   31 -> 33  AND NOT_RULES 3 -> 4   (now wrong on both terms)
+    123e8c7  08-17 17:03  T-0028   33 -> 35
+    working tree                   35 -> 37
+
+**It was not born stale. It was correct for three and a half hours.**
+
+> **FOUR commits made it wronger and only ONE of them opened the file the figure lives in.** The
+> other three added a rule module and had no reason to look. **So there is no reviewer who failed and
+> no diff to blame** — the figure is a count of one directory's contents, written as prose in a
+> different file, **and it goes stale on commits that never open it.**
+
+**That is the structural argument in its strongest form: an attentional fix has nobody to attach
+to.** `e864998` is the only commit that could plausibly be faulted, and faulting it would leave the
+three that rotted the figure first entirely unaddressed — **and those three are the recurring case,
+because "added a rule module" is what this programme does all day.**
+
+### It is also UNDATABLE by the obvious tools, which is a consequence of the same defect
+
+**Measured, because a claim about what a tool cannot see has to be run rather than reasoned:**
+
+    touched backend/tests/unit/test_rules_base.py?
+      bd3cdc5  NO      c326e8e  NO      e864998  YES      123e8c7  NO      -> 1 of 4
+
+    git log -S '29 `.py`'  ce12b88..d01ef38 -- test_rules_base.py     ZERO ROWS
+    git log -L 67,67:test_rules_base.py     ce12b88..d01ef38          ZERO ROWS
+
+**`-S` returns nothing because the text never changed — the figure rotted without being edited.**
+And `-L` traces the `NOT_RULES` line, **which is ONE TERM of a two-term expression**: the `.py` count
+is a property of a directory listing and **is not a line in any file**, so line history structurally
+cannot see the term that rotted first.
+
+> **A seat asking *"when did this stop being true?"* runs `git log -S`, gets zero rows, and reads
+> "never changed" as "never been wrong". The tool answers a question one keystroke away from the one
+> asked — and answers it correctly, in the affirmative, with no rows to suggest otherwise.**
+
+**So this is the same grade-3 object again, in a third channel: an empty result sitting where an
+answer goes.** **A figure whose inputs live outside any line cannot be dated from line history at
+all — only re-measured per commit**, which is how the sequence above was obtained.
+
+**`agents/stale_sweep.py` exists to catch exactly this class — a comment citing code that changed.
+It has never been run against it.** So this entry does not have to argue that an unenforced check
+costs something: **here is a drift of seven modules, a miscount of the exclusion set, and a pointer
+ninety lines off, and the tool built to find it was written, committed to nothing, and never run.**
+
+*(Pre-existing at `d01ef38`; not `T-0032`'s and not Execute's — the numbers were already stale before
+this task opened.)*
+
+## Instance 2 — grade 3. The Manager's CI watcher printed a verdict for a run that had not concluded.
+
+**Its guard, and the reproduction, one line:**
+
+    R=""; [ "$R" != "RUNNING" ] && [ "$R" != "NO_RUN_YET" ]   ->  TRUE
+
+**An empty string passes both tests, so a FAILED QUERY is admitted as a VERDICT.** An
+`SSL_ERROR_SYSCALL` produced `R=""`, and the watcher printed
+
+    CI CONCLUSION d01ef38:          <- exit 0
+
+**while `d01ef38` read `IN_PROGRESS` on an independent check.** The guard enumerated the two
+non-terminal states it knew and treated *everything else* as terminal — **and "everything else"
+silently includes "no answer".**
+
+## Instance 3 — grade 3 again, in the mechanism built to fix grade 2
+
+**The Manager instituted a commit-trailer convention — `Seat:` / `Found-by:` / `Written-by:` — so
+seat attribution would be READABLE FROM `git log` instead of reconstructed from bus messages.
+The first two commits under it are `d01ef38` and `ff642e1`. Verified independently:**
+
+    git log -1 --format='%(trailers:only=true)' ff642e1
+    git log -1 --format='%(trailers:only=true)' d01ef38
+      -> Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+      -> and NOTHING ELSE. No Seat:, no Found-by:, no Written-by:.
+
+**Cause, confirmed against the raw body: a BLANK LINE between the seat block and
+`Co-Authored-By`. Git parses only the LAST paragraph as trailers, so the seat lines are body
+text.** The message contains them; the parser cannot see them.
+
+> **A convention created specifically to make attribution machine-readable produced, on its first
+> two uses, attribution the machine cannot read — and reported success, because the lines are
+> visibly present when a human looks at `git log`.**
+
+**And the check is one command, which nobody ran until the third commit.** The Manager verified the
+diff and read *"trailers are on it"*, both true, neither being the question. **This is the same
+object as the blank verdict and the zero-row `git log -S`: the place a reader looks is occupied.**
+
+*(Fixed forward, not backward — the rule and a mandatory post-commit parse are now in both prompt
+files. History is NOT rewritten, so a future seat auditing attribution must not read `d01ef38` and
+`ff642e1` as omitting their seats: the lines are in the body and greppable.)*
+
+## The tell fired here and was walked past, and the reason is the durable half
+
+**The label said `CI CONCLUSION` and the line after it was empty — the label disagreeing with its
+own output, one character apart. This register records that tell as FREE. It is not uniformly free:**
+
+    AUTHORSHIP time   label and output written and read together, in one hand   nearly free
+    READING time      output arrives alone, detached from the guard's author    needs SUSPICION,
+                                                                                which a clean-looking
+                                                                                result suppresses
+
+**Everything asynchronous — a background watcher, a scheduled sweep, a CI callback — is in the
+second column.** **Visibility is not the binding constraint; NOTICING is, and a tell nobody looks at
+is not cheaper than one that needs suspicion.**
+
+## Therefore the fix is STRUCTURAL, and recording it as attentional is this register's own defect
+
+    NOT  "watch for a label that disagrees with its output"     <- known, written down, and it did
+                                                                   not help the seat that wrote it
+    BUT  "make the blank IMPOSSIBLE TO PRINT"
+
+**Same shape as the units fix — *compute in one scale IN CODE* rather than *remember to convert* —
+and the same shape as `test_rules_base.py:130`'s derived scratch id, which replaced a hardcoded
+precondition that could silently stop holding.**
+
+> **A tell tells you WHERE to look. It is a diagnostic, never a remedy. Recording a convention as
+> the fix is `B47` — and doing it inside the entry that is about `B47` is how the family survives
+> being named.**
+
+## Fix
+
+**1. The watcher reports one of THREE things and only one is a verdict** — and the words *"this is
+not a pass"* belong in the other two, at the moment of absence, because the habit being interrupted
+is treating the absence of a negative as a positive:
+
+    CI VERDICT <sha> conclusion=success        a verdict
+    ABORTED: N consecutive query failures      NO VERDICT OBTAINED — this is not a pass
+    TIMED OUT after N minutes                  NO VERDICT — this is not a pass
+
+**2. Assert non-empty before reporting.** The guard must enumerate the TERMINAL states and treat
+everything else as non-terminal, **not the reverse** — the reverse is what admits the empty string.
+
+**3. `6c` — move `register_commit_check.py` INTO the index**, then a committed installer becomes
+representable end to end, and CI can run the checks directly without a hook at all.
+
+**4. The trailer convention verifies itself or it is not a convention** — one paragraph, no blank
+line before `Co-Authored-By`, and a mandatory `git log -1 --format='%(trailers:only=true)'` after
+every commit. **Reading the message back is not the check; parsing it is.**
+
+**5. Until 3 lands, nothing under `agents/` may be cited as a control in any verdict.** It is
+documentation of an intention. **This entry exists so that the next seat quoting one of those tools
+as evidence finds the reason it is not.**
+
+## The general form, which is the only part worth carrying to a different codebase
+
+> **Every instance here is a check whose OUTPUT was inspected and whose EXECUTION was not.** The
+> diff was read, the message was read, the label was read, the rows were counted. **In each case the
+> thing that failed was upstream of the thing that was looked at, and the artefact at the reading
+> point was well-formed.**
+
+**So the question that separates these from ordinary bugs is not *"is the output right?"* but
+*"could this output have been produced by the check not running at all?"* — and where the answer is
+yes, the output is not evidence.**
+
+### B146 — the dominance HEALTH CHECK does not use the dominance SOURCE's path resolution: three consumers, three rules, three defaults, and they agree in exactly one deployment
+
+**Found by the Manager, written by Review, 2026-08-17. Measured statically at `d01ef38`; the live
+property is NOT tested and the reason is stated below rather than left as an absence.**
+
+`T-0006` criterion 4c already caught this defect once, on the *source* side, and the fix documents
+itself in twenty lines at `dominance.py:131-150`. **It fixed the site where the bug was found and
+never swept for the other readers of the same variable.** There are three.
+
+## The three consumers of one directory
+
+    consumer                      resolution                                       default
+    dominance.py:151-155          DOMINANCE_DIR  or  DOMINANCE_DATA_DIR            /opt/dominance
+    data_health.py:34             DOMINANCE_DATA_DIR only                          /data/dominance
+    deploy/backup/backup.sh:35    DOMINANCE_DIR only                               /opt/dominance
+
+**All three are reaching for the same artefact, and the source and the monitor name the same file:**
+
+    dominance.py:159    Path(dominance_dir) / "dominance_intraday_raw.csv"
+    data_health.py:107  DOMINANCE_DIR       / "dominance_intraday_raw.csv"
+
+## And the compose files set DIFFERENT VARIABLES in different services
+
+    deploy/compose.vps.yaml:110          api        DOMINANCE_DATA_DIR: "/data/dominance"
+    deploy/compose.dominance.yaml:37     collector  DOMINANCE_DIR: "/data"
+    deploy/compose.dominance.bootstrap.yaml:37      DOMINANCE_DIR: "/data"
+
+**So the resolution depends on which container you are in, and the monitor and the source only
+coincide in one of them:**
+
+    container / env          source resolves      health check resolves      agree?
+    api (vps compose)        /data/dominance      /data/dominance            YES
+    collector               /data                /data/dominance            NO — one segment
+    neither var set         /opt/dominance       /data/dominance            NO — entirely
+
+**`backup.sh` supplies a third answer in the api container, where `DOMINANCE_DIR` is unset: it backs
+up `/opt/dominance` while the source reads `/data/dominance`.**
+
+## The override that can move the data and cannot move the monitor
+
+    dominance.py:158    or os.getenv("DOMINANCE_RAW_CSV")     <- full-path override, SOURCE ONLY
+
+**`DOMINANCE_RAW_CSV` has exactly one reader in the entire tree.** Setting it repoints the source at
+an arbitrary file **and `data_health.py` goes on checking the directory nobody is reading.**
+
+> **A health check that resolves its target differently from the thing it is checking does not
+> report on that thing. It reports, in well-formed language, about a path.** Both answers —
+> `healthy` and `stale` — are then true of something other than the data the engine consumes.
+
+**That is the aggravating fact rather than a flourish: `data_health.py` is the instrument you consult
+to find out whether the data is there, so it is the consumer whose divergence is hardest to notice.
+The source failing is visible as empty panels; the MONITOR failing is visible as nothing at all.**
+`T-0006` found the source bug precisely because *"read nothing"* and *"read the two we have"* are
+different verdicts and a criterion existed to separate them. **No such criterion exists for the
+monitor.**
+
+## The route, which is a finding and not a footnote
+
+**The endpoint is `/api/system/data-health`**, verified end to end rather than inferred:
+
+    main.py:460    api_prefix = "/api"
+    main.py:474    app.include_router(system_router, prefix=api_prefix)
+    system.py:13   router = APIRouter(prefix="/system", tags=["system"])
+    system.py:89   @router.get("/data-health")
+
+**And the module is `backend/app/api/routers/system.py` — `routers/`, not `routes/`.** The wrong
+spelling was in circulation in this loop; **a path that does not exist produces "no such file" and a
+reader concludes the endpoint does not exist, which is the same class of well-formed wrong answer as
+the finding above.**
+
+## What is NOT established, and the precise reason
+
+**The live property — that the deployed api's health check and its dominance source resolve to the
+same directory — is UNTESTED.** The route exists and answers; **it requires a bearer token, and no
+seat here has one it can establish is its to use. The value in `compose.vps.yaml` is INHERITED from
+the repo, not read from the running container.**
+
+**So this entry claims a code-level divergence, which is measured, and claims NOTHING about what the
+deployed api currently reports.** The two are different quantities and only the first is in evidence.
+
+## Fix, in the order that survives
+
+**1. One resolver, one module, imported by both** — `data_health.py` calls the source's own path
+rather than restating it. A restatement is a second implementation, and this register already carries
+the general form: *the exemption list has become a second implementation of the check.*
+
+**2. Until then, `data_health.py:34` must read `DOMINANCE_DIR` first, exactly as `dominance.py` does,
+and share its `/opt/dominance` default** — the mismatch is the whole defect and the one-line version
+of it is available now.
+
+**3. `backup.sh` and `DOMINANCE_RAW_CSV` come along or they are the next instance.** A sweep that
+fixes two of four readers has produced this entry once already.
+
+**4. A test that asserts the two resolutions are EQUAL under each compose file's environment** —
+not that each is individually correct. **Individually correct is what they are today.**
+
 ### B145 — `GATE-014` IS DELIBERATELY UNBUILT: its resumption condition is undefined, and C-05 makes every implementable path invent a governance decision on Malek's behalf
 
 **Established by Execute during `T-0032`, on Review's finding, ruled by the Manager. Filed because a
