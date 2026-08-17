@@ -14,7 +14,9 @@ realistic macro release is on it. The repository's only calendar data
 (`test_calendar_service.py`) is 12:30 x4 / 10:00 x4 / 03:00 x1 — three distinct times, all
 grid-aligned. So the natural fixture, and the one already in the tree, exercises the M15 term
 ZERO times while every assertion passes. Every off-grid case here is CONSTRUCTED for that
-reason, and both arms of the `max()` are shown to win.
+reason. The `max()` is gone — its first argument was unreachable, so a criterion
+demanding both its arms win was unsatisfiable; the M15 close is a RATCHET on the
+cooldown and the tests say that instead.
 """
 from __future__ import annotations
 
@@ -72,66 +74,113 @@ def at(h: int, m: int, d: int = 17) -> datetime:
 # ===========================================================================
 # GATE-014 — THE GUARD THAT REPLACES THE IMPLEMENTATION
 # ===========================================================================
-def _identifiers(source: str) -> list[str]:
-    """Every NAME-LIKE POSITION an AST carries — not merely every identifier node.
+#: THE ONE DECLARED EXCLUSION from the identifier surface, with its reason.
+#:
+#: Everything else that carries a name is consumed GENERICALLY, so the walker's coverage is
+#: derived from the AST rather than from a list somebody remembered to keep current.
+EXCLUDED_FIELDS: dict[tuple[str, str], str] = {
+    ("Constant", "value"): (
+        "Bare string VALUES are PROSE — docstrings and messages. These modules discuss "
+        "volatility at length in order to FORBID it, so admitting bare strings would make "
+        "the guard fire on the very text that exists to prevent the thing. Constant.value "
+        "IS admitted in NAME-LIKE positions — dict keys and annotations — handled "
+        "explicitly below, so the exclusion is about the POSITION and not the node type."
+    ),
+}
 
-    ONE walker, used by the guard AND by the falsifiability tests below, so the tests
-    exercise the code path the guard uses rather than a reconstruction of it. A second copy
-    here would be B140's middle layer — running your own rebuild and showing it as the code's.
 
-    THE FIRST VERSION COVERED FOUR POSITIONS AND MISSED FOUR, AND THE INJECTION TESTS COULD
-    NOT SEE THE GAP — found by Review, which planted a real threshold config in a news module
-    and watched all 62 tests pass:
+def _walk_identifiers(source: str) -> tuple[list[str], set[tuple[str, str]]]:
+    """Every name in `source`, plus the `(node, field)` pairs actually consumed.
 
-        _VOL = {"atr_period": 14, "sigma_mult": 2.0}          <- dict STRING keys, BLIND
-        _measure(series, window=cfg["atr_period"])            <- keyword AT A CALL, BLIND
+    ONE walker, used by the guard, by the falsifiability matrix AND by the coverage
+    assertion, so none of them tests a reconstruction of the others (`B140`).
 
-    **Those are how a threshold actually gets configured** — arguably likelier than a bare
-    identifier. The must-fire control that proved the instrument itself worked was the same
-    smuggle with one term rewritten as a plain `Name`, which DID go red.
+    ## THE FIELD LOOP IS THE FIX. THE PREVIOUS TWO VERSIONS ENUMERATED NODE TYPES.
 
-    WHY THE PER-TERM FIX DID NOT REACH IT, which is the transferable half: every injection
-    planted its term as a `FunctionDef` name, so five injections proved the walker sees ONE
-    node type five times. **The per-TERM gap was closed and the per-POSITION gap was never
-    opened.** That is Review's own T-0028 narrowing one level up — `BinOp` without `Compare`,
-    where the control proved the walker saw arithmetic and nothing about whether arithmetic
-    covered *derives*. **A control validates the INSTRUMENT, never the VOCABULARY; an
-    injection validates the POSITION, never the positions.**
+    v1 listed four node types and was silently incomplete — Review planted a real threshold
+    config and 62 tests passed. v2 added four more and pinned the gap as a stated boundary,
+    **which was worse: it was ASSERTIVELY incomplete.** It claimed the remaining limits were
+    "dynamic or textual", and `async def` is neither. **A reader who trusts a stated pin
+    stops looking, which the silently-incomplete version never earned.**
 
-    STRING CONSTANTS ARE INCLUDED ONLY IN NAME-LIKE POSITIONS — dict keys and annotations —
-    and never as bare values. Taking every string would fire on the docstrings these modules
-    use to FORBID the thing, which is the failure the AST approach exists to avoid.
+    MEASURED over `backend/app`, 170/170 files parsed — the six positions v2's boundary
+    missed, every one a STATIC BINDING:
+
+        alias.name           2157      import atr_calc
+        ImportFrom.module    1141      from atr_stats import ...
+        AsyncFunctionDef.na   272      async def compute_atr_threshold   <- 29.9% of all defs
+        ExceptHandler.name    129      except E as atr_err
+        alias.asname           84      import numpy as atr_cfg
+        Global.names            2      global atr_period
+
+    **`ast.AsyncFunctionDef` is not a subclass of `ast.FunctionDef`**, and in a FastAPI
+    codebase `async def` is the dominant form for anything touching I/O — which is where a
+    resumption check would live.
+
+    **So the walk is no longer a list of node types.** It consumes EVERY field carrying a
+    `str` or a `list[str]`, minus `EXCLUDED_FIELDS`, and
+    `test_the_walker_covers_the_measured_identifier_surface` asserts that against the surface
+    derived from the real corpus. **The boundary is now a consequence of one declared
+    exclusion instead of a hand-written list that can be short.**
     """
     names: list[str] = []
+    consumed: set[tuple[str, str]] = set()
     for node in ast.walk(ast.parse(source)):
-        if isinstance(node, ast.Name):
-            names.append(node.id)
-        elif isinstance(node, ast.Attribute):
-            names.append(node.attr)
-        elif isinstance(node, ast.arg):
-            names.append(node.arg)
-            if isinstance(node.annotation, ast.Constant) and isinstance(
-                node.annotation.value, str
+        kind = type(node).__name__
+        for field in node._fields:
+            if (kind, field) in EXCLUDED_FIELDS:
+                continue
+            value = getattr(node, field, None)
+            if isinstance(value, str):
+                names.append(value)
+                consumed.add((kind, field))
+            elif (
+                isinstance(value, list)
+                and value
+                and all(isinstance(item, str) for item in value)
             ):
-                names.append(node.annotation.value)
-        elif isinstance(node, (ast.FunctionDef, ast.ClassDef)):
-            names.append(node.name)
-        elif isinstance(node, ast.keyword) and node.arg:
-            # `f(atr_period=14)` and `@configure(atr_mult=2.0)` — a keyword at a CALL is an
-            # `ast.keyword`, not an `ast.arg`, and the two are easy to conflate by name.
-            names.append(node.arg)
-        elif isinstance(node, ast.Dict):
-            # `{"atr_period": 14}` — a dict key is a name-like position. Only KEYS, never
-            # values, so a message string cannot trip the guard.
+                names.extend(value)
+                consumed.add((kind, field))
+
+        # `Constant.value` IN NAME-LIKE POSITIONS ONLY. `{"atr_period": 14}` is a dict KEY
+        # and `x: "atr_series"` is an annotation; both name something. A bare string is prose.
+        if isinstance(node, ast.Dict):
             for key in node.keys:
                 if isinstance(key, ast.Constant) and isinstance(key.value, str):
                     names.append(key.value)
-        elif isinstance(node, ast.AnnAssign):
-            if isinstance(node.annotation, ast.Constant) and isinstance(
-                node.annotation.value, str
-            ):
-                names.append(node.annotation.value)
-    return names
+        elif isinstance(node, (ast.arg, ast.AnnAssign)):
+            annotation = getattr(node, "annotation", None)
+            if isinstance(annotation, ast.Constant) and isinstance(annotation.value, str):
+                names.append(annotation.value)
+    return names, consumed
+
+
+def _identifiers(source: str) -> list[str]:
+    return _walk_identifiers(source)[0]
+
+
+def _identifier_surface(paths) -> set[tuple[str, str]]:
+    """The `(node, field)` pairs that carry names, DERIVED from real source.
+
+    Review's instrument, taken verbatim rather than recalled — which is the whole point: a
+    surface that is measured cannot be short the way an enumeration can.
+    """
+    surface: set[tuple[str, str]] = set()
+    for path in paths:
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except SyntaxError:                          # pragma: no cover - defensive
+            continue
+        for node in ast.walk(tree):
+            for field in node._fields:
+                value = getattr(node, field, None)
+                if isinstance(value, str) or (
+                    isinstance(value, list)
+                    and value
+                    and all(isinstance(item, str) for item in value)
+                ):
+                    surface.add((type(node).__name__, field))
+    return surface
 
 
 #: The POSITIONS a forbidden term can occupy, as source templates taking one `{term}`.
@@ -148,23 +197,14 @@ INJECTION_POSITIONS: dict[str, str] = {
     "dict_string_key": '_VOL = {{"{term}_period": 14}}\n',
     "decorator_keyword": "@configure({term}_mult=2.0)\ndef f():\n    pass\n",
     "string_annotation": 'def f(x: "{term}_series") -> None:\n    pass\n',
+    # The six STATIC BINDINGS v2's boundary wrongly certified as out of reach.
+    "async_function_def": "async def compute_{term}_threshold(series):\n    return series\n",
+    "import_name": "import {term}_calc\n",
+    "import_asname": "import numpy as {term}_cfg\n",
+    "importfrom_module": "from {term}_stats import x\n",
+    "except_handler_name": "try:\n    pass\nexcept ValueError as {term}_err:\n    pass\n",
+    "global_statement": "def f():\n    global {term}_period\n",
 }
-
-#: POSITIONS THIS GUARD DOES **NOT** COVER, named so the table above cannot read as exhaustive.
-#:
-#: A table of shapes implies completeness exactly the way five terms implied it — which is the
-#: mistake that produced this whole finding. These are asserted as KNOWN-UNCOVERED below, so a
-#: later seat that closes one moves it up rather than discovering the hole the way Review did.
-#:
-#: All four are dynamic or textual: the term never appears in a name-like AST position, so no
-#: identifier walker can see it. Closing them needs a different instrument, not a wider walk.
-UNCOVERED_POSITIONS: dict[str, str] = {
-    "getattr_string": 'v = getattr(cfg, "{term}_period")\n',
-    "subscript_string": 'v = cfg["{term}_period"]\n',
-    "fstring_fragment": 'v = cfg[f"{{prefix}}_{term}"]\n',
-    "assembled_at_runtime": 'v = cfg["{term}"[:3] + "_period"]\n',
-}
-
 
 @pytest.mark.parametrize("position", sorted(INJECTION_POSITIONS))
 @pytest.mark.parametrize("term", VOLATILITY_TERMS)
@@ -208,28 +248,93 @@ def test_the_walker_does_not_fire_on_prose(term):
     )
 
 
-@pytest.mark.parametrize("position", sorted(UNCOVERED_POSITIONS))
-def test_the_guard_does_NOT_cover_these_positions_and_says_so(position):
-    """THE GUARD'S BOUNDARY, ASSERTED — because a shape table reads as exhaustive.
+def test_the_walker_covers_the_measured_identifier_surface():
+    """THE BOUNDARY IS DERIVED, NOT ENUMERATED — and that is the whole repair.
 
-    That is precisely how this finding happened: five terms in one position read as five
-    terms covered. So the positions the walker CANNOT see are named and pinned, and the
-    assertion is deliberately inverted — it goes red the day one becomes covered, which
-    forces the entry to move to `INJECTION_POSITIONS` rather than the coverage silently
-    growing without anyone noticing which cells changed.
+    v2 hand-wrote the uncovered positions and justified them as "dynamic or textual".
+    `async def` is neither, and nor are five more static bindings. **A stated boundary that
+    is wrong is worse than an unstated one: it certifies, and a reader who trusts it stops
+    looking.** The silently-incomplete version never earned that trust.
 
-    ALL FOUR ARE DYNAMIC OR TEXTUAL. `cfg["atr_period"]` as a SUBSCRIPT is a bare string
-    VALUE, not a dict key or a keyword, and admitting bare strings would fire on the
-    docstrings these modules use to forbid the thing. **So this is a real limit of the
-    approach and not an oversight in the walk:** closing it needs a different instrument.
+    So the surface is MEASURED from the real corpus and the walker must consume all of it,
+    with `Constant.value` as the ONE declared exclusion carrying its reason. The four genuine
+    limits — `getattr("...")`, `cfg["..."]`, f-string fragments, runtime assembly — now fall
+    out as CONSEQUENCES of that single exclusion rather than as a list that can be short.
+
+    Third instance today of the same fix shape: compute the residue at guard time rather than
+    write it in prose; let the predicate replace the exemption list; derive the boundary
+    rather than state it.
     """
-    planted = UNCOVERED_POSITIONS[position].format(term="atr")
+    corpus = sorted((BACKEND / "app").rglob("*.py"))
+    assert len(corpus) > 100, "the surface must be derived from a non-trivial corpus"
 
-    assert not any("atr" in n.lower() for n in _identifiers(planted)), (
-        f"{position!r} is now COVERED by the walker — good. Move it from "
-        "UNCOVERED_POSITIONS to INJECTION_POSITIONS so the guard's boundary stays stated "
-        "rather than drifting"
+    surface = _identifier_surface(corpus)
+    assert ("Constant", "value") in surface, "the declared exclusion must actually occur"
+    assert ("AsyncFunctionDef", "name") in surface, (
+        "the position that broke v2 must be present in the corpus, or this test cannot "
+        "prove the repair"
     )
+
+    # NAMED EXPLICITLY DESPITE BEING COVERED GENERICALLY — the Manager's ask, and the blast
+    # radius earns it: `ast.AsyncFunctionDef` is NOT a subclass of `ast.FunctionDef`, so a
+    # tuple that LOOKS like it covers defs misses 272 of 909 (29.9%), and in a FastAPI
+    # codebase `async def` is the form anything touching I/O takes. The field loop makes this
+    # true by construction; this asserts it so a future rewrite back to node types goes red.
+    async_consumed = _walk_identifiers(
+        "async def compute_atr_threshold(s):\n    return s\n"
+    )[1]
+    assert ("AsyncFunctionDef", "name") in async_consumed
+
+    consumed: set[tuple[str, str]] = set()
+    for path in corpus:
+        consumed |= _walk_identifiers(path.read_text(encoding="utf-8"))[1]
+
+    missed = surface - consumed - set(EXCLUDED_FIELDS)
+    assert not missed, (
+        f"the walker does not consume {sorted(missed)}, which carry names in the real "
+        "corpus. Either consume them or add them to EXCLUDED_FIELDS WITH A REASON — an "
+        "unexplained gap is what made v2 worse than v1"
+    )
+
+    # And the exclusion must be exactly one, or "the ONE declared exclusion" is prose.
+    assert set(EXCLUDED_FIELDS) == {("Constant", "value")}
+    assert "prose" in EXCLUDED_FIELDS[("Constant", "value")].lower()
+
+
+def test_the_remaining_limits_are_CONSEQUENCES_of_the_one_exclusion():
+    """The guard's genuine blind spots, DERIVED rather than listed.
+
+    v2 hand-wrote these four and justified them with a reason that did not cover `async def`.
+    They are still blind — but now for a reason that is CHECKED rather than asserted: each
+    writes the term as a bare string VALUE, and `Constant.value` is the single declared
+    exclusion. **Nothing here is a separate claim; they are all the same claim.**
+
+    Closing them means admitting bare strings, which would fire on the docstrings these
+    modules use to FORBID the thing — so it needs a different instrument, and THAT sentence
+    is now true because it follows from the exclusion rather than from a guess about which
+    constructs exist.
+    """
+    consequences = {
+        "getattr_string": 'v = getattr(cfg, "{term}_period")\n',
+        "subscript_string": 'v = cfg["{term}_period"]\n',
+        "fstring_fragment": 'v = cfg[f"{{prefix}}_{term}"]\n',
+        "assembled_at_runtime": 'v = cfg["{term}"[:3] + "_period"]\n',
+    }
+    for label, template in consequences.items():
+        planted = template.format(term="atr")
+        # Blind — and the AST says WHY: the term is a bare Constant value, nothing else.
+        assert not any("atr" in n.lower() for n in _identifiers(planted)), (
+            f"{label} is now covered; if that came from admitting bare strings, check the "
+            "docstring arm still passes before keeping it"
+        )
+        bare_string_values = [
+            n.value for n in ast.walk(ast.parse(planted))
+            if isinstance(n, ast.Constant) and isinstance(n.value, str)
+        ]
+        assert any("atr" in v.lower() for v in bare_string_values), (
+            f"{label} is blind for some reason OTHER than the declared exclusion — that is "
+            "a new gap and needs its own entry in EXCLUDED_FIELDS"
+        )
 
 
 def test_the_guard_catches_a_realistic_smuggled_threshold():
