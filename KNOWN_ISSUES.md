@@ -4094,6 +4094,79 @@ Review reported.**
 
 Related: **B103**, **B125**, and round-2 hard rule 5.
 
+#### AMENDMENT 2026-08-17 — `T-0031` DOES NOT EXIST, half of this was closed by `T-0032`, and the live half now has NO OWNER
+
+**`T-0031` has no task directory and appears nowhere in the bus.** The three references above —
+*"`T-0031` owns it, criterion `1a`"* and *"`T-0031`'s `1b` requires it"* — **assign this fix to a task
+that was never created.** `landed_sweep` exits 1 on them, which is how they surfaced.
+
+**Re-pointing them at `T-0032` would be wrong, and that is the finding.** `T-0032` closed one half
+and DECLINED the other explicitly:
+
+    CLOSED by T-0032   GATE-015 classifies from the RAW provider value, so its verdict does not
+                       inherit the upstream fail-open. Unrecognised -> UNKNOWN, never
+                       NOT_RED_FOLDER, and the handling of UNKNOWN is a DECLARED, RECORDED
+                       choice. Pinned by tests over "tier-1" / "" / None, plus
+                       "an unknown event blocks rather than trades".
+
+    STILL OPEN         app/services/calendar/finnhub.py
+                         :262  impact_raw = str(item.get("impact") or item.get("importance")
+                                                or "low")
+                         :263  impact = _IMPACT_MAP.get(impact_raw.lower(), "low")
+                         :188  if event.impact != "high": continue
+                       Both routes live. UNCHANGED since this entry was filed — no commit has
+                       touched the file.
+
+**`gate_015_calendar_scope.py:48` says so in the code: *"`finnhub.py` ITSELF IS NOT CHANGED HERE. It
+is live code, served hourly and to `GET /calendar/today`, and this task is shadow-only. The upstream
+fail-open is escalated rather than patched in passing."*** **That was the right call** — a
+shadow-only task must not edit a live serving path — **and it means the escalation landed on a task
+id that does not exist.**
+
+> **So the rule can no longer be fooled and the DATA still is. An event whose impact the provider
+> labelled in a way we do not recognise is STILL served to the UI as `"low"`, and the count that
+> criterion `1b` required — how often `UNKNOWN` actually fires against the live feed — has never
+> been taken and nothing schedules it.**
+
+**When this amendment was first written NO live task owned it, checked rather than assumed:**
+`T-0033` is the declared-but-unproducible detector and `T-0034` is the declared-but-unenforced
+detector, and **neither touches the calendar fetch path.** **It said so rather than inventing an
+owner** — the same refusal as declining to index `risk_altcoin_heavy_as_written`: **a task nobody
+created is not a task to assign work to.**
+
+**`T-0035` was then opened and OWNS THE SOURCE.** *(Verified before being cited here — directory,
+`plan.md`, and `PLANNING` on the bus — because this amendment exists precisely because `T-0031` was
+cited as an owner without existing.)*
+
+    1.  MAKE `UNKNOWN` VISIBLE AT THE SOURCE WITHOUT CHANGING GATE BEHAVIOUR — unrecognised or
+        missing impact becomes an explicit RECORDED `UNKNOWN` instead of a silent `"low"`.
+        `:188` still skips anything not `"high"`, so `UNKNOWN` stays non-blocking and the
+        engine behaves IDENTICALLY. Asserted over `{}`, `{"impact": ""}`, `{"impact": None}`,
+        `{"impact": "tier-1"}` — gate decision identical before and after. If it changes,
+        criterion 1 has been exceeded.
+    2.  THE COUNT, once the recording exists.
+    3.  THE DIRECTION IS NOT A SEAT'S TO CHOOSE — it goes to Malek with the count in hand.
+
+> **You cannot count what you do not record.** Criterion `1b`'s count was never taken for a circular
+> reason: the code coerces unknown to `"low"`, **so there is nothing recorded to count.** There is
+> also no Finnhub key, no `.env`, no cached events and no fixture in the repo, **so a live-feed study
+> is not available to a seat here.** Step 1 needs neither a key nor a doctrine ruling, and it is what
+> makes step 2 possible at all.
+
+**And the obvious wrong fix is named in the plan: do NOT widen `_IMPACT_MAP`.** A wider map makes the
+next unrecognised value silently `"low"` again — **the same shape as loosening a grep pattern to
+clear a false positive, which `check_partial_rules.py` forbids in its own failure message.**
+
+**The sequence is the point and it is why the blank was worth writing:** the sweep failed loudly, the
+mechanical repair would have silenced it, refusing to invent an owner left the gap visible, **and the
+gap is what produced a real owner.** **An honest blank beats a plausible filler, because the filler
+is what stops the next reader looking.**
+
+**And the citation above is half an address.** It reads `finnhub.py:262` with no directory; the file
+is at `app/services/calendar/finnhub.py`, and the obvious guess is `market_data/sources/`, where
+`dominance.py` lives. **A line number is a coordinate in a document — citing one without its path is
+a reference with half an address**, which is the same rule as *name the sha you are reading*.
+
 ### B125 — the news blackout is DORMANT, and it activates on the FIRST HALF of its own fix: populate the key and you ship "trading suspended" while taking every trade
 
 > ## `[AMENDED 2026-08-16 by Review, and the amendment makes this worse rather than smaller.]`
