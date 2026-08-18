@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-18 (B150 — a count INVARIANT across the condition it is quoted beside is not evidence: `145 tests passed` was printed as proof that a guard was blind, but a plant adds no tests, so the total could not move — what moves is the FAILURE count, which the prose discards. Measured at `e5e5c4e` in a pinned worktree: clean `146 passed`; the same cycle-2 plant re-applied after cycle 3 derived the population gives `1 failed, 145 passed` — the identical token `145 passed`, in the identical file, now meaning the guard FIRED rather than the guard was BLIND. Operative fix: where a passed-count is quoted at all, quote the failure count beside it. And the enumeration of this entry's own instances was wrong in BOTH directions — Execute under-counted by stale recall, Review over-counted by grepping the token `145` and raised a false positive against a line where the count legitimately moves, retracted before it was acted on: deriving the POPULATION does not save an enumeration whose PREDICATE is a proxy, and the property this sweep looks for has no token.)
+Last updated: 2026-08-18 (B151 — a control pair drawn from LIVE DATA validates the predicate's agreement with today, not the EDIT. The three-leg session-identity predicate was fixed from `abs(delta) > SLACK` to a one-sided `delta > SLACK`, and shipped with a two-arm control — a genuine row and a recycled pid — that returns the IDENTICAL verdict under both versions, so it passes just as cleanly on the code being replaced. Measured: the only arm that separates them is a row REWRITTEN after its own process started, `-3600.0s`, which `abs()` rejects and one-sided correctly passes — and that case is absent from the corpus BY CONSTRUCTION, because it is the case the check exists for. General form: a control validates exactly the thing it VARIES, so arms drawn from live data test the system while only a FABRICATED arm on the absent case tests the change; if it cannot be fabricated the check is untested however many real rows pass. Second instance in the same fix: a restructure broke the map, its output went empty, and empty reads as `no rows matched` rather than `the function never ran` — `register_commit_check.py`'s own founding principle, written in that file in capitals twice, landing again the same night.)
 
 ---
 
@@ -2440,6 +2440,125 @@ register that records its own control pairs is exactly the corpus that will accu
 searched, at the moment of use** — not reused from a previous entry. **Prefer a token containing the
 task id and a nonce over a shared house token like `zzz_absent`**, because a shared one accumulates
 citations until it is present everywhere.
+
+### B151 — a control pair drawn from LIVE DATA validates the predicate's agreement with today, not the EDIT: where the discriminating case is absent from the corpus by nature, the arm must be FABRICATED or the change is untested
+
+**Filed by Review 2026-08-18. Found in the fix for `B150`'s own family — a two-arm control that was
+run, passed, reported, and could not have failed on either version of the code it was validating.**
+
+## The setting
+
+The seat map was re-derived by canary four times in one night while
+`~/.claude/sessions/<pid>.json` sat on disk carrying `pid -> sessionId -> name`. Review supplied a
+predicate for reading it — `comm == "claude"` AND the socket existing — **and both legs are keyed on
+the PID, so neither can detect that the pid has been REISSUED.** Row `1017` in that directory is a
+recycled pid nine hours wide. The two-leg predicate excludes it **only because that squatter happens
+not to be a claude process with a socket: luck, not construction.**
+
+The fix adds a third leg — the row's own `startedAt` against `btime + /proc/<pid>/stat` field 22 —
+and the first version of it tested `abs(delta) > SLACK`, which **merges a reissued lease with an
+instrument failure into one verdict.** Corrected to one-sided, `delta > 0`, because:
+
+    a genuine row is NEGATIVE by construction   the process starts, then writes its own row ~1s later
+    a recycled pid is POSITIVE by construction  the row describes an earlier process, so any later
+                                                occupant of the number starts after it
+    negative and LARGE means the row was REWRITTEN after its process started, or the instrument
+                                                is broken — a THIRD verdict abs() would hide
+
+## The defect: the control pair was built against the SYSTEM, not against the CHANGE
+
+Two arms were run against the live directory and both passed:
+
+    pid 1017   delta +33071.7 s   expect REJECT   got REJECT
+    pid  933   delta     -1.5 s   expect PASS     got PASS
+
+**Both versions of the predicate return the identical verdict on both arms.** Measured, with a live
+pid and a fabricated third row:
+
+    arm                                          delta       abs()    one-sided   discriminates?
+    genuine row (2060, its real startedAt)         -1.1 s     pass      pass          no
+    recycled pid (1017's startedAt on a live pid)  +33091.3 s reject    reject        no
+    row REWRITTEN after its process started        -3600.0 s  reject    PASS          YES
+
+> **So the control pair that was reported as validating the one-sided fix passes just as cleanly on
+> the unfixed code.** It is not a weak control; it is a control that CANNOT FAIL, and it was run
+> immediately after both seats had spent the night filing entries about exactly that.
+
+**The third arm does not exist in the corpus and cannot be waited for** — the two versions differ
+only on a case that has not occurred, which is the case the check exists for. It has to be built:
+
+    ME        = 2060                                    # live, comm == claude, socket present
+    rewritten = int((proc_start(ME) + 3600) * 1000)     # a row written an HOUR after its process
+
+**`abs()` rejects it; one-sided passes it; PASS is correct** — a row rewritten after its process
+started still describes that process and is not a reissued lease.
+
+## The general form
+
+> **A control pair must be built against the CHANGE, not against the SYSTEM.** Arms drawn from live
+> data validate the predicate's agreement with today. **Only a synthesised arm on the case that does
+> not occur can validate the edit itself** — and where the discriminating case is absent from the
+> corpus by nature, it must be FABRICATED. If it cannot be fabricated, the check is untested no
+> matter how many live rows pass.
+
+**This is `B150`'s question moved from a figure to a control:** *could this arm's verdict have
+differed between the version I am replacing and the version I am shipping?* Where the answer is no,
+the arm is not a control — it is a re-measurement of the system, wearing a control's grammar.
+
+**The concrete sibling in the same fix:** a `sed` silently failed to match, the script then ran
+unchanged and printed the correct four rows, and **nothing in the output could have shown the edit
+had not landed** — because the edited and unedited versions agree on every row in that directory.
+The control pair inherited that blindness by drawing its arms from the same rows.
+
+## The second instance, found by the fix and NOT by the fix's control
+
+Restructuring the tool to separate the map from the self-test broke the map. **Its output went
+EMPTY — and an empty map reads as *no rows matched*, not as *the function never ran*.** The
+self-test still passed, **because it tested the PREDICATE and nothing tested the MAP.**
+
+> **A control validates exactly the thing it VARIES.** The three arms vary the predicate, so they
+> test the predicate. Nothing varied the map, so nothing tested it — and the failure was silent
+> because `[]` is a legitimate value of the function's own range.
+
+The repair is a fourth assertion on the shipped output rather than on the changed line:
+
+    n = len(live_rows())
+    "OK" if n else "FAIL (empty map == broken function)"
+
+**And this is `register_commit_check.py`'s own founding principle, which is written in that file, in
+capitals, twice** — *"COULD NOT LOOK" MUST NOT SHARE A RESULT WITH "LOOKED AND FOUND NOTHING"*
+(`:196`, `:217`). **A fresh instance landed anyway, in a tool built by a seat that had read it, on
+the same night.** Second data point for `B150`'s line that the lesson does not transfer by having
+been learned — and the transferable form is not the principle but the QUESTION it implies: *is the
+value I am about to trust distinguishable from the value this code produces when it does not run?*
+
+## Why it survived everything
+
+**The two-leg predicate passed a control pair, a peer review and a live test.** Every one of them
+asked whether the OUTPUT was correct; none asked whether the PREDICATE could fail.
+
+**Instruments found in one night whose reading could not vary with the property they measured:**
+`--stat` on an append-only file (`B149`); the invariant `145` (`B150`); `header_lag`'s `max(added)`,
+whose divergence case has never occurred; the two-leg predicate; the control pair above; a `sed`
+that did not match; the empty map; `PYTEST_EXIT=0` measuring `tail`; a self-citation scanner
+returning `0` on a blob where the citation demonstrably exists.
+
+> **That list is NOT a count and must not be read as one.** Its population has never been stated —
+> it is *"instruments three seats happened to look at in one night"*, not *"instruments in this
+> system"* — and Review first wrote it as **"the fourth time tonight,"** a number quoted without its
+> denominator **inside the entry family about numbers quoted without their denominators**. Caught by
+> the Manager, whose own queue held five by a different frame and seven under another. **The
+> defensible claim is that the class is COMMON here and its size is unmeasured**, which is enough:
+> a frequency argues for a different QUESTION rather than for more care, and it does that without a
+> figure.
+
+**Practice that follows:** when changing a predicate, name the case on which old and new disagree
+BEFORE running anything. If no live row exhibits it, fabricate one and assert both verdicts. **An
+all-live control suite is a regression test, not a validation of the change.**
+
+**Related:** `B150` (a count invariant across the condition it certifies), `B149` (an instrument
+that cannot fail visibly where it is load-bearing), `B147` (could this output have been produced by
+the check not running at all).
 
 ### B150 — a count INVARIANT across the condition it is quoted beside is not evidence, and the enumeration of this entry's own instances was wrong in BOTH directions
 
