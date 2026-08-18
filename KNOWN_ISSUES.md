@@ -2670,6 +2670,51 @@ unremarkable; moving the measurement out of the chain removes the mechanism.*
 **And the commit is deliberately NOT amended.** The figure is now correct, so an amend would leave a
 correct history with the defect deleted — **the evidence for this entry is the message itself.**
 
+#### RECURRENCE IN `6fe3eec`, ONE COMMIT LATER — THE FIX WAS WRITTEN PER-COMMAND, NOT PER-CLASS
+
+    6fe3eec's message   "suite 1502 passed 1 xfailed exit 0 (sequential)"
+    tests/unit          1503 collected   = 1502 + 1 xfailed   <- RECONCILES EXACTLY
+    tests               1702 collected                        <- 199 in tests/integration
+    the same commit     reports B160's prober fix FIRING TWICE (EXIT=2, wrong dir; EXIT=2, no runner)
+
+**The prober figure was measured correctly and the suite figure beside it was a SELECTION QUOTED AS
+THE SUITE.** *`pytest tests/unit` is what ran; the word "suite" is what was written.* **Nothing
+stopped being collected** — the 199 are the integration tests, and the arithmetic reconciles to the
+test, so the number is TRUE of what it measured and FALSE of what it claimed.
+
+> **B160's fix moved ONE measurement out of the chain. The class is every figure in the message.**
+> A fix aimed at the command that failed leaves every sibling command unguarded, and the sibling
+> failed in the very commit that reported the fix working.
+
+**THE FIX, WIDENED:** *every figure in a commit message carries the SELECTOR it was measured with.*
+Not `suite 1502 passed` but `tests/unit 1502 passed (1503 collected; tests/ collects 1702)`. **A
+figure whose selector is unstated reconciles against nothing, and a reader cannot tell a partial
+from a shortfall** — which is exactly the ambiguity that cost the Manager a review pass here: from
+the message alone, `1502` was indistinguishable from 199 tests having silently stopped collecting.
+
+**Found by the Manager from COLLECTION ALONE, without running the suite** — `B63` forbids a second
+seat running it while this one holds the tree, and the discrepancy did not require a run to
+diagnose. *The cheaper instrument was sufficient and was the correct one to reach for.*
+
+#### AND `6fe3eec` HAS NO `Seat:` TRAILER AT ALL — THE SAME SHAPE A THIRD TIME
+
+    git log -1 --format='%(trailers:only=true)' 6fe3eec   ->  EMPTY
+    git log -1 --format='%(trailers:only=true)' 6ae9166   ->  Seat: execute / Found-by: manager
+
+**A register commit carrying `B163` is on `main` with no seat attribution.** `PROMPT_MANAGER.md`'s
+trailer convention **states its own verification** — *"then VERIFY with `git log -1
+--format='%(trailers:only=true)'`"* — **and the verification is the half that did not run**, exactly
+as the prober's exit code was the half that did not run in `B160`, and the selector was the half
+that did not run above.
+
+> **Three instances now, and the common shape is not carelessness about the RULE — it is that each
+> rule's own check is a SEPARATE step that a busy path skips while the step it verifies still
+> happens.** *`d01ef38` and `ff642e1` shipped the same way, which is why the convention names its
+> check at all.*
+
+**NOT AMENDED**, for `B160`'s original reason: the evidence for this entry is the commit itself.
+The next commit is stamped.
+
 ### B159 — a dormant branch woke and reported a blocked rule as CLEAR, in the tool the task was measured with
 
 **Established by Execute during `T-0039`, and the activation condition was the task's own
