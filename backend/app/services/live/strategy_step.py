@@ -18,6 +18,7 @@ from app.services.backtest.engine import (
 )
 from app.services.execution.service import Signal
 from app.services.live.decision_trace import DecisionTrace
+from app.services.live.news_context import GATE_NAME as NEWS_GATE_NAME, NewsContext
 from app.services.ict.detector import _normalize_df, ict_detector
 
 
@@ -27,13 +28,14 @@ def evaluate_latest_bar(
     bias_df: pd.DataFrame,
     p: Params | None = None,
     risk_pct: float = 0.01,
+    news: NewsContext | None = None,
 ) -> Signal | None:
     """Return a Signal if the latest closed bar triggers an entry, else None.
 
     Thin wrapper over :func:`evaluate_latest_bar_traced`. Kept so existing
     callers and tests are unaffected by the addition of decision tracing.
     """
-    signal, _trace = evaluate_latest_bar_traced(symbol, entry_df, bias_df, p, risk_pct)
+    signal, _trace = evaluate_latest_bar_traced(symbol, entry_df, bias_df, p, risk_pct, news)
     return signal
 
 
@@ -43,6 +45,7 @@ def evaluate_latest_bar_traced(
     bias_df: pd.DataFrame,
     p: Params | None = None,
     risk_pct: float = 0.01,
+    news: NewsContext | None = None,
 ) -> tuple[Signal | None, DecisionTrace]:
     """Evaluate the latest bar AND record why (task 2.3).
 
@@ -50,9 +53,29 @@ def evaluate_latest_bar_traced(
     actually ran rather than a reconstruction of it. Every gate is recorded
     whether it passed or failed: a record of only the failures cannot tell you
     whether the rest were even reached.
+
+    ``news`` is `T-0036` Stage A and is RECORDED, NEVER ACTED ON. **`None` means the
+    verdict was NOT TAKEN — it does not mean "no blackout", and the two must not share a
+    representation.** The caller is async and this function is not, so the calendar is
+    fetched there and the verdict arrives here as data; a caller that could not reach the
+    calendar passes `None`, and the trace says `NOT-EVALUATED` rather than staying silent.
+    **Silence would be indistinguishable from a clear week, which is the failure this
+    parameter exists to make impossible.**
     """
     p = p or Params()
     trace = DecisionTrace(symbol=symbol, timeframe=str(p.entry_tf))
+
+    # RECORDED FIRST, before any gate that can return early. A news verdict written only on
+    # bars that survived `history` and `daily_bias` would be missing from exactly the traces
+    # a later reader needs — the declines — and Stage B's count would be taken over a
+    # population silently filtered by unrelated gates.
+    if news is None:
+        trace.observe(
+            NEWS_GATE_NAME, None,
+            "calendar verdict NOT TAKEN for this bar — this is not 'no blackout'",
+        )
+    else:
+        news.record_on(trace)
 
     required = max(60, p.atr_period + 5)
     have = 0 if entry_df is None else len(entry_df)

@@ -170,6 +170,39 @@ class DecisionEngine:
                 logger.error("Failed to generate entry signal alert", error=str(exc), pair=pair)
 
         # 9. Blackout / risk warnings ----------------------------------------
+        #
+        # THIS BRANCH HAS NEVER EXECUTED, AND IT IS LEFT IN PLACE DELIBERATELY (T-0036).
+        # MEASURED over `app/`, as reads and writes SEPARATELY, because the interesting
+        # number is the second one and a combined count hides it:
+        #
+        #     reads  `.get("news_blackout")` / `["news_blackout"]`   -> 1, the line below
+        #     writes `"news_blackout":` or `= `                      -> 0
+        #
+        # So this key is read once and set nowhere: the branch is falsy on every candle the
+        # engine has ever seen (`B125`). It is not a weaker statement of the news doctrine on
+        # the alerts path; it is a dead one, and a dead statement beside a live one reads as
+        # coverage.
+        #
+        # (The first draft of this comment claimed the token "appears in app/ exactly twice".
+        # It was wrong when written — the token also names a rule module and this module's
+        # own prose — and it was wrong in the direction that flatters the claim. A count of a
+        # TOKEN is not a count of a READ.)
+        #
+        # NOT DELETED, and the reason is three-legged rather than tidiness:
+        #   * `generate_risk_warning` is called from HERE AND NOWHERE ELSE, so deleting this
+        #     orphans it in `alerts.py:153` — moving the deadness somewhere it reads as
+        #     intentional, which is strictly harder to notice.
+        #   * `AlertType.RISK_WARNING` is produced only inside that function AND is a value
+        #     in the DB enum at `alembic/versions/0001_initial.py:30,285`. Deleting leaves a
+        #     schema value no code path can produce — a declared-with-no-producer, which
+        #     reads as a capability rather than as dead weight.
+        #   * The platform therefore has NO WORKING NEWS WARNING TO THE USER AT ALL. That is
+        #     a product gap and settling it by cleanup would be deciding it by proxy.
+        #
+        # The order path's news verdict is computed in `live/news_context.py` and recorded on
+        # `DecisionTrace`. Stage A records and enforces nothing, so this branch is not wired
+        # to it: a second consumer of a verdict never yet observed to block anything is the
+        # thing the staging exists to prevent.
         if candle.get("news_blackout"):
             try:
                 warning = await generate_risk_warning(

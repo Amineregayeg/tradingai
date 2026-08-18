@@ -19,6 +19,12 @@ from app.core.logging import logger
 from app.services.broker.paper import PaperBroker
 from app.services.execution.service import ExecMode, ExecutionService
 from app.services.live import fixed_config as fixed
+from app.services.live.news_context import (
+    NewsContext,
+    build_news_context,
+    fetch_calendar_events,
+)
+from app.services.telemetry.ny_time import to_ny
 from app.services.live.strategy_step import evaluate_latest_bar_traced
 from app.services.market_data.sources.binance import BinanceSource
 from app.services.ws.manager import ws_manager
@@ -377,6 +383,32 @@ class LiveCryptoLoop:
         if await self._open_count() >= self.max_concurrent:
             return f"max concurrent {self.max_concurrent} reached"
         return None
+
+    async def _news_context(self) -> NewsContext | None:
+        """T-0036 Stage A — the order path's news verdict, RECORDED and not enforced.
+
+        Deliberately NOT part of `_entry_block_reason`. That function documents itself as
+        *"pure gate logic (no network) so it is directly testable"*, and it is the ENFORCING
+        path — a reason returned there skips the bar. Stage A must suppress nothing, and
+        putting a calendar fetch there would break a property the function states about
+        itself. **Stage B belongs there, and will need the events passed in rather than
+        fetched, for that same reason.**
+
+        Returns `None` when the calendar could not be read. **`None` is NOT an empty
+        calendar**: the evaluator records it as `NOT-EVALUATED`, so a period of provider
+        outage is visible in the traces instead of being indistinguishable from a quiet news
+        week. A `[]` here would make an unreachable calendar say *"no blackout"* — the
+        fail-open `T-0035` closed at the source, rebuilt at the consumer.
+        """
+        now = datetime.now(tz=timezone.utc)
+        events, reason = await fetch_calendar_events()
+        if events is None:
+            # NOT `return None` and NOT an empty calendar. The trace records
+            # NOT-EVALUATED with the reason, so a silent stretch is attributable: quiet
+            # news, a missing key and a provider outage look identical in a verdict and
+            # need different responses.
+            return NewsContext.unavailable(to_ny(now), reason or "unknown")
+        return build_news_context(now, events)
 
     async def _open_count(self) -> int:
         return len((await self.paper.get_positions()))
@@ -1028,7 +1060,14 @@ class LiveCryptoLoop:
             return
         bias = await self._fetch_bars(bsym, self.bias_tf, 220)
 
-        sig, trace = evaluate_latest_bar_traced(pair, entry, bias, risk_pct=self.risk_pct)
+        # T-0036 STAGE A: RECORDED, NOT ENFORCED. The verdict lands on the trace beside the
+        # three existing gates and suppresses no signal. A gate that has never been observed
+        # to block anything must not be given the power to block, and `trace.would_block_by`
+        # is the count that has to be non-zero and read before Stage B may enforce.
+        news = await self._news_context()
+        sig, trace = evaluate_latest_bar_traced(
+            pair, entry, bias, risk_pct=self.risk_pct, news=news
+        )
         if sig is None:
             # Record WHY, not just that nothing happened. DecisionRecord has
             # carried `abstained`/`reasons`/ABSTAINED since it was written and

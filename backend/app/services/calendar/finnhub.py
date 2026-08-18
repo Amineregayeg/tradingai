@@ -293,7 +293,7 @@ class CalendarService:
             # docstring above, and seven test lines. The control arm is `get_today_events`,
             # which the same command finds at `api/routers/calendar.py:26`. So the live
             # blast radius of the old fail-open was `GET /calendar/today` and the UI it
-            # feeds -- NOT the engine, whose `engine.py:173` reads a `news_blackout`
+            # feeds -- NOT the engine, whose `decision/engine.py` reads a `news_blackout`
             # boolean that nothing writes (B125).
             #
             # T-0036 IS WHAT MAKES THIS LINE MATTER. Making UNKNOWN block is a live

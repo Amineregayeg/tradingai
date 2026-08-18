@@ -113,6 +113,15 @@ BlockReason = Literal["NEWS_PRE_WINDOW", "NEWS_POST_WINDOW"]
 #: optimistic branch of exactly that asymmetry.
 NEWS_BLOCKED_DEFAULT = "BLOCK"
 
+#: Shared by every COVERAGE_NOTE in this module, so the four cannot drift apart. The
+#: staleness class T-0036 was written against is "what did not change": a note is wrong by
+#: having been LEFT ALONE, there is no hunk for it, and no amount of diff-reading reaches an
+#: absent edit. Three notes here said NOT WIRED and were true until the moment this module
+#: was imported from live/.
+_WIRED_FOR_RECORDING = (
+    'WIRED FOR RECORDING ONLY (T-0036 Stage A): app/services/live/news_context.py imports this module and the order path records the verdict on DecisionTrace as an UNENFORCED observation. It suppresses no signal. A gate never observed to block anything must not be given the power to block, so Stage B enforces only once trace.would_block_by has produced a non-zero, human-read count. '
+)
+
 
 def first_m15_close_at_or_after(
     moment: datetime, *, m15_closes: Sequence[datetime] | None = None
@@ -275,9 +284,10 @@ class PreEventBlackout(RuleImplementation):
         "THE CARVE-OUT IS ENFORCED AS A FIELD, not a comment: every decision carries "
         "blocks_management=False, because the rule addresses new entries only and a blackout "
         "that froze management would strand an open position through the volatility the rule "
-        "exists to avoid. NOT WIRED — nothing under app/services/live/ imports this module, "
-        "and the pre-contract news branch at engine.py:173 is NOT adopted (B125): populating "
-        "news_blackout and enforcing the block are one change or neither."
+        "exists to avoid. " + _WIRED_FOR_RECORDING + "The pre-contract news branch in "
+        "decision/engine.py is still NOT adopted (B125) and is marked dead in place: "
+        "populating news_blackout and enforcing the block are one change or neither, and "
+        "Stage A does neither."
     )
 
     @classmethod
@@ -372,7 +382,7 @@ class PostEventBlackout(RuleImplementation):
         "window, blocking' are both NOT_APPLICABLE with opposite `decision` — so whatever "
         "wires this must read `decision`/`news_window_outcome`, not the verdict. Pinned by "
         "test_the_not_applicable_verdict_OVERLOADS_no_news_with_blocking_news. "
-        "NOT WIRED into the live path."
+        + _WIRED_FOR_RECORDING
     )
 
     @classmethod
@@ -506,7 +516,7 @@ class RedFolderDayFlag(RuleImplementation):
         "reduced size on red-folder days the stored telemetry can answer 'what would this "
         "have been?' without a re-run. Salim round-3 question 6i. This was CONSTRUCTION, not "
         "preservation: before T-0032, is_red_folder_day had ZERO occurrences outside "
-        "telemetry/contract/, as did the whole news_context block. NOT WIRED into live."
+        "telemetry/contract/, as did the whole news_context block. " + _WIRED_FOR_RECORDING
     )
 
     @classmethod

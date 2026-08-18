@@ -654,7 +654,11 @@ async def test_a_position_closing_during_the_shadow_is_seen_by_the_gate(monkeypa
         reasons: list[str] = []
         summary = "no setup"
 
-    def _evaluate_ok(pair, entry, bias, risk_pct):
+    # **kwargs, not a fixed signature. This stub stands in for a real function whose
+    # parameter list grows: T-0036 added `news`, and a stub that pins today's signature
+    # fails on a change that has nothing to do with what this test asserts — the same
+    # expiry-nobody-can-see as a hardcoded unimplemented rule id (B145).
+    def _evaluate_ok(pair, entry, bias, risk_pct, *args, **kwargs):
         evaluated.append(pair)
         return None, _Trace()
 

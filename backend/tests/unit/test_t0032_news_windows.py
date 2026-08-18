@@ -173,7 +173,69 @@ def _news_modules() -> tuple[str, ...]:
         rel = str(path.relative_to(BACKEND)).replace("\\", "/")
         if "news" in path.name.lower() or re.match(r"gate_01[2-6]", path.name):
             found.add(rel)
+
+    # 4. THE IMPORT CONE. Every `app/services/` module the above transitively import.
+    #
+    # T-0036 ADDED THIS, and the reason is that the first three key on NAME and on the
+    # REGISTRY, so a file that is news-subsystem code BY ROLE and named nothing in
+    # particular is outside all of them. `app/services/calendar/finnhub.py` is exactly
+    # that file: Review planted a working numeric volatility gate in it and 146 tests
+    # passed silently -- T-0032 cycle 3's DECLARED RESIDUE, row 4 of its mutation table,
+    # and a deliberate debt now coming due because T-0036 makes that file's contents
+    # capable of deciding a trade.
+    #
+    # A FOURTH SOURCE NAMING `calendar/` OR `finnhub.py` WOULD HAVE BEEN THE DEFECT ONE
+    # MEMBER OVER -- an enumeration wearing a predicate's clothes, and cycles 2 and 3 of
+    # T-0032 were spent removing exactly that. So the source is a property with other
+    # members, and `test_the_watched_population_is_derived_not_asserted` asserts it has a
+    # CONTROL PAIR rather than one member.
+    #
+    # TRANSITIVE, not one-hop, and that is a removal rather than a choice: a depth limit
+    # would be an unjustified constant, and a volatility test planted two hops down decides
+    # a trade exactly as well as one planted in the gate. MEASURED, because the widening
+    # direction is what breaks a guard keyed on vocabulary: the whole cone is 7 modules and
+    # NONE of them contain a volatility identifier, so this admits `finnhub.py` without
+    # making the guard fire on correct code. (T-0032 measured 84 `atr` identifiers elsewhere
+    # in the tree -- widening toward total is the failure this stays clear of.)
+    found |= _import_cone(found)
     return tuple(sorted(found))
+
+
+def _import_cone(seed: set[str]) -> set[str]:
+    """Every `app/services/` module transitively imported by `seed`. Excludes `seed` itself.
+
+    AST, not text: an import inside a function body is still an import, and
+    `news_context.py` imports the calendar service inside `fetch_calendar_events` precisely
+    so the module can be loaded without one. A regex over the file head would miss it, which
+    is the same text-versus-structure distinction the guard itself is built on.
+    """
+    cone: set[str] = set()
+    frontier = set(seed)
+    while frontier:
+        nxt: set[str] = set()
+        for rel in frontier:
+            for module in _imported_app_modules(BACKEND / rel):
+                path = BACKEND / (module.replace(".", "/") + ".py")
+                rel_path = module.replace(".", "/") + ".py"
+                if not path.exists() or not rel_path.startswith("app/services/"):
+                    continue
+                if rel_path in seed or rel_path in cone:
+                    continue
+                nxt.add(rel_path)
+        cone |= nxt
+        frontier = nxt
+    return cone
+
+
+def _imported_app_modules(path: Path) -> set[str]:
+    """Dotted `app.*` module names imported by one file, from its AST."""
+    out: set[str] = set()
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("app."):
+            out.add(node.module)
+        elif isinstance(node, ast.Import):
+            out.update(a.name for a in node.names if a.name.startswith("app."))
+    return out
 
 
 #: Materialised once so the guard and its assertions read the same set.
@@ -473,9 +535,44 @@ def test_the_watched_population_is_derived_not_asserted():
     assert by_name <= set(NEWS_MODULES), (
         f"a news-named module is not watched: {by_name - set(NEWS_MODULES)}"
     )
-    assert set(NEWS_MODULES) == implementing | by_name, (
+    cone = _import_cone(implementing | by_name)
+    assert set(NEWS_MODULES) == implementing | by_name | cone, (
         "NEWS_MODULES has drifted from its derivation — it is computed, not typed, so this "
         "can only mean the derivation changed under it"
+    )
+
+    # ---- SOURCE 4 MUST BE A PREDICATE, NOT AN ENUMERATION WEARING ONE ------------------
+    #
+    # T-0036 added the import cone so that `finnhub.py` — news-subsystem code BY ROLE and
+    # named nothing in particular — is watched. **A fourth source naming `calendar/` or that
+    # file would have flipped the same arms red while being cycle 2's defect one member
+    # over**, so the arms below discriminate the two, and they are phrased about the SOURCE
+    # rather than about the target. Naming the target in the criterion is what would make
+    # appending it look like compliance.
+    assert "app/services/calendar/finnhub.py" in cone, (
+        "the cone no longer admits the calendar module; T-0036 wired it onto the order path "
+        "and a numeric volatility test planted there decides a trade"
+    )
+    # POSITIVE CONTROL: a SECOND, different member. One member is an enumeration.
+    others = cone - {"app/services/calendar/finnhub.py"}
+    assert len(others) >= 1, (
+        f"the import cone has exactly one member, so it is an enumeration with a predicate's "
+        f"syntax: {sorted(cone)}"
+    )
+    # NEGATIVE CONTROL: a services module OUTSIDE the cone stays outside — and deliberately
+    # one that CARRIES volatility maths, because the failure this pair guards against is
+    # over-widening. T-0032 measured 84 `atr` identifiers outside the news modules; a
+    # population widened toward total fires on correct code and the CLEAN run goes red.
+    assert (BACKEND / "app/services/ict/detector.py").exists(), "must-hit: the arm below is real"
+    assert "app/services/ict/detector.py" not in set(NEWS_MODULES), (
+        "the detector is not news-subsystem code and its volatility maths is legitimate; "
+        "watching it would make the guard fire on correct code"
+    )
+    # AND THE CONE IS TRANSITIVE WITH NO DEPTH CONSTANT. Re-deriving from the full population
+    # must add nothing: if it did, some member was reachable and not reached.
+    assert _import_cone(set(NEWS_MODULES)) == set(), (
+        "the cone is not closed — a depth limit has crept in, or the seed is not the whole "
+        "population"
     )
 
     # GATE-014 IS THE MEMBER THE OLD LIST WAS MISSING. Nothing implements it (that is the
@@ -1157,21 +1254,39 @@ def test_no_open_rule_reaches_a_verdict_without_a_declared_parameter():
         assert open_rule_requires_declared_parameter(record) is None
 
 
-def test_nothing_under_live_imports_the_news_rules():
-    """Criterion 12, stated NARROWLY per B142: the bare form of this claim has been true per
-    task and false of the architecture, because `live/shadow.py` imports eleven rule modules.
+def test_live_imports_the_news_rules_and_the_wiring_ENFORCES_NOTHING():
+    """T-0036 INVERTED THIS TEST ON PURPOSE, and the inversion is the deliverable.
 
-    The must-hit arm is what makes the zeros meaningful — without it, a wrong path returns
-    zero for everything and reads exactly like a clean result.
+    Through `T-0032` this asserted that NOTHING under `live/` imported the news rules —
+    criterion 12, stated narrowly per `B142`. **That was the shadow-only property of the task
+    that built them, not a property anyone wanted to keep**: four gates that the order path
+    cannot see do not gate a trade. `T-0036` wires them, so the old assertion is false BY
+    DESIGN and going red was this test working.
+
+    **What replaces it is the property that now matters: wired, and enforcing nothing.** The
+    weaker claim ("is it imported?") is kept as the first arm because it is the precondition
+    for the second, and the second is what Stage A actually promises.
     """
     live = BACKEND / "app" / "services" / "live"
-    assert live.is_dir(), "wrong path — the must-hit arm below would be meaningless"
+    assert live.is_dir(), "wrong path — every arm below would be meaningless"
     text = "\n".join(p.read_text(encoding="utf-8") for p in live.rglob("*.py"))
 
     for module in ("gate_012_news_blackout", "gate_015_calendar_scope"):
-        assert module not in text
-    # MUST-HIT: live/ genuinely does import rule modules, so a zero above is a fact about
-    # these two rather than about the path.
+        assert module in text, f"{module} is no longer reachable from the order path"
+
+    # THE STAGE A INVARIANT. `trace.gate(...)` acts on its verdict and sets `blocked_by`;
+    # `trace.observe(...)` records and returns nothing. A news verdict routed through the
+    # blocking channel would suppress a signal AND drop `reasons`' census line, which is B10.
+    news_context = (live / "news_context.py").read_text(encoding="utf-8")
+    assert "trace.observe(" in news_context, "the verdict must be recorded, not gated"
+    assert "trace.gate(" not in news_context, (
+        "STAGE A MUST NOT ENFORCE. A gate never observed to block anything must not be given "
+        "the power to block; Stage B enforces, after a non-zero human-read count."
+    )
+
+    # MUST-HIT / MUST-MISS on the search itself: `live/` genuinely does import other rule
+    # modules, and a token nothing contains genuinely returns nothing. Without the pair a
+    # wrong path answers every question the same way and reads like a clean result.
     assert "prim_003_liquidity" in text
     assert "zzz_T0032_absent" not in text
 

@@ -36,6 +36,22 @@ class Gate:
     passed: bool
     detail: str
     values: dict[str, Any] = field(default_factory=dict)
+    #: False for a gate that is RECORDED AND NOT ACTED ON (T-0036 Stage A).
+    #:
+    #: An unenforced gate never sets `blocked_by`, so it cannot claim to be the reason a
+    #: bar was declined. **The distinction is on the record rather than in the reader's
+    #: head**: `passed=False, enforced=False` means *this would have blocked the trade and
+    #: did not*, which is precisely the quantity Stage B needs before it may enforce.
+    enforced: bool = True
+    #: False when the condition COULD NOT BE READ -- the input was unavailable, not
+    #: unfavourable.
+    #:
+    #: **"Could not look" must not share a representation with "looked and found nothing."**
+    #: A calendar fetch that failed is not a bar with no news, and collapsing the two is
+    #: precisely the fail-open `T-0035` closed one layer upstream. `passed` is False for such
+    #: a gate -- the safe direction -- but `would_block_by` excludes it, because it did not
+    #: say block either. It said nothing.
+    evaluated: bool = True
 
     def as_dict(self) -> dict:
         return {
@@ -43,6 +59,8 @@ class Gate:
             "passed": self.passed,
             "detail": self.detail,
             "values": self.values,
+            "enforced": self.enforced,
+            "evaluated": self.evaluated,
         }
 
 
@@ -62,7 +80,13 @@ class DecisionTrace:
     candidates: list[dict] = field(default_factory=list)
 
     took_trade: bool = False
-    #: Set when a gate stops the evaluation. None while still running.
+    #: Set when an ENFORCED gate stops the evaluation. None while still running.
+    #:
+    #: An observation (`observe`) never writes here, and that is load-bearing rather than
+    #: tidy: `reasons` guards its census line with `blocked_by is None`, so a recorded
+    #: would-block that touched this field would emit a record with no
+    #: `candidates: N considered` line -- `B10` exactly, rebuilt by a change that suppresses
+    #: nothing.
     blocked_by: str | None = None
 
     # -- building -----------------------------------------------------------
@@ -73,6 +97,50 @@ class DecisionTrace:
         if not passed and self.blocked_by is None:
             self.blocked_by = name
         return passed
+
+    def observe(self, name: str, would_block: bool | None, detail: str, **values: Any) -> None:
+        """Record a gate's verdict WITHOUT acting on it (T-0036 Stage A).
+
+        **A GATE THAT HAS NEVER BEEN OBSERVED TO BLOCK ANYTHING MUST NOT BE GIVEN THE POWER
+        TO BLOCK.** So a newly wired rule is recorded first and enforced only once the count
+        of trades it would have stopped is non-zero and has been read by a human.
+
+        Deliberately NOT `gate(..)` with the return ignored. `gate` sets `blocked_by` on a
+        failing verdict, and two things follow that a caller ignoring the return would not
+        see: `summary` would name this gate as the reason a bar was declined when it was
+        not, and `reasons` would drop its census line, which is `B10`. **The blocking
+        channel makes the record claim a block; that is what the channel is for.**
+
+        Returns nothing ON PURPOSE. There is no value here a caller could act on without
+        defeating the staging, and `if not trace.observe(...)` reads like `gate` while
+        meaning the opposite.
+        """
+        self.gates.append(
+            Gate(
+                name=name,
+                # `would_block is None` -> NOT EVALUABLE. `passed=False` is the safe
+                # direction for anything reading this field naively; `evaluated=False` is
+                # what stops it being counted as a would-block.
+                passed=(would_block is False),
+                detail=detail,
+                values=values,
+                enforced=False,
+                evaluated=would_block is not None,
+            )
+        )
+
+    @property
+    def would_block_by(self) -> list[str]:
+        """Unenforced gates whose verdict was to block. Stage B's numerator.
+
+        **Derived from the trace rather than counted alongside it**, so the figure cannot
+        disagree with the record it describes -- and a trace that is stored is a count that
+        can be re-taken later against a question nobody has asked yet.
+        """
+        return [
+            g.name for g in self.gates
+            if not g.enforced and g.evaluated and not g.passed
+        ]
 
     def candidate(self, index: int, direction: str, accepted: bool, reason: str, **values: Any) -> None:
         self.candidates.append({
@@ -87,7 +155,13 @@ class DecisionTrace:
         if self.took_trade:
             return "entry taken"
         if self.blocked_by:
-            failed = next((g for g in self.gates if not g.passed), None)
+            # `g.enforced` is NOT optional here, and the bug it prevents is subtle enough
+            # to be worth naming. Without it this takes the first NOT-PASSED gate of any
+            # kind -- so a news observation recorded as would-block BEFORE an enforced gate
+            # failed would have its detail returned as the reason the bar was declined,
+            # while `blocked_by` correctly named the other gate. The two fields would
+            # disagree, and the human-readable one is the one that would be believed.
+            failed = next((g for g in self.gates if g.enforced and not g.passed), None)
             return failed.detail if failed else f"blocked at {self.blocked_by}"
         if self.candidates:
             rejected = [c for c in self.candidates if not c["accepted"]]
@@ -110,7 +184,20 @@ class DecisionTrace:
         "no findings vs nothing checked" ambiguity the reconciliation and data
         health surfaces avoid.
         """
-        out = [f"{'PASS' if g.passed else 'FAIL'} {g.name}: {g.detail}" for g in self.gates]
+        out = []
+        for g in self.gates:
+            if not g.evaluated:
+                # NEITHER "PASS" NOR "WOULD-BLOCK". The condition was not read, and a record
+                # that says either would be answering a question nobody asked.
+                verdict = "NOT-EVALUATED"
+            elif g.enforced:
+                verdict = "PASS" if g.passed else "FAIL"
+            else:
+                # NOT "FAIL". A reader scanning for FAIL is looking for the reason a trade
+                # did not happen, and this gate did not stop anything. WOULD-BLOCK says the
+                # verdict and the fact that it was not acted on in one token.
+                verdict = "OBSERVED" if g.passed else "WOULD-BLOCK"
+            out.append(f"{verdict} {g.name}: {g.detail}")
 
         # The census line is UNCONDITIONAL. It used to be written only when there
         # were candidates, so a bar that passed every gate and then found no
@@ -140,6 +227,7 @@ class DecisionTrace:
             "bar_time": self.bar_time,
             "took_trade": self.took_trade,
             "blocked_by": self.blocked_by,
+            "would_block_by": self.would_block_by,
             "summary": self.summary,
             "gates": [g.as_dict() for g in self.gates],
             "candidates": self.candidates,

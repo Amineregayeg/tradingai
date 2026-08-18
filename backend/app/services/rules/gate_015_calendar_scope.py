@@ -260,7 +260,11 @@ class CalendarScope(RuleImplementation):
         "the currency set from the registry, NY-local timestamps via GATE-023, a declared "
         "provider mapping carried unratified, and a third impact state UNKNOWN that blocks "
         "rather than trades — which the upstream finnhub.py default does not do (B126). "
-        "finnhub.py is NOT changed here: it is live code and this task is shadow-only."
+        "finnhub.py was NOT changed by T-0032 — that was shadow-only — and T-0035 has since "
+        "closed the same fail-open AT THE SOURCE: an unrecognised or missing impact is "
+        "recorded as UNKNOWN there too, with the provider's own string kept, which is what "
+        "makes this rule's raw-payload input constructible at all. WIRED FOR RECORDING ONLY "
+        "(T-0036 Stage A) via app/services/live/news_context.py; it enforces nothing."
     )
 
     @classmethod

@@ -76,7 +76,10 @@ def test_insufficient_history_says_how_much_was_missing():
 
     assert sig is None
     assert trace.blocked_by == "history"
-    g = trace.gates[0]
+    # BY NAME, NOT BY POSITION. `gates[0]` was the history gate until T-0036 recorded the
+    # news verdict ahead of it, and it was the only positional index in the tree. The test's
+    # subject is the history gate; finding it by name is what it always meant.
+    g = next(g for g in trace.gates if g.name == "history")
     assert g.values["have"] == 10
     assert g.values["required"] >= 60
     assert "10 bars available" in g.detail
