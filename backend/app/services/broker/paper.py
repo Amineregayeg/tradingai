@@ -110,13 +110,33 @@ class PaperBroker(BrokerAdapter):
                 events.append(self._settle(pos, hit[1], reason=hit[0], ts=ts))
         return events
 
-    def _settle(self, pos: PaperPosition, exit_price: float, reason: str, ts=None) -> dict:
-        pnl = pos.upnl(exit_price)
+    def _settle(
+        self, pos: PaperPosition, exit_price: float, reason: str, ts=None,
+        units: float | None = None,
+    ) -> dict:
+        """Settle `units` of `pos` (all of it when `units` is None), returning the event.
+
+        **A PARTIAL LEAVES THE POSITION OPEN WITH THE REMAINDER, and the event says so.** Both
+        `units` and `remaining_units` are emitted on every settle, whole or partial, because a
+        record in which a partial and a full close look alike is the defect this method was
+        changed to fix, one layer up.
+        """
+        closed = pos.units if units is None else min(float(units), pos.units)
+        remaining = round(pos.units - closed, 10)
+        sign = 1.0 if pos.direction == DirectionType.LONG else -1.0
+        pnl = sign * (float(exit_price) - pos.entry) * closed
         self.balance += pnl
-        self._positions.pop(pos.id, None)
+        if remaining > 0:
+            # THE REMAINDER RIDES. `sl`/`tp` are unchanged: moving them would be EXIT-003's
+            # behaviour, which is OPEN in the registry and must not be invented here.
+            pos.units = remaining
+        else:
+            self._positions.pop(pos.id, None)
         ev = {
             "position_id": pos.id, "pair": pos.pair, "direction": pos.direction.value,
-            "entry": pos.entry, "exit": float(exit_price), "units": pos.units,
+            "entry": pos.entry, "exit": float(exit_price), "units": closed,
+            "remaining_units": remaining,
+            "partial": remaining > 0,
             "pnl": round(pnl, 4), "reason": reason,
             "open_time": pos.open_time, "close_time": ts or datetime.now(timezone.utc),
             "balance_after": round(self.balance, 2),
@@ -196,10 +216,42 @@ class PaperBroker(BrokerAdapter):
             return None
 
     async def close_position(self, position_id: str, lot_size: float | None = None) -> dict:
+        """Close a position, in whole or in part.
+
+        THE PARTIAL PATH EXISTS BECAUSE THE CONTRACT DECLARED IT AND THIS ADAPTER DISCARDED IT.
+
+        `BrokerAdapter.close_position`'s abstract signature has carried
+        `lot_size: Partial close volume. None means close all units.` since it was written, and
+        both LIVE adapters honour it -- `oanda.py` sends `longUnits`/`shortUnits`,
+        `cryptofundtrader.py` sends `volume`. **This adapter accepted the argument, never read
+        it, settled the whole position and returned success.**
+
+        > **So a 70/30 exit model validated in simulation was validated against a broker that
+        > cannot take a partial, and the broker reported success.** The realised-R distribution
+        > a partial-exit strategy produces here could not occur live, and nothing in the record
+        > said so -- **a simulator that silently disagrees with production in the direction of
+        > the thing being tested.**
+
+        Latent until now: `close_position` had exactly one caller and it passed no `lot_size`.
+        **It becomes load-bearing the moment `EXIT-001` is wired, which is what T-0038 does.**
+
+        `lot_size <= 0` is REFUSED rather than treated as "close everything": a caller asking
+        for nothing has made an error, and returning a full close would be the same silent
+        substitution this method is being fixed for.
+        """
         pos = self._positions.get(position_id)
         if not pos:
             return {"status": "not_found", "position_id": position_id}
-        return self._settle(pos, self._price(pos.pair), reason="MANUAL")
+        if lot_size is not None and float(lot_size) <= 0:
+            return {
+                "status": "refused",
+                "position_id": position_id,
+                "reason": "lot_size must be > 0; use None to close all units",
+            }
+        return self._settle(
+            pos, self._price(pos.pair), reason="MANUAL",
+            units=None if lot_size is None else float(lot_size),
+        )
 
     async def close_all_positions(self) -> list[dict]:
         return [self._settle(p, self._price(p.pair), reason="CLOSE_ALL")
