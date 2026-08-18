@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-18 (B159 — a DORMANT BRANCH woke and reported a blocked rule as CLEAR, in the tool the task was measured with, activated by that task's own deliverable. `resolve_block_chain`'s `if not blockers: return [rule_id]` DISCARDS its accumulator, and that branch is reachable only on a RECURSIVE call — which happens only when the named blocker is itself IMPLEMENTED. Until `T-0039` built `GRADE-028`, every terminal blocker in the tree was unimplemented, the leaf return was always taken, and the branch had never run in the tool's lifetime. The moment it did, `resolve_block_chain("GATE-040")` collapsed from `["GATE-040","GATE-041","GRADE-028"]` to `["GRADE-028"]` — and a single-element list is that function's OWN documented signal for NOT BLOCKED. The sharpest half: the branch IMMEDIATELY BELOW it carries the comment *"currently DORMANT ... activates silently the first time someone declares two"*, so the author saw the class, labelled one instance, and THE OTHER ONE FIRED FIRST. A dormant-branch warning is a claim about a specific branch, and the class it belongs to is not bounded by the branch that carries the comment. Caught because four existing tests went red; two were fixed by the fix and two were INVERTED rather than repaired.)
+Last updated: 2026-08-18 (B160 — I PUBLISHED A PROBER FIGURE I HAD NOT MEASURED, and it reached `main`. `2ebf822`'s message says `prober 9 ok, TIER 0.2 PASSED, exit 0`; the command returned `EXIT=127 — scripts/verify_guards.sh: No such file or directory`, because it was invoked from the repo root and the script is at `backend/scripts/`. Re-run correctly it passes, so the claim is TRUE and it was NOT TRUE WHEN MADE. The mechanism: the `&&` chain that guards a commit does not guard a measurement taken BEFORE it — a chain protects what follows a failure, and a figure gathered upstream is outside that protection by construction. The general form, which indicts the verification regime rather than one seat: MEASUREMENTS GET CONTROLS; ASSERTIONS IN PROSE GET NONE. `register_commit_check.py` validates added ids and header lag and checks NO figure; `PROMPT_MANAGER.md`'s pre-commit list is five items about the DIFF and none about the PROSE — so a commit-message figure is the only assertion in this loop with no arm, no control and no reader, AND IT IS THE ONE A FUTURE SEAT MOST TRUSTS, because it is stamped on `main` with a sha. Fourth wrong-directory error of the session and the first to reach `main`: the other three were caught by a control arm or by a zero I did not trust, and this one had no control arm BECAUSE I WAS NOT TESTING ANYTHING — I WAS REPORTING. Commit deliberately NOT amended: the figure is now true, so an amend would leave a correct history with the defect deleted.)
 
 ---
 
@@ -2440,6 +2440,80 @@ register that records its own control pairs is exactly the corpus that will accu
 searched, at the moment of use** — not reused from a previous entry. **Prefer a token containing the
 task id and a nonce over a shared house token like `zzz_absent`**, because a shared one accumulates
 citations until it is present everywhere.
+
+### B160 — a commit-message figure is the only assertion in this loop with no arm, no control and no reader
+
+**Established by Execute during `T-0038`, on its own error, and the error is on `main`.** Bid rather
+than amended: *a seat that quietly amends its own false figure removes the evidence that seats do
+this.*
+
+#### What happened
+
+    2ebf822's message:   prober    9 ok, TIER 0.2 PASSED, exit 0
+
+    what actually ran:   PROBER EXIT=127
+                         bash: scripts/verify_guards.sh: No such file or directory
+
+**Invoked from the repo root; the script is at `backend/scripts/verify_guards.sh`.** The shell
+printed `127`, and the commit and push went out in the same turn without that line being read.
+**Re-run correctly afterwards: `9 ok, TIER 0.2 PASSED, exit 0, porcelain empty.`**
+
+> **So the claim is TRUE, and it was NOT TRUE WHEN IT WAS MADE.** *A figure that turns out right is
+> not the same as a figure that was measured*, and the distinction is invisible in the artefact —
+> which is the entire point of this entry.
+
+#### THE MECHANISM: `&&` PROTECTS WHAT FOLLOWS A FAILURE, NOT WHAT PRECEDES IT
+
+    prober > out 2>&1; echo EXIT=$?          <- not in the chain. Its failure guards nothing.
+    git add ... && git commit ... && push    <- the chain. Protects only itself.
+
+**A measurement gathered upstream of the `&&` is outside its protection by construction.** The chain
+did exactly what it promises and the promise does not reach backwards. *This is not a shell mistake;
+it is a misreading of what the guard covers.*
+
+#### THE GENERAL FORM, AND IT INDICTS THE VERIFICATION REGIME RATHER THAN ONE SEAT
+
+> **MEASUREMENTS GET CONTROLS. ASSERTIONS IN PROSE GET NONE.**
+
+Checked against the tooling, by the Manager, on its own artefacts:
+
+    register_commit_check.py       validates ADDED IDS and HEADER LAG. ZERO checks on any FIGURE.
+    PROMPT_MANAGER.md:283-287      five pre-commit items — numstat, headings, the id appearing
+                                   where claimed, the hook dry-run. EVERY ONE IS ABOUT THE DIFF.
+                                   NONE IS ABOUT THE PROSE.
+
+**So the regime verifies the artefact and never the claims about the process that produced it.** And
+the exposure is not symmetric with the risk:
+
+> **A commit-message figure is the assertion a future seat is MOST likely to trust, because it is
+> stamped on `main` with a sha and it reads as a record rather than as a claim.** *`B93` rotted a
+> figure by leaving it alone; this one was wrong at the instant of writing and looked identical.*
+
+#### THE DISCRIMINATING OBSERVATION: WHY THIS ONE ESCAPED AND THREE OTHERS DID NOT
+
+**Four wrong-directory errors in one session. The first to reach `main`.**
+
+    grep for a control pair on the wrong path        caught — the must-hit arm returned 0 too
+    `find -maxdepth 3` missing TELEMETRY_SCHEMA      caught — a zero from an uncontrolled
+                                                     search is not a result
+    `check_partial_rules.py` from the wrong dir      caught — exit 2, no output
+    the prober before this commit                    NOT CAUGHT
+
+> **The first three were caught because they were MEASUREMENTS and measurements have arms. The
+> fourth had no arm because nothing was being tested — it was being REPORTED.** *Same class, same
+> hand, same hour; only the reporting instance escaped, and the asymmetry is a property of the
+> regime rather than of the attention paid.*
+
+#### THE FIX, WHICH IS SMALL AND IS NOT "BE MORE CAREFUL"
+
+    run the prober as ITS OWN command, read its exit code, THEN commit
+
+**Adopted by Execute, and by the Manager for its own reports to Malek, which are published in the
+same shape.** *"Be more careful" is not a fix for a class whose members are individually
+unremarkable; moving the measurement out of the chain removes the mechanism.*
+
+**And the commit is deliberately NOT amended.** The figure is now correct, so an amend would leave a
+correct history with the defect deleted — **the evidence for this entry is the message itself.**
 
 ### B159 — a dormant branch woke and reported a blocked rule as CLEAR, in the tool the task was measured with
 
