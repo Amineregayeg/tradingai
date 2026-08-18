@@ -19,6 +19,10 @@ from app.services.backtest.engine import (
 from app.services.execution.service import Signal
 from app.services.live.decision_trace import DecisionTrace
 from app.services.live.news_context import GATE_NAME as NEWS_GATE_NAME, NewsContext
+# EXIT-001's RATIFIED constants, read from the registry doctrine — not `Params.rr_partial`,
+# which is the BACKTEST's knob and whose numeric equality with PARTIAL_AT_R is the coincidence
+# B162 is about. No new exit constant is introduced by this cutover.
+from app.services.rules.exit_001_v1_model import PARTIAL_AT_R, PARTIAL_FRACTION
 from app.services.ict.detector import _normalize_df, ict_detector
 
 
@@ -199,8 +203,15 @@ def evaluate_latest_bar_traced(
             trace.candidate(idx, fdir, True, "all conditions met",
                             entry=round(entry, 2), stop=round(sl, 2), risk=round(risk, 2))
             trace.took_trade = True
-            return Signal(symbol, DirectionType.LONG, entry, sl, entry + p.rr_partial * risk,
-                          risk_pct, OrderType.MARKET, approved=True), trace
+            return Signal(
+                symbol, DirectionType.LONG, entry, sl,
+                # NO FINAL TARGET. See `Signal.tp` — this used to be
+                # `entry + p.rr_partial * risk`, the partial's constant spent as the whole
+                # position's take-profit (B162).
+                tp=None,
+                partial_price=entry + PARTIAL_AT_R * risk,
+                partial_fraction=PARTIAL_FRACTION,
+                risk_pct=risk_pct, order_type=OrderType.MARKET, approved=True), trace
 
         if bias == "SHORT":
             if not (hi >= pl and cl < ph):
@@ -219,7 +230,11 @@ def evaluate_latest_bar_traced(
             trace.candidate(idx, fdir, True, "all conditions met",
                             entry=round(entry, 2), stop=round(sl, 2), risk=round(risk, 2))
             trace.took_trade = True
-            return Signal(symbol, DirectionType.SHORT, entry, sl, entry - p.rr_partial * risk,
-                          risk_pct, OrderType.MARKET, approved=True), trace
+            return Signal(
+                symbol, DirectionType.SHORT, entry, sl,
+                tp=None,
+                partial_price=entry - PARTIAL_AT_R * risk,
+                partial_fraction=PARTIAL_FRACTION,
+                risk_pct=risk_pct, order_type=OrderType.MARKET, approved=True), trace
 
     return None, trace

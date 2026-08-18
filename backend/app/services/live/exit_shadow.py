@@ -60,11 +60,37 @@ def tranche_plan(signal: Any) -> dict[str, Any]:
     if entry is None or stop is None or side is None:
         return {"planned": False, "reason": "signal carries no entry/stop/direction"}
     if target is None:
-        # NOT an error and NOT a degenerate runner. EXIT-001 measures its levels against a
-        # final target; without one there is no plan to make, and saying so is different from
-        # saying the plan was degenerate.
-        return {"planned": False, "reason": "signal carries no take-profit — EXIT-001 has no "
-                                            "final target to measure the runner against"}
+        # STAGE B CHANGED WHAT "NO TARGET" MEANS, and this branch had to move with it.
+        #
+        # Through T-0050 a signal without a take-profit had no plan to record. Now `tp` is None
+        # on EVERY signal BY DESIGN — the 2R price moved to `partial_price` and the 30% runner
+        # has no final target because TARGET-001 cannot select one. So a signal carrying an
+        # explicit partial IS planned, and the runner's terminal reasons are STOP_HIT and
+        # SESSION_CLOSE rather than a price.
+        partial_price = getattr(signal, "partial_price", None)
+        partial_fraction = getattr(signal, "partial_fraction", None)
+        if partial_price is None or partial_fraction is None:
+            return {"planned": False, "reason": "signal carries neither a final target nor an "
+                                                "EXIT-001 partial — nothing to plan"}
+        return {
+            "planned": True,
+            "side": side,
+            "entry": float(entry),
+            "stop": float(stop),
+            "final_target": None,
+            "partial_level": float(partial_price),
+            "partial_at_r": PARTIAL_AT_R,
+            "partial_fraction": float(partial_fraction),
+            "runner_fraction": RUNNER_FRACTION,
+            # NO FINAL TARGET EXISTS, so there is no runner DISTANCE to compute and the
+            # degeneracy question does not arise. `None`, never 0.0 — a zero here would say the
+            # runner has nowhere to go, which is a different and false claim.
+            "runner_distance": None,
+            "degenerate_runner": None,
+            "runner_terminates_on": ["STOP_HIT", "SESSION_CLOSE"],
+            # AND THIS IS NO LONGER A SHADOW. T-0050 made the loop execute this plan.
+            "executed": True,
+        }
 
     try:
         plan = TradePlan(side=side, entry=float(entry), stop=float(stop),

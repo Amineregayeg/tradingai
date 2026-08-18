@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-18 (B167 — A FILTER BORROWED A TOKEN FROM THE ORDER-STATUS VOCABULARY AND APPLIED IT TO A FILL-STATE FIELD. `fill_state != "FILLED"` in `GATE-027`'s rung-2 pool and `fill_state == "FILLED"` in `candidate_target_distances`, where `FillState` is UNFILLED|HALF_FILLED|FULLY_FILLED|FULLY_FILLED_AND_VIOLATED and `"FILLED"` is `OrderStatus.FILLED` — a DIFFERENT enum. Always-true and always-false respectively; neither has ever excluded anything. Measured on the pinned corpus: the filter admits 1574/1574 where the ruling's OPEN pool is 69 (4.4%), so 95.6% of what it admits is closed and 92.4% is FULLY_FILLED_AND_VIOLATED. It survived because it sits behind `is_momentum_imbalance is True`, which is 0/1574 — TWO DEFECTS STACKED SO NEITHER IS OBSERVABLE, and the obvious repair (populate the flag) would have shipped the second. The wrong token is FINDABLE, defined in `app/db/enums.py`, which is what made it durable — a reader greps it, finds it real, and stops. Fixed by selecting on the DECLARED registry value `rung2_eligibility.fill_state_in`, not by correcting the string.)
+Last updated: 2026-08-18 (B168 — A ONE-PARAMETERISATION EXIT MEASUREMENT WHOSE SIGN FLIPPED WHEN THE ARM WAS WIDENED. `T-0050`'s before/after realised-R first read as "the passive runner gave back in 32 of 32 trades and added in 0, -0.228 R/trade" — one side, one stop distance, one 1500-bar window. Swept across both sides and four stop distances the SIGN FLIPS: LONG -0.202/-0.228, SHORT +0.045/+0.054. The window trends down, so longs stop out and the passive 30% bleeds back to the original stop while shorts run and it adds. The corpus cannot settle whether the passive runner helps or hurts, and the `32/0` that looked like a mechanism is a fact about direction. Two rows are noise printed in the same format as evidence: 1 and 0 trades reached 2R at the widest stops. CLASS: a measurement taken at ONE point in its parameter space and reported as a property of the thing measured — B150's family reached from the other side, a number that VARIES across a condition nobody varied. Practice: sweep both signs and three magnitudes before reporting a comparison; if the conclusion survives it costs one command, and if it does not, the sweep IS the finding. NOT a reason to hold the cutover — it is the evidence that EXIT-003's runner-management gap is worth Salim's time, and its shape is "we cannot tell from this corpus".)
 
 ---
 
@@ -2441,6 +2441,62 @@ searched, at the moment of use** — not reused from a previous entry. **Prefer 
 task id and a nonce over a shared house token like `zzz_absent`**, because a shared one accumulates
 citations until it is present everywhere.
 
+### B168 — a one-parameterisation exit measurement, whose sign flipped when the arm was widened
+
+**Found by Execute during `T-0050`, on its own figure, before reporting it.** *The first number was
+produced, read as a finding, and was an artefact.*
+
+#### WHAT THE FIRST RUN SAID
+
+    OLD  100% at 2R            mean  -0.172 R
+    NEW  70% at 2R + passive   mean  -0.401 R      delta -0.228 R/trade
+    of the 32 trades that reached 2R: runner GAVE BACK 32 · ADDED 0
+
+**Read alone that is a headline: the ratified exit model loses money against the behaviour it
+replaces, and the passive runner never once helps.** *It is also one side, at one stop distance,
+on one 1500-bar window.*
+
+#### WHAT THE SWEEP SAID
+
+    stop%  side   OLD mean   NEW mean    delta
+    0.002  LONG     -0.075     -0.277   -0.202
+    0.002  SHORT    +0.109     +0.154   +0.045      <- SIGN FLIPS
+    0.004  LONG     -0.172     -0.401   -0.228
+    0.004  SHORT    +0.017     +0.071   +0.054      <- SIGN FLIPS
+    0.008  SHORT    +0.851     +0.774   -0.077
+    0.015  SHORT    +1.700     +1.600   -0.100
+
+> **The effect's SIGN depends on the side.** *This window trends down: longs stop out and the
+> passive runner bleeds the 30% back to the original stop; shorts run and the runner adds.* **So
+> the measurement is dominated by the drift of a single 1500-bar corpus and cannot settle whether
+> the passive runner helps or hurts.** The `32/0` that looked like a mechanism is a fact about
+> direction, not about the exit model.
+
+**And two rows are noise rather than evidence:** at `0.008 LONG` only **1** trade reached 2R and at
+`0.015 LONG` **none** did. *A mean over one sample is printed in the same column, in the same
+format, as a mean over 44 — and nothing in the row says which.* **Denominators published for that
+reason.**
+
+#### THE CLASS
+
+> ### A FIGURE THAT VARIES ACROSS A CONDITION NOBODY VARIED.
+
+**A measurement run at ONE point in its parameter space, reported as a property of the thing
+measured.** The instrument was not wrong and the arithmetic was not wrong; **the arm was one point
+wide.** *`B150` is a figure that CANNOT move; this is one that moves along an axis the report does
+not mention* — the same defect approached from opposite sides, and neither is visible in the number.
+
+**Standing practice, and it is cheap: before a comparison figure is reported, run it at both signs
+and at three magnitudes of whatever parameter is nearest to arbitrary.** *If the conclusion survives,
+the sweep costs one command; if it does not, the sweep is the finding.* **Here the sweep was the
+finding, and the honest report is that the corpus cannot answer the question — which is a statement
+about the corpus and not about `EXIT-001`.**
+
+**NOT a reason to hold the cutover.** `EXIT-001` is ratified, Malek authorised it, and the runner's
+passivity follows from `EXIT-003` being OPEN. *What the measurement supports is the OPPOSITE of a
+verdict: it is the evidence that `EXIT-003` — the runner-management gap — is worth Salim's time,
+and the shape of the evidence is "we cannot tell from this corpus", not "the runner is bad".*
+
 ### B167 — a filter borrowed a token from the ORDER-STATUS vocabulary and applied it to a FILL-STATE field
 
 **Found by Execute during `T-0046`, while reading `GATE-027`'s rung-2 pool before changing it.**
@@ -2839,6 +2895,34 @@ result.*
 `T-0038`'s shadow guard are all the same shape** — walk the AST, key on identifiers, exclude nothing
 by hand. **`T-0039` additionally needed the enforcing module exempted from its own population**,
 which is the prohibition case where even an AST walk cannot separate the guard from its subject.
+
+#### SIX INSTANCES NOW, AND THE SIXTH WAS IN AN ARM WRITTEN BY SOMEONE WHO KNEW THE CLASS
+
+    1-2  T-0038  a guard flagged its own module for naming what it forbids        FALSE FIRE
+      3  T-0038  the Manager's scanner PASSED where the token was absent          FALSE PASS
+      4  T-0045  grep found QML_SHAPE_UNDEFINED_IN_SOURCE alive on disk — in the
+                 description RECORDING ITS REMOVAL. Nearly reported "unapplied"   FALSE FIRE
+      5  T-0046  the Manager measured `'== "FILLED"' in getsource()` -> True and
+                 reported the fix absent; the AST showed the fix present. The
+                 substring was in the comment documenting the fix                 FALSE PASS
+      6  T-0050  Execute asserted a retired justification was ABSENT from a
+                 declared parameter's source — while the honest rewrite QUOTES
+                 the retired sentence in order to record that it expired          FALSE FIRE
+
+> **The sixth was written by a seat that had already recorded the class twice that day, in an arm
+> whose whole purpose was to check that prose had been updated.** *That is the measure of how cheap
+> the mistake is: knowing the pattern does not prevent it, because the substring check is the
+> obvious way to ask the question and the failure is invisible until the prose is honest.*
+
+**AND THE HONEST PROSE IS WHAT BREAKS IT.** *A lazy rewrite that deleted the old sentence would have
+passed the absence check.* The rewrite that quotes what it retired — the one a future reader
+actually needs — is the one that fails. **So the absence check does not merely miss the class; it
+selects against the better documentation.**
+
+**THE FIX, GENERALISED PAST AST:** *absence of a token is never the property.* Ask for the property
+positively — `"expired" in source`, `NotIn ('UNFILLED','HALF_FILLED')` in the parsed tree, the enum
+array walked rather than the file read. **A positive check on the current state cannot be satisfied
+or defeated by prose about the old one.**
 
 ### B160 — a commit-message figure is the only assertion in this loop with no arm, no control and no reader
 

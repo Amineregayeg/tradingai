@@ -35,11 +35,28 @@ class Signal:
     direction: DirectionType
     entry: float
     sl: float
+    #: THE FINAL TARGET, and it is `None` on every signal this engine produces today.
+    #:
+    #: It used to carry `entry + rr_partial * risk` — the 2R level — as a WHOLE-POSITION take
+    #: profit, which is B162: `rr_partial` is the constant that names EXIT-001's PARTIAL, and
+    #: spending it here collapsed a two-stage exit into one. Under EXIT-001 that price is the
+    #: partial level and is carried in `partial_price`; the 30% runner has NO final target
+    #: because TARGET-001 cannot select one, so it terminates on STOP_HIT or SESSION_CLOSE.
     tp: float | None = None
     risk_pct: float = 0.01
     order_type: OrderType = OrderType.MARKET
     approved: bool = False        # must be True for LIVE
     client_order_id: str | None = None
+    #: EXIT-001's 2R partial level and the fraction banked there. BOTH or NEITHER.
+    #:
+    #: **APPENDED AT THE END, DELIBERATELY.** `Signal` is a positional dataclass with callers
+    #: that pass `tp` and `risk_pct` positionally; inserting these after `tp` silently re-bound
+    #: every one of them — `risk_pct` started arriving as `partial_price` and `order_type` as
+    #: `partial_fraction`, which a test caught only because an `OrderType` will not cast to
+    #: float. A field added mid-record to a positional structure is a caller-side change wearing
+    #: the appearance of an additive one.
+    partial_price: float | None = None
+    partial_fraction: float | None = None
 
 
 def size_position(equity: float, risk_pct: float, entry: float, sl: float) -> float:

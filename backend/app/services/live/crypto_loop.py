@@ -13,7 +13,7 @@ import os
 import urllib.request
 import uuid
 from collections import deque
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from app.core.logging import logger
 from app.services.broker.paper import PaperBroker
@@ -29,6 +29,7 @@ from app.services.live.news_context import (
 from app.services.live.shadow import _bars_from_frame
 from app.services.telemetry.ny_time import to_ny
 from app.services.live.strategy_step import evaluate_latest_bar_traced
+from app.services.rules.exit_001_v1_model import DECLARED_SESSION_CLOSE
 from app.services.market_data.sources.binance import BinanceSource
 from app.services.ws.manager import ws_manager
 
@@ -78,6 +79,19 @@ class LiveCryptoLoop:
         # whole point of fixed_config is that there is only one.
         self.broker_mode = (broker_mode or fixed.BROKER_MODE).lower()
         self._marks: dict[str, float] = {}
+        #: EXIT-001's plan per OPEN position id: {"price", "fraction", "direction", "pair"}.
+        #: Removed when the partial fires or the position closes.
+        #:
+        #: IN MEMORY ONLY, and the consequence is stated rather than left to be discovered: a
+        #: restart between entry and the 2R touch loses the plan, and that position then rides
+        #: to STOP_HIT or SESSION_CLOSE as a whole. It fails toward NOT taking a partial, which
+        #: is a worse outcome and not an unsafe one — no order is placed that doctrine forbids.
+        self._tranche_plans: dict[str, dict[str, Any]] = {}
+        #: Position ids already partialled, kept so a price oscillating across the 2R level
+        #: cannot bank 70% twice. Cleared with the plan.
+        self._partialled: set[str] = set()
+        #: NY date of the last session close performed, so 19:00 fires once a day.
+        self._last_session_close: date | None = None
         if self.broker_mode == "sim":
             from app.services.broker.cft_sim import PropFirmRules, SimPropFirmBroker
 
@@ -862,6 +876,90 @@ class LiveCryptoLoop:
             unemitted=len(record["unemitted_bars"]),
         )
 
+    async def _take_partials(self, pair: str, price: float) -> None:
+        """Bank EXIT-001's 70% when price reaches the 2R level. The runner keeps its stop.
+
+        > **THE RUNNER'S STOP IS NOT TOUCHED HERE AND MUST NEVER BE.** `EXIT-001`: *"the runner
+        > is PASSIVE — it does not trail, scale or move its stop"*, because `EXIT-003` is OPEN
+        > and Salim re-confirmed passivity in round 3.
+
+        The backtest does move it — `runner_trail_atr = 2.5`, *"never below break-even"* — and
+        that policy is OFF-DOCTRINE. It is the most likely thing to leak into this method,
+        because it is more sophisticated and it is thirty lines away in another file. **A
+        break-even shift is a stop movement**, so "only to break-even" is not a lesser version
+        of trailing; it is the same violation.
+        """
+        for pid, plan in list(self._tranche_plans.items()):
+            if plan["pair"] != pair or pid in self._partialled:
+                continue
+            reached = (
+                price >= plan["price"] if plan["direction"] == "LONG"
+                else price <= plan["price"]
+            )
+            if not reached:
+                continue
+            position = next(
+                (p for p in await self.paper.get_positions() if str(p.id) == pid), None
+            )
+            if position is None:
+                self._tranche_plans.pop(pid, None)
+                continue
+            units = float(position.lot_size)
+            lot = round(units * plan["fraction"], 8)
+            if lot <= 0 or lot >= units:
+                # Nothing to split. Refuse rather than close the whole position under a name
+                # that says "partial" — T-0038's own defect, in the caller this time.
+                self._tranche_plans.pop(pid, None)
+                continue
+            event = await self.paper.close_position(pid, lot_size=lot)
+            if event.get("status") == "refused":
+                logger.warning("EXIT-001 partial refused", pair=pair, pid=pid, lot=lot)
+                continue
+            self._partialled.add(pid)
+            self._tranche_plans.pop(pid, None)
+            await ws_manager.push_position_close(event)
+            await self._act(
+                "exit",
+                f"EXIT-001 partial: banked {plan['fraction']:.0%} of {pair} at "
+                f"{plan['price']:.0f} ({event.get('pnl', 0):+.0f} USDT) — "
+                f"{event.get('remaining_units', 0):.3f} units run on, stop UNCHANGED",
+            )
+
+    async def _close_at_session_end(self, now_ny: datetime) -> None:
+        """EXIT-001's third terminal reason: the 19:00 New York session close.
+
+        **Built here because without it the runner has NO termination but the stop.** Before
+        this cutover every position carried a 2R take-profit and ended there; after it the 30%
+        remainder has no target at all (TARGET-001 cannot select one), so an unimplemented
+        session close would leave it riding indefinitely — which is not EXIT-001's model, it is
+        the absence of one.
+
+        The time is `DECLARED_SESSION_CLOSE`: **OURS, UNRATIFIED, and stamped as such.** 19:00
+        enters the codex only through the EURUSD / algo HT v2.0 strand while our instrument
+        trades 24/7, and question 4 to Salim is unanswered. It is implemented as stated so the
+        record shows how often a runner is cut and what R it was carrying — which is the
+        evidence the ruling should rest on.
+        """
+        if self._last_session_close is not None and self._last_session_close >= now_ny.date():
+            return
+        if now_ny.time() < DECLARED_SESSION_CLOSE.local_time:
+            return
+        self._last_session_close = now_ny.date()
+        positions = await self.paper.get_positions()
+        if not positions:
+            return
+        for position in positions:
+            pid = str(position.id)
+            event = await self.paper.close_position(pid)
+            self._tranche_plans.pop(pid, None)
+            self._partialled.discard(pid)
+            await ws_manager.push_position_close(event)
+        await self._act(
+            "exit",
+            f"EXIT-001 SESSION_CLOSE {DECLARED_SESSION_CLOSE.local_time:%H:%M} NY — closed "
+            f"{len(positions)} position(s). DECLARED and UNRATIFIED (question 4, unanswered).",
+        )
+
     async def _record_abstention(self, pair: str, entry_df, trace) -> None:
         """Persist WHY no trade was taken.
 
@@ -996,6 +1094,13 @@ class LiveCryptoLoop:
         if price is None:
             return
         self._marks[pair] = price
+        # EXIT-001 STAGE B: bank 70% at the 2R partial, BEFORE the SL/TP sweep below.
+        #
+        # Ordering is deliberate. If a single tick reaches both the partial level and the stop,
+        # the partial is the earlier event in price terms on the way up (long) and taking it
+        # first is what EXIT-001 describes. Running the sweep first would close the whole
+        # position and the partial could never fire.
+        await self._take_partials(pair, price)
         # mark-to-market + auto-close SL/TP
         for ev in self.paper.on_tick(pair, price):
             # Persistence + decision resolution happen via the broker's settle
@@ -1003,6 +1108,10 @@ class LiveCryptoLoop:
             await ws_manager.push_position_close(ev)
             await self._act("exit", f"Closed {pair} {ev.get('reason')} {ev.get('pnl', 0):+.0f} USDT")
         await ws_manager.push_tick(pair, price, price, 0.0)
+
+        # EXIT-001's THIRD terminal reason. Checked on the tick path because that is the only
+        # clock this loop has — there is no scheduler — and it is idempotent per NY date.
+        await self._close_at_session_end(to_ny(datetime.now(timezone.utc)))
 
         # new closed entry-TF bar? -> evaluate strategy
         entry = await self._fetch_bars(bsym, self.entry_tf, 320)
@@ -1112,6 +1221,15 @@ class LiveCryptoLoop:
         res = await self.execution.execute(sig)
         if res.get("status") == "FILLED":
             logger.info("Live paper entry", pair=pair, dir=sig.direction.value, fill=res.get("fill"))
+            # STAGE B. The plan EXIT-001 produces is now EXECUTED, not merely recorded.
+            pid = res.get("position_id")
+            if pid and sig.partial_price is not None and sig.partial_fraction is not None:
+                self._tranche_plans[str(pid)] = {
+                    "price": float(sig.partial_price),
+                    "fraction": float(sig.partial_fraction),
+                    "direction": sig.direction.value,
+                    "pair": pair,
+                }
             await self._record_signal_decision(
                 pair, entry, sig, res.get("sized_units", 0), fill_price=res.get("fill"),
                 trace=trace,
@@ -1120,7 +1238,11 @@ class LiveCryptoLoop:
             await self._act(
                 "entry",
                 f"Entered {pair} {sig.direction.value} {res.get('sized_units', 0):.3f} "
-                f"@ {res.get('fill', sig.entry):.0f} (SL {sig.sl:.0f} TP {sig.tp:.0f})",
+                f"@ {res.get('fill', sig.entry):.0f} (SL {sig.sl:.0f}, "
+                f"{sig.partial_fraction:.0%} at {sig.partial_price:.0f}, "
+                f"remainder passive to STOP_HIT or SESSION_CLOSE)"
+                if sig.partial_price is not None else
+                f"@ {res.get('fill', sig.entry):.0f} (SL {sig.sl:.0f}, no exit plan)",
             )
         else:
             # NEVER drop a generated signal silently. A rejection (non-positive

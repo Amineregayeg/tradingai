@@ -233,10 +233,19 @@ class DecisionEngine:
         # NOT CHANGED HERE, and the reason is not caution. Moving 1.5 -> 2.0 would make this
         # branch agree with EXIT-001 while remaining a SECOND statement of it -- GATE-011's
         # defect with a corrected constant, which is harder to notice than a disagreement.
-        # Retiring it means reading the verdict from the rule, and the rule's verdict is not
-        # on this path: `live/exit_shadow.py` records the tranche plan on the ORDER path and
-        # executes nothing (T-0038 Stage A). Wiring the alerts path to a verdict that has never
-        # been observed to fire is the thing the staging exists to prevent.
+        #
+        # WHAT CHANGED AT T-0050, AND IT MAKES THIS WORSE RATHER THAN BETTER: the rule's verdict
+        # is now ON the order path. `crypto_loop._take_partials` BANKS 70% at 2R against the
+        # simulation broker -- EXIT-001 DECIDES, it no longer merely records. So this branch no
+        # longer disagrees with a shadow; **it disagrees with what the engine actually does to a
+        # position.** A trader reading the alert is advised to act at 1.5R while the engine acts
+        # at 2R on the same trade.
+        #
+        # STILL NOT WIRED TO THE RULE, and the reason has narrowed to one: the argument for
+        # retiring it was that the alert path should read the verdict from the rule, and that is
+        # now possible. It is not done HERE because it is a change to the ALERTS contract, not to
+        # the exit -- a different task, and one that should be taken deliberately rather than as
+        # a side effect of the exit cutover. Recorded so the next reader does not re-derive it.
         #
         # And it is NOT DELETED, for the three legs recorded at step 9 above: this module is
         # the only caller of `generate_risk_warning`, `AlertType.RISK_WARNING` is produced only

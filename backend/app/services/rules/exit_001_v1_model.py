@@ -63,6 +63,7 @@ from app.services.telemetry.ny_time import NY, iso_ny, to_ny
 from app.services.telemetry.records import (
     RuleEvaluation,
     derived,
+    from_declared,
     from_registry,
 )
 
@@ -158,11 +159,89 @@ DECLARED_SESSION_CLOSE = DeclaredSessionClose(
         "('70% of position 2RR, 30% (EOD; 19:00)'), and that the two-strand question is "
         "'answered by adoption, never by argument'. Our instrument is BTC/ETH, which trade "
         "24/7, and the Magic Strategy has no session-end concept. Question 4 of the pack "
-        "sent to Salim 2026-08-15 — UNANSWERED as of this record. Implemented as stated and "
-        "defaulted ON so that shadow produces the evidence the ruling should rest on: how "
-        "often a runner would have been cut, and the R it was carrying."
+        "sent to Salim 2026-08-15 — UNANSWERED as of this record. "
+        "THE VALUE IS HIS RULING; THE APPLICABILITY TO A 24/7 INSTRUMENT IS QUESTION 4 — "
+        "authority_class O tells you a ruling's authority, not its scope. "
+        "WHY IT IS ON, REWRITTEN AT T-0050 BECAUSE THE OLD REASON EXPIRED: it used to read "
+        "'defaulted ON so that shadow produces the evidence the ruling should rest on', which "
+        "held only while it was OFF the deciding path. T-0050 converted shadow into "
+        "ENFORCEMENT — this now CLOSES POSITIONS — so evidence-gathering is no longer why it "
+        "is on. It is on because Malek authorised the exit cutover and because the 30% runner "
+        "has NO final target (TARGET-001 cannot select one), so without a session close the "
+        "remainder rides indefinitely, which is worse than closing it on a time whose scope is "
+        "unsettled. The daily position-wide close is carried to Malek explicitly: he "
+        "authorised the cutover, not separately a hard daily flatten on a EURUSD-derived time."
     ),
 )
+
+
+class SessionClose(RuleImplementation):
+    """GATE-022: any position still open at 19:00 New York time is closed.
+
+    **CLAIMED AT T-0050 BECAUSE THE ENGINE STARTED ENFORCING IT.** Until this task nothing
+    closed positions on a clock, so the id was legitimately unimplemented. `crypto_loop.
+    _close_at_session_end` now performs exactly this rule's statement — *"any position still
+    open at 19:00 New York time is closed … exit_reason = SESSION_CLOSE"* — daily and
+    position-wide.
+
+    > **A PRODUCER WITH NO DECLARATION is the mirror of `T-0033`'s declared-with-no-producer**,
+    > and it is worse in one respect: `check_rule_coverage.py` would report `GATE-022`
+    > unimplemented while the engine closed real positions by it, so every coverage figure we
+    > publish would UNDERSTATE what the engine does. *An unclaimed enforcement is invisible to
+    > the instrument built to find exactly that.*
+
+    The rule DECIDES nothing here — the loop owns the clock, because the loop is the only thing
+    that has one. This class carries the id, the declared value and the verdict, so the
+    behaviour is attributable to a rule rather than to a method.
+    """
+
+    RULE_ID = "GATE-022"
+
+    COVERAGE_NOTE = (
+        "Claimed at T-0050, the task that made it ENFORCED. crypto_loop._close_at_session_end "
+        "closes every open position at DECLARED_SESSION_CLOSE (19:00 NY), which is this rule's "
+        "statement verbatim. The VALUE is Salim's ruling (authority_class O); its APPLICABILITY "
+        "to a 24/7 instrument is question 4 of the round-3 pack and is UNANSWERED -- 19:00 "
+        "enters the codex only through the EURUSD / algo HT v2.0 strand. Enforced anyway "
+        "because the 30% runner has no final target and an indefinitely-riding remainder is "
+        "worse; the default's ownership is recorded on DECLARED_SESSION_CLOSE and carried to "
+        "Malek. The rule does not own the clock -- the loop does, being the only thing that "
+        "has one -- so this reports the verdict and the declared value rather than acting."
+    )
+
+    @classmethod
+    def evaluate(cls, now_ny: datetime | None = None) -> Any:
+        """PASS while the session is open; FAIL once 19:00 NY has passed.
+
+        `now_ny=None` is NOT ASKED and returns `NOT_APPLICABLE` — distinct from "asked, and the
+        session is open". A gate that answered PASS for a caller that never supplied a clock
+        would be reporting the session open on no evidence.
+        """
+        values: dict[str, Any] = {
+            **DECLARED_SESSION_CLOSE.as_values(),
+            "now_ny": iso_ny(now_ny) if now_ny is not None else None,
+            "enforced_by": "crypto_loop._close_at_session_end",
+        }
+        provenance = {
+            DECLARED_SESSION_CLOSE.name: from_declared(DECLARED_SESSION_CLOSE.name),
+            f"{DECLARED_SESSION_CLOSE.name}_ratified": derived(
+                "the VALUE is his ruling; the APPLICABILITY to a 24/7 instrument is question 4"
+            ),
+            f"{DECLARED_SESSION_CLOSE.name}_zone": derived(
+                "America/New_York — the clock the ruling is stated in, DST-aware. Emitted "
+                "because '19:00' without a zone is not a time"
+            ),
+            f"{DECLARED_SESSION_CLOSE.name}_source": derived("GATE-022 statement + GATE-022 note"),
+            "now_ny": derived("caller's clock; None means NOT ASKED"),
+            "enforced_by": derived("the loop owns the clock; this rule owns the id"),
+        }
+        if now_ny is None:
+            return cls.evaluation("NOT_APPLICABLE", values=values, value_provenance=provenance)
+        past = now_ny.timetz().replace(tzinfo=None) >= DECLARED_SESSION_CLOSE.local_time
+        values["session_closed"] = past
+        provenance["session_closed"] = derived("now_ny at or after the declared close")
+        return cls.evaluation("FAIL" if past else "PASS",
+                              values=values, value_provenance=provenance)
 
 
 def next_session_close_after(ts: datetime) -> datetime:

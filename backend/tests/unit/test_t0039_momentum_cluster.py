@@ -489,12 +489,17 @@ def test_the_coverage_figure_CANNOT_DISTINGUISH_the_honest_work_from_the_refused
     #                                  PRIM-007  implemented (the Order Block producer)
     #                                  GATE-027  left the CANNOT-FIRE bucket, because PRIM-007
     #                                            IS the producer its blocker named
+    #   T-0050  53 / 80 -> 54 / 80   NUMERATOR only, by ONE rule: GATE-022, CLAIMED because the
+    #                                engine started ENFORCING it. The behaviour came first and
+    #                                the claim followed in the same task — an enforcement with
+    #                                no declaration is invisible to this very figure, which
+    #                                would have UNDERSTATED what the engine does.
     #
     # So the +2 is not "coverage improved" — it is one rule built and one rule unblocked BY that
     # rule, and the cannot-fire count fell 6 -> 5 in the same run, which is the other side of the
     # same event and is asserted below.
-    assert "53 / 80 distinct" in out, (
-        "effective coverage is not where T-0046 left it — say which rule became able to reach "
+    assert "54 / 80 distinct" in out, (
+        "effective coverage is not where T-0050 left it — say which rule became able to reach "
         "a verdict, which CANNOT_FIRE_WITHOUT was cleared, or which HARD_GATE was registered"
     )
     # THE DISTINGUISHING EVIDENCE, and it is not the coverage number. The refused edit would

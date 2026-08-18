@@ -123,17 +123,46 @@ def test_the_doctrine_constants_come_from_the_registry_and_are_republished_intac
 # ---------------------------------------------------------------------------
 
 
-def test_a_signal_with_no_take_profit_records_the_reason_rather_than_vanishing():
-    """*No plan* and *nobody looked* must not share a representation."""
+def test_a_signal_with_NEITHER_a_target_NOR_a_partial_records_the_reason_rather_than_vanishing():
+    """*No plan* and *nobody looked* must not share a representation.
+
+    **WHAT COUNTS AS "NO PLAN" CHANGED AT T-0050 AND THE TEST MOVED WITH IT.** Through T-0046 a
+    signal without a take-profit had nothing to plan. After the cutover `tp` is `None` on EVERY
+    signal by design — the 2R price is `partial_price` and the runner has no final target
+    because TARGET-001 cannot select one — so *no target* alone is no longer the condition.
+    **A signal is unplanned only when it carries neither.**
+    """
     record = tranche_plan(
         Signal("X", DirectionType.LONG, 100.0, 95.0, None, 0.01, OrderType.MARKET)
     )
 
     assert record["planned"] is False
-    assert "take-profit" in record["reason"]
+    assert "nothing to plan" in record["reason"]
     assert "degenerate" not in record["reason"].lower(), (
         "a missing target is not a degenerate runner — different facts, different fixes"
     )
+
+
+def test_a_signal_carrying_ONLY_a_partial_IS_planned_and_names_its_terminal_reasons():
+    """THE MUST-MISS for the test above: the post-cutover signal must NOT read as unplanned.
+
+    Every live signal now has `tp=None`. If that alone marked it unplanned, the shadow would
+    report "no plan" on every trade the engine takes — an absence indistinguishable from the
+    engine having stopped producing plans at all.
+    """
+    record = tranche_plan(Signal(
+        "X", DirectionType.LONG, 100.0, 95.0, None, 0.01, OrderType.MARKET,
+        partial_price=110.0, partial_fraction=0.7,
+    ))
+
+    assert record["planned"] is True
+    assert record["partial_level"] == 110.0 and record["partial_fraction"] == 0.7
+    assert record["final_target"] is None
+    assert record["runner_terminates_on"] == ["STOP_HIT", "SESSION_CLOSE"]
+    # `None`, never 0.0 — a zero would say the runner has nowhere to go, which is a different
+    # and false claim from "no target has been selected".
+    assert record["runner_distance"] is None
+    assert record["degenerate_runner"] is None
 
 
 def test_a_target_INSIDE_the_2r_level_records_the_refusal_rather_than_swallowing_it():

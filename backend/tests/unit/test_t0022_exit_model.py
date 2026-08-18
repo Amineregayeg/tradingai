@@ -724,13 +724,20 @@ def test_an_inverted_or_zero_stop_is_refused():
 # ---------------------------------------------------------------------------
 # Criterion 7 — shadow only. Nothing wires this into the live exit path.
 # ---------------------------------------------------------------------------
-def test_the_exit_model_IS_wired_into_live_and_executes_nothing():
-    """CRITERION 7. A green suite here must not be readable as a live 70/30 exit.
+def test_the_exit_model_IS_wired_into_live_and_EXECUTES_from_exactly_one_place():
+    """CRITERION 7, INVERTED TWICE NOW — and both times by the event its docstring named.
 
-    `broker/paper.py:on_tick` still closes positions WHOLE at sl/tp. Wiring this in is a
-    live behaviour change with its own deploy. This test is what makes that statement
-    checkable rather than a claim in a report — it goes red the moment someone wires it,
-    which is the moment the claim stops being true.
+    It began as *"nothing under live/ imports the exit model"*, with the note that it *"goes red
+    the moment someone wires it, which is the moment the claim stops being true."*
+
+        T-0022  importers == []                  Stage 0: not wired
+        T-0038  importers is NON-EMPTY           Stage A: wired, shadow only
+        T-0050  a partial IS executed            Stage B: EXIT-001 decides
+
+    **Criterion 7's real content was never "stay unwired" — it was that a green suite here must
+    not be readable as something it is not.** At each stage the assertion moved and the property
+    stayed: *the record must state which stage we are in.* This is now Stage B, and what needs
+    guarding is no longer that nothing executes but that the execution has EXACTLY ONE SITE.
     """
     app_dir = Path(model.__file__).parents[2]
     needles = ("exit_001_v1_model", "exit_002_ladder_off", "V1ExitModel", "LadderOffForV1")
@@ -760,14 +767,12 @@ def test_the_exit_model_IS_wired_into_live_and_executes_nothing():
         f"the importer is not the shadow recorder — something else wired it: {importers}"
     )
 
-    # AND IT STILL EXECUTES NOTHING. `close_position` is never called with a lot_size anywhere
-    # under the directories walked below, so no tranche is taken. Stage B is what changes that,
-    # and it is gated on this record being non-empty and read.
+    # AND IT NOW EXECUTES, FROM ONE SITE. T-0050 made `crypto_loop._take_partials` bank 70% at
+    # the 2R level against the simulation broker.
     #
     # BOTH DIRECTORIES ARE WALKED, and the first version of this comment claimed two while the
-    # loop iterated one -- `for sub in ("live",)`. Latent (no partial call exists under
-    # `broker/` outside the adapters' own definitions) and load-bearing the day Stage B lands.
-    # B149's shape: defined one way and described another, in adjacent lines.
+    # loop iterated one -- `for sub in ("live",)`. Latent then and load-bearing now, because the
+    # partial call this asserts on is exactly the thing the walk exists to find (B149/B163).
     import ast
 
     for sub in ("live", "broker"):
@@ -782,9 +787,30 @@ def test_the_exit_model_IS_wired_into_live_and_executes_nothing():
                         and node.func.attr == "close_position"
                         and any(k.arg == "lot_size" for k in node.keywords)):
                     partial_calls.append(path.name)
-    assert partial_calls == [], (
-        f"a PARTIAL close is being executed from the live path: {partial_calls}. That is "
-        "Stage B, and Stage A must record without enforcing."
+
+    # ONE SITE, NAMED. A partial close is the only order this engine places that is not an entry
+    # or a full exit; a SECOND caller would mean two policies deciding the same tranche, and the
+    # record could not attribute a banked 70% to either.
+    assert partial_calls == ["crypto_loop.py"], (
+        f"partial closes are executed from {partial_calls or 'nowhere'}. Exactly one site is "
+        "expected — crypto_loop._take_partials. Nowhere means Stage B was reverted and EXIT-001 "
+        "no longer decides; more than one means two policies bank the same tranche."
+    )
+
+    # AND THE OTHER HALF OF STAGE B: the runner's stop is never written on the live path. A
+    # trailing or break-even shift is the backtest's off-doctrine policy, and EXIT-003 is OPEN.
+    stop_writes = []
+    for path in (app_dir / "services" / "live").rglob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text())):
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if (isinstance(target, ast.Attribute) and target.attr in {"sl", "stop"}
+                            and isinstance(target.value, ast.Name)
+                            and target.value.id in {"pos", "position", "runner"}):
+                        stop_writes.append(f"{path.name}:{node.lineno}")
+    assert not stop_writes, (
+        f"the live path writes a position's stop at {stop_writes}. EXIT-001: the runner is "
+        "PASSIVE — it does not trail, scale or move its stop, and a break-even move IS a move."
     )
 
 
