@@ -201,13 +201,19 @@ def next_session_close_after(ts: datetime) -> datetime:
 
 
 class DegenerateRunner(ValueError):
-    """The final target is not beyond the 2R partial level, so the runner has nowhere to go.
+    """The final target is INSIDE the 2R partial level, so the runner would run backwards.
 
-    RAISED, not silently corrected. GATE-031 governs this and says the engine "must not
-    silently invent" a minimum gap between the partial level and the final target; GATE-031
-    depends on GATE-025's `selected_stop.rr`, which is unimplemented, so the rule that would
-    adjudicate this cannot run. Refusing the plan is the only move that neither invents a
-    gap nor hides the condition.
+    STILL RAISED, and the scope is now narrower than it was — see `TradePlan.__post_init__`.
+
+    **Salim ruled the EQUALITY case in round 3** — *"Take it, flag `DEGENERATE_RUNNER`, log 70%
+    + 30% both closing at 2R (i.e. 100% out at target). No invented minimum gap."* — so a target
+    sitting exactly ON the 2R level is now TAKEN and FLAGGED rather than refused.
+
+    **He did not rule the target-inside case, and it is a different fact:** at equality the
+    runner runs zero distance, and inside it would have to run in the wrong direction to reach
+    a target already passed. **Extending his ruling to cover it would be inventing the treatment
+    of a case he did not address**, which is the same move `GATE-031` forbids one step over —
+    so that case still refuses the plan.
     """
 
 
@@ -234,22 +240,27 @@ class TradePlan:
                 "non-positive risk — R is the unit every level here is measured in, so a "
                 "zero or inverted stop makes 2R meaningless rather than merely wrong"
             )
-        # Checked here rather than at simulate() so an impossible plan cannot be constructed
-        # at all. See DegenerateRunner: GATE-031 owns this and cannot run.
+        # THE BOUNDARY MOVED IN ROUND 3, AND ONLY THE EQUALITY CASE MOVED.
         #
-        # STRICTLY beyond, not `_beyond`, and the difference is the whole case. `_beyond` is
-        # inclusive because a price touching a level HAS reached it — right for firing an
-        # exit, wrong for validating a plan. A target sitting exactly ON the 2R level is the
-        # degenerate runner: the partial and the final target fire on the same tick at the
-        # same price, and the 30% "runs" a distance of zero. Inclusive here would have let
-        # the plan's own named risk through as a normal trade.
-        if (self.final_target - self.partial_level) * self.sign <= 0:
+        # This used to refuse `<= 0` — target at OR inside the 2R level. Salim ruled the
+        # EQUALITY case: "Take it, flag DEGENERATE_RUNNER, log 70% + 30% both closing at 2R
+        # (i.e. 100% out at target). No invented minimum gap." So `== 0` is now a legal plan
+        # that carries a flag, and `simulate()` emits both events at one price and one
+        # timestamp in a deterministic order.
+        #
+        # `< 0` STILL REFUSES, and the distinction is not caution. At equality the runner runs
+        # zero distance; inside, it would have to run BACKWARDS to reach a target price has
+        # already passed. He ruled the first and not the second, and extending a ruling to a
+        # case it does not name is inventing the treatment — GATE-031's own prohibition, one
+        # step over.
+        gap = (self.final_target - self.partial_level) * self.sign
+        if gap < 0:
             raise DegenerateRunner(
-                f"final target {self.final_target} is not beyond the 2R level "
-                f"{self.partial_level} for a {self.side} — the runner would have zero "
-                "distance to run. GATE-031 governs this and needs GATE-025's "
-                "selected_stop.rr, which is unimplemented; a minimum gap is exactly what "
-                "GATE-031 says the engine must not silently invent."
+                f"final target {self.final_target} is INSIDE the 2R level "
+                f"{self.partial_level} for a {self.side} — the runner would have to run "
+                "backwards. Round 3 ruled the EQUALITY case (take it, flag it); this is not "
+                "that case, and GATE-031 says the engine must not silently invent a "
+                "treatment for one it does not cover."
             )
 
     # -- geometry ------------------------------------------------------------------
@@ -279,6 +290,41 @@ class TradePlan:
     def realised_r(self, price: float) -> float:
         """P&L at `price`, in R. Negative below entry for a long, above it for a short."""
         return (price - self.entry) * self.sign / self.r_distance
+
+    @property
+    def runner_distance(self) -> float:
+        """How far the 30% has to run, in price. Zero is the degenerate case."""
+        return (self.final_target - self.partial_level) * self.sign
+
+    @property
+    def degenerate_runner(self) -> bool:
+        """`computed_rr.degenerate_runner` — the schema field at `TELEMETRY_SCHEMA.json:2553`.
+
+        **THE COLLAPSE AND THE FLAG ARE DIFFERENT PREDICATES, and Salim's round-3 ruling says
+        so:** *the epsilon governs the FLAG only, not the collapse.*
+
+            collapse   `runner_distance == 0` — exact. Both events fire at one price because
+                       the two levels ARE one price. No epsilon can widen an identity.
+            flag       `runner_distance <= eps` — this property.
+
+        **The eps is READ from `GATE-029`'s existing `DECLARED_EPS`, not redeclared here.** A
+        second declaration of one parameter is `GATE-011`'s shape, and that one already carries
+        its authority (`ENGINEERING — this engine, T-0030. Not ratified by Salim`) and its
+        reasoning.
+
+        **At its current value of `0.0` the two predicates coincide**, so today the flag fires
+        exactly when the collapse happens. A ratification to a positive eps widens the FLAG and
+        leaves the collapse untouched — which is why the split costs nothing to build now.
+
+        *(The round-3 pack cites `K-14`'s `planned_rr <= 2.05` as background. `K-14` does not
+        exist in this repository — measured, with `K-24` as the control arm proving the search
+        works — so it is a candidate RATIFICATION of this same parameter rather than a second
+        one, and adopting it silently would install a value under Salim's name that he may not
+        have aimed at this engine.)*
+        """
+        from app.services.rules.gate_029_stop_flags import DECLARED_EPS  # noqa: PLC0415
+
+        return self.runner_distance <= float(DECLARED_EPS.value)
 
 
 @dataclass(frozen=True)

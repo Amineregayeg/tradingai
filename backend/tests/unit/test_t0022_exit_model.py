@@ -684,12 +684,34 @@ def test_a_position_opened_exactly_at_1900_runs_a_full_session_rather_than_closi
 
 
 # ---------------------------------------------------------------------------
-# GATE-031 — a degenerate runner is refused, not silently widened
+# GATE-031 — the boundary MOVED in round 3, and only the equality case moved
 # ---------------------------------------------------------------------------
-@pytest.mark.parametrize("target", [110.0, 105.0])
-def test_a_target_at_or_inside_2r_is_refused_and_cites_gate_031(target):
+def test_a_target_INSIDE_2r_is_still_refused_and_cites_gate_031():
+    """`105.0` is inside the `110.0` 2R level for this plan: the runner would have to run
+    BACKWARDS to reach a price the position has already passed.
+
+    **Salim ruled the EQUALITY case in round 3 and not this one**, and extending a ruling to a
+    case it does not name is inventing the treatment — `GATE-031`'s own prohibition, one step
+    over. So this still refuses.
+    """
     with pytest.raises(DegenerateRunner, match="GATE-031"):
-        TradePlan(side="LONG", entry=100.0, stop=95.0, final_target=target)
+        TradePlan(side="LONG", entry=100.0, stop=95.0, final_target=105.0)
+
+
+def test_a_target_EXACTLY_at_2r_is_now_TAKEN_AND_FLAGGED_by_salims_round_3_ruling():
+    """INVERTED BY A RULING, NOT REPAIRED — and the inversion is the deliverable.
+
+    This case used to raise. Round 3: *"Take it, flag `DEGENERATE_RUNNER`, log 70% + 30% both
+    closing at 2R (i.e. 100% out at target). No invented minimum gap."*
+
+    **`skip` was refused by the same sentence**: skipping the setup would invent the minimum gap
+    `GATE-031.output` forbids, which is what the old refusal amounted to.
+    """
+    plan = TradePlan(side="LONG", entry=100.0, stop=95.0, final_target=110.0)
+
+    assert plan.partial_level == 110.0 and plan.final_target == 110.0
+    assert plan.runner_distance == 0.0
+    assert plan.degenerate_runner is True
 
 
 def test_an_inverted_or_zero_stop_is_refused():
@@ -837,3 +859,72 @@ def test_both_rules_are_registered_under_their_contract_ids():
     assert LadderOffForV1.RULE_ID == "EXIT-002"
     for cls in (V1ExitModel, LadderOffForV1):
         assert cls.COVERAGE_NOTE, "both rules ship partial coverage and must say so"
+
+
+# ---------------------------------------------------------------------------
+# ROUND 3 — the degenerate runner is taken, flagged, and 100% out at target
+# ---------------------------------------------------------------------------
+
+
+def test_the_degenerate_case_emits_two_ordered_events_at_ONE_price_and_ONE_timestamp():
+    """THE RULING, ASSERTED AS BEHAVIOUR. *"log 70% + 30% both closing at 2R (i.e. 100% out at
+    target)"* — and the order is deterministic because `simulate()` already emits the partial
+    before the terminals within a tick, for a reason that predates this ruling: the partial is
+    the earlier level and it CREATES the runner rather than ending it."""
+    from datetime import datetime, timezone
+
+    plan = TradePlan(side="LONG", entry=100.0, stop=95.0, final_target=110.0)
+    tick = datetime(2026, 5, 1, 12, 0, tzinfo=timezone.utc)
+    sim = V1ExitModel.simulate(plan, [(tick, 100.0), (tick, 110.0)])
+
+    assert [e.reason for e in sim.events] == [PARTIAL_2R, FINAL_TARGET]
+    assert {e.price for e in sim.events} == {110.0}, "both events must fire at ONE price"
+    assert {e.timestamp for e in sim.events} == {tick}, "and at ONE timestamp"
+    assert sum(e.fraction for e in sim.events) == pytest.approx(1.0), "100% out at target"
+    assert sim.runner_open is False
+
+
+def test_no_new_exit_reason_was_invented_for_the_degenerate_case():
+    """The vocabulary is unchanged: `PARTIAL_2R` and `FINAL_TARGET` already existed and
+    `EXIT_001_REASONS` is untouched. **A new reason would have made every stored record before
+    this ruling unreadable against the new enum**, for a case the existing pair describes
+    exactly."""
+    from app.services.rules.exit_001_v1_model import EXIT_001_REASONS, TERMINAL_REASONS
+
+    assert EXIT_001_REASONS == (PARTIAL_2R, *TERMINAL_REASONS)
+    assert "DEGENERATE" not in " ".join(EXIT_001_REASONS)
+
+
+def test_the_flag_and_the_collapse_are_DIFFERENT_predicates():
+    """*"The epsilon governs the FLAG only, not the collapse."*
+
+    The collapse is an identity — the two levels ARE one price — and no epsilon can widen an
+    identity. The flag reads `GATE-029`'s existing `DECLARED_EPS`, **not a second declaration**:
+    a second declaration of one parameter is `GATE-011`'s shape, and that one already carries
+    its authority and its reasoning.
+
+    **At `0.0` the two coincide**, so today the flag fires exactly when the collapse happens.
+    """
+    from app.services.rules.gate_029_stop_flags import DECLARED_EPS
+
+    assert DECLARED_EPS.name == "degenerate_runner_eps"
+    assert float(DECLARED_EPS.value) == 0.0
+    assert "NOT RATIFIED" in DECLARED_EPS.authority.upper(), (
+        "if this became ratified, the flag's threshold changed and this test should say so"
+    )
+
+    degenerate = TradePlan(side="LONG", entry=100.0, stop=95.0, final_target=110.0)
+    normal = TradePlan(side="LONG", entry=100.0, stop=95.0, final_target=130.0)
+    assert degenerate.degenerate_runner is True and degenerate.runner_distance == 0.0
+    assert normal.degenerate_runner is False and normal.runner_distance > 0.0
+
+
+def test_the_degenerate_flag_holds_for_a_short_too():
+    """MUST-MISS on a sign error: `runner_distance` is signed by side, so a short whose target
+    equals its 2R level must flag identically rather than by accident of arithmetic."""
+    short = TradePlan(side="SHORT", entry=100.0, stop=105.0, final_target=90.0)
+    assert short.partial_level == 90.0
+    assert short.degenerate_runner is True
+
+    with pytest.raises(DegenerateRunner):
+        TradePlan(side="SHORT", entry=100.0, stop=105.0, final_target=95.0)
