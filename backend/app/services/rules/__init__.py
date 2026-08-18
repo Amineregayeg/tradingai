@@ -299,6 +299,10 @@ from app.services.rules.prim_003_liquidity import (  # noqa: F401
 from app.services.rules.prim_004_sweeps import SweepEvent, SweepEvents  # noqa: F401
 from app.services.rules.prim_005_breaks import BreakEvent, BreakEvents  # noqa: F401
 from app.services.rules.prim_006_sr_flips import SRFlip, SRFlipZones  # noqa: F401
+from app.services.rules.prim_007_order_blocks import (  # noqa: F401
+    OrderBlock,
+    OrderBlocks,
+)
 from app.services.rules.target_005_clearance import (  # noqa: F401
     DECLARED_WEAK_SWEEP, PENETRATION_EPISODE_BASIS, REMOVAL_PROBE_VALUES,
     ClearanceIsStructural, ClearanceObservation, DeclaredPercentage, RemovalProbe,
@@ -356,6 +360,8 @@ __all__ = [
     "RuleImplementation",
     "SRFlip",
     "SRFlipZones",
+    "OrderBlock",
+    "OrderBlocks",
     "StandAside",
     "StandardBoxGrade",
     "StructuralNotStatistical",

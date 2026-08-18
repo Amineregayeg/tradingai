@@ -294,7 +294,9 @@ def test_the_evaluations_validate_inside_a_real_record():
         session={"ny_local_time": "2026-08-14T09:00:00-04:00", "tz_offset_used": "-04:00",
                  "in_magic_zone": False, "minutes_from_nyo": -30},
         primitives={"swing_points": [], "structure_boxes": [], "imbalances": [],
-                    "liquidity_pools": [], "sweeps": [], "breaks": []},
+                    "liquidity_pools": [], "sweeps": [], "breaks": [],
+                    # REQUIRED from T-0046 (PRIM-007 landed): `[]` = ran and found nothing.
+                    "order_blocks": []},
         correlates={"layout_size": 4, "disturbed_count": 0,
                     "disturbance_grade": "NONE", "states": []},
         rule_evaluations=evaluations,

@@ -1730,14 +1730,15 @@
         },
         "primitives": {
           "type": "object",
-          "description": "PRIM-001 to PRIM-007. Every primitive carries the price levels that define it, so an auditor can reconstruct the chart read without the engine. order_blocks EXISTS as a property from v1.2.2 — that is the structural fix rung 4 needed, because stop.anchor_object_id had nowhere to resolve to and HG-11 could never be satisfied, which is what guaranteed rung 4's 0/529. IT IS DELIBERATELY NOT IN `required` YET, AGAINST TELEMETRY_PATCH §3. The patch's reason for requiring it is that 'an absent array is the loophole HG-28 exists to close' — which is a loophole for an engine that HAS a detector and omits the array to hide a non-search. PRIM-007 IS REGISTERED AND NOT IMPLEMENTED (T-0046 implements it), so requiring the array today would make every emitter write `order_blocks: []` — 'we looked for order blocks and found none', asserted by code that never looked, and INDISTINGUISHABLE FROM A REAL EMPTY RESULT. That is the same fail-open the requirement exists to prevent, installed by the requirement itself. It joins `required` in T-0046, in the commit that makes the array answerable; test_t0045_round3_patch.py fails the moment PRIM-007 becomes implemented while this is still absent.",
+          "description": "PRIM-001 to PRIM-007. Every primitive carries the price levels that define it, so an auditor can reconstruct the chart read without the engine. order_blocks is REQUIRED from T-0046 — the commit that IMPLEMENTED PRIM-007 and so made an empty array answerable. T-0045 added the property and deliberately withheld the requirement (B166), because until a detector existed every `[]` would have claimed a search that no code performed. It may now be empty, and an empty array means the detector RAN AND FOUND NOTHING; an absent one is the loophole HG-28 exists to close.",
           "required": [
             "swing_points",
             "structure_boxes",
             "imbalances",
             "liquidity_pools",
             "sweeps",
-            "breaks"
+            "breaks",
+            "order_blocks"
           ],
           "properties": {
             "swing_points": {

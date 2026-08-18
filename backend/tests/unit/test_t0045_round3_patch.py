@@ -143,55 +143,62 @@ def test_prim_007_is_REGISTERED_and_the_schema_can_hold_it():
     assert "order_block" in contract.schema()["$defs"]
 
 
-def test_order_blocks_joins_required_ON_THE_DAY_PRIM_007_IS_IMPLEMENTED_and_not_before():
-    """A DELIBERATE DIVERGENCE FROM `TELEMETRY_PATCH` §3, and the tripwire that ends it.
+def test_the_order_blocks_divergence_is_RETIRED_and_the_two_halves_landed_together():
+    """**T-0045's deliberate divergence from `TELEMETRY_PATCH` §3 is CLOSED, by `T-0046`.**
 
-    §3 says add `order_blocks` to `primitives.required` because *"an absent array is the
-    loophole HG-28 exists to close"*. **That loophole belongs to an engine that HAS a detector
-    and omits the array to hide a non-search.** PRIM-007 is registered and NOT implemented, so
-    requiring the array today makes every emitter write `order_blocks: []` — *"we looked for
-    order blocks and found none"*, asserted by code that never looked, and **indistinguishable
-    from a real empty result.** That is the same fail-open the requirement exists to prevent,
-    installed by the requirement itself.
+    T-0045 added `order_blocks` as a property and withheld it from `primitives.required`, against
+    the pack, with the Manager's authority: until a detector existed every emitter would have
+    written `order_blocks: []` — *"we looked and found none"*, asserted by code that never looked
+    (`B166`). T-0046 implemented `PRIM-007` and added the requirement IN THE SAME COMMIT, which
+    was the condition the divergence was granted on.
 
-    > **The condition below is the EVENT, not a proxy for it.** It does not watch for a field,
-    > a version or a filename; it watches for PRIM-007 becoming implemented — which is the
-    > thing that makes an empty array answerable. *`B163`'s lesson: the `__slots__` tripwire
-    > named the right event and keyed on the wrong signal.*
-    """
-    import app.services.rules  # noqa: F401 - importing the package is what registers them
-    from app.services.rules.base import implementations
+    > **The tripwire that guarded the window is deleted along with it.** It branched on whether
+    > `PRIM-007` was implemented, and *both* of its failure modes — an empty `implementations()`,
+    > and a module assigning `RULE_ID` without subclassing — took the branch that AFFIRMED the
+    > divergence. *A guard whose every failure mode endorses a departure from the pack is one
+    > nobody should have to keep trusting; the honest end for it is to become unnecessary.*
 
-    implemented = set(implementations())
-    prim = contract.schema()["$defs"]["setup_evaluation"]["properties"]["primitives"]
-    if "PRIM-007" in implemented:
-        assert "order_blocks" in prim["required"], (
-            "PRIM-007 IS NOW IMPLEMENTED — an empty order_blocks array is finally answerable, "
-            "so TELEMETRY_PATCH §3's requirement applies and this is T-0046's remaining step. "
-            "Add 'order_blocks' to primitives.required and delete this branch."
-        )
-    else:
-        assert "order_blocks" not in prim["required"], (
-            "order_blocks is required while PRIM-007 is unimplemented — every record now claims "
-            "an order-block search that no code performs"
-        )
-
-
-def test_registering_a_rule_did_not_move_what_is_implemented():
-    """The arm the whole patch turns on: a REGISTRATION enlarges the denominator only.
-
-    If a numerator moved, the patch did more than register a rule.
+    What remains is the unconditional pair, which is what the divergence promised.
     """
     import app.services.rules  # noqa: F401 - importing the package is what registers them
     from app.services.rules.base import implementations
 
     implemented = set(implementations())
     assert implemented, "no rule implementations were discovered — this arm is measuring nothing"
-    assert "PRIM-007" not in implemented, (
-        "PRIM-007 is implemented — T-0046 landed, so this test and the one above both need "
-        "their T-0045 framing retired rather than relaxed"
+    assert "PRIM-007" in implemented, (
+        "PRIM-007 is not implemented, so `order_blocks` being required means every emitter must "
+        "write an array no code can honestly fill — B166, reintroduced"
     )
-    assert implemented <= set(contract.known_rule_ids())
+    prim = contract.schema()["$defs"]["setup_evaluation"]["properties"]["primitives"]
+    assert "order_blocks" in prim["required"], (
+        "PRIM-007 is implemented but `order_blocks` is optional again — an absent array is the "
+        "loophole HG-28 exists to close, and the reason for withholding it has expired"
+    )
+
+
+def test_a_registration_alone_still_moves_only_the_DENOMINATOR():
+    """T-0045 registered PRIM-007; T-0046 implemented it. **Two commits, two different effects.**
+
+    The original form of this arm asserted `"PRIM-007" not in implemented` — true of T-0045 and
+    now false, by design. Its own message said the framing should be RETIRED rather than relaxed,
+    so what survives here is the part still observable from HEAD: every implemented id is a
+    registered one. **The T-0045-specific claim — 67 distinct implemented before and after, only
+    the denominators moving — was measured at `51160e5` in a worktree at its parent, and is
+    recorded in that commit rather than re-asserted here, because HEAD can no longer see it.**
+
+    *A test that cannot observe its own subject should say so and stop, not keep a shape that
+    looks like evidence.*
+    """
+    import app.services.rules  # noqa: F401
+    from app.services.rules.base import implementations
+
+    implemented = set(implementations())
+    assert implemented, "no rule implementations were discovered — this arm is measuring nothing"
+    unregistered = implemented - set(contract.known_rule_ids())
+    assert not unregistered, (
+        f"{sorted(unregistered)} claim a RULE_ID the registry does not carry — a rule id is the "
+        "contract's join key and is never invented locally"
+    )
 
 
 # ---------------------------------------------------------------------------

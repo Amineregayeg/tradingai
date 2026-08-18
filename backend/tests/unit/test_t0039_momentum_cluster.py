@@ -436,9 +436,20 @@ def test_the_block_chain_survives_an_implemented_terminal_blocker():
 
     # MUST-HIT on the OTHER path: a blocker that is NOT a rule id still terminates as a leaf,
     # which is the branch that was carrying the whole tree before GRADE-028 existed.
-    assert crc.resolve_block_chain("GATE-027", impl, ids) == [
-        "GATE-027", "order_block_detector",
-    ]
+    #
+    # THE EXEMPLAR MOVED, AND THAT IS THE NEWS. This used to be `GATE-027`, whose blocker was the
+    # non-rule-id string `"order_block_detector"`. **T-0046 built PRIM-007, so GATE-027 declares no
+    # blocker at all and can no longer demonstrate this branch** — it now returns the
+    # single-element NOT-BLOCKED form, which is asserted separately below. `GRADE-019` carries
+    # `instrument_class`, a data name rather than a rule id, and exercises the same leaf.
+    assert crc.resolve_block_chain("GRADE-019", impl, ids) == ["GRADE-019", "instrument_class"], (
+        "the non-rule-id leaf branch is not being taken — it carried the entire tree before "
+        "GRADE-028 was implemented and it is still the branch most rules use"
+    )
+    # And GATE-027's own transition, pinned where the reader is already looking at chains:
+    assert crc.resolve_block_chain("GATE-027", impl, ids) == ["GATE-027"], (
+        "GATE-027 still reports a chain — PRIM-007 discharged its producer gap in T-0046"
+    )
 
 
 def test_the_coverage_figure_CANNOT_DISTINGUISH_the_honest_work_from_the_refused_edit():
@@ -468,16 +479,33 @@ def test_the_coverage_figure_CANNOT_DISTINGUISH_the_honest_work_from_the_refused
         [sys.executable, str(BACKEND.parent / "scripts" / "check_rule_coverage.py")],
         capture_output=True, text=True, cwd=BACKEND.parent,
     ).stdout
-    # T-0045 moved the DENOMINATOR and not the numerator: registering PRIM-007 (a HARD_GATE
-    # nothing implements) enlarges the space of rules without implementing one, so 79 -> 80
-    # while 51 stands. THE NUMERATOR IS THE CLAIM; the denominator is the size of the problem.
-    assert "51 / 80 distinct" in out, (
-        "effective coverage is not where stage 2 left it — say which rule became able to reach "
+    # TWO TASKS HAVE MOVED THIS SINCE STAGE 2, AND BOTH ARE ATTRIBUTABLE — which is what this
+    # test asks for in its own failure message.
+    #
+    #   T-0045  51 / 79 -> 51 / 80   DENOMINATOR only. PRIM-007 was REGISTERED and not
+    #                                implemented, so the space of rules grew and the set of
+    #                                implemented ones did not.
+    #   T-0046  51 / 80 -> 53 / 80   NUMERATOR only, by exactly two rules, both named:
+    #                                  PRIM-007  implemented (the Order Block producer)
+    #                                  GATE-027  left the CANNOT-FIRE bucket, because PRIM-007
+    #                                            IS the producer its blocker named
+    #
+    # So the +2 is not "coverage improved" — it is one rule built and one rule unblocked BY that
+    # rule, and the cannot-fire count fell 6 -> 5 in the same run, which is the other side of the
+    # same event and is asserted below.
+    assert "53 / 80 distinct" in out, (
+        "effective coverage is not where T-0046 left it — say which rule became able to reach "
         "a verdict, which CANNOT_FIRE_WITHOUT was cleared, or which HARD_GATE was registered"
     )
     # THE DISTINGUISHING EVIDENCE, and it is not the coverage number. The refused edit would
     # have SHORTENED this list; nine rules of honest work left it exactly as it was.
-    assert "implemented but CANNOT FIRE    6 distinct" in out
+    # 6 -> 5: GATE-027 left the bucket in T-0046 when PRIM-007 discharged its producer gap. The
+    # OTHER five are unchanged, and GATE-040/GATE-041 are asserted by name below so a different
+    # rule silently leaving cannot be read as this one.
+    assert "implemented but CANNOT FIRE    5 distinct" in out
+    assert "GATE-027" not in out.split("CANNOT FIRE")[1].split("effective coverage")[0], (
+        "GATE-027 is still listed as unable to fire — PRIM-007 is its producer"
+    )
     assert "GATE-040" in out and "GATE-041" in out
 
     # And the +1 is attributable: exactly one of the nine is HARD_GATE, so exactly one lands in

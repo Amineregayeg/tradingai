@@ -391,7 +391,15 @@ def candidate_target_distances(
         if distance > 0:
             out.append(distance)
     for imbalance in imbalances:
-        if getattr(imbalance, "fill_state", None) == "FILLED":
+        # B167. THIS READ `== "FILLED"`, WHICH IS NOT A `FillState`. The four values are
+        # UNFILLED / HALF_FILLED / FULLY_FILLED / FULLY_FILLED_AND_VIOLATED; `"FILLED"` is
+        # `OrderStatus.FILLED` from app/db/enums.py — a different vocabulary that a reader can
+        # grep, find defined, and believe. So the comparison was ALWAYS FALSE and skipped nothing,
+        # while this function's own docstring says its candidates are "a liquidity pool or
+        # UNFILLED imbalance". Measured on the pinned corpus: 1505 of 1574 imbalances are not
+        # open, and 1455 of those are FULLY_FILLED_AND_VIOLATED — all of them were in this
+        # distribution, whose definition said they were not.
+        if getattr(imbalance, "fill_state", None) not in ("UNFILLED", "HALF_FILLED"):
             continue
         edge = imbalance.price_high if direction == "LONG" else imbalance.price_low
         distance = edge - entry if direction == "LONG" else entry - edge

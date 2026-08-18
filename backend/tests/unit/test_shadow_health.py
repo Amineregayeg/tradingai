@@ -195,6 +195,8 @@ def _minimal_setup_evaluation() -> dict:
         primitives={
             "swing_points": [], "structure_boxes": [], "imbalances": [],
             "liquidity_pools": [], "sweeps": [], "breaks": [],
+            # REQUIRED from T-0046 (PRIM-007 landed): `[]` = ran and found nothing.
+            "order_blocks": [],
         },
         # A POPULATED state — an empty `states` list cannot carry the defect, so a
         # fixture with `states: []` would make the mutation below unfalsifiable.

@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-18 (B166 — MAKING A FIELD REQUIRED BEFORE ITS PRODUCER EXISTS CONVERTS “NOT IMPLEMENTED” INTO “SEARCHED AND FOUND NOTHING”. `TELEMETRY_PATCH` §3 asks for `order_blocks` in `primitives.required` so that “an absent array” cannot hide a non-search — but that loophole belongs to an engine that HAS a detector, and `PRIM-007` is registered by this patch and implemented by `T-0046`. Requiring it makes every emitter write `order_blocks: []`, a claim that a search happened, indistinguishable from a real empty result — the exact fail-open the requirement exists to prevent, installed by the requirement itself; a reader auditing rung 4's `0/529` would conclude the market had no order blocks. Measured: 26 record-validation tests across five files, which is the blast radius of the false claim and not just of the edit. Property added, `required` deferred to `T-0046`, tripwire keyed on `PRIM-007` entering `implementations()` rather than on a proxy. General form: the test is never “is requiring this good hygiene?” but “does a producer exist that can answer it honestly?” — the same patch's five new required fields on `events_considered[]` ARE correct, because `GATE-012` already emits them.)
+Last updated: 2026-08-18 (B167 — A FILTER BORROWED A TOKEN FROM THE ORDER-STATUS VOCABULARY AND APPLIED IT TO A FILL-STATE FIELD. `fill_state != "FILLED"` in `GATE-027`'s rung-2 pool and `fill_state == "FILLED"` in `candidate_target_distances`, where `FillState` is UNFILLED|HALF_FILLED|FULLY_FILLED|FULLY_FILLED_AND_VIOLATED and `"FILLED"` is `OrderStatus.FILLED` — a DIFFERENT enum. Always-true and always-false respectively; neither has ever excluded anything. Measured on the pinned corpus: the filter admits 1574/1574 where the ruling's OPEN pool is 69 (4.4%), so 95.6% of what it admits is closed and 92.4% is FULLY_FILLED_AND_VIOLATED. It survived because it sits behind `is_momentum_imbalance is True`, which is 0/1574 — TWO DEFECTS STACKED SO NEITHER IS OBSERVABLE, and the obvious repair (populate the flag) would have shipped the second. The wrong token is FINDABLE, defined in `app/db/enums.py`, which is what made it durable — a reader greps it, finds it real, and stops. Fixed by selecting on the DECLARED registry value `rung2_eligibility.fill_state_in`, not by correcting the string.)
 
 ---
 
@@ -2440,6 +2440,97 @@ register that records its own control pairs is exactly the corpus that will accu
 searched, at the moment of use** — not reused from a previous entry. **Prefer a token containing the
 task id and a nonce over a shared house token like `zzz_absent`**, because a shared one accumulates
 citations until it is present everywhere.
+
+### B167 — a filter borrowed a token from the ORDER-STATUS vocabulary and applied it to a FILL-STATE field
+
+**Found by Execute during `T-0046`, while reading `GATE-027`'s rung-2 pool before changing it.**
+
+    FillState  =  "UNFILLED" | "HALF_FILLED" | "FULLY_FILLED" | "FULLY_FILLED_AND_VIOLATED"
+    OrderStatus.FILLED = "FILLED"                    <- app/db/enums.py:103, A DIFFERENT VOCABULARY
+
+    gate_027_stop_ladder.py:421   i.is_momentum_imbalance is True and i.fill_state != "FILLED"
+    stop_ladder_corpus.py:394     getattr(imbalance, "fill_state", None) == "FILLED": continue
+
+**`"FILLED"` is not a `FillState`.** Both comparisons name a token that the field can never hold, so
+the first is ALWAYS TRUE and the second is ALWAYS FALSE. *Neither filter has ever excluded anything.*
+
+#### MEASURED ON THE PINNED CORPUS, not argued
+
+    fill_state over btcusdtp_5m_1500.csv          1574 imbalances
+      FULLY_FILLED_AND_VIOLATED   1455   92.4%
+      FULLY_FILLED                  50    3.2%
+      UNFILLED                      50    3.2%
+      HALF_FILLED                   19    1.2%
+
+      OPEN, the ruling's rung-2 pool                69    4.4%
+      NOT open but admitted by `!= "FILLED"`      1505   95.6%
+
+    `fill_state != "FILLED"` admits  1574/1574   EVERY ONE
+    `fill_state == "FILLED"` skips      0/1574   NONE
+
+**The filter admits 22.8x the ruling's pool, and 92.4% of what it admits is
+`FULLY_FILLED_AND_VIOLATED` — the most emphatically closed state there is.**
+
+#### WHY IT SURVIVED: TWO DEFECTS STACKED SO NEITHER IS OBSERVABLE
+
+    is_momentum_imbalance is True   0 / 1574      <- the flag is NEVER set (B159's cluster)
+    therefore  pool = []  regardless of the fill test
+
+**The dead comparison sits BEHIND a conjunct that is always false, so the pool was empty for a
+reason that had nothing to do with it.** *Fixing only the flag — which is what "populate
+`is_momentum_imbalance`" would have done — exposes an always-true fill filter and admits 1505
+closed imbalances as stop anchors.* **The obvious repair would have shipped the second defect.**
+
+> **And the wrong token is FINDABLE, which is what made it durable.** A reader who greps `"FILLED"`
+> finds it DEFINED, in `app/db/enums.py`, as a real member of a real enum — and concludes the
+> comparison is sound. *`B161` said a guard whose subject is a token fires on the documentation of
+> that token; this is the same collision with the outcomes swapped — the token's documentation
+> belongs to a different vocabulary, and it vouches for the wrong field.*
+
+**`candidate_target_distances` is the sharper of the two sites**, because it is a MEASUREMENT that has
+been REPORTED: its own docstring says its candidates are *"a liquidity pool or **unfilled**
+imbalance"*, and the filter meant to enforce "unfilled" excluded nothing. **So a published
+distribution's definition and its contents disagree, and the definition is the part people read.**
+
+**Fixed in `T-0046` by selecting on the declared registry value** — `GATE-027.values.rung2_eligibility.fill_state_in`
+— **rather than by correcting the string.** *A corrected string would be right today and unpinned to
+anything; the registry value is what the ruling actually says, and it fails loudly if the vocabulary
+moves under it.*
+
+#### AND THE FIX INVALIDATES FIGURES ALREADY PUBLISHED — `T-0049` OWNS THE RE-RUN
+
+    T-0038's target distribution   "0 of 49 setups all-identical · 49 of 49 with more than one ·
+                                    distinct counts 2 … 453"
+    the stop sweep                 "0 -> 11 -> 296"
+
+**Both were computed over the 22.8x population, and the Manager used the first to rule `T-0038`'s
+realised-R arm UNRUNNABLE** — on the ground that the target is a live choice on every setup. *"453
+distinct target distances" over a candidate set that is 92% `FULLY_FILLED_AND_VIOLATED` is not a
+measure of how much choice the target involves.*
+
+> **The direction matters: correcting the filter can only REDUCE the candidate set**, so it moves
+> toward FEWER distinct targets per setup — **toward the arm being RUNNABLE.** *If setups collapse
+> to one candidate under the correct filter, that arm was blocked by a defect rather than by a
+> rule-owned selection.* **The conclusion may survive; the magnitude cannot.**
+
+#### THE T-0046 FIX IS HALF THE RULING, AND THE RECORD SAYS SO
+
+`rung2_eligibility` has two halves. **`T-0046` implemented OPEN-NESS and not the WINDOW** — *"far
+edge inside entry ↔ rung-1 swing, stop side"* — which `T-0049` owns. So the pool is every open
+imbalance on the stop side **at any distance**, and it can select an anchor BEYOND rung 1's swing,
+which the ruling excludes.
+
+    step 12, MID          rungs locatable            pairs      setups w/ inversion
+    before T-0046         {1,3,5}                    11 /  67   10 / 49
+    after  T-0046         {1:10, 2:49, 3:49, 5:48}   70 / 174   49 / 49
+
+**The setup-level inversion rate is now SATURATED, and a saturated figure stops being evidence.**
+*Before, "the proxy rung changed nothing" was shown by `10 == 10`; at `49 == 49` the same equality
+is guaranteed for any secondary at all — a rung that inverted every setup and one that inverted none
+both read `49/49`.* **Published as `window_applied: False` on every rung-2 report so the number
+cannot be read as the ruled rung 2's**, and re-measuring under the window is `T-0049`'s.
+
+
 
 ### B166 — making a field REQUIRED before its producer exists converts “not implemented” into “searched and found nothing”
 

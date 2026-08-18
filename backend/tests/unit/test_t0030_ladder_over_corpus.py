@@ -264,24 +264,42 @@ def test_the_inversion_rate_carries_its_unit_denominator_and_interval(setups):
     )
 
 
-def test_rung_two_never_locates_because_no_declared_momentum_width_exists(setups):
-    """A FINDING, PINNED: the plan's PRIMARY split is rungs 1,2,3,5 and rung 2 cannot fire.
+def test_rung_two_LOCATES_NOW_and_NOT_because_a_momentum_width_was_supplied(setups):
+    """**THE FINDING THIS PINNED IS CLOSED, AND ITS OWN FAILING-INPUT NOTE NAMES THE WRONG CAUSE.**
 
-    `is_momentum_imbalance` is set only when a `momentum_min_width` is supplied, and nothing
-    in `app/` supplies one — `evaluate_layout` defaults it to None and `shadow.py` never
-    passes it. So the measurable ladder is rungs 1, 3 and 5, and rung 4 has no producer.
+    It asserted rung 2 could never locate, because `is_momentum_imbalance` is set only when a
+    `momentum_min_width` is supplied and nothing in `app/` supplies one. Its failing input was
+    *"pass a `momentum_min_width` in the extractor"* — **the forbidden fix**, the fixed-width test
+    `GATE-035` bans and Salim has since ruled has no threshold (`min_imbalance_width: 0`).
 
-    FAILING INPUT: pass a `momentum_min_width` in the extractor. Rung 2 starts locating and
-    this fails — correctly, because the measurement would then be of a ladder the engine
-    does not run.
+    **Rung 2 now locates, and by the OTHER route: round 3 split the flag from the anchor.**
+    Eligibility is *"still left open"* — `fill_state ∈ {UNFILLED, HALF_FILLED}` — and is not gated
+    on the flag at all. So the flag is still `None` everywhere, `momentum_min_width` is still
+    supplied by nothing, and the rung fires anyway. *The two fixes are indistinguishable in this
+    assertion and opposite in doctrine, which is why the must-miss below is the load-bearing half.*
+
+    **AND THE POOL IS WIDER THAN THE RULING'S.** `T-0046` implemented the open-ness half and NOT
+    `rung2_eligibility.window` (*"far edge inside entry ↔ rung-1 swing, stop side"*), which
+    `T-0049` owns. Every figure here is therefore over a SUPERSET of the ruled candidates, and the
+    ladder publishes `window_applied: False` so no reader takes it for the ruled rung 2.
     """
     report = inversion_report(setups, placement="MID")
-    assert 2 not in report.rung_locatable_counts, (
-        "rung 2 must never locate under production settings"
+    assert report.rung_locatable_counts.get(2), (
+        "rung 2 still never locates — the open-ness predicate is not reaching the pool"
     )
-    assert 4 not in report.rung_locatable_counts, "rung 4 has no producer at all"
-    assert {1, 3, 5} >= set(report.rung_locatable_counts), (
-        f"only rungs 1, 3 and 5 can locate; saw {sorted(report.rung_locatable_counts)}"
+    assert {1, 2, 3, 5} >= set(report.rung_locatable_counts), (
+        f"the PRIMARY must not contain rung 4; saw {sorted(report.rung_locatable_counts)}"
+    )
+
+    # THE MUST-MISS, and it is what separates this from the banned repair. If rung 2 started
+    # locating because someone supplied a width, the flag would be populated. It must not be.
+    from app.services.rules.stop_ladder_corpus import extract_setups  # noqa: F401
+    assert all(
+        imb.is_momentum_imbalance is None
+        for setup in setups for imb in getattr(setup, "imbalances", ()) or ()
+    ), (
+        "is_momentum_imbalance is populated — rung 2 was fixed with the fixed-width test GATE-035 "
+        "bans, not with the ruling's open-ness predicate"
     )
 
 
@@ -620,13 +638,46 @@ def test_the_secondary_measurement_adds_rung_four_and_is_reported_apart(bars: li
     assert 4 not in p_report.rung_locatable_counts, "the PRIMARY must not contain rung 4"
     assert s_report.rung_locatable_counts[4] == 47, "the proxy located on 47 of 49 setups"
 
-    assert (p_report.pairs.successes, p_report.pairs.trials) == (11, 67)
-    assert (s_report.pairs.successes, s_report.pairs.trials) == (20, 170)
+    # RE-MEASURED AT T-0046, and the numbers moved because the LADDER changed, not the corpus.
+    #
+    #     step 12, MID              rungs locatable        pairs        setups w/ inversion
+    #     before T-0046   PRIMARY   {1,3,5}                11 /  67     10 / 49
+    #                     SECONDARY {1,3,5} + proxy 4      20 / 170     10 / 49
+    #     after  T-0046   PRIMARY   {1:10, 2:49, 3:49, 5:48}  70 / 174   49 / 49
+    #                     SECONDARY + proxy 4               120 / 324   49 / 49
+    #
+    # Rung 2 went from NEVER locating to locating on 49 of 49 (B167 + the ruling's predicate), and
+    # that alone adds 49 rungs and 107 pairs. THE SETUP-LEVEL INVERSION RATE WENT 10/49 -> 49/49,
+    # which is the figure to be careful with: it is NOT evidence that the ladder became more
+    # inverted, because the pool it is computed over is a SUPERSET of the ruled candidates —
+    # `rung2_eligibility.window` is unimplemented (T-0049) and the ladder says so via
+    # `window_applied: False`. **Reported here as a fact about this measurement, not about the
+    # ruled rung 2**, and re-measuring it under the window is T-0049's, along with the stale
+    # target distribution and stop sweep that were computed under the broken filter.
+    assert (p_report.pairs.successes, p_report.pairs.trials) == (70, 174)
+    assert (s_report.pairs.successes, s_report.pairs.trials) == (120, 324)
 
-    assert p_report.setups_with_inversion.successes == 10
-    assert s_report.setups_with_inversion.successes == 10, (
-        "the proxy rung introduced NO newly-inverted setup — the setup-level rate is the "
-        "one that is comparable across the two rung sets, and it did not move"
+    assert p_report.setups_with_inversion.successes == 49
+    # AND THE COMPARISON THAT USED TO CARRY THIS TEST HAS LOST ITS FORCE — SAID PLAINLY RATHER
+    # THAN LEFT AS A PASSING ASSERTION.
+    #
+    # The original evidence was: PRIMARY 10/49 and SECONDARY 10/49, IDENTICAL, therefore the proxy
+    # rung introduced no newly-inverted setup. Both are now 49/49 — still identical, and it no
+    # longer shows anything, **because the primary is SATURATED.** At the ceiling, "the secondary
+    # matches the primary" is guaranteed for any secondary whatsoever: a rung that inverted every
+    # setup and a rung that inverted none would both read 49/49.
+    #
+    # *An unchanged figure is evidence only when the change could have moved it.* This one cannot
+    # move up, so it is retained as a CONSISTENCY check and explicitly NOT as evidence about the
+    # proxy. The discriminating comparison is the pair-level one above, whose denominators differ
+    # and are asserted separately for that reason.
+    assert s_report.setups_with_inversion.successes == 49, (
+        "the secondary no longer matches the saturated primary — with the primary at 49/49 this "
+        "can only fall, which would mean adding a rung REMOVED an inversion"
+    )
+    assert p_report.setups_with_inversion.successes == p_report.setups_usable, (
+        "the primary is no longer saturated, so the comparison below regains its force and the "
+        "framing in this test must be revisited rather than the number updated"
     )
     assert p_report.setups_usable == s_report.setups_usable == 49
 

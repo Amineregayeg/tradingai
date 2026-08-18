@@ -77,6 +77,14 @@ from app.services.telemetry.records import (
 
 Direction = Literal["LONG", "SHORT"]
 
+#: Rung 2's eligibility, READ FROM THE REGISTRY rather than retyped — `GATE-027.values.
+#: rung2_eligibility`, landed by `T-0045` from Salim's round-3 ruling.
+#:
+#: Read rather than transcribed for the reason `LADDER` is: a transcribed predicate is correct
+#: until the ruling moves and then silently disagrees with it, and NOTHING would fail. `B167` is
+#: what a locally-typed predicate costs — a token from a different enum, always-true, for months.
+RUNG2_ELIGIBILITY: dict[str, Any] = contract.rule("GATE-027")["values"]["rung2_eligibility"]
+
 #: The five anchors IN ENGINE ORDER, read from the registry rather than retyped.
 #:
 #: Retyping it here would create a second source that can drift from the registry silently,
@@ -312,6 +320,14 @@ class LadderInputs:
     sweeps: Sequence[SweepEvent] = ()
     pools: Sequence[LiquidityPool] = ()
     breaks: Sequence[BreakEvent] = ()
+    #: PRIM-007's inventory. `None` MEANS THE DETECTOR DID NOT RUN; `()` means it ran and found
+    #: nothing. **Those are different facts and rung 4 reports them differently** — a producer gap
+    #: is not a search failure, and collapsing them is exactly what `B166` cost us one layer up in
+    #: the schema. The default is `None` because a caller that says nothing has not searched.
+    order_blocks: Sequence[Any] | None = None
+    #: The imbalance the entry was taken from, when the caller knows it. Rung 2 must EXCLUDE it
+    #: (`entry_poi_imbalance_eligible: false`). `None` means NOT TOLD, never "there isn't one".
+    entry_poi_imbalance_id: str | None = None
     #: The MSB that opened the trade. Rung 1 is the deepest swing AFTER it.
     msb: BreakEvent | None = None
 
@@ -380,7 +396,16 @@ class StopCandidateLadder(RuleImplementation):
     #: Rung 4 cannot be located until something produces order blocks. Declared so the
     #: coverage report puts this rule in the implemented-but-CANNOT-FIRE bucket for that
     #: rung rather than counting a five-rung ladder the engine cannot build.
-    CANNOT_FIRE_WITHOUT = (ORDER_BLOCK_PRODUCER,)
+    # `CANNOT_FIRE_WITHOUT` IS GONE, and its removal is the measurable half of T-0046.
+    #
+    # It declared `("order_block_detector",)` because six PRIM rules produced no order block and
+    # rung 4 could never be located. PRIM-007 now produces them, so the rule-level claim is false
+    # and keeping it would report a rule as unable to fire when it can.
+    #
+    # WHAT REPLACES IT IS PER-CALL, NOT PER-RULE: a caller that does not run the detector passes
+    # `order_blocks=None` and rung 4 reports `missing_producer` for THAT evaluation. The gap moved
+    # from "nobody built one" to "this caller did not use it", which is a fact about a call and
+    # cannot be declared once for the class.
 
     # -- per-rung location ----------------------------------------------------------
     @staticmethod
@@ -416,10 +441,29 @@ class StopCandidateLadder(RuleImplementation):
         `DECLARED_IMBALANCE_EDGE` — ours, unratified, with the competing edge recorded.
         """
         considered = [i.id for i in inputs.imbalances]
-        pool = [
-            i for i in inputs.imbalances
-            if i.is_momentum_imbalance is True and i.fill_state != "FILLED"
-        ]
+        # THE PREDICATE IS THE RULING'S, READ FROM THE REGISTRY. Round 3: "Split the flag from
+        # the anchor. Rung-2 eligibility is a DIFFERENT predicate — 'still left open' — and must
+        # NOT be gated on the momentum flag."
+        #
+        # WHAT WAS HERE BEFORE, AND WHY BOTH HALVES WERE WRONG (B167):
+        #     i.is_momentum_imbalance is True and i.fill_state != "FILLED"
+        # `is_momentum_imbalance` is populated ONLY when a caller supplies PRIM-002's
+        # `momentum_min_width` — the fixed-width test GATE-035 bans and Salim has since ruled has
+        # NO threshold — so it is None on every production path and the pool was empty. AND
+        # `"FILLED"` IS NOT A `FillState`: the four values are UNFILLED / HALF_FILLED /
+        # FULLY_FILLED / FULLY_FILLED_AND_VIOLATED, while `"FILLED"` is `OrderStatus.FILLED` from
+        # app/db/enums.py — a different vocabulary. So that conjunct was ALWAYS TRUE and excluded
+        # nothing; measured on the pinned corpus it admits 1574/1574 where the ruling's open pool
+        # is 69. The dead comparison was invisible because it sat behind an always-false conjunct,
+        # and "fix the flag" alone would have shipped it live.
+        eligible_states = tuple(RUNG2_ELIGIBILITY["fill_state_in"])
+        pool = [i for i in inputs.imbalances if i.fill_state in eligible_states]
+        # THE ENTRY POI'S OWN IMBALANCE IS NOT A RUNG-2 CANDIDATE — `entry_poi_imbalance_eligible:
+        # false`, a registry VALUE rather than a sentence in the ruling prose. When the caller does
+        # not say which imbalance is the POI we CANNOT apply it, and that is published as
+        # `entry_poi_excluded: None` rather than passed over: "not told which" and "told, and none
+        # matched" are different facts about the pool.
+        pool = StopCandidateLadder._apply_entry_poi_exclusion(pool, inputs)[0]
         far_edge = DECLARED_IMBALANCE_EDGE.value == "FAR_EDGE"
         edges: list[tuple[float, str]] = []
         for imb in pool:
@@ -518,13 +562,21 @@ class StopCandidateLadder(RuleImplementation):
             "DEEPEST_SWING": cls._deepest_swing,
             "MOMENTUM_IMBALANCE": cls._momentum_imbalance,
             "LIQUIDITY_SWEEP_QML": cls._swept_level,
+            "ORDER_BLOCK": cls._order_block,
             "INNER_MSB": cls._inner_msb,
         }
         out: list[StopCandidate] = []
         for index, anchor in enumerate(LADDER, start=1):
-            if anchor == "ORDER_BLOCK":
-                # THE PRODUCER GAP. No search ran, so no search_evidence is emitted and no
-                # unlocatable_reason is claimed — see the module docstring.
+            if anchor == "ORDER_BLOCK" and inputs.order_blocks is None:
+                # THE PRODUCER GAP, NARROWED TO WHAT IT NOW MEANS. PRIM-007 exists as of T-0046,
+                # so this is no longer "nobody has built a detector" — it is "THIS CALLER DID NOT
+                # RUN IT". Still not a search failure, so still no search_evidence and no
+                # unlocatable_reason: those are a closed set of REAL search failures, and filing a
+                # non-search as one rebuilds the fabricated-excuse shape round 2 deleted.
+                #
+                # `order_blocks=()` takes the ordinary path below instead and reports a genuine
+                # empty search WITH evidence. That distinction is the whole reason the field is
+                # `None`-defaulted rather than `()`-defaulted — B166, one layer down.
                 out.append(StopCandidate(
                     rung=index,
                     anchor=anchor,
@@ -562,6 +614,84 @@ class StopCandidateLadder(RuleImplementation):
             ))
         return out
 
+    @staticmethod
+    def _order_block(inputs: LadderInputs) -> tuple[float | None, Any]:
+        """Rung 4: the deepest PRIM-007 order block on the stop side, anchored at its WICK.
+
+        `WICK_EXTREME` is Salim's round-3 ruling and is read from `PRIM-007.values`, not retyped.
+        "Deepest" matches rungs 2 and 3 — the far object gives the larger cushion — so rung 4 is
+        placed by the same rule as its neighbours rather than by one invented for it.
+
+        The caller passing `None` never reaches here; `build` reports that as the producer gap.
+        """
+        blocks = list(inputs.order_blocks or ())
+        considered = [b.id for b in blocks]
+        edges: list[tuple[float, str]] = []
+        for block in blocks:
+            if block.direction != ("DEMAND" if inputs.direction == "LONG" else "SUPPLY"):
+                continue
+            anchor_price = block.stop_anchor
+            if inputs.is_on_stop_side(anchor_price):
+                edges.append((float(anchor_price), block.id))
+        if not edges:
+            return None, considered
+        return max(edges, key=lambda pair: abs(inputs.entry - pair[0]))
+
+    @staticmethod
+    def _apply_entry_poi_exclusion(
+        pool: list[Imbalance], inputs: LadderInputs
+    ) -> tuple[list[Imbalance], bool | None]:
+        """Drop the entry's own POI imbalance. `None` when the caller did not say which.
+
+        `entry_poi_imbalance_eligible: false` is a registry VALUE, not a sentence in the ruling
+        prose — it was found by reading the patch's values rather than its paragraphs.
+
+        **`None` is not `False`.** "The caller never told us which imbalance the entry came from"
+        and "we were told, and it was not in the pool" are different facts, and a bool cannot hold
+        both. The rung-2 report publishes the tri-state so a reader can tell whether the exclusion
+        was APPLIED or merely CONFIGURED.
+        """
+        if RUNG2_ELIGIBILITY.get("entry_poi_imbalance_eligible", False):
+            return pool, None
+        if inputs.entry_poi_imbalance_id is None:
+            return pool, None
+        kept = [i for i in pool if i.id != inputs.entry_poi_imbalance_id]
+        return kept, len(kept) != len(pool)
+
+    @classmethod
+    def rung2_pool_report(cls, inputs: LadderInputs) -> dict[str, Any]:
+        """Rung 2's pool WITH ITS DENOMINATORS, so an empty pool is readable.
+
+        `B159`'s lesson: a rung that never fires and a rung that fires and finds nothing produce
+        the same absence in the record unless the counts are published beside it.
+        """
+        eligible_states = tuple(RUNG2_ELIGIBILITY["fill_state_in"])
+        considered = list(inputs.imbalances)
+        open_pool = [i for i in considered if i.fill_state in eligible_states]
+        kept, poi_excluded = cls._apply_entry_poi_exclusion(open_pool, inputs)
+        return {
+            "imbalances_considered": len(considered),
+            "eligible_fill_states": list(eligible_states),
+            "open_pool": len(open_pool),
+            "pool_after_entry_poi_exclusion": len(kept),
+            "entry_poi_excluded": poi_excluded,
+            "gated_on_momentum_flag": RUNG2_ELIGIBILITY["gated_on_momentum_flag"],
+            "min_width": RUNG2_ELIGIBILITY["min_width"],
+            # THE RULED PREDICATE IS ONLY HALF IMPLEMENTED, AND THE RECORD SAYS SO.
+            #
+            # `rung2_eligibility.window` is "far edge inside entry <-> rung-1 swing, stop side".
+            # T-0046 implemented the OPEN-NESS half and NOT the window: this pool is every open
+            # imbalance on the stop side, at any distance, so it can select an anchor BEYOND rung
+            # 1's swing — which the ruling excludes. T-0049 owns the window and the re-measure.
+            #
+            # Published rather than left implicit because the alternative is a record that looks
+            # like the ruled rung 2 and is not. A figure computed from this pool is about a
+            # SUPERSET of the ruled candidates and must not be reported as the ruling's.
+            "window_applied": False,
+            "window_owner": "T-0049",
+            "declared_window": RUNG2_ELIGIBILITY.get("window"),
+        }
+
     @classmethod
     def evaluate(cls, inputs: LadderInputs) -> RuleEvaluation:
         ladder = cls.build(inputs)
@@ -575,6 +705,7 @@ class StopCandidateLadder(RuleImplementation):
             "competing_placement": COMPETING_SWEEP_PLACEMENT,
             **DECLARED_IMBALANCE_EDGE.as_values(),
             "competing_imbalance_edge": COMPETING_IMBALANCE_EDGE,
+            "rung2_pool": cls.rung2_pool_report(inputs),
         }
         provenance: dict[str, Any] = {
             "ladder_order": from_registry("GATE-027", "values.ladder"),
@@ -590,6 +721,7 @@ class StopCandidateLadder(RuleImplementation):
             f"{DECLARED_IMBALANCE_EDGE.name}_ratified": derived("OURS, unratified"),
             f"{DECLARED_IMBALANCE_EDGE.name}_source": derived("GATE-027 inputs name the imbalance, not the edge"),
             "competing_imbalance_edge": derived("the edge not taken, recorded"),
+            "rung2_pool": from_registry("GATE-027", "values.rung2_eligibility"),
         }
         for candidate in ladder:
             if candidate.anchor_object_id:

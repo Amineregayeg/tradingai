@@ -407,10 +407,32 @@ def test_a_rung_cannot_claim_both_a_producer_gap_and_a_search_failure():
                       search_evidence=SearchEvidence(T0, T0))
 
 
-def test_gate_027_declares_it_cannot_fire_without_an_order_block_producer():
-    """(b) — so rung 4 lands in the implemented-but-CANNOT-FIRE bucket rather than inflating
-    effective coverage. TARGET-001's precedent, which kept that figure honest."""
-    assert ORDER_BLOCK_PRODUCER in StopCandidateLadder.CANNOT_FIRE_WITHOUT
+def test_gate_027_no_longer_declares_a_producer_gap_because_PRIM_007_IS_the_producer():
+    """**THE DECLARATION THIS TEST PINNED IS DISCHARGED, and by a producer rather than an edit.**
+
+    Through T-0045 this asserted `ORDER_BLOCK_PRODUCER in CANNOT_FIRE_WITHOUT`, which kept rung 4
+    in the implemented-but-CANNOT-FIRE bucket instead of inflating effective coverage —
+    TARGET-001's precedent, and it was right for as long as no producer existed.
+
+    **T-0046 built PRIM-007 to Salim's round-3 definition, so the rule-level claim is now false.**
+    Keeping it would report a rule as unable to fire when it can, which is the same dishonesty in
+    the opposite direction.
+
+    > **What replaces it is PER-CALL, not per-rule.** A caller that does not run the detector
+    > passes `order_blocks=None` and rung 4 reports `missing_producer` for THAT evaluation. *"This
+    > caller did not search" is a fact about a call and cannot be declared once for the class.*
+    """
+    assert not getattr(StopCandidateLadder, "CANNOT_FIRE_WITHOUT", ()), (
+        "GATE-027 still declares a producer gap — PRIM-007 exists and is imported by the ladder"
+    )
+    # THE PER-CALL REPLACEMENT, asserted here so the removal is not a bare deletion.
+    not_run = StopCandidateLadder.build(_inputs(order_blocks=None))
+    assert not_run[3].missing_producer == ORDER_BLOCK_PRODUCER
+    searched = StopCandidateLadder.build(_inputs(order_blocks=()))
+    assert not searched[3].missing_producer, (
+        "a caller that ran the detector and found nothing is still reported as a producer gap — "
+        "that is the B166 collapse, one layer down"
+    )
 
 
 def test_no_rule_module_reaches_into_the_pre_contract_ict_detector():
@@ -814,12 +836,44 @@ def test_a_filled_imbalance_is_not_an_open_momentum_imbalance():
     assert rung2.unlocatable_reason == "NO_SUCH_PRIMITIVE_IN_SEARCH_WINDOW"
 
 
-def test_a_non_momentum_imbalance_is_not_rung_two():
-    """PRIM-002 leaves `is_momentum_imbalance` None when no declared threshold was supplied.
-    None is 'not assessed' and must not be read as True."""
+def test_an_UNASSESSED_momentum_flag_no_longer_excludes_an_OPEN_imbalance_from_rung_two():
+    """**THE PREMISE THIS TEST PINNED IS THE ONE SALIM OVERTURNED.**
+
+    It asserted that an imbalance with `is_momentum_imbalance=None` cannot be rung 2, on the
+    ground that *"None is 'not assessed' and must not be read as True"*. **That reasoning was
+    correct about the FLAG and wrong about the POOL** — round 3: *"Split the flag from the anchor.
+    Rung-2 eligibility is a DIFFERENT predicate — 'still left open' — and must NOT be gated on the
+    momentum flag."*
+
+    So the flag stays honest (`None` is still not `True`, and `GRADE-037` still owns it) and it is
+    no longer what rung 2 consults. **The imbalance below is UNFILLED, so it IS eligible, and its
+    unassessed flag is irrelevant rather than disqualifying.**
+    """
     inputs = _inputs(imbalances=[
         Imbalance(id="IMB-unassessed", tf="5m", bar_time=T0, price_high=88.0,
-                  price_low=85.0, type="FVG", direction="BULLISH",
+                  price_low=85.0, type="FVG", direction="BULLISH", fill_state="UNFILLED",
                   is_momentum_imbalance=None),
     ])
-    assert StopCandidateLadder.build(inputs)[1].locatable is False
+    assert StopCandidateLadder.build(inputs)[1].locatable is True, (
+        "an OPEN imbalance was excluded from rung 2 — the pool is still gated on the momentum flag"
+    )
+
+
+def test_a_CLOSED_imbalance_is_still_excluded_no_matter_what_the_flag_says():
+    """THE MUST-MISS. Ungating the flag must not turn rung 2 into "any imbalance at all".
+
+    `B167`: the old fill test compared against `"FILLED"`, which is not a `FillState`, so it was
+    always true and excluded nothing. It was invisible behind the always-false flag conjunct —
+    **and removing that conjunct without fixing the comparison would have admitted every
+    fully-filled-and-violated imbalance on the chart as a stop anchor.** This is the arm that
+    separates the two fixes.
+    """
+    for closed in ("FULLY_FILLED", "FULLY_FILLED_AND_VIOLATED"):
+        inputs = _inputs(imbalances=[
+            Imbalance(id=f"IMB-{closed}", tf="5m", bar_time=T0, price_high=88.0,
+                      price_low=85.0, type="FVG", direction="BULLISH", fill_state=closed,
+                      is_momentum_imbalance=True),  # flag TRUE, and it must not rescue it
+        ])
+        assert StopCandidateLadder.build(inputs)[1].locatable is False, (
+            f"{closed} was admitted as a rung-2 anchor — the fill test is not excluding it"
+        )

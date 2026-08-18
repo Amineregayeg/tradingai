@@ -67,6 +67,8 @@ def evaluation(declared) -> dict:
         primitives={
             "swing_points": [], "structure_boxes": [], "imbalances": [],
             "liquidity_pools": [], "sweeps": [], "breaks": [],
+            # REQUIRED from T-0046 (PRIM-007 landed): `[]` = ran and found nothing.
+            "order_blocks": [],
         },
         correlates={"layout_size": 4, "disturbed_count": 0, "disturbance_grade": "NONE", "states": []},
         rule_evaluations=[
@@ -101,6 +103,10 @@ def test_the_vendored_artefacts_are_byte_for_byte_the_ones_analysed():
     #   T-0045  MagicStrategy_Round3_Rulings  registry 1.2.1 -> 1.2.2  (7 sections, +PRIM-007)
     # These are the ONLY authorised reasons these hashes have ever moved — a drop that changes
     # them without a reviewed patch is still the failure this test exists to catch.
+    # T-0046 moved the SCHEMA hash again: `order_blocks` joined `primitives.required`, which is
+    # the retirement of T-0045's deliberate divergence and landed in the same commit that
+    # implemented PRIM-007 and so made an empty array answerable.
+    #
     # T-0045 landed in TWO commits. The first moved ONLY RULE_REGISTRY.json (c7898fcf7baf0799).
     # The second moves TELEMETRY_SCHEMA.json AND touches the registry again — deliberately, and
     # for one reason: its DELIBERATE DIVERGENCES are recorded in meta.changelog, because the
@@ -109,7 +115,7 @@ def test_the_vendored_artefacts_are_byte_for_byte_the_ones_analysed():
     # divergence in a schema description would guarantee round 4 does the same.
     expected = {
         "RULE_REGISTRY.json": "aa3d1b68cf1d2793",
-        "TELEMETRY_SCHEMA.json": "da3804d0df0ed4a5",
+        "TELEMETRY_SCHEMA.json": "481a679c1bb19f71",
     }
     for name, prefix in expected.items():
         got = hashlib.sha256((contract.CONTRACT_DIR / name).read_bytes()).hexdigest()[:16]

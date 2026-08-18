@@ -46,6 +46,7 @@ from app.services.rules.prim_002_imbalances import ImbalanceInventory
 from app.services.rules.prim_003_liquidity import LiquidityPools
 from app.services.rules.prim_004_sweeps import SweepEvents
 from app.services.rules.prim_005_breaks import BreakEvents
+from app.services.rules.prim_007_order_blocks import OrderBlocks
 from app.services.rules.prim_006_sr_flips import SRFlipZones
 from app.services.live import fixed_config as fixed
 from app.services.telemetry import records as rec
@@ -656,6 +657,15 @@ def evaluate_detailed(
         # -- primitives, in dependency order --------------------------------
         swings = SwingPoints.detect(bars, tf=schema_tf(signal_tf))
         breaks = BreakEvents.detect(bars, swings, tf=schema_tf(signal_tf))
+        # PRIM-007 RUNS HERE, and the record carries what it found — including nothing.
+        #
+        # `order_blocks` became REQUIRED in T-0046 and NOT in T-0045, which registered the rule
+        # (B166): while no detector existed, every emitted `[]` would have claimed a search no
+        # code performed, and been indistinguishable from a real empty result. The requirement and
+        # the producer landed together, so an empty array here now means THE WALK RAN AND FOUND
+        # NOTHING. Wiring the field without running the detector would have rebuilt exactly the
+        # claim the deferral existed to prevent, one layer further out.
+        order_blocks = OrderBlocks.detect(bars, breaks, tf=schema_tf(signal_tf))
         SwingPoints.classify_strength(swings, breaks)
         imbalances = ImbalanceInventory.detect(bars, tf=schema_tf(signal_tf))
         pools = LiquidityPools.detect(bars, swings, tf=schema_tf(signal_tf))
@@ -772,6 +782,7 @@ def evaluate_detailed(
                 "liquidity_pools": [p.as_dict() for p in pools[-40:]],
                 "sweeps": [s.as_dict() for s in sweeps[-20:]],
                 "breaks": [b.as_dict() for b in breaks[-20:]],
+                "order_blocks": [b.as_dict() for b in order_blocks[-20:]],
             },
             # MEASURED WHEN THERE IS SOMETHING TO MEASURE, HARDCODED NEVER.
             #

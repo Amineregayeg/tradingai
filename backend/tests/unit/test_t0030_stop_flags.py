@@ -593,7 +593,20 @@ def test_gate_027_still_owns_its_own_coverage_entry():
     immediately, and it fails on the thing that would actually have been lost.
     """
     assert implementations()["GATE-027"] is StopCandidateLadder
-    assert StopCandidateLadder.CANNOT_FIRE_WITHOUT == ("order_block_detector",)
+    # WHAT WOULD BE LOST HAS CHANGED, AND THE GUARD IS STILL WORTH KEEPING.
+    #
+    # Through T-0045 this asserted `CANNOT_FIRE_WITHOUT == ("order_block_detector",)`, because
+    # that tuple was the ONLY channel by which rung 4's producer gap reached the coverage report,
+    # and a shared-id takeover would have silently dropped it. **T-0046 built PRIM-007 and removed
+    # the tuple**, so the thing at risk is no longer a declaration — it is the ladder's five-rung
+    # `build` itself, including the per-call producer gap that replaced the per-rule one.
+    assert not getattr(StopCandidateLadder, "CANNOT_FIRE_WITHOUT", ()), (
+        "GATE-027 declares a producer gap again — PRIM-007 exists; see T-0046"
+    )
+    assert hasattr(StopCandidateLadder, "build") and hasattr(StopCandidateLadder, "rung2_pool_report"), (
+        "a shared-id takeover replaced the ladder in _IMPLEMENTATIONS — the five-rung build and "
+        "the rung-2 denominators would go with it, and no behaviour would appear to change"
+    )
 
     # THE FIRST VERSION OF THIS GUARD WAS A SUBSTRING SCAN AND IT FAILED ON MY OWN
     # DOCSTRING — the module has to NAME `ALLOW_SHARED_ID` in order to explain why it was
