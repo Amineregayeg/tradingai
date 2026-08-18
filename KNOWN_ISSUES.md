@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-18 (B149 — the register's deletions check was DEFINED with `--numstat` and QUOTED with `--stat`, and `--stat` prints ONE figure per file = insertions PLUS deletions with no deletions column, so it cannot yield the pair `+X/-Y` at all: a seat's in-flight file was reported as `+29/-7` when it was `+22/-7`. Measured both ways — `git diff --stat` on test_t0032_news_windows.py prints `47` for a `38 9` file, while `git show --stat 17d84eb` prints `38` for a `38 0` file. Both definitions in `agents/` are correct (`--numstat`); the substitution happened at the point of USE and exists in no artefact, B147 grade 2. It survived three days of register commits because every edit to this file is an append, so deletions are zero, so insertions + 0 == insertions and the wrong command prints the right number — the one file the check exists to guard is the one file that cannot expose the instrument, and no re-measurement can catch it because re-running the wrong command on the same file returns the same right answer forever. General form: where a verification step is performed by hand, prefer the output whose format refuses the wrong parse over the one that permits it and relies on the reader.)
+Last updated: 2026-08-18 (B150 — a count INVARIANT across the condition it is quoted beside is not evidence: `145 tests passed` was printed as proof that a guard was blind, but a plant adds no tests, so the total could not move — what moves is the FAILURE count, which the prose discards. Measured at `e5e5c4e` in a pinned worktree: clean `146 passed`; the same cycle-2 plant re-applied after cycle 3 derived the population gives `1 failed, 145 passed` — the identical token `145 passed`, in the identical file, now meaning the guard FIRED rather than the guard was BLIND. Operative fix: where a passed-count is quoted at all, quote the failure count beside it. And the enumeration of this entry's own instances was wrong in BOTH directions — Execute under-counted by stale recall, Review over-counted by grepping the token `145` and raised a false positive against a line where the count legitimately moves, retracted before it was acted on: deriving the POPULATION does not save an enumeration whose PREDICATE is a proxy, and the property this sweep looks for has no token.)
 
 ---
 
@@ -2440,6 +2440,181 @@ register that records its own control pairs is exactly the corpus that will accu
 searched, at the moment of use** — not reused from a previous entry. **Prefer a token containing the
 task id and a nonce over a shared house token like `zzz_absent`**, because a shared one accumulates
 citations until it is present everywhere.
+
+### B150 — a count INVARIANT across the condition it is quoted beside is not evidence, and the enumeration of this entry's own instances was wrong in BOTH directions
+
+**Filed by Review 2026-08-18. Found while SOURCING a figure Execute asked me to justify — the
+sourcing succeeded, the population was fully recoverable, and the figure was worthless anyway.
+That is the entry.**
+
+## The measurement
+
+One pinned detached worktree at `e5e5c4e`, one interpreter, one selector, `git status --porcelain`
+empty and checked before every figure:
+
+    pytest tests/unit/test_t0032_news_windows.py \
+           tests/unit/test_rules_base.py \
+           tests/unit/test_rule_coverage_counting.py -q       146 collected  (120 + 18 + 8)
+
+    clean, nothing planted                                    146 passed        2.07s
+    numeric threshold in app/services/calendar/finnhub.py     146 passed        <- declared residue
+    the CYCLE-2 PLANT, app/services/monitoring/
+      news_resumption.py, working threshold, no rule id       1 failed, 145 passed
+    a plant that CLAIMS an id, RULE_ID = "GATE-014"           5 failed, 141 passed
+
+> **A plant adds no tests, so the TOTAL cannot move. What moves is the FAILURE count — and the prose
+> quotes the passed-count.** `145` is not a narrower or a wider population than the guard's; it is
+> INDEPENDENT of the condition it was printed beside.
+
+**For the residue the argument is A PRIORI, not empirical.** No `def test_` in that selector depends
+on `finnhub.py`'s absence of a numeric threshold, so nothing in the population could go red except
+the guard itself. **The clean run confirms it; it was never needed to establish it.**
+
+## The same token, in the same file, meaning the opposite thing
+
+Cycle 2's prose reports the `news_resumption.py` plant as **`145 tests passed`**, meaning *all green
+and the guard blind*. Re-planted at `e5e5c4e` after cycle 3 derived the population, the identical
+file gives **`1 failed, 145 passed`** — `145 passed` again, now meaning *145 of 146 with the guard
+RED*, `test_no_numeric_volatility_test_exists_in_the_news_modules`.
+
+> **Identical token, identical file, identical plant, opposite outcomes. The bit that separates them
+> is the failure count — the one field a quoted passed-count throws away, and it is one character
+> wide.** A reader grepping `145` over this file's history cannot tell the blind guard from the
+> firing one.
+
+## Why this is worse than a stale figure, which is the whole point
+
+`B93`'s figure ROTTED — written `29`, true `37` — **so a re-measurer finds the disagreement.**
+
+> **A count invariant across the condition it certifies survives EVERY re-measurement, correct and
+> empty. It cannot be contradicted because it cannot MOVE.** Sourcing does not help: the population
+> here is fully reproducible as `120 + 18 + 8 = 146`, and the figure is still worthless for the claim
+> it supported.
+
+**So *"name the denominator"* is NOT the fix for this class** — the denominator was nameable
+throughout.
+
+**And invariance is not always a defect, which this entry must not be read as saying.** The Manager
+widened a wiring sweep's population and the count did not move; there invariance was the RESULT of a
+test whose condition was the widening, and it is what established that the narrow answer was right.
+**The defect is quoting a number as evidence FOR something else when it could not have differed under
+that something else. Invariance measured is a finding; invariance unnoticed is decoration with the
+grammar of evidence.**
+
+## Two landed instances, one caught in a diff, and one FALSE POSITIVE raised against a correct line
+
+    committed at e5e5c4e, backend/tests/unit/test_t0032_news_windows.py
+      :55    "...145 tests passed silently."                   INSTANCE     cannot move
+      :400   "...threshold and 145 tests passed."              INSTANCE     cannot move
+      :114   "Review's first plant passed 145 tests
+              precisely because it claimed nothing."           LEGITIMATE
+    a third instance in the working-tree diff                  caught by the Manager, because a
+                                                               diff put it in front of a reader
+
+**`:114` names a different condition — CLAIMING versus not claiming a rule id — and the count moves
+across that one:** a claiming plant gives `5 failed, 141 passed` against `146 passed` clean. **Review
+called it an instance and instructed Execute to change it. That instruction was wrong, was measured
+against a planted claiming implementation, and was retracted before Execute acted on it** — Execute
+had independently measured the line untouched in its own tree.
+
+**`:55` and `:400` survived Review's cycle-2 AND cycle-3 passes. Review planted the thing they
+describe, so had more reason than anyone to ask whether the count could have differed, and did not.**
+
+> **A diff review structurally cannot reach the landed prose around a hunk — not because the reader
+> stops at the boundary, but because a diff can only express what CHANGED, and prose that is wrong
+> by having been left alone produces no hunk at all.** Three readers returned green on text that no
+> review in this loop re-reads.
+
+## THE ENUMERATION OF THE INSTANCES HAD THE DEFECT, TWICE, IN OPPOSITE DIRECTIONS
+
+    Execute   UNDER-counted   by RECALL   `:758` was already `:768`; `:415` cited where e5e5c4e
+                                          reads `:400` — the same `+15` shift, twice
+    Review    OVER-counted    by TOKEN    grepped `145`, called `:114` an instance
+
+**Deriving the population is what fixed the recall error, and it did nothing for the second one.**
+The derived sweep was
+
+    git show e5e5c4e:backend/tests/unit/test_t0032_news_windows.py | grep -n "145\|146"
+
+which enumerates by matching a **string** while the defect is a **property**.
+
+> **Deriving the POPULATION does not save an enumeration whose PREDICATE is a proxy.** `T-0032` spent
+> three cycles moving from enumerated positions to derived positions to a derived population, and
+> both seats then enumerated this entry's own instances by hand against a token.
+
+**The honest statement of this sweep's reach, recorded as its limit and reached independently by
+Execute: it enumerated by TOKEN over ONE file, and the property it claims to find HAS NO TOKEN.**
+`"one hundred and forty-five"`, `f"{n} tests"`, or a percentage are the same defect and no
+`grep 145` reaches any of them. **These three are not known to be all of them.**
+
+## The fix
+
+    where a passed-count is quoted at all, quote the FAILURE count beside it
+
+**Operative, because it can be followed without first working out whether the number can move** —
+and it repairs the case the property test licenses but leaves unreadable: `:114` is legitimate under
+*does the number move under the condition the sentence names*, and `145 passed` versus
+`1 failed, 145 passed` are still indistinguishable in the history without it.
+
+The invariance is still worth stating where the figure carries scope:
+
+    All 146 tests in {test_t0032_news_windows, test_rules_base, test_rule_coverage_counting}
+    passed with a working numeric volatility threshold present in app/services/calendar/finnhub.py
+    — the SAME 146 that pass on a clean tree, since the plant adds no tests. The load-bearing
+    observation is which ARM stayed green: test_no_numeric_volatility_test_exists_in_the_news_modules.
+
+**Deleting the number loses the SCOPE it legitimately carries — what else was running and silent.
+Keeping it bare implies a discrimination it never had.**
+
+## Same family as `B149`, and a THIRD member measured while writing this
+
+**`B149` is an instrument that cannot fail visibly where it is load-bearing** — `--stat`'s single
+column read as two quantities, correct on this file precisely because append-only edits make
+`38 + 0 == 38`. **This entry is a count that cannot move against the condition it certifies.**
+
+**The third is `header_lag()` in `agents/register_commit_check.py:180`, and its defect is Execute's
+finding; the measurement below is what this entry adds to it.** The check takes
+`newest = max(added)` over the ids added by the committing diff, while `bus.py bid` allocates
+ascending and concurrently — **so a lower id landing after a higher one forces line 9 to name
+something OLDER than the newest entry in the file, which is verbatim the rot the check exists to
+prevent.**
+
+    the two candidate instruments over this file's whole history
+      max(added)   — the ids this commit adds          (what the hook does)
+      max(file)    — the ids present in the staged blob (what line 9 CLAIMS)
+
+    commits adding at least one heading, where the two COULD disagree     6
+    commits where they DID disagree                                       0
+
+**The divergence case has never occurred, so the hook's clean record is not evidence that it is
+right** — the same shape as everything above, in a live check. The operational fix in force is *land
+in id order*, which is a convention; **the structural fix is one line: derive `newest` from the
+staged blob the function already reads, `max` over `^### (B\d+)` across the whole file rather than
+over the diff.** That is order-independent, it makes the check assert exactly the property line 9
+claims, and it closes a third case the current gate exempts — `if not added: return None` means
+REMOVING the newest heading leaves line 9 stale and unrefused.
+
+**The same question turned on the hook's own verification step gives a third answer nobody would
+check.** `header_lag` reads the INDEX — `git show :KNOWN_ISSUES.md` — so dry-running it against an
+edit that is still UNSTAGED sees the previous commit's blob, finds zero added ids, takes
+`if not added: return None`, and reports clean. **A green produced by the check looking at content
+that is not the content being committed.** Stage, then dry-run; the fix in the paragraph above does
+not touch this and it is the more likely of the two to bite, because the dry-run is the step a seat
+performs precisely when it is being careful.
+
+**And that comparison's own first run was a dead instrument printing a well-formed table.** An
+argument-order error put the sha after `--`, so every commit reported `max(added) = None`, six rows
+of `-`, and a confident `0 disagreements` — **the right conclusion from a measurement of nothing.**
+A control pair on the instrument caught it: must-fire `2b55da6 -> ['B148']`, must-miss
+`4261687 -> []`.
+
+> **All three are UNFALSIFIABLE BY CONSTRUCTION, which is why three readers passed each. A defect
+> that can only be found by asking whether an output COULD have differed is invisible to any review
+> that asks whether the output is right.**
+
+**`B147`'s question is the general form: *could this output have been produced by the check not
+running at all?* — with one turn added here: *could this output have been produced by the condition
+being ABSENT?*** Where the answer is yes, the output is not evidence.
 
 ### B149 — the register's deletions check was DEFINED with `--numstat` and QUOTED with `--stat`, and on the one file it guards the broken instrument returns the correct answer
 
