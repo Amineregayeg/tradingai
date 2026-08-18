@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-18 (B165 — AN ASSERTION KEYED ON “THE NEWEST ENTRY”, NAMED FOR A SPECIFIC ONE. `changelog[-1]` in a test named for ROUND 2's changelog entry: correct only while round 2 was newest, and silently retargeted at round 3 the moment `T-0045` appended `1.2.2`; it failed loudly only because round 3's text differs. `[-1]`, `[0]`, `max()` and “the latest” are one smell — a population decided by later events, the same defect as `__subclasses__()`. Fix: select by identity, never by position. See also B164 — the round-3 pack's machine-readable half carries `PRIM-007.statement = “see REGISTRY_PATCH.md P3”`, a POINTER, where its markdown half carries the full rule; scripting the `.json` would have installed a dangling reference to an absent file as Salim's doctrine, and every structural gate we own would still have passed because none of them read the prose.)
+Last updated: 2026-08-18 (B166 — MAKING A FIELD REQUIRED BEFORE ITS PRODUCER EXISTS CONVERTS “NOT IMPLEMENTED” INTO “SEARCHED AND FOUND NOTHING”. `TELEMETRY_PATCH` §3 asks for `order_blocks` in `primitives.required` so that “an absent array” cannot hide a non-search — but that loophole belongs to an engine that HAS a detector, and `PRIM-007` is registered by this patch and implemented by `T-0046`. Requiring it makes every emitter write `order_blocks: []`, a claim that a search happened, indistinguishable from a real empty result — the exact fail-open the requirement exists to prevent, installed by the requirement itself; a reader auditing rung 4's `0/529` would conclude the market had no order blocks. Measured: 26 record-validation tests across five files, which is the blast radius of the false claim and not just of the edit. Property added, `required` deferred to `T-0046`, tripwire keyed on `PRIM-007` entering `implementations()` rather than on a proxy. General form: the test is never “is requiring this good hygiene?” but “does a producer exist that can answer it honestly?” — the same patch's five new required fields on `events_considered[]` ARE correct, because `GATE-012` already emits them.)
 
 ---
 
@@ -2440,6 +2440,68 @@ register that records its own control pairs is exactly the corpus that will accu
 searched, at the moment of use** — not reused from a previous entry. **Prefer a token containing the
 task id and a nonce over a shared house token like `zzz_absent`**, because a shared one accumulates
 citations until it is present everywhere.
+
+### B166 — making a field REQUIRED before its producer exists converts “not implemented” into “searched and found nothing”
+
+**Found by Execute during `T-0045`, applying `TELEMETRY_PATCH` §3. Diverged from the pack
+deliberately; recorded in the registry changelog so round 4 does not re-list it.**
+
+§3 says add `order_blocks` to `primitives.required`, and gives its reason: *"an absent array is the
+loophole `HG-28` exists to close."* **That loophole belongs to an engine that HAS a detector and
+omits the array to hide a non-search.** We have no detector — `PRIM-007` is registered by this patch
+and implemented by `T-0046`.
+
+    required + no producer  ->  every emitter writes  order_blocks: []
+                            ->  "we looked for order blocks and found none"
+                            ->  asserted by code that never looked
+                            ->  INDISTINGUISHABLE FROM A REAL EMPTY RESULT
+
+> **The requirement installs the exact fail-open it exists to prevent.** *An absent array at least
+> says nothing; an empty one makes a claim, and the claim is false.* **A reader auditing rung 4's
+> `0/529` would find `0 order_blocks` on every record and conclude the market had none.**
+
+**Measured, not argued: requiring it turned 26 record-validation tests red across five files** —
+every emitted `setup_evaluation` in the suite. *That number is the blast radius of the claim, not
+just of the schema edit: those 26 are the places a false `[]` would have been written.*
+
+**RESOLUTION.** The PROPERTY is added — that is the structural fix rung 4 actually needed, because
+`stop.anchor_object_id` had nowhere to resolve to and `HG-11` could never be satisfied, which is what
+guaranteed the `0/529`. **`required` is deferred to `T-0046`, the commit that makes the array
+answerable.**
+
+**And the tripwire is keyed on the EVENT, not a proxy** (`B163`'s lesson, applied rather than
+repeated): it does not watch for a field, a version or a filename — it watches for `PRIM-007`
+appearing in `implementations()`, and fails the moment it does while `required` still omits the
+array. *`test_order_blocks_joins_required_ON_THE_DAY_PRIM_007_IS_IMPLEMENTED_and_not_before`.*
+
+#### THE SAME QUESTION HAS A DIFFERENT ANSWER ONE FIELD OVER, AND THAT IS THE GENERAL FORM
+
+`events_considered[]` ALSO gained five required fields in the same patch, and that one is applied —
+**`GATE-015` already carries every one of them under a different name** (`impact_raw`,
+`exceptional_class`, a `blocks` property). **Same patch, same mechanism, opposite verdict.** *The
+test is never "is requiring this good hygiene?" but "does a producer exist that can answer it
+honestly?"*
+
+#### AND ONE OF THOSE FIVE HAS NO TOKEN FOR THE HONEST ANSWER — RAISED, NOT RESOLVED
+
+    ScopedEvent.as_dict()   "category_checked": self.category is not None
+                            category: None means NOT CHECKED -- never "checked and found none"
+                            (the field exists for NO OTHER PURPOSE)
+
+    the patch's required    taxonomy_class ∈ {the ten Forex Factory types, UNCLASSIFIED}
+                            ...and NOTHING for NOT CHECKED
+
+**`GATE-015` carries a dedicated boolean whose only job is to keep "not checked" apart from "checked
+and unclassifiable". The required enum collapses them into `UNCLASSIFIED`.** *So wiring `GATE-015`'s
+output into this path would delete, by vocabulary, exactly the distinction the code was built to
+preserve* — and it would do it while satisfying the schema.
+
+**NOT FIXED, AND DELIBERATELY SO.** Adding a `NOT_CHECKED` token would be inventing vocabulary for a
+closed enum the ruling specifies, which is `GATE-014`'s shape and `T-0029`'s refusal. **The enum is
+left exactly as ruled.** It is latent today — nothing in `app/` emits this schema path at all (the
+only `events_considered` producer is `GATE-012`'s rule-`values` block, a DIFFERENT SHAPE UNDER THE
+SAME NAME, never validated against it) — **and it becomes live in `T-0047`, the GATE-015 classifier,
+which is the task that will first have something to write there. Flagged to the Manager for round 4.**
 
 ### B165 — an assertion keyed on “the newest entry”, named for a specific one
 

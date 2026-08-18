@@ -101,12 +101,15 @@ def test_the_vendored_artefacts_are_byte_for_byte_the_ones_analysed():
     #   T-0045  MagicStrategy_Round3_Rulings  registry 1.2.1 -> 1.2.2  (7 sections, +PRIM-007)
     # These are the ONLY authorised reasons these hashes have ever moved — a drop that changes
     # them without a reviewed patch is still the failure this test exists to catch.
-    # T-0045 moved the REGISTRY hash only; TELEMETRY_SCHEMA.json is unchanged in that commit
-    # and its hash is deliberately untouched here, so the two artefacts move independently and
-    # a schema change smuggled in beside a registry change still fails.
+    # T-0045 landed in TWO commits. The first moved ONLY RULE_REGISTRY.json (c7898fcf7baf0799).
+    # The second moves TELEMETRY_SCHEMA.json AND touches the registry again — deliberately, and
+    # for one reason: its DELIBERATE DIVERGENCES are recorded in meta.changelog, because the
+    # changelog is where a future round looks to find out what was not applied. Round 3 re-listed
+    # round-2's P1 as outstanding precisely because that record was missing, and burying a
+    # divergence in a schema description would guarantee round 4 does the same.
     expected = {
-        "RULE_REGISTRY.json": "c7898fcf7baf0799",
-        "TELEMETRY_SCHEMA.json": "c5c86c67c305fdff",
+        "RULE_REGISTRY.json": "aa3d1b68cf1d2793",
+        "TELEMETRY_SCHEMA.json": "da3804d0df0ed4a5",
     }
     for name, prefix in expected.items():
         got = hashlib.sha256((contract.CONTRACT_DIR / name).read_bytes()).hexdigest()[:16]
