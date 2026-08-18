@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-18 (B155 — a mutation is a deliberate LIE about the code and it fails in two ways. THE LIE OUTLIVES THE MEASUREMENT: two plants in one session, one removed by an `rm` that happened to sit in the same command as its measurement and one left on disk for ninety minutes, found only because a peer's unrelated question prompted a `git worktree list` — and a mutation fixture is the ONE test artefact that cannot be labelled, since a plant carrying `# TEST FIXTURE` tests a scanner that ignores commented files rather than the scanner. THE LIE IS NOT THE ONE YOU MEANT: reverting a changed file wholesale to invert its arms gave `ImportError: cannot import name 'ABSENT'` at COLLECTION, 0 tests run — a well-formed red result sitting exactly where the check looks, proving only that the fix added some names; the same move is VALID on the frontend, where the test imports only the component, and nothing in either output says which happened. Fixes: plant-measure-remove as ONE operation with `cd` out before removal, because a `finally` is a mechanism where a removal step is a promise; and mutate the DECISION while keeping the NAMES, which turned 1 collection error into 12 failed / 16 passed with every must-fire arm firing. Measured while bounding this entry's own claim: `landed_sweep.py` was fixed-path-rooted and never printed the tree it scanned.)
+Last updated: 2026-08-18 (B156 — `T-0036` wired `GATE-012/013/015/016` onto the order path as Stage A, recording and enforcing nothing, and the finding worth carrying is that the change CLOSING a fail-open rebuilt it one layer up: `_fetch_from_finnhub` returns `[]` — with a warning nothing downstream can see — when no API key is configured, and this repository has none, so the first version wrote *"no news blackout"* on every bar the platform would ever evaluate, from a calendar it never called. A verdict that was never taken is not a verdict of ALLOW. Closed with a third state carried all the way down — `(None, reason)` from the fetch, `would_block -> None` on the context, `NOT-EVALUATED` with the reason in the trace — because quiet news, a missing key and a provider outage need different responses and looked identical in the record. Also: routing the verdict through `trace.gate()` would have set `blocked_by` and dropped `reasons`' `candidates:` census line, rebuilding `B10` with a change that suppresses nothing; and four `COVERAGE_NOTE`s were wrong BY BEING LEFT ALONE, which no diff shows.)
 
 ---
 
@@ -2440,6 +2440,132 @@ register that records its own control pairs is exactly the corpus that will accu
 searched, at the moment of use** — not reused from a previous entry. **Prefer a token containing the
 task id and a nonce over a shared house token like `zzz_absent`**, because a shared one accumulates
 citations until it is present everywhere.
+
+### B156 — the change that CLOSED a fail-open rebuilt it one layer up, and a verdict never taken is not a verdict of ALLOW
+
+**Established by Execute during `T-0036`, found by RUNNING the wiring rather than by reading it.**
+`T-0035` closed `finnhub.py`'s impact fail-open at the source. `T-0036` consumed it and reintroduced
+the same shape at the consumer, in the commit whose subject is closing it.
+
+#### The mechanism, and it is one line of absent handling
+
+    _fetch_from_finnhub:  if not self._api_key:
+                              logger.warning("Finnhub API key not set; returning empty calendar.")
+                              return []
+
+    first version:  fetch_calendar_events() -> []  ->  scope 0 events  ->  ALLOW
+                    -> "no news blackout" recorded on EVERY bar, forever
+
+**And this repository has no key**, so that was not a hypothetical branch — **it was the state every
+trace the platform writes would have been in.**
+
+> **A calendar that was never consulted, indistinguishable from a quiet news week, in the exact
+> telemetry field built to tell those apart.** `api/routers/calendar.py:18` already refuses the same
+> state correctly, with a `503` rather than an empty list — **so the platform contained both the
+> defect and its own worked counter-example, in two consumers of one service.**
+
+#### THE FIX IS A THIRD STATE CARRIED ALL THE WAY DOWN, not a check at one layer
+
+    fetch_calendar_events()   -> (None, reason)          not [] and not a bare None
+    NewsContext.unavailable() -> would_block is None      None, never False -- False is a verdict
+    trace.observe(.., None)   -> "NOT-EVALUATED: ..."     with the reason attached
+
+**A boolean cannot express this and every layer that narrows it to one re-creates the defect.** The
+reason travels because *quiet news*, *no API key* and *provider outage* demand different responses
+and were one word in the record. **`B63`'s shape in a different currency: a figure whose provenance
+is missing reads as a measurement.**
+
+#### THE SAME TASK ALMOST REBUILT `B10`, THROUGH A CHANNEL THAT SUPPRESSES NOTHING
+
+`DecisionTrace.gate()` sets `blocked_by` on a failing verdict. Recording a **non-blocking**
+observation through it would have:
+
+    summary/blocked_by   named the news gate as the reason a bar was declined -- it was not declined
+    reasons              DROPPED its `candidates: N considered` line, which is guarded by
+                         `if self.blocked_by is None`
+
+**The second is silent and the record still looks complete** — and the comment explaining why that
+census line was made unconditional sits **three lines above the guard that would have re-broken it.**
+
+> **A non-blocking observation routed through the blocking channel makes the record claim a block.
+> That is what the channel is for.** Fixed with `Gate.enforced` and `trace.observe()`, and
+> `would_block_by` as a DERIVED property — **so Stage B's count comes out of the trace instead of a
+> second instrument that could disagree with it.**
+
+**A latent defect surfaced with it:** `summary` took the first NOT-PASSED gate of any kind, so an
+observation recorded before a failing gate would have supplied the human-readable reason while
+`blocked_by` correctly named the other. **Two fields disagreeing, and the readable one is the one
+that gets believed.**
+
+#### FOUR `COVERAGE_NOTE`s WERE WRONG BY BEING LEFT ALONE — the staleness with no hunk
+
+    gate_012_news_blackout.py  x3   "NOT WIRED -- nothing under app/services/live/ imports this"
+    gate_015_calendar_scope.py      "finnhub.py is NOT changed here: this task is shadow-only"
+
+**All four became false the moment `live/news_context.py` imported them; the fourth was already
+false after `T-0035`.** No diff shows this class — **the text is wrong precisely because nothing
+touched it** — and only a set difference or an in-suite check reaches it. Fixed with one shared
+constant so the three in a single module cannot drift apart again.
+
+**And one test was INVERTED rather than repaired.**
+`test_nothing_under_live_imports_the_news_rules` asserted the shadow-only property of the task that
+BUILT the rules. **That was never a property worth keeping — four gates the order path cannot see do
+not gate a trade.** It now asserts the property that matters: `trace.observe(` present and
+`trace.gate(` absent in the seam. *A test going red because the thing it forbade became the
+deliverable is the test working, and deleting it would have removed the record of the transition.*
+
+#### THE GUARD-REACH DEBT IS PAID, AND THE OBVIOUS FIX WAS THE DEFECT ONE MEMBER OVER
+
+`T-0032` cycle 3 declared a residue: its volatility guard derived a population that
+`app/services/calendar/finnhub.py` fell outside of, and a planted numeric threshold there passed
+silently. **`T-0036` is when that stops being cheap, because the file's contents can now decide a
+trade.**
+
+    arm 0  clean                              146 passed        <- the OVER-WIDENING detector
+    arm 1  plant INSIDE the population         1 failed, 145    <- the guard did not narrow
+    arm 2  plant in calendar/finnhub.py
+             BEFORE:                          146 passed SILENT
+             AFTER:                            1 failed, 145    <- THE CRITERION
+    arm 3  the new source's CONTROL PAIR      asserted in the derivation test
+
+> **A fourth source naming `calendar/` or `finnhub.py` would have flipped arms 1 and 2 identically
+> while being cycle 2's defect one member over.** Three arms could not tell the fix from the defect;
+> **the fourth arm is what discriminates, and it is phrased about the SOURCE rather than the target —
+> naming the target in a criterion is what makes appending it look like compliance.**
+
+**Source 4 is the TRANSITIVE import cone over `app/services/`, by AST.** Positive control: four
+members besides the target, so not an enumeration of one. Negative control:
+`app/services/ict/detector.py` stays out **and carries `atr` legitimately**, so the arm sits exactly
+where over-widening would hurt. **Transitive is the ABSENCE of a depth constant rather than a choice
+of one**, and the whole cone measures 7 modules with **zero volatility identifiers**, so the target
+is admitted without making the guard fire on correct code.
+
+#### AND `T-0035` WAS A FEASIBILITY PREREQUISITE, NOT A SAFETY ONE — the stated reason was the weaker
+
+`CalendarScope.scope()` takes raw provider dicts **and** requires a real `datetime`:
+
+    provider raw    impact "tier-1"   time "2026-05-29T12:30:00Z" or an epoch int
+    CalendarEvent   impact "low"      time datetime    <- normalisation destroyed the raw
+    scope() needs   impact "tier-1"   time datetime    <- THE CROSS PRODUCT
+
+**Neither source produced it.** Wiring before `T-0035` would not have gated on a laundered input —
+**`isinstance(time_raw, datetime)` drops a string time in silence, every event would have vanished,
+and a gate that sees no events returns "no blackout" and looks exactly like one that works.**
+
+> **The ordering was justified by the weaker of its two reasons, and a prerequisite justified by the
+> weaker reason is one that someone who disagrees with it can reorder.**
+
+#### A PROCEDURAL FINDING WORTH MORE THAN IT LOOKS
+
+**`verify_guards.sh` REFUSES TO START while `crypto_loop.py` has uncommitted changes** — it
+overwrites that file to mutate guards and would destroy the work. So for any task touching
+`crypto_loop.py` the order is **suite → COMMIT → prober**, not the usual suite → prober → commit.
+
+**The refusal is correct and the trap is what it invites:** a seat holding to the usual order meets a
+red exit and the two obvious ways out — `git stash` and `--no-verify` — are **both forbidden here**,
+one by a standing rule written after a Manager destroyed a seat's work four times. **A protective
+check whose remedy is a forbidden command needs its remedy written down beside it**, and it is
+recorded here rather than left to be re-derived under time pressure.
 
 ### B155 — a mutation is a deliberate LIE about the code, and it fails in two ways: the lie OUTLIVES the measurement, or the lie is not the one you meant
 
