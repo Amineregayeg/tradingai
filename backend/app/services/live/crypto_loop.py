@@ -384,7 +384,7 @@ class LiveCryptoLoop:
             return f"max concurrent {self.max_concurrent} reached"
         return None
 
-    async def _news_context(self) -> NewsContext | None:
+    async def _news_context(self) -> NewsContext:
         """T-0036 Stage A — the order path's news verdict, RECORDED and not enforced.
 
         Deliberately NOT part of `_entry_block_reason`. That function documents itself as
@@ -394,11 +394,20 @@ class LiveCryptoLoop:
         itself. **Stage B belongs there, and will need the events passed in rather than
         fetched, for that same reason.**
 
-        Returns `None` when the calendar could not be read. **`None` is NOT an empty
-        calendar**: the evaluator records it as `NOT-EVALUATED`, so a period of provider
-        outage is visible in the traces instead of being indistinguishable from a quiet news
-        week. A `[]` here would make an unreachable calendar say *"no blackout"* — the
-        fail-open `T-0035` closed at the source, rebuilt at the consumer.
+        ALWAYS RETURNS A CONTEXT. An unreadable calendar comes back as
+        `NewsContext.unavailable(reason)`, never as `None` and never as an empty one: the
+        evaluator records it as `NOT-EVALUATED` with the reason, so a provider outage is
+        visible in the traces instead of being indistinguishable from a quiet news week. A
+        `[]` here would make an unreachable calendar say *"no blackout"* — the fail-open
+        `T-0035` closed at the source, rebuilt at the consumer.
+
+        **The annotation said `-> NewsContext | None` until B157's sweep, and that was worse
+        than stale.** `strategy_step`'s `news=None` ALSO means "not evaluated", so the type
+        advertised two representations of one state — **describing this code as having the
+        exact defect it was changed to remove.** A seat following that signature would
+        reasonably add `if news is None: return` at the caller, or build a second unavailable
+        path, and be following the type. **No test reads an annotation and a reader trusts it
+        more than prose.**
         """
         now = datetime.now(tz=timezone.utc)
         events, reason = await fetch_calendar_events()

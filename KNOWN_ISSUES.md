@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-18 (B156 — `T-0036` wired `GATE-012/013/015/016` onto the order path as Stage A, recording and enforcing nothing, and the finding worth carrying is that the change CLOSING a fail-open rebuilt it one layer up: `_fetch_from_finnhub` returns `[]` — with a warning nothing downstream can see — when no API key is configured, and this repository has none, so the first version wrote *"no news blackout"* on every bar the platform would ever evaluate, from a calendar it never called. A verdict that was never taken is not a verdict of ALLOW. Closed with a third state carried all the way down — `(None, reason)` from the fetch, `would_block -> None` on the context, `NOT-EVALUATED` with the reason in the trace — because quiet news, a missing key and a provider outage need different responses and looked identical in the record. Also: routing the verdict through `trace.gate()` would have set `blocked_by` and dropped `reasons`' `candidates:` census line, rebuilding `B10` with a change that suppresses nothing; and four `COVERAGE_NOTE`s were wrong BY BEING LEFT ALONE, which no diff shows.)
+Last updated: 2026-08-18 (B157 — the evidence format built to expose an inert instrument became its disguise. `NewsContext.detail` guarded on `if not self.would_block` where `would_block` is `bool | None`, and `not None` is True — so an UNREAD calendar would have rendered `"no news blackout — 0 blocking of 0 scoped of 0 provider events"`, which is exactly what a WORKING gate emits on a quiet day. Those funnel counts exist for one reason: to tell an inert gate from a working one. Rendering an absence through them makes the false reading MORE convincing than a bare "no blackout" would have been, and the reader who had learned to trust the funnel is the one it deceives most. General form: any "show your work" format applied to a state where the work was not done prints zeros indistinguishable from work that found nothing, so a format that enumerates its inputs must REFUSE TO RENDER when it had none. This is `B10` generalised and the two point OPPOSITE ways — `B10`'s zero is a FACT the code observed and must be emitted; `B157`'s zeros are an ABSENCE it never looked at and must not be. `T-0037`'s `"undefined (0 comparable)"` rather than `0%` is the same rule at the aggregate layer, derived independently hours earlier for a different reason.)
 
 ---
 
@@ -2440,6 +2440,128 @@ register that records its own control pairs is exactly the corpus that will accu
 searched, at the moment of use** — not reused from a previous entry. **Prefer a token containing the
 task id and a nonce over a shared house token like `zzz_absent`**, because a shared one accumulates
 citations until it is present everywhere.
+
+### B157 — the evidence format built to expose an inert instrument became the disguise: a funnel of zeros reads as a MEASURED quiet calendar
+
+> **`"no news blackout — 0 blocking of 0 scoped of 0 provider events"`**
+>
+> *— what an unread calendar would have rendered through the evidence format built to prove a
+> calendar had been read.*
+
+**Established by Execute during `T-0036`'s review, found by Review, id from `bus.py bid`. The fix is
+one comparison; this entry is the reason a later seat must not "simplify" it back.**
+
+#### The line, and the sentence it would emit
+
+    news_context.py   def detail(self) -> str:
+                          if not self.available:  return "calendar verdict NOT TAKEN — ..."
+                          if not self.would_block:            <- would_block is `bool | None`
+
+**Constructed rather than read off the branch:**
+
+    NewsContext.unavailable(...)   available=False   would_block=None
+      `not would_block`       -> True    SELECTS the no-blackout branch
+      `would_block is False`  -> False   does not
+
+    the string it would emit:
+      "no news blackout — 0 blocking of 0 scoped of 0 provider events"
+
+**Not a fail-open today** — the `available` guard returns first, so `would_block` is a real bool by
+the time that line runs. **The defect is what the guard is holding back, and it is not "the wrong
+string".**
+
+#### THE MECHANISM, AND IT IS NOT ONE THIS REGISTER ALREADY HAS
+
+The funnel counts exist for one reason, stated in `NewsContext`'s own docstring: ***"no blackout"
+from a scope that saw zero events and "no blackout" from a scope that saw eleven and none of them
+blocking are the same word and opposite facts, and the first is what an INERT GATE LOOKS LIKE.***
+
+> **So the format was designed to make an inert gate visible — and rendering an unavailable calendar
+> through it produces `0 blocking of 0 scoped of 0 provider events`, which is exactly what a working
+> gate on a quiet day emits.** The evidence format supplies the disguise. **A reader who had learned
+> to trust the funnel BECAUSE it distinguishes inert from working is the reader it deceives most,
+> and the zeros make the false reading more convincing than a bare "no blackout" would have been.**
+
+**Distinct from the neighbours, and the distinction is the point:**
+
+    B156   a fail-open REBUILT one layer up by the change closing it        a behaviour defect
+    B150   a figure INVARIANT across the condition it is quoted beside      a figure that cannot move
+    B149   an instrument that cannot fail visibly where it is load-bearing  a blind check
+    B157   a correct, informative, WELL-FORMED evidence format whose
+           FIDELITY is what lends credibility to the state it was
+           built to exclude                                                 the disguise IS the instrument
+
+**The general form, which is what makes it worth an id: any "show your work" format, applied to a
+state where the work was not done, prints zeros that are indistinguishable from work that found
+nothing.** *The richer the format, the more convincing the empty case.* **A format that enumerates
+its inputs must refuse to render at all when it had none, rather than rendering them as `0`.**
+
+#### THE SAME RULE WAS DERIVED INDEPENDENTLY AT THE AGGREGATE LAYER, HOURS EARLIER AND FOR ANOTHER REASON
+
+`T-0037`'s deliverable is a disagreement rate, and its ruling is that when the comparable set is
+empty the figure renders **`"undefined (0 comparable)"` and NEVER `0%`.** That was settled to stop a
+rate being quoted over a population that does not exist — **the `B150` argument, arrived at from a
+completely different direction.**
+
+    per-record layer   an unavailable calendar must not render "0 blocking of 0 scoped of 0"
+    aggregate layer    an empty comparable set must not render "0%"
+
+> **They are one rule at two altitudes: a format that enumerates its inputs must refuse to render
+> when it had none.** *Two independent derivations converging is the strongest support either gets*,
+> and it is the reason `T-0037`'s `undefined` rendering is **not a formatting preference** — a later
+> seat "simplifying" it to `0%` for tidiness would be re-opening this entry at the layer where it is
+> harder to see.
+
+#### AND THIS IS AN ARGUMENT AGAINST THE INSTRUMENT'S OWN AUTHOR, STATED RATHER THAN RESOLVED
+
+**The funnel counts were added in `T-0036` precisely so an inert gate could be told from a working
+one, by the seat writing this entry.** The failure mode is that they make the inert case *more*
+credible than a bare "no blackout" would have been.
+
+**The conclusion is NOT that the funnel was a mistake.** It is right, and it does the job it was
+built for. **It needed to be UNREACHABLE FROM THE STATE IT CANNOT DESCRIBE** — which is what the fix
+implements, and which is a different repair from removing it. *An instrument that is correct
+everywhere it applies still needs a boundary saying where it does not.*
+
+#### `B157` IS `B10` GENERALISED, AND THE TWO POINT IN OPPOSITE DIRECTIONS
+
+**Review's finding, and it is the half that stops this entry being applied backwards.**
+
+    B10    "0 considered is a finding; silence is an ambiguity"   ->  the census line MUST EMIT
+    B157   where the record cannot distinguish `none` from `not asked`, the RICHER
+           rendering makes the wrong one more persuasive          ->  it must REFUSE TO RENDER
+
+**Same distinction, opposite remedies.** `B10`'s zero is a **FACT**: the evaluation reached the
+candidate stage, looked, and found nothing, so printing `candidates: 0 considered` is a measurement
+and staying silent would be the ambiguity. `B157`'s zeros are an **ABSENCE**: the calendar was never
+read, so `0 blocking of 0 scoped of 0` enumerates inputs that were never collected.
+
+> **THE TEST FOR WHICH APPLIES: is the empty case something the code OBSERVED, or something it never
+> LOOKED AT?** *Get it backwards and you either suppress a real finding or dress an absence as a
+> measurement.*
+
+**So `B10`'s census line stays unconditional and must NOT be "made consistent" with this entry.**
+A seat holding only one of these rules will apply it in the wrong direction half the time, which is
+why they are written here together rather than cross-referenced.
+
+#### THE FIX, AND WHY IT IS NOT "DEFENSIVE"
+
+    if not self.would_block:        ->      if self.would_block is False:
+
+**Measured: `if not self.would_block` is the ONLY truthiness use of the tri-state in the whole
+class.** Every other site compares explicitly — `would_block is False` in `observe`,
+`would_block is not None` for `evaluated`. **So the file already had a convention and this line was
+its single departure**, which is a stronger argument than robustness: *the codebase agreed on
+`is`-comparison and one line did not.*
+
+**And `is False` fails LOUDLY if a fourth state is ever added, where `not` absorbs it silently.**
+Depending on a guard eight lines above is a property of today's line order — **and this same file has
+already had one inserted paragraph move a docstring by 39 lines.**
+
+#### WHAT THE FIX IS NOT
+
+**Not a rewrite of `detail`, and not a general audit of truthiness in the tree.** One comparison, in
+the one place the measurement found. *A fix wider than its finding cannot be checked against it.*
 
 ### B156 — the change that CLOSED a fail-open rebuilt it one layer up, and a verdict never taken is not a verdict of ALLOW
 

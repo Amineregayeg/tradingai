@@ -131,11 +131,27 @@ class DecisionTrace:
 
     @property
     def would_block_by(self) -> list[str]:
-        """Unenforced gates whose verdict was to block. Stage B's numerator.
+        """Unenforced gates on THIS trace whose verdict was to block. A list, not a count.
 
-        **Derived from the trace rather than counted alongside it**, so the figure cannot
-        disagree with the record it describes -- and a trace that is stored is a count that
-        can be re-taken later against a question nobody has asked yet.
+        **NOT "Stage B's numerator", which is what this docstring said until B157.** This is a
+        `list[str]` about ONE bar; a numerator is a population statistic. The aggregate
+        vocabulary was used throughout this docstring, so a reader auditing the same claim in
+        `news_context.py` came here and met a consistent register — **and consistency reads as
+        corroboration**, which turns a check into a confirmation.
+
+        Two DIFFERENT derivations sit on top of this, and they must be published together
+        because they differ by a large factor:
+
+            bars_where_news_would_block      GATE_NAME in trace.would_block_by
+            trades_news_would_have_stopped   ... and trace.took_trade
+
+        Observations are recorded BEFORE the enforcing gates, deliberately, so the verdict is
+        present on every bar rather than only on bars surviving three unrelated gates. **That
+        is why the bar-level list is not the trade-level count.**
+
+        **Derived from the record rather than tallied beside it**, so neither figure can
+        disagree with the trace it describes -- and a STORED trace can be re-derived later
+        against a question nobody has asked yet.
         """
         return [
             g.name for g in self.gates

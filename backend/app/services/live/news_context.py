@@ -17,10 +17,30 @@ one, and a dead statement beside a live one is worse than none, because it reads
 
 **A gate that has never been observed to block anything must not be given the power to
 block.** The verdict is written onto `DecisionTrace` as an *unenforced* observation and
-suppresses no signal. Stage B enforces, and only once the count of trades this would have
-stopped is non-zero and a human has read it. **That count is `DecisionTrace.would_block_by`
-— derived from the record rather than tallied beside it, so the figure cannot disagree with
-the trace it describes.**
+suppresses no signal. Stage B enforces only once the count of trades this would have stopped
+is non-zero and a human has read it.
+
+**`DecisionTrace.would_block_by` IS NOT THAT COUNT, AND AN EARLIER DRAFT OF THIS PARAGRAPH
+SAID IT WAS.** It is a `list[str]` of gate names on ONE trace, and the verdict is recorded
+BEFORE `history`/`daily_bias`/`ltf_bos` — deliberately, so it is present on every bar rather
+than only on bars that survived three unrelated gates. **So it accrues on bars that could
+never have produced a trade, which is most of them.** Two different derivations over the same
+record, and they must be published together because they differ by a large factor:
+
+    bars_where_news_would_block      GATE_NAME in trace.would_block_by
+                                     "how often is the calendar hot" -- a real question,
+                                     and NOT Stage B's precondition
+    trades_news_would_have_stopped   ... and trace.took_trade
+                                     Stage B's numerator. `took_trade` is set at exactly two
+                                     sites, each immediately before a `return Signal(...)`,
+                                     so it IS "a signal was produced" -- and it already
+                                     implies `blocked_by is None`, since `gate()` returns
+                                     early on failure. ONE condition, not two.
+
+**Still derived from the record rather than tallied beside it**, so neither figure can
+disagree with the trace it describes. **And the names carry the unit at the layer where the
+unit exists** — `would_block_by` is neither bars nor trades, so putting either word in its
+name would be false precision.
 
 ## WHY THE CALENDAR IS FETCHED BY THE CALLER AND NOT HERE
 
@@ -191,7 +211,21 @@ class NewsContext:
                 f"calendar verdict NOT TAKEN — {self.unavailable_reason}. "
                 f"This is NOT 'no blackout'."
             )
-        if not self.would_block:
+        # `is False`, NOT `not`. `would_block` is `bool | None` and `not None` is True, so the
+        # truthiness form selects THIS branch for an unavailable calendar -- emitting
+        # "no news blackout -- 0 blocking of 0 scoped of 0 provider events", which is what a
+        # WORKING gate prints on a quiet day. B157: the funnel counts exist to tell an inert
+        # gate from a working one, and rendering an absence through them makes the false
+        # reading MORE convincing than a bare "no blackout" would have been.
+        #
+        # The `available` guard above returns first, so this is not reachable today. It is
+        # written as `is False` anyway because that is this class's convention everywhere else
+        # (`would_block is False`, `would_block is not None` in `observe`) and this line was
+        # its single departure -- and because depending on a guard eight lines up is a
+        # property of today's line order in a file that has already had one inserted paragraph
+        # move a docstring 39 lines. `is False` also fails loudly if a fourth state is added,
+        # where `not` would absorb it silently.
+        if self.would_block is False:
             return (
                 f"no news blackout — {self.blocking_count} blocking of {self.scoped_count} "
                 f"scoped of {self.raw_count} provider events"
