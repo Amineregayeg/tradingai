@@ -19,11 +19,13 @@ from app.core.logging import logger
 from app.services.broker.paper import PaperBroker
 from app.services.execution.service import ExecMode, ExecutionService
 from app.services.live import fixed_config as fixed
+from app.services.live.entry_comparison import compare_entry
 from app.services.live.news_context import (
     NewsContext,
     build_news_context,
     fetch_calendar_events,
 )
+from app.services.live.shadow import _bars_from_frame
 from app.services.telemetry.ny_time import to_ny
 from app.services.live.strategy_step import evaluate_latest_bar_traced
 from app.services.market_data.sources.binance import BinanceSource
@@ -1077,6 +1079,18 @@ class LiveCryptoLoop:
         sig, trace = evaluate_latest_bar_traced(
             pair, entry, bias, risk_pct=self.risk_pct, news=news
         )
+        # T-0037 THE ENTRY SEAM. Runs AFTER the decision has already returned, on the trace it
+        # produced -- so "change no decision" is structural rather than tested-into-place: this
+        # cannot influence a decision that has been made. Not one line inside
+        # `evaluate_latest_bar_traced` is touched by it.
+        #
+        # `compare_entry` catches everything and records NOT_COMPARABLE(RULE_RAISED); the
+        # `try` here is the second layer, for a failure in building the bars themselves. A
+        # parallel observer that can crash the trading loop is worse than no observer.
+        try:
+            compare_entry(trace, _bars_from_frame(entry), tf=self.entry_tf).record_on(trace)
+        except Exception as exc:  # noqa: BLE001 - the observer may never reach the decision
+            logger.warning("Entry comparison failed; decision unaffected", error=str(exc))
         if sig is None:
             # Record WHY, not just that nothing happened. DecisionRecord has
             # carried `abstained`/`reasons`/ABSTAINED since it was written and
