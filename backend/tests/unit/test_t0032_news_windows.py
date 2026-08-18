@@ -52,7 +52,7 @@ def _news_modules() -> tuple[str, ...]:
     comment claimed a later seat adding `news_volatility.py` *"either covers it or VISIBLY
     does not, which is the whole point."* **It did not. Review planted
     `app/services/monitoring/news_resumption.py` containing a working numeric threshold and
-    145 tests passed silently.**
+    the guard PASSED.**
 
     > **The guard exists to stop `GATE-014` being implemented — and a `GATE-014`
     > implementation would live in `gate_014_*.py`, which the tuple excluded BY
@@ -74,13 +74,51 @@ def _news_modules() -> tuple[str, ...]:
 
     ## THE RESIDUE, STATED AS A PROPERTY RATHER THAN AS A GAP — AND THE DISTINCTION MATTERS
 
-    **NO DERIVATION CAN COVER A FILE THAT DOES NOT YET EXIST.** A `GATE-014` implementation
-    could be written into any new module under any name, and volatility maths legitimately
-    lives elsewhere in this codebase — `test_the_volatility_probe_finds_those_terms_where_
-    they_legitimately_exist` measures 84 `atr` identifiers outside the news modules. **So a
-    guard keyed on volatility vocabulary can never be both complete and quiet. An unbounded
-    population is unboundable, and that is a property of the problem rather than a defect in
-    this test.**
+    **THE POPULATION KEYS ON THE REGISTRY `layer` AND ON FILENAME.** A file that is
+    news-subsystem code BY ROLE, but is named neither `*news*` nor `gate_01[2-6]*` and claims
+    no rule id, is outside all three sources.
+
+    > **`app/services/calendar/finnhub.py` IS EXACTLY THAT FILE AND IS NOT WATCHED.** It is
+    > the calendar producer whose events `GATE-012/013/015` consume, and THIS FILE already
+    > tests it in `test_an_unrecognised_impact_is_unknown_and_never_tradeable`, `B126`'s
+    > subject. **Review planted a working numeric volatility threshold in it and
+    > `test_no_numeric_volatility_test_exists_in_the_news_modules` PASSED** — as did all 146
+    > tests of `test_t0032_news_windows` + `test_rules_base` + `test_rule_coverage_counting`,
+    > measured at `e5e5c4e`, **which is the SAME 146 that pass on a clean tree.**
+
+    *(Two corrections live in those sentences and both outlive them.*
+
+    *An earlier draft cited that docstring by LINE, and its own insertion moved it. Measured
+    against `e5e5c4e`, where `git show e5e5c4e:<this file> | sed -n 729p` IS that docstring, a
+    net +15 above it put the same line at 744 — so the citation was true of the file it was
+    read from and false of the file it was written into, with no window between the two. And
+    the stale number still RESOLVED, onto a section banner: plausible content, no error. Both
+    numbers here are pinned to a commit for that same reason, this paragraph having since
+    moved that docstring again.* ***A line number may cite another file and may never cite the
+    file it is written in.***
+
+    *That draft also printed "146 tests passed" bare. The population IS reproducible —
+    `120 + 18 + 8` across those three files at `e5e5c4e` — and the bare figure was still
+    worthless, because* ***the plant adds no tests, so the count is invariant across the very
+    condition it is quoted about.*** *A number identical on both branches bounds nothing, and
+    printed beside "the guard stayed silent" it implies a discrimination it never had. But
+    deleting it loses the one real thing it carries — the SCOPE: this claim was checked
+    against three files and NOT against the suite. So it is kept, pinned, and stated with its
+    invariance. The load-bearing observation is which arm stayed green.)*
+
+    **An earlier draft of this paragraph said instead that "no derivation can cover a file
+    that does not yet exist" — which implies every EXISTING news file is covered, and
+    `finnhub.py` exists.** That was cycle 1's defect one layer further up: a stated limit
+    whose stated reason does not cover the omissions. **The reason below is the one that
+    holds.**
+
+    **A GUARD KEYED ON VOLATILITY VOCABULARY CANNOT BE BOTH COMPLETE AND QUIET.** Volatility
+    maths legitimately lives elsewhere in this codebase —
+    `test_the_volatility_probe_finds_those_terms_where_they_legitimately_exist` measures 84
+    `atr` identifiers outside the news modules — so widening the population until it is total
+    makes the guard fire on correct code. **That entails unboundedness on its own, it covers
+    the existing-file case as well as the not-yet-written one, and it is a property of the
+    problem rather than a defect in this test.**
 
     **THIS IS STATED AS FINISHED, NOT AS SOMETHING A LATER CYCLE SHOULD CLOSE** — and that is
     the difference between this limit and the one at cycle 1, which claimed *"dynamic or
@@ -397,7 +435,8 @@ def test_the_watched_population_is_derived_not_asserted():
     """THE SEVENTH FINDING — the positions were derived and the POPULATION was hand-written.
 
     Review planted `app/services/monitoring/news_resumption.py` with a working numeric
-    threshold and 145 tests passed. **The tuple's own comment claimed a later seat adding
+    threshold and `test_no_numeric_volatility_test_exists_in_the_news_modules` PASSED.
+    **The tuple's own comment claimed a later seat adding
     such a file would be VISIBLY uncovered. It was invisibly uncovered.**
 
     And the irony is the argument: **a `GATE-014` implementation would live in

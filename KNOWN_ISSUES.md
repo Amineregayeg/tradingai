@@ -3221,6 +3221,166 @@ if nobody does.** That is operator governance rather than strategy, **so it goes
 into a Salim round** — filed by the Manager in `NEEDS_MALEK.md`. Until then `GATE-014` stays
 unimplemented and the coverage report counts it as such, which is the honest figure.
 
+## AMENDMENT — THE ENTRY ABOVE DESCRIBES THE VERSION REVIEW FAILED, and three review passes read past a figure that could not move
+
+**Everything above `WHAT WOULD UNBLOCK IT` was written at cycle 0. Cycles 1, 2 and 3 each falsified a
+sentence of it, and the entry was not re-opened.** Filed by Execute at the close of `T-0032`.
+
+#### 1. "AN EXPLICITLY ENUMERATED FILE LIST" IS NO LONGER TRUE, AND BOTH ENUMERATIONS WENT
+
+The section above says the guard walks *"an **explicitly enumerated** file list."* **It walks neither
+an enumerated file list nor an enumerated set of AST positions.** Both were removed, one per cycle,
+and each removal was forced by a plant that the enumerated version could not see:
+
+    cycle 1   the POSITION list was wrong    keyword-at-call, dict keys, decorator keywords,
+                                             string annotations, and AsyncFunctionDef, which is
+                                             NOT a FunctionDef subclass -- 6 static-binding
+                                             positions, 3,785 occurrences, called "dynamic or
+                                             textual" in a boundary stated ASSERTIVELY
+    cycle 2   the POSITION list was DERIVED  a field loop over node._fields, with the excluded
+                                             fields named and reasoned
+    cycle 3   the POPULATION was still a     Review planted a working numeric threshold in
+              hand-written tuple             app/services/monitoring/news_resumption.py and the
+                                             guard PASSED. A gate_014_*.py -- the ONE file the
+                                             guard exists to watch -- was excluded BY CONSTRUCTION
+    cycle 3   the POPULATION is DERIVED      registry layer == "news"; filename contains "news";
+                                             filename matches gate_01[2-6]
+
+> **Three times the same defect at a different altitude: A STATED BOUNDARY WHOSE STATED PROPERTY DOES
+> NOT HOLD.** Not a wrong list — **a right-sounding reason for a list.** The enumeration is the
+> symptom; the justification that nobody could check is the disease.
+
+#### 2. THE RESIDUE IS A NAMED FILE, NOT AN ABSTRACT ONE — and this entry does not mention it
+
+The guard's stated limit was *"no derivation can cover a file that does not yet exist"*, which
+**asserts by implication that every EXISTING news file IS covered.** Measured:
+
+    app/services/calendar/finnhub.py
+      in NEWS_MODULES        False        declares a RULE_ID     False
+      name contains "news"   False        matches gate_01[2-6]   False
+
+**All four.** It exists, it is the calendar producer `GATE-012/013/015` consume, and Review planted a
+working numeric volatility threshold in it while
+`test_no_numeric_volatility_test_exists_in_the_news_modules` PASSED. **The reason that does hold is
+that a guard keyed on volatility vocabulary cannot be both complete and quiet** — 84 `atr`
+identifiers live legitimately elsewhere, so a total population fires on correct code. **That covers
+the existing-file case and the not-yet-written one alike, which the original reason did not.**
+
+**`T-0035` owns `finnhub.py`'s fail-open. It does not own this — the SOURCE being unguarded and the
+GUARD not reaching the source are different gaps and only one of them has a task.**
+
+#### 3. TWO FIGURES THAT WENT WRONG WITHOUT ROTTING, and the second is a category this register lacks
+
+**A line citation, invalidated at ZERO elapsed time by the act of writing it.** A paragraph cited a
+docstring at `:729`; the paragraph's own insertion moved it to `:744`.
+
+    git show e5e5c4e:backend/tests/unit/test_t0032_news_windows.py | sed -n 729p   IS that docstring
+    hunk @@ -74,13 +74,28 @@ -- ENTIRELY ABOVE it -- net +15 == 22 - 7
+
+> **A self-referential line citation CANNOT BE COLLECTED AT A MOMENT WHEN IT IS TRUE.** If the target
+> sits below the insertion point, the write falsifies it. **And it fails open: `:729` still RESOLVES,
+> onto a section banner.** Fixed with a test-name anchor, not with `:744`.
+
+**That `:744` would have re-armed is not hypothetical — the same docstring has moved TWICE MORE since,
+and each move is one of this task's own corrections:**
+
+    e5e5c4e            :729     the citation was collected here
+    the +22/-7 draft   :744     already wrong when the draft was written
+    this commit        :768     moved again by the finnhub.py and count corrections
+
+**A LINE NUMBER MAY CITE ANOTHER FILE AND MAY NEVER CITE THE FILE IT IS WRITTEN IN.**
+
+**A test count that was INVARIANT ACROSS THE CONDITION IT WAS QUOTED ABOUT.** Three instances of
+*"N tests passed silently"* stood beside *"the guard stayed silent"*:
+
+    e5e5c4e:55    145   the _news_modules() residue
+    e5e5c4e:400   145   test_the_watched_population_is_derived_not_asserted
+    the draft     146   the finnhub.py paragraph -- THE ONLY ONE FLAGGED, because it was in a diff
+
+The selector was recoverable — `test_t0032_news_windows` + `test_rules_base` +
+`test_rule_coverage_counting`, `120 + 18 + 8 == 146` at `e5e5c4e`. **And on a clean checkout with
+nothing planted: `146 passed`.**
+
+> **THE PLANT ADDS NO TESTS, SO THE COUNT CANNOT MOVE. It is the same number whether the guard is
+> being fooled or the tree is clean.** Not unanchored — **invariant**, which is strictly worse than
+> `B93`'s rot: `B93`'s figure at least went from `29` to `37`, so a re-measurer caught it. **A count
+> that cannot differ survives every re-measurement, correct and empty.**
+
+**Kept rather than deleted, because the one real thing it carries is SCOPE** — the claim was checked
+against three files and NOT against the suite. **Pinned to `e5e5c4e` and stated WITH its invariance**,
+since it had already moved `145 -> 146` when a test was added.
+
+**AND THE SAME FILE HOLDS A THIRD `145` THAT IS LEGITIMATE, which is the arm this finding needs.**
+Review first reported it as a fourth instance and then retracted, having measured it:
+
+    e5e5c4e:55    145   the residue                     CANNOT move -- the plant adds no tests
+    e5e5c4e:400   145   derived-not-asserted            CANNOT move -- same
+    e5e5c4e:114   145   "...passed 145 tests PRECISELY BECAUSE IT CLAIMED NOTHING"
+                          a CLAIMING implementation ->  5 failed, 141 passed
+                          clean                     ->  146 passed
+                          MOVES ACROSS ITS OWN CONDITION. Load-bearing.
+
+> **The separating test is not "does the sentence state a population." It is "DOES THE NUMBER MOVE
+> UNDER THE CONDITION THE SENTENCE NAMES."** Three identical tokens in one file, one of them doing
+> real work. **A blanket rule against bare counts would be false, and this file is its own
+> counterexample.**
+
+**THE SWEEP'S REACH, STATED AS ITS LIMIT: it enumerated by TOKEN over ONE file, and the property it
+claims to find has no token.** A count written as `"one hundred and forty-five"`, as `f"{n} tests"`,
+or as a percentage is the same defect and no `grep 145` reaches it. **Both seats erred by token in
+opposite directions — Execute under-counted (`:758` already `:768`; `:415` cited where `e5e5c4e`
+says `:400`), Review over-counted (`grep 145` rather than testing the property).** *Same shape as
+the volatility guard's own residue, one level up: an enumeration whose stated basis is not the
+property it is enumerating.*
+
+#### 4. THE REASON TWO OF THE THREE SURVIVED, WHICH IS THE PART THAT GENERALISES
+
+**One was caught. Two were not, and they sat in the same file.**
+
+    caught     the draft's        in the DIFF     the Manager read it in review
+    missed     e5e5c4e:55         landed prose    read by Review at cycle 2 AND cycle 3, and by
+    missed     e5e5c4e:400        landed prose    the seat that PLANTED what they describe
+
+> **A diff review structurally cannot reach the landed prose around its hunk, and nothing else in
+> this loop re-reads it.** So the ratio is not about attention: **for every defective figure a review
+> can see, the file around it holds the ones nothing will.** *`landed_sweep` is the only instrument
+> here that re-opens a closed task's text, and it keys on task ids — not on figures.*
+
+#### 5. AND EVERY FIGURE IN THIS TASK WAS TAKEN THREE TIMES, because /tmp is not durable
+
+**Two completed full-suite runs were lost to a scratchpad wipe** — once at the 00:17:59 reboot, once
+while the next run was in flight — **and a third to a background process killed at session teardown.**
+The session scratchpad is under `/tmp/claude-1000/...` and is on the same wipe.
+
+    fix   write measurements to agents/tasks/T-NNNN/_runs/, and capture git status --porcelain
+          into the same directory BESIDE the figure
+    and   detach the run: setsid, its own session id, so a teardown that kills the process group
+          does not take an 11-minute suite with it
+
+> **`B63` says a figure without `porcelain 0/0` beside it is not a baseline — and "beside it" was
+> being satisfied by HAVING READ the porcelain, in a shell that then died.** A figure whose
+> provenance evaporates with the process meets the letter and none of the point.
+
+#### 6. AND THIS AMENDMENT'S OWN FIRST DRAFT CARRIED BOTH DEFECTS IT DOCUMENTS
+
+**Written, then measured before committing. Both evidence rows were wrong, in exactly the two ways the
+section above names:**
+
+    drafted "the same docstring is now at :758"       it was at :768 -- moved again by the edits
+                                                      written BETWEEN the draft and the check
+    drafted the second landed count at ":415"         that is its WORKING-TREE line. At e5e5c4e --
+                                                      the commit the row is LABELLED with -- it is
+                                                      at :400.  415 - 400 = 15, the same +15
+
+> **A stale self-referential line number, and a figure quoted in the wrong frame, inside the entry
+> whose subject is stale self-referential line numbers and figures quoted in the wrong frame.**
+
+**Both were caught by measuring rows that had already been written down, not by writing them more
+carefully.** *That is the whole content of this entry: the defect is not carelessness, it is that a
+well-formed pointer gives no signal when it goes wrong, so the only thing that finds one is
+re-measuring it.* **The rows now name the commit they were read from, or a test name that does not
+move.**
+
 ### B144 — `status: completed` is not `conclusion: success`, and a CANCELLED CI run is indistinguishable from a passing one to everything this loop reads
 
 **Filed by Review 2026-08-17. Found by the Manager during T-0028's verification, measured by both of
