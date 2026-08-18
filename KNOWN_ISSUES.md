@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-18 (B160 — I PUBLISHED A PROBER FIGURE I HAD NOT MEASURED, and it reached `main`. `2ebf822`'s message says `prober 9 ok, TIER 0.2 PASSED, exit 0`; the command returned `EXIT=127 — scripts/verify_guards.sh: No such file or directory`, because it was invoked from the repo root and the script is at `backend/scripts/`. Re-run correctly it passes, so the claim is TRUE and it was NOT TRUE WHEN MADE. The mechanism: the `&&` chain that guards a commit does not guard a measurement taken BEFORE it — a chain protects what follows a failure, and a figure gathered upstream is outside that protection by construction. The general form, which indicts the verification regime rather than one seat: MEASUREMENTS GET CONTROLS; ASSERTIONS IN PROSE GET NONE. `register_commit_check.py` validates added ids and header lag and checks NO figure; `PROMPT_MANAGER.md`'s pre-commit list is five items about the DIFF and none about the PROSE — so a commit-message figure is the only assertion in this loop with no arm, no control and no reader, AND IT IS THE ONE A FUTURE SEAT MOST TRUSTS, because it is stamped on `main` with a sha. Fourth wrong-directory error of the session and the first to reach `main`: the other three were caught by a control arm or by a zero I did not trust, and this one had no control arm BECAUSE I WAS NOT TESTING ANYTHING — I WAS REPORTING. Commit deliberately NOT amended: the figure is now true, so an amend would leave a correct history with the defect deleted.)
+Last updated: 2026-08-18 (B162 — `strategy_step` SPENT THE PARTIAL'S CONSTANT ON THE TARGET. `backtest/engine.py` has a real two-stage exit: `:464` computes `entry + rr_partial * risk`, `:469` banks `partial_frac * rr_partial` there, sets a trail and RUNS THE REMAINDER, and `:511` blends `partial_frac * rr_partial + (1 - partial_frac) * r`. `strategy_step.py:202` passes that same `entry + rr_partial * risk` as the Signal's **`tp`** — a FULL exit — and uses `partial_frac` ZERO times. So it is not that two constants coincide: ONE CONSTANT IS DOING A JOB IT WAS NOT NAMED FOR, in the file that places live orders. Consequences: every live signal's take-profit sits exactly on `EXIT-001`'s 2R partial level, so under the ratified model every live trade is the DEGENERATE RUNNER and the ratified 30% runner CANNOT EXIST on the live path; and the backtest and the live path are DIFFERENT EXIT MODELS, so a strategy validated in the backtest does not describe what the live path does — the same validation-versus-execution divergence as `B161`'s sibling in the broker layer, found in the same task, in opposite components. Surfaced by `T-0038`'s Stage A shadow rather than asserted about it, with a must-miss arm — a 4R target DOES produce a runner — so the zero is a fact about the config and not about the recorder.)
 
 ---
 
@@ -2440,6 +2440,114 @@ register that records its own control pairs is exactly the corpus that will accu
 searched, at the moment of use** — not reused from a previous entry. **Prefer a token containing the
 task id and a nonce over a shared house token like `zzz_absent`**, because a shared one accumulates
 citations until it is present everywhere.
+
+### B162 — `strategy_step` spent the PARTIAL's constant on the TARGET, and dropped the fraction
+
+**Established by Execute during `T-0038`, sharpened by the Manager. Surfaced by the Stage A shadow
+rather than asserted about it.**
+
+#### The backtest HAS the tranche. The live path collapsed it.
+
+    backtest/engine.py:12    "Exit = bank `partial_frac` at `rr_partial`-R, run the remainder to EOD"
+                      :37    rr_partial   = 2.0    "bank partial at this R multiple"
+                      :38    partial_frac = 0.70   "fraction banked at rr_partial"
+                      :464   target = d.entry + p.rr_partial * risk      <- THE PARTIAL LEVEL
+                      :469   d.partialed = True
+                             d.r_multiple += p.partial_frac * p.rr_partial   <- BANKS 70%
+                             trail = hi - p.runner_trail_atr * a             <- RUNS THE REST
+                      :511   d.r_multiple = p.partial_frac * p.rr_partial
+                                            + (1 - p.partial_frac) * r       <- BLENDED
+
+    live/strategy_step.py:202   Signal(..., entry + p.rr_partial * risk)     <- the FULL tp
+                                `partial_frac` appears ZERO times
+
+> **So it is not that two independent constants happen to coincide. ONE CONSTANT IS DOING A JOB IT
+> WAS NOT NAMED FOR, in the file that places live orders** — and `partial_frac = 0.70` sat unused two
+> files away the whole time.
+
+#### TWO CONSEQUENCES, AND THE SECOND IS THE LARGER ONE
+
+**1. The ratified 30% runner cannot exist on the live path.** `EXIT-001`'s `PARTIAL_AT_R` is `2.0`,
+so every live signal's take-profit sits **exactly** on the 2R partial level — verified numerically
+for LONG and SHORT. **Under the ratified model every live trade is the DEGENERATE RUNNER: 70% and
+30% close at one price, 100% out at target.**
+
+**2. The backtest and the live path are DIFFERENT EXIT MODELS.** The backtest banks 70% at 2R and
+runs the remainder with a trail; the live path closes 100% at 2R. **So a strategy validated in the
+backtest does not describe what the live path does.**
+
+> **That is the same validation-versus-execution divergence as the broker one found in the same
+> task** — simulated adapters silently discarding `lot_size` while the live ones honour it — **in the
+> opposite component.** *Two independent places where the thing being tested and the thing being run
+> were not the same thing, both invisible from either side alone.*
+
+#### WHAT MAKES THE ZERO A FACT ABOUT THE CONFIG RATHER THAN THE RECORDER
+
+**A must-miss arm: a 4R target DOES produce a runner.** Without it, *"there is never a runner"* and
+*"the recorder never records one"* are indistinguishable — **and the first is a finding while the
+second is a bug in the finder.**
+
+#### AND SALIM'S ROUND-3 RULING ARRIVED IN TIME BY LUCK, WHICH IS RECORDED AS LUCK
+
+**Before it, `TradePlan` raised `DegenerateRunner` whenever the target was at or inside the 2R
+level** — so wiring `EXIT-001` to the live signal would have raised **on every single signal**. The
+ruling made the seam buildable **and** turned a fatal degeneracy into a visible one.
+
+**Neither seat knew that when the work was sequenced.** *Recorded as luck rather than as judgement,
+because a sequencing decision that happens to work is not evidence that the reasoning behind it was
+the operative one.*
+
+#### NOT FIXED HERE
+
+**`T-0038` was Stage A: record, enforce nothing.** Changing `strategy_step`'s `tp` is a live
+behaviour change on the order path with its own deploy, and **which of the two constants is wrong is
+a question rather than an edit** — the live path may be intended to close whole at 2R, in which case
+`EXIT-001` is unwired rather than contradicted. **That is Malek's to answer and the shadow record is
+what will inform it.**
+
+### B161 — a guard whose subject is a TOKEN fires on the documentation of the rule it enforces
+
+**Three instances in one session, two from Execute and one from the Manager.** Recorded because the
+third was found while writing up the second, which is the point at which a slip becomes a pattern.
+
+    T-0039  GRADE-034's guard flagged ITS OWN MODULE      MomentumScoreIsNotDoctrine,
+            it cannot forbid a "score" without naming one  SCORE_FRAGMENTS, scoring
+    T-0038  `the shadow executes nothing` grepped for     the module docstring says
+            "close_position" and failed                    "Nothing here calls close_position"
+    Manager the self-citation scanner returned ZERO on a  the dangerous form is a bare `:729`
+            blob where the citation demonstrably exists    with no filename
+
+#### The form, and the wider form the third instance forces
+
+> **A guard over a PROHIBITION must read CODE, because the file that forbids a thing is the file
+> most likely to name it.**
+
+**And the general case is broader than prohibitions:** *any guard whose subject is a TOKEN will fire
+on the documentation of the rule it enforces — prohibitions are simply where that is GUARANTEED
+rather than likely.* **The Manager's scanner is the other end of the same axis: it did not
+false-fire, it false-PASSED**, because the token it keyed on was absent from the dangerous form.
+
+    keyed on a token, over prose   FALSE FIRE   the rule's own explanation matches
+    keyed on a token, too narrow   FALSE PASS   the dangerous form omits the token
+
+**Both are the same defect — the instrument keys on spelling rather than on structure — and they
+fail in opposite directions, so neither one's absence is evidence about the other.**
+
+#### THE FIX, AND THE MUST-HIT HALF IS WHAT MAKES IT SAFE
+
+    ast.walk over Call nodes -> the set of names this module actually CALLS
+    assert "close_position" not in called          the prohibition
+    assert "observe"        in called              MUST-HIT: the walk sees real calls
+
+**Without the second line the AST version fails silently the way the Manager's regex did** — an
+empty result from a walk that matched nothing looks exactly like an empty result from a clean
+module. *`B159`'s lesson in a new instrument: a zero from a probe you have not controlled is not a
+result.*
+
+**And it generalises past code: `T-0032`'s volatility guard, `T-0039`'s banned-input arm and
+`T-0038`'s shadow guard are all the same shape** — walk the AST, key on identifiers, exclude nothing
+by hand. **`T-0039` additionally needed the enforcing module exempted from its own population**,
+which is the prohibition case where even an AST walk cannot separate the guard from its subject.
 
 ### B160 — a commit-message figure is the only assertion in this loop with no arm, no control and no reader
 
