@@ -1,7 +1,7 @@
 {
   "meta": {
     "contract_name": "Magic Strategy Engine Contract — Rule Registry",
-    "version": "1.2.1",
+    "version": "1.2.2",
     "generated": "2026-07-31",
     "purpose": "Machine-readable registry of every documented rule the execution engine must cite. The objective of this contract is FIDELITY, NOT PROFIT: it exists so that (a) every automated decision can cite the documented rule that produced it, (b) the engine can emit telemetry proving what it detected and which rules fired, and (c) conformance to the documented strategy can be tested from that telemetry alone.",
     "source_of_truth": {
@@ -50,10 +50,10 @@
       "reconstructed": "The extracted-rule payload handed to this contract was truncated; this entry was rebuilt from the cited codex sections and must be re-verified against them before shipping."
     },
     "counts": {
-      "total": 117,
-      "READY": 100,
-      "of_which_partial": 7,
-      "fully_resolved": 93,
+      "total": 118,
+      "READY": 101,
+      "of_which_partial": 6,
+      "fully_resolved": 95,
       "OPEN": 14,
       "CALIBRATED": 1,
       "WITHDRAWN": 2,
@@ -68,18 +68,21 @@
           "id": "GATE-033",
           "alias": "GRADE-018",
           "name": "base risk x 0.5 double-sizes the most common grade",
-          "effect": "Standard box + light disturbance sizes at 0.50% instead of 0.25% — exactly double, on the most common grade. Super sizes at 0.625% instead of 0.50%."
+          "effect": "Standard box + light disturbance sizes at 0.50% instead of 0.25% — exactly double, on the most common grade. Super sizes at 0.625% instead of 0.50%.",
+          "resolved": "§B-1 — sizing is the literal 3×3 lookup; the modifier is wrong."
         },
         {
           "id": "GATE-034",
           "alias": "GRADE-033",
           "name": "momentum Bullet Train band 15-20 is unreachable",
-          "effect": "The score's true maximum is +14 (range [-11,+14]); the top band can never be assigned, and three other rulings gate on the bullet-train state."
+          "effect": "The score's true maximum is +14 (range [-11,+14]); the top band can never be assigned, and three other rulings gate on the bullet-train state.",
+          "resolved": "§B-3 — the Momentum Score is invented machinery; rule WITHDRAWN."
         },
         {
           "id": "GATE-028",
           "name": "largest stop whose R:R is closest to 3R is self-contradictory",
-          "effect": "R:R falls monotonically as the stop widens, so the largest survivor always has the lowest R:R. The two readings select different stops and different position sizes on the source's own worked example."
+          "effect": "R:R falls monotonically as the stop widens, so the largest survivor always has the lowest R:R. The two readings select different stops and different position sizes on the source's own worked example.",
+          "resolved": "§A-6 — operative reading is closest-to-3R; “largest” is dead text."
         }
       ],
       "historical_stale_ids": {
@@ -132,6 +135,12 @@
     "changelog": [
       "1.1.0 — traceability audit. (a) GATE-048 ADDED: negative-correlate agreement inversion (§10.D D-6/D-7 collision) was a codex-flagged HARD hazard with no rule. (b) banned_inputs added to GATE-006 and GATE-037, the two HARD negative gates that declared a 'conformance assertion' output with nothing enumerated for the assertion to run against. (c) GATE-044 scoped: it is evaluated only when a range object is emitted, and its pixel census is corpus calibration, not a live-data test. No rule id renumbered, reused or withdrawn.",
       {
+        "version": "1.2.0",
+        "date": "2026-08-15",
+        "summary": "1.2.0 — corpus triage applied to every status; DEFECT → 0. Reconstructed retrospectively in v1.2.2: the entry was missing from this list entirely, which is why round-3 P7 asks for it. Dates and applied_by are from the triage record, not from this list.",
+        "applied_by": "corpus triage (see meta.triage)"
+      },
+      {
         "version": "1.2.1",
         "date": "2026-08-16",
         "summary": "1.2.1 — prose sync. Statuses were already correct; notes, statements and meta blocks brought into line with the corpus triage. No status changed. OFF_4 unblocked as a level-state comparison. ENTRY-004 closed by the GATE-038 interval ruling. QML skip licence removed from the suite, scorecard and telemetry enum. Answers-document register rule recorded.",
@@ -144,6 +153,23 @@
         "not_applied_here": [
           "CONFORMANCE_SUITE.md:204 and FIDELITY_SCORECARD.md:173 — the other two P1 targets. Neither file exists in this repository; they belong to the MagicStrategy_EngineKnowledge pack. Recorded as NOT APPLICABLE HERE rather than counted as done.",
           "open_rule_exposure / defect_exposure recomputation — lives in FIDELITY_SCORECARD.md, not held here."
+        ]
+      },
+      {
+        "version": "1.2.2",
+        "date": "2026-08-18",
+        "summary": "1.2.2 — round-3 rulings: GATE-016 reconciled + ONE_RUNG_DOWN sizing (trader); GATE-015 event-type conjunct + IGNORE_AND_LOG + force-include (trader); PRIM-007 added (Order Block); PRIM-002 min_width 0; GATE-027 rung-2 eligibility (trader) + rung-4 wick anchor (trader); GATE-031 TAKE_AND_FLAG (trader); GRADE-019 column stands + typo ratified (trader), has_open_half false; GATE-028 and five sibling DEFECT names/blocker flags synced; meta.open_items already pruned in v1.2.1. No status, enum or assertion changed.",
+        "applied_by": "T-0045, from MagicStrategy_Round3_Rulings REGISTRY_PATCH.md (apply_mode REVIEW_THEN_APPLY — applied by hand, section by section, each edit preconditioned).",
+        "status_changes": "NONE. All 117 pre-existing status fields are byte-identical to v1.2.1; PRIM-007 is ADDED as READY.",
+        "deliberate_divergences_from_the_patch": [
+          "meta.blockers is NOT replaced by []. P7's section title reads \"meta.blockers.ids -> []\" and the sub-key is ALREADY [] since v1.2.1; `blockers` itself is a DICT whose `note` records that v1.2.1 kept the historical material deliberately. Emptying the dict would delete a record its own note says was kept on purpose. Only `resolved:` was ADDED to the three named defects.",
+          "PRIM-007 carries `requires_telemetry`, a field present in REGISTRY_PATCH.json's copy of the rule but not in REGISTRY_PATCH.md's. The two halves of the pack list different fields; the .md's full statement is used (the .json's is a pointer reading \"see REGISTRY_PATCH.md P3\", which applied literally would install a reference to a file absent from this repo as PRIM-007's doctrine)."
+        ],
+        "not_applied_here": [
+          "CONFORMANCE_SUITE.md (HG-06 amendment, HG-28(d), D-03/D-04 labels, C-05, C-14, K-29) and FIDELITY_SCORECARD.md (:238, :371, exposure recomputation) — neither file exists in this repository; they belong to the MagicStrategy_EngineKnowledge pack. Same finding as v1.2.1.",
+          "ENGINE_CONTRACT/README.md:87 — no such file here (the contract README is 39 lines).",
+          "TELEMETRY_SCHEMA.json — every telemetry-side change (block_reason's three new tokens, primitives.order_blocks[], events_considered[] item schema, sizing eco-day fields, matrix_cell altcoin tokens, wording at :152/:1432/:2439) is applied in a SEPARATE commit in this same task, so that a registry-only diff stays reviewable.",
+          "Round-2 P1's remaining targets: the QML skip licence was ALREADY discharged here — QML_SHAPE_UNDEFINED_IN_SOURCE is absent from every enum in TELEMETRY_SCHEMA.json (it survives only in the description that RECORDS its removal, and the anchor token LIQUIDITY_SWEEP_QML is deliberately unchanged per that description). The pack re-lists P1 as unapplied because it reads the EngineKnowledge copy. Its other four targets are in the two files absent here."
         ]
       }
     ],
@@ -225,7 +251,7 @@
       "kind": "gate",
       "enforceability": "HARD_GATE",
       "layer": "alignment",
-      "statement": "If disturbance_grade == HEAVY, the engine MUST NOT open a trade — regardless of Structure Box grade, momentum state, amplifier count, or any alignment score. risk_pct is forced to 0. There is no override path. Verbatim: “Heavy Disturbance is a hard filter: no trade regardless of the Structure Box.”",
+      "statement": "If disturbance_grade == HEAVY, the engine MUST NOT open a trade — regardless of Structure Box grade, momentum state, amplifier count, or any alignment score. risk_pct is forced to 0. There is no override path. Verbatim: “Heavy Disturbance is a hard filter: no trade regardless of the Structure Box.” Scope: instrument_class = ALIGNED_MAJOR. For altcoins the disturbance grade is recorded, not consulted (GRADE-019, trader ruling round 3).",
       "inputs": "disturbance_grade from GATE-002, computed on the alignment layout at the execution timeframe; structure_box_grade (does not affect the outcome — record it for telemetry so conformance can prove the gate fired before sizing).",
       "output": "decision = BLOCK; block_reason = HEAVY_DISTURBANCE; risk_pct = 0.0; disturbed_asset_list recorded.",
       "citation": "§2 F5 [R]/[O]; §10.A.1; §10.B O4; §3.7 step 3 (PDF Q14, p.29)",
@@ -389,7 +415,7 @@
           "USDT.D"
         ]
       },
-      "notes": "Left unruled: whether the engine trades altcoins at all, and the entire `Risk Altcoin` column of 053 (9 of its 18 cells unaddressed). Altcoins cannot be magic-aligned at all — “we can not rely on any kind of magic alignments when we trade Altcoins” (066) — so GATE-001/002 have no defined behaviour for them (§10.F.2 item 13)."
+      "notes": "Altcoin SIZING is ruled (GRADE-019, round 3). Whether v1 TRADES altcoins is product scope (altcoin_trading_enabled); the four-panel roster is the BTC layout and altcoins use the TOTALs direction read as an advisory flag. Altcoins cannot be magic-aligned at all — “we can not rely on any kind of magic alignments when we trade Altcoins” (066) — so GATE-001/002 have no defined behaviour for them (§10.F.2 item 13)."
     },
     {
       "id": "GATE-009",
@@ -444,7 +470,7 @@
       "enforceability": "HARD_GATE",
       "layer": "news",
       "statement": "No new trade may be OPENED within 15 minutes before the scheduled time of any high-impact (red-folder) economic event on the calendar for the traded instrument's currency set. The rule addresses new entries only; it says nothing about positions already open.",
-      "inputs": "Economic calendar (Forex Factory / Crypto Craft) filtered to red folders; event scheduled time in NEW YORK local time; current NY time; instrument currency set (GATE-015).",
+      "inputs": "Economic calendar filtered per GATE-015 (impact RED ∧ his six event types ∧ currency scope; Crypto Craft is his NEWS source, K2, not the eco calendar); event scheduled time in NEW YORK local time; current NY time; instrument currency set (GATE-015).",
       "output": "decision = BLOCK; block_reason = NEWS_PRE_WINDOW; event_id and event_time recorded.",
       "citation": "§1.8 [R]; §2 G5 [R]; §10.C news-blackout-before row (PDF Q12, p.27)",
       "authority_class": "R",
@@ -480,7 +506,7 @@
       "statement": "For exceptional events — FOMC, emergency central-bank announcements, major geopolitical events, exchange failures such as FTX — trading REMAINS DISABLED until volatility has clearly normalized, “even if this exceeds the standard 30-minute window”. The event CLASS is enumerable from the two image tables. The RESUMPTION CONDITION is not: “volatility has clearly normalized”, “abnormal volatility (large impulsive candles or wide ranges)” and “normal market structure” are all undefined, and the same document elsewhere forbids exactly the statistical shortcuts an implementer would reach for. The engine MUST NOT invent a numeric volatility test; it must expose the resumption decision as an explicit, logged state transition.",
       "inputs": "News feed classified against the event taxonomy; a volatility/structure read whose criterion is undefined.",
       "output": "BLOCK with reason NEWS_EXCEPTIONAL; a resumption event that records who/what authorised it.",
-      "citation": "§2 G5 [R]; §10.F.2 item 24 (PDF Q12, p.27). Event taxonomies: §9.H IM44 — VERY HIGH: inflation (CPI, PPI, Core CPI, Core PPI), interest rates (Federal Funds Rate, Main Referencing Rate, Official Bank Rate), employment (Unemployment Claims, Job Openings, Non-Farm Employment Change, Unemployment Rates), growth (GDP), statements (FOMC talks/statements/conferences/projections, Monetary Policy Statements and Reports); HIGH: all PMI, Industrial Production, Capacity Utilization. §9.H IM45 — VERY HIGH: elections/referendums, bankruptcies, pandemics, scandals (FTX), lawsuits (Binance), war or coup, political decisions (a government banning Bitcoin); HIGH: big innovations, long recessions, natural disasters",
+      "citation": "§2 G5 [R]; §10.F.2 item 24 (PDF Q12, p.27). Scheduled IM44 events route to GATE-012/013; only FOMC-class SCHEDULED events (answers Q12, impersonal: “FOMC, emergency central bank announcements”) plus the IM45 UNSCHEDULED taxonomy arm this rule. Read literally, the former citation would arm an indefinite disable on every CPI — it must not. Event taxonomies: §9.H IM44 — VERY HIGH: inflation (CPI, PPI, Core CPI, Core PPI), interest rates (Federal Funds Rate, Main Referencing Rate, Official Bank Rate), employment (Unemployment Claims, Job Openings, Non-Farm Employment Change, Unemployment Rates), growth (GDP), statements (FOMC talks/statements/conferences/projections, Monetary Policy Statements and Reports); HIGH: all PMI, Industrial Production, Capacity Utilization. §9.H IM45 — VERY HIGH: elections/referendums, bankruptcies, pandemics, scandals (FTX), lawsuits (Binance), war or coup, political decisions (a government banning Bitcoin); HIGH: big innovations, long recessions, natural disasters",
       "authority_class": "R",
       "status": "OPEN"
     },
@@ -490,11 +516,11 @@
       "kind": "gate",
       "enforceability": "HARD_GATE",
       "layer": "news",
-      "statement": "The calendar filter is Forex Factory RED FOLDERS ONLY — “the highest impactful data… growth, inflation, employment, central bank, business surveys and speeches for the currencies”. Currency selection: for FX, the traded pair's own currencies; for crypto, “USD is enough however for extra confluence i can use EUR, GBP and USD”. The calendar's timezone must be set to New York local so calendar timestamps and chart timestamps match.",
+      "statement": "The calendar filter is three filters applied together — Forex Factory RED impact ∧ six Forex Factory EVENT TYPES ∧ currency scope: “These are my settings focusing on only red folders means the highest impactful data for the event types. I will use growth, inflation, employment, central bank, business surveys and speeches for the currencies. If i'm trading Forex such as EUR/USD or GBP/USD i should select the related pairs and if i'm trading crypto USD is enough however for extra confluence i can use EUR, GBP and USD for overall impactful events, the rest of the currencies are useless unless i trade them for FOREX” (001:20). His filter screenshot (images/Economic_Data_for_Morning_Routine/0003, batch_001.md:45) shows all ten Forex Factory event types: ticked Growth, Inflation, Employment, Central Bank, Business Surveys, Speeches; UNTICKED Bonds, Housing, Consumer Surveys, Misc; Currencies = USD only. The calendar's timezone must be New York local so calendar and chart timestamps match (001:23). The vendor is not doctrinal — “You can use any website to get economic data or news!” (slide 0009) — the filter is.",
       "inputs": "Calendar feed; instrument → currency set mapping; calendar timezone setting.",
       "output": "The event list that GATE-012/013/014 consume.",
-      "citation": "§2 K1 (001_Economic_Data_for_Morning_Routine.md); §3.0 step 1; §9.H IM44; §2 G1 (001: “my Forex Factory timeframe is also set to UTC-4 New York local time so they are matching”)",
-      "authority_class": "documentary",
+      "citation": "§2 K1 (001_Economic_Data_for_Morning_Routine.md); §3.0 step 1; §9.H IM44; §2 G1 (001: “my Forex Factory timeframe is also set to UTC-4 New York local time so they are matching”); images 0003, 0004, 0009 (batch_001.md:45, 54, 99–101); ROUND3 RULINGS item 2",
+      "authority_class": "R",
       "status": "READY",
       "values": {
         "crypto_currency_set": [
@@ -503,23 +529,85 @@
         "crypto_optional_confluence": [
           "EUR",
           "GBP"
-        ]
-      }
+        ],
+        "impact_threshold": "RED",
+        "event_types_included": [
+          "GROWTH",
+          "INFLATION",
+          "EMPLOYMENT",
+          "CENTRAL_BANK",
+          "BUSINESS_SURVEYS",
+          "SPEECHES"
+        ],
+        "event_types_excluded": [
+          "BONDS",
+          "HOUSING",
+          "CONSUMER_SURVEYS",
+          "MISC"
+        ],
+        "unmatched_vendor_high_policy": "IGNORE_AND_LOG",
+        "force_include_by_name": [
+          "FOMC Statement",
+          "FOMC Minutes",
+          "FOMC Press Conference",
+          "FOMC Economic Projections",
+          "Fed Interest Rate Decision",
+          "Federal Funds Rate",
+          "Fed Chair Powell speaks",
+          "Fed Chair Powell testifies"
+        ],
+        "force_include_doctrine_extension": [
+          "Monetary Policy Statement",
+          "Monetary Policy Report"
+        ],
+        "fomc_member_speeches_force_included": false,
+        "exceptional_class_by_name": [
+          "FOMC Statement",
+          "FOMC Press Conference"
+        ],
+        "unclassified_red_policy": "BLOCK_AND_LOG_CLASSIFIER_MISS",
+        "name_match_semantics": "case_insensitive_substring",
+        "indicator_seed_list_ref": "codex §9.H IM44 (image 0002)"
+      },
+      "notes": "Trader ruling round 3: a vendor-'high' USD event outside the six types does NOT block — log it (taxonomy_class = the excluded class or UNCLASSIFIED, vendor_impact_raw as received, blocks = false); FOMC / Fed-Chair / rate-decision events are force-included by name even when the vendor rates them 'medium' (his card rates FOMC talks/statements/conferences/projections VERY HIGH, image 0002; 084:70; batch_100.md:135). The Monetary Policy Statement / Report patterns are a [DOCTRINE]-derived extension (his card's Statements row), not part of the ruling — keep or drop. blocks = (impact == RED ∨ force_included) ∧ taxonomy_class ∈ the six ∧ currency ∈ scope; a force-included event is assigned CENTRAL_BANK (SPEECHES for Fed-Chair) if the classifier returns anything else. Matching is [ENGINEERING] (case-insensitive substring): ship the force list as EXACT event names — a bare FOMC pattern would also catch FOMC-member speeches (several a week, orange on Forex Factory, outside his RED filter) and fail toward far fewer trades; fomc_member_speeches_force_included = false is declared and goes to round 4. unclassified_red_policy is [ENGINEERING]: his ruling covers events KNOWN to be outside the six; a classifier miss on a RED USD event is more likely one of his six — default BLOCK and log classifier_miss = true (fails toward fewer trades); ask him next round. Keep force_include_by_name distinct from GATE-014's exceptional_class_by_name (FOMC statement / press conference only, answers Q12). The force-include never overrides the currency conjunct. [ENGINEERING] Finnhub's calendar event carries actual/country/estimate/event/impact/prev/time/unit only — no type field — so the six-type assignment is a name-pattern classifier the engine owns: version it, stamp it, log taxonomy_class per event; map vendor impact to RED/ORANGE/YELLOW and log the raw string; map country codes to the currency set; determine the feed's timezone empirically and convert to America/New_York. His indicator card (IM44) is a seed, not a closed whitelist — his own filtered result (0004) admits Retail Sales and Empire State, which are not on the card. Cross-validate one month against a Forex Factory export."
     },
     {
       "id": "GATE-016",
-      "name": "Whole-DAY eco-data avoidance vs the minutes window — unreconciled",
+      "name": "Red-folder economic-data DAY — tradeable outside the per-event windows (his Choice 2), at one rung down the disturbance axis (trader ruling, round 3)",
       "kind": "gate",
       "enforceability": "HARD_GATE",
       "layer": "news",
-      "statement": "The workspace gate is a DAY-level gate; the engine constant is a MINUTES-level gate, and nothing reconciles them. Workspace: “Trading before economic data should be avoided at all costs. There will be manipulation after manipulation, fake market structure shifts, fake BOS, fake liquidity hunts… Economic data days are the times when people blow their accounts”; “smart money is disturbed here, it does not work as they are supposed to be, this is why we avoid trading eco data days or at least use extremely small cash”; eco-data days are named as the first cause of setups “destined to fail”. Engine: −15 min / +30 min / first M15 close. An implementer must be told whether a red-folder day is tradeable at all outside the ±window, and whether risk is reduced on such days.",
-      "inputs": "is_red_folder_day (calendar); risk_pct from the matrix.",
-      "output": "Undefined until ruled — record is_red_folder_day on every trade so the two readings can be tested against outcomes.",
-      "citation": "§1.8 (001, 084); §2 G5; §2 H17 (056); §3.7 step 5 (“Reduce/skip on eco-data or global-event days”); §10.C",
-      "authority_class": "documentary",
+      "statement": "The workspace gate is a DAY-level gate; the engine constant is a MINUTES-level gate, and nothing reconciles them. Workspace: “Trading before economic data should be avoided at all costs. There will be manipulation after manipulation, fake market structure shifts, fake BOS, fake liquidity hunts… Economic data days are the times when people blow their accounts”; “smart money is disturbed here, it does not work as they are supposed to be, this is why we avoid trading eco data days or at least use extremely small cash”; eco-data days are named as the first cause of setups “destined to fail”. Engine: −15 min / +30 min / first M15 close. Reconciled. His slide (images/Economic_Data_for_Morning_Routine/0007, CHART_ANALYSIS/batch_001.md:81) draws a two-choice menu — Choice 1 “Avoid Trading for the DAY!” / Choice 2 “Avoid Trading before the EVENT! Once the volatility settles after the event, look for a proper trading setup! However, reduce your RISK significantly! Manipulation will happen.” — and his prose picks Choice 2 for day traders: “Day traders only avoid the first volatility and use the volatility later on to find trading setups” (001:26; also 001:34 “just wait for things to settle and reduce your risk”, slides 0004/0005). The engine is DAY_TRADE-only (GATE-019). Trader ratified round 3: “Yes — Choice 2.” His two red-folder-day executions (ETH 29 Feb 2024, Core PCE + Claims 08:30, entered ~07:35 NY; ETH 1 Mar 2024, ISM PMI 10:00, entered ~06:26 NY) were both taken outside the −15 window and sized to the full matrix cell (calendar per a public listing; impact colours not verified against a Forex Factory archive; 27 Feb Durable Goods unverified — possibly a third); he has now ruled the engine cuts size on such days (see values).",
+      "inputs": "is_red_folder_day := ∃ event on the America/New_York calendar day with blocks == true under GATE-015 (so a force-included vendor-medium FOMC item makes the day red; a vendor-high housing print does not; events later in the day still count); box_grade; disturbance_grade; the 9-cell matrix (GRADE-017).",
+      "output": "is_red_folder_day recorded on EVERY evaluation (C-10). It does NOT block; blocking is per event (GATE-012 / GATE-013; GATE-014 for the exceptional class). On a red-folder day: risk_pct = matrix cell one rung down the disturbance axis — NONE → the LIGHT cell of the same box; LIGHT → skip (block_reason ECO_DAY_RUNG_DOWN_TO_SKIP); HEAVY already skips. Altcoin candidates: block_reason ALTCOIN_DISABLED takes precedence, then ECO_DAY_ALTCOIN_UNRULED while enabled (see values). Emit eco_day_risk_policy, matrix_risk_pct (undisturbed cell), eco_day_step_applied and risk_pct (the applied value) on every sized evaluation.",
+      "citation": "§1.8 (001, 084); §2 G5; §2 H17 (056); §3.7 step 5 (“Reduce/skip on eco-data or global-event days”); §10.C; CORPUS_ANSWERS §C-1, §T-1; ROUND3 RULINGS item 1",
+      "authority_class": "R",
       "status": "READY",
-      "notes": "001 carries a nuance pointing toward the minutes reading — day traders “only avoid the first volatility and use the volatility later on” and “never trade the outcome” — but it never states that the day itself is then tradeable.",
-      "resolution": "RESOLVED_FROM_CORPUS"
+      "notes": "Trader rulings, round 3: (a) day tradeable outside the per-event windows — Choice 2; (b) size = one rung down the disturbance axis (his own numbers, 053_untitled.md). Retire the interim eco_day_risk_multiplier = 1.0 (§T-1) — superseded by a ruling; the ruling applies retroactively to any stored record carrying is_red_folder_day. [ENGINEERING] altcoin_on_red_folder_day: the altcoin column has no disturbance axis (GRADE-019); default do-not-size until asked (altcoins are disabled in v1 anyway). [ENGINEERING] exceptional_pre_window_minutes: his FOMC-day frame (Examples/0940, Sep 20 2023) shows disturbance from ~09:55 NY for a 14:00 release; ship −15 as ruled, declare, log, ask next round. Multi-event days: union of the per-event windows. 001:33 says “before”, 001:35 ends “at least reduce the damage”; “never trade the outcome” is codex paraphrase, his words are “I have to never ever look to the outcome of the event” (001:26). Evaluation order: GATE-016 sits after GRADE-010 and before SIZE-001; sizer_implementation stays LOOKUP_TABLE. Retroactive re-read: recompute is_red_folder_day for stored records from calendar_snapshot / events_considered under the P2 filter where possible; records that cannot be re-classified keep eco_day_risk_policy = NOT_APPLIED and are not re-sized.",
+      "resolution": "RESOLVED_FROM_CORPUS",
+      "values": {
+        "eco_day_risk_policy": "ONE_RUNG_DOWN",
+        "eco_day_matrix": {
+          "MANIPULATED": {
+            "NONE": 0.0075,
+            "LIGHT": 0.0,
+            "HEAVY": 0.0
+          },
+          "SUPER": {
+            "NONE": 0.005,
+            "LIGHT": 0.0,
+            "HEAVY": 0.0
+          },
+          "STANDARD": {
+            "NONE": 0.0025,
+            "LIGHT": 0.0,
+            "HEAVY": 0.0
+          }
+        },
+        "altcoin_on_red_folder_day": "NOT_SIZED_UNTIL_RULED (block_reason ECO_DAY_ALTCOIN_UNRULED)",
+        "exceptional_pre_window_minutes": 15,
+        "day_boundary": "America/New_York calendar day"
+      }
     },
     {
       "id": "GATE-017",
@@ -721,7 +809,7 @@
       "enforceability": "HARD_GATE",
       "layer": "stop",
       "statement": "Evaluate stop-loss candidates in exactly this order: 1. Deepest Swing (deepest LL/HH) · 2. Momentum Imbalance · 3. Previous Liquidity Sweep / Quasimodo · 4. Order Block · 5. Inner MSB. “This order reflects the natural preference of the strategy. The first options provide more room for natural pullbacks, while the later options progressively reduce that cushion.” It is cushion-monotonic. The engine MUST use this order — the workspace's printed order (§2 H8, §3.5, §8), which runs Order Block THIRD and hunted-liquidity/QML fourth, is superseded for execution.",
-      "inputs": "Chart objects at the entry location: deepest LL/HH after the MSB; the deeper open momentum imbalance; the swept wick / SFP tip / PDL-sweep extreme; the OB high/low; the inner MSB (plus any residual imbalance to cover).",
+      "inputs": "Chart objects at the entry location: deepest LL/HH after the MSB (rung 1); the DEEPEST still-open imbalance (fill_state ∈ {UNFILLED, HALF_FILLED}, any timeframe) lying between the entry and rung 1's swing on the stop side of entry (rung 2); the swept wick / SFP tip / PDL-sweep extreme (rung 3); the WICK extreme of the PRIM-007 Order Block (rung 4); the inner MSB (rung 5) (plus the zone-coverage modifier of note (b)).",
       "output": "Ordered candidate list feeding GATE-025.",
       "citation": "§2 H8 [O]; §3.5 step 1 [O]; §8 SL-placement menu; §10.B O5 (PDF Q11, p.25)",
       "authority_class": "O",
@@ -733,25 +821,44 @@
           "LIQUIDITY_SWEEP_QML",
           "ORDER_BLOCK",
           "INNER_MSB"
-        ]
+        ],
+        "rung2_eligibility": {
+          "fill_state_in": [
+            "UNFILLED",
+            "HALF_FILLED"
+          ],
+          "timeframes": "declared rung2_timeframe_set (any TF per ruling; default exec TF + the analysis TFs the setup was drawn from)",
+          "window": "far edge inside entry ↔ rung-1 swing, stop side",
+          "window_when_rung1_unlocatable": "rung-1 search_window_from → entry bar (log which)",
+          "entry_poi_imbalance_eligible": false,
+          "pick": "DEEPEST (far-edge distance from entry)",
+          "stop_placement": "JUST_BEYOND_FAR_EDGE by stop_beyond_anchor_margin",
+          "min_width": 0,
+          "gated_on_momentum_flag": false
+        },
+        "rung4_anchor": {
+          "object": "PRIM-007 order block",
+          "point": "WICK_EXTREME",
+          "stop_placement": "JUST_BEYOND by stop_beyond_anchor_margin"
+        }
       },
-      "notes": "RESOLVED round 2. (a) Anchor #3 is a SWEPT LIQUIDITY LEVEL — swept prior swing / SFP tip / PDL-sweep level. The trader removed the QML requirement himself: “it does not have to be QML, any old liquidity sweep level can act as SL level for me, i do not have perfect standards for this” (026_Stop_Loss_Decision.md:46, dup 075_Stop_Loss_Decision.md:46). SHIP NO QML DETECTOR. Rung 3 is locatable and the skip licence is withdrawn from TELEMETRY_SCHEMA.json. Exact placement of the stop on the level is [ENGINEERING] — declare it. (b) The wide-cover case is a ZONE-COVERAGE MODIFIER APPLIED AFTER ANCHOR SELECTION, not a sixth anchor: if the chosen stop lands inside a zone object, extend to the far edge of the whole zone (075 Choice 4; 049_Examples.md:5; 116_Examples.md:5; PRIM-006, zones never lines). Residual [ENGINEERING]: the snap tolerance for the adjacent-but-not-intersecting case, and whether the widening runs before or after the 2R floor and before sizing. The pictorial ranking of candidates is drawn at §9.J IM63 (“Most Ideal / Second most Ideal / Least Ideal”, the tightest annotated “Stopped Out Already”).",
+      "notes": "RESOLVED round 2. (a) Anchor #3 is a SWEPT LIQUIDITY LEVEL — swept prior swing / SFP tip / PDL-sweep level. The trader removed the QML requirement himself: “it does not have to be QML, any old liquidity sweep level can act as SL level for me, i do not have perfect standards for this” (026_Stop_Loss_Decision.md:46, dup 075_Stop_Loss_Decision.md:46). SHIP NO QML DETECTOR. Rung 3 is locatable and the skip licence is withdrawn from TELEMETRY_SCHEMA.json. Exact placement of the stop on the level is [ENGINEERING] — declare it. (b) The wide-cover case is a ZONE-COVERAGE MODIFIER APPLIED AFTER ANCHOR SELECTION, not a sixth anchor: if the chosen stop lands inside a zone object, extend to the far edge of the whole zone (075 Choice 4; 049_Examples.md:5; 116_Examples.md:5; PRIM-006, zones never lines). Residual [ENGINEERING]: the snap tolerance for the adjacent-but-not-intersecting case, and whether the widening runs before or after the 2R floor and before sizing. The pictorial ranking of candidates is drawn at §9.J IM63 (“Most Ideal / Second most Ideal / Least Ideal”, the tightest annotated “Stopped Out Already”). Round 3 (trader rulings): rung 2 = the deepest still-open gap between entry and the deepest swing, half-filled counts, any TF, no size floor, stop just beyond its far edge (075:32 “deeper imbalances still left open… covering the deeper imbalance” — note his hedge “or it may not”; slide Questionnaire/0300 “DEEPEST IMB (Unmitigated)” + “IMBALANCE STOP” above its far edge; 0334; 116_Examples.md:5,7 with 0513/0514 — the latter covers an “IMB 30m” from a 5m entry). Rung 4 = PRIM-007 wick extreme. [ENGINEERING] beyond-edge margin (drawn small, unnumbered), leg boundary, tie-break (deepest wins; emit all), order of operations of the zone-coverage widening vs the 2R floor vs argmin (ROUND2 item 5 residual 2). Journal: his BNB trade of 26 Feb 2024 is filed “Stop Loss Desicion: Momentum IMB Level” with a 0.36% stop distance — any % floor would have deleted it.",
       "resolution": "RESOLVED_FROM_CORPUS",
       "triage_note": "Round-2 P2: this row uniquely lacked the resolution and triage_note fields its neighbours GATE-028 and GATE-029 received in the same pass. Both sub-items are now ruled; the residuals are [ENGINEERING] placement questions, not doctrine gaps."
     },
     {
       "id": "GATE-028",
-      "name": "DEFECT — “largest stop whose R:R is closest to 3R” is self-contradictory",
+      "name": "Stop selection — among candidates ≥2R, the one closest to 3R; ties to the larger stop (“largest” in PDF Q11 step 4 is dead text — defect D1b, resolved by corpus triage §A-6)",
       "kind": "selector",
       "enforceability": "HARD_GATE",
       "layer": "stop",
-      "statement": "BLOCKER. PDF Q11 step 4 reads: “select the largest (most cushioned) stop-loss that still provides an acceptable reward, with preference given to values closest to 3R”. Risk:Reward falls MONOTONICALLY as the stop widens, so among survivors the LARGEST stop always has the LOWEST RR — nearest 2R, never nearest 3R. On the PDF's own worked table (Deepest Swing 1R → rejected · Momentum Imbalance 2R accept · Liquidity Sweep/QML 3R selected · Order Block 4R “valid but tighter” · Inner MSB 10R “valid but excessively tight”), “largest ≥2R” selects the 2R Momentum Imbalance while “closest to 3R” selects the 3R Liquidity Sweep — TWO DIFFERENT STOPS and two different position sizes. The PDF answers Liquidity Sweep, so its own example is decided by the “closest to 3R” clause and the word “largest” is dead text. Do not ship either reading silently. Operative rule as actually applied, pending a trader ruling: among candidates with RR ≥ 2R, select the one whose RR is CLOSEST TO 3R; break ties toward the larger (more cushioned) stop.",
+      "statement": "RESOLVED (corpus triage §A-6; READY since v1.2.0 — this text supersedes the former “BLOCKER” framing; behaviour unchanged). PDF Q11 step 4 (impersonal spec register, p.25) reads: “select the largest (most cushioned) stop-loss that still provides an acceptable reward, with preference given to values closest to 3R”. Risk:Reward falls MONOTONICALLY as the stop widens, so among survivors the LARGEST stop always has the LOWEST RR — nearest 2R, never nearest 3R. On the PDF's own worked table (Deepest Swing 1R → rejected · Momentum Imbalance 2R accept · Liquidity Sweep/QML 3R selected · Order Block 4R “valid but tighter” · Inner MSB 10R “valid but excessively tight”), “largest ≥2R” selects the 2R Momentum Imbalance while “closest to 3R” selects the 3R Liquidity Sweep — TWO DIFFERENT STOPS and two different position sizes. The PDF answers Liquidity Sweep, so its own example is decided by the “closest to 3R” clause and the word “largest” is dead text. The trader's own material decides the same way: his checklist asks “Which SL level gives you a 1:3 risk/reward ratio?” (023:170); his R:R page says “switch to 1:3 ratio, it is the most optimal ratio you can have… Keep it around 1:2 and 1:3 they are optimal ratios” (027:21–22); his worked ladder walks top-down past the 2R imbalance stop (“1:2 ratio is a great start”) to the liquidity stop (“Now my trade is 3R … feels optimal to me”) and rejects 10R on cushion grounds (075:64–72; slides 0334/0335/0336: 2R “Feels confident to me!”, 3R “Fells optimal and ok!”, 10R “Feels to tight for me!”). Operative rule: among candidates with RR ≥ 2R, select the one whose RR is CLOSEST TO 3R; break ties toward the larger (more cushioned) stop (GATE-030, “i personally take larger SLs more than tighter SLs, if i am not forced” — a stated personal default, 075:17). LARGEST_ABOVE_2R is retained as a NAMED, TESTABLE alternative under selection_rule_id (K-10 / D-03), not as an open choice.",
       "inputs": "Surviving candidates from GATE-025.",
       "output": "selected_stop; selection_rule_id — MUST be logged so conformance can test which reading actually shipped, and so the learning loop can attribute outcomes to the reading.",
-      "citation": "§2 H9 ⚠; §3.5 step 2; §8 SL-placement menu; §10.F.1 defect D1b (PDF Q11, pp.25–26). Provenance of the “closest to 3R” wording: §10.E A-5 — it originates in the prior AI assistant's rewrite of the developer's proposal (“your developer”, “your course”, “your philosophy”), which materially changed the developer's largest-first-with-3R-tiebreak rule while claiming only to remove ambiguity — plus the trader's own step 4",
+      "citation": "§2 H9 ⚠; §3.5 step 2; §8 SL-placement menu; §10.F.1 defect D1b (PDF Q11, pp.25–26). Provenance of the “closest to 3R” wording: §10.E A-5 — it originates in the prior AI assistant's rewrite of the developer's proposal (“your developer”, “your course”, “your philosophy”), which materially changed the developer's largest-first-with-3R-tiebreak rule while claiming only to remove ambiguity — plus the trader's own step 4; CORPUS_ANSWERS §A-6; ROUND2 RULINGS item 5; ROUND3 RULINGS item 7",
       "authority_class": "A",
       "status": "READY",
-      "blocker": true,
+      "blocker": false,
       "values": {
         "operative_reading": "CLOSEST_TO_3R_TIES_TO_LARGER",
         "competing_reading": "LARGEST_ABOVE_2R"
@@ -761,7 +868,8 @@
         "GATE-027"
       ],
       "resolution": "RESOLVED_FROM_CORPUS",
-      "triage_note": "Selector = argmin |RR - 3.0| over candidates with RR >= 2.0; ties to the larger stop. 'Largest' is DEAD TEXT."
+      "triage_note": "Selector = argmin |RR - 3.0| over candidates with RR >= 2.0; ties to the larger stop. 'Largest' is DEAD TEXT.",
+      "notes": "Prose sync only — no behaviour change (round-3 item 7; no trader input sought or given). Sources: 023:170; 027:21–22; 075:64–72 (dup 026); images/Stop_Loss_Decision/0334, 0335, 0336 (batch_065.md:144, batch_066.md:18, :40); executed trades planned R 3.64 / 3.05 / 4.0 / 3.15 (Feb–Mar 2024 journal); measured house R:R 2.9 (GATE-046). One drawn item ranks stops widest-first subject to affordability — Technical_Concepts/0055 (“Stop Loss (Most Ideal). But can you take the risk?”, IM63) — compatible because the affordability test is 023's 1:3 question; do not claim unanimity. Register: PDF Q11 step 4 and its “prefer larger cushion / only move tighter when the reward becomes insufficient” clauses (txt :1269, :1271, :1369) are impersonal spec prose that literally encode LARGEST_ABOVE_2R; the p.27 “I would modify it slightly” paragraph is prior-AI-assistant register (zero authority) and only the provenance of the wording. Authority: authority_class stays A for the wording's provenance; the operative reading rests on the documentary sources above and on corpus triage. TRADER_QUESTIONS R3 (ratification) defaulted to closest-to-3R; round 2 reaffirmed (RULINGS item 5). Order-of-operations residual (zone-coverage widening vs 2R floor vs argmin) — ROUND2 item 5 residual 2, still to declare."
     },
     {
       "id": "GATE-029",
@@ -799,19 +907,27 @@
     },
     {
       "id": "GATE-031",
-      "name": "DEFECT — a 2R-exact setup makes the 30% runner degenerate",
+      "name": "2R-exact setup — legal, taken and flagged DEGENERATE_RUNNER (partial level coincides with the target; trader ruling round 3)",
       "kind": "gate",
       "enforceability": "HARD_GATE",
       "layer": "exit",
-      "statement": "The default exit banks 70% at 2R, while GATE-025 accepts ANY candidate with RR ≥ 2R against the predefined target. When the selected stop yields exactly 2R the partial level IS the final target: 70% closes there, “the final target is reached” fires, and the 30% runner never runs. No minimum gap between partial level and final target is stated, and it is never said whether a 2R-only setup should be taken at all given the runner adds nothing.",
+      "statement": "The default exit banks 70% at 2R, while GATE-025 accepts ANY candidate with RR ≥ 2R against the predefined target. When the selected stop yields exactly 2R the partial level IS the final target: 70% closes there, “the final target is reached” fires, and the 30% runner never runs. No minimum gap between partial level and final target is stated and the engine must not invent one. Whether a 2R-only setup is legal IS answered: “you shall never aim less than 1:2 ratios” (074:73), “i still use 1:2 ratios a lot in my trading… Keep it around 1:2 and 1:3 they are optimal ratios” (027:21–22), “still locking the 2R setup with a nice caution, 1:2 ratio is a great start” (075:68; slide 0334 “Feels confident to me!”); the answers document restates the floor inclusively five times and strictly never (Q11, impersonal). Never EXECUTED at 2R (journal 3.05–4.0R; workspace demo lessons 2.3–2.83R; teaching brackets 0512–0518 ≈1.9–2.5R). The degeneracy is a specification artefact of pairing GATE-025's pre-fixed target with the 70%-at-2R exit imported from the HT v2.0/EURUSD strand (046:8), where the remainder ran to EOD / trailing / 1D ATR and never to a fixed target (138:6,9,10,13). Trader ruling round 3: take it, flag it, log 70% + 30% both closing at 2R; no invented gap.",
       "inputs": "selected_stop.rr; partial_level (2R); target price.",
       "output": "flag DEGENERATE_RUNNER when selected_stop.rr ≤ 2.0 + ε; the engine must not silently invent a minimum gap.",
       "citation": "§2 H12 ⚠; §10.F.1 defect D10b (PDF C2, pp.29–30 read against Q11, pp.25–26)",
       "authority_class": "R",
       "status": "READY",
       "blocker": false,
-      "notes": "Compounding gap: “the active trade management rules” that govern the 30% runner are NEVER DEFINED — “the single most load-bearing undefined phrase in the document” — and the only workspace page bearing that name (036_Single_Trade_Management.md) is empty (§10.F.2 item 21, §10.F.3).",
-      "resolution": "RESOLVED_FROM_CORPUS"
+      "notes": "Compounding gap: “the active trade management rules” that govern the 30% runner are NEVER DEFINED — “the single most load-bearing undefined phrase in the document” — and the only workspace page bearing that name (036_Single_Trade_Management.md) is empty (§10.F.2 item 21, §10.F.3). The runner policy gap is EXIT-003 (OPEN); it is not this rule's defect. computed_rr.degenerate_runner (schema :2497–2500) already records the coincidence — do not add a duplicate field.",
+      "resolution": "RESOLVED_FROM_CORPUS",
+      "values": {
+        "policy_at_exact_2r": "TAKE_AND_FLAG",
+        "exit_events_at_2r": [
+          "PARTIAL_2R:0.7",
+          "FINAL_TARGET:0.3"
+        ],
+        "epsilon_note": "K-14 uses planned_rr ≤ 2.05 — engineering, declare it"
+      }
     },
     {
       "id": "GATE-032",
@@ -853,17 +969,17 @@
     },
     {
       "id": "GATE-033",
-      "name": "DEFECT — the “base risk × 0.5” modifier double-sizes the most common grade",
+      "name": "Sizing is the literal 3×3 lookup — the proposed “base risk × 0.5” modifier is WRONG (defect, resolved by corpus triage §B-1)",
       "kind": "sizer",
       "enforceability": "HARD_GATE",
       "layer": "risk",
-      "statement": "BLOCKER. The proposed refactor — Base Risk (Manipulated 1.50% / Super 1.25% / Standard 1.00%) × Disturbance modifier (No ×1 · Light ×0.5 · Heavy ×0) — claims “This produces exactly the same results as the table”. IT DOES NOT. Manipulated 1.50 × 0.5 = 0.75% matches. Super 1.25 × 0.5 = 0.625% vs the table's 0.50% (+0.125 pp, 25% more risk). Standard 1.00 × 0.5 = 0.50% vs the table's 0.25% — EXACTLY DOUBLE; on a $100,000 account a Standard box with light disturbance sizes at $500 instead of $250, and Standard is the most common grade. Keep the LOOKUP TABLE. The true relationship is SUBTRACTIVE and exact for all three grades: Light = No − 0.75 percentage points (1.50−0.75=0.75; 1.25−0.75=0.50; 1.00−0.75=0.25). Equivalently, per-box multipliers ×0.50 / ×0.40 / ×0.25 — not a single ×0.5. Equivalently again, in units of 0.25%: No = {6,5,4}, Light = {3,2,1}, Heavy = {0,0,0}. Most economical description: the Light row is numerically identical to 053's own `Risk Altcoin` column (0.0075 / 0.005 / 0.0025). The ×1 and ×0 legs are correct; only the ×0.5 leg is wrong.",
+      "statement": "The proposed refactor — Base Risk (Manipulated 1.50% / Super 1.25% / Standard 1.00%) × Disturbance modifier (No ×1 · Light ×0.5 · Heavy ×0) — claims “This produces exactly the same results as the table”. IT DOES NOT. Manipulated 1.50 × 0.5 = 0.75% matches. Super 1.25 × 0.5 = 0.625% vs the table's 0.50% (+0.125 pp, 25% more risk). Standard 1.00 × 0.5 = 0.50% vs the table's 0.25% — EXACTLY DOUBLE; on a $100,000 account a Standard box with light disturbance sizes at $500 instead of $250, and Standard is the most common grade. Keep the LOOKUP TABLE. The true relationship is SUBTRACTIVE and exact for all three grades: Light = No − 0.75 percentage points (1.50−0.75=0.75; 1.25−0.75=0.50; 1.00−0.75=0.25). Equivalently, per-box multipliers ×0.50 / ×0.40 / ×0.25 — not a single ×0.5. Equivalently again, in units of 0.25%: No = {6,5,4}, Light = {3,2,1}, Heavy = {0,0,0}. Most economical description: the Light row is numerically identical to 053's own `Risk Altcoin` column (0.0075 / 0.005 / 0.0025). The ×1 and ×0 legs are correct; only the ×0.5 leg is wrong.",
       "inputs": "structure_box_grade; disturbance_grade",
       "output": "conformance assertion: the shipped sizer must reproduce all nine cells exactly; a single multiplicative modifier cannot express the table.",
       "citation": "§2 H3 ⚠; §10.A.1 DEFECT block; §10.D D-10; §7.4 (PDF Q14, p.29)",
       "authority_class": "A",
       "status": "READY",
-      "blocker": true,
+      "blocker": false,
       "values": {
         "wrong_modifier": 0.5,
         "wrong_results": {
@@ -891,17 +1007,17 @@
     },
     {
       "id": "GATE-034",
-      "name": "DEFECT — the momentum “Bullet Train” band 15–20 is unreachable",
+      "name": "WITHDRAWN — the Momentum Score's “Bullet Train” band 15–20 was unreachable; the score is invented machinery (§B-3)",
       "kind": "grader",
       "enforceability": "HARD_GATE",
       "layer": "momentum",
-      "statement": "BLOCKER. The 8-component Momentum Score's printed per-component maxima are +3, +3, +3, +2, 0, +3, 0, 0 → MAX = +14; the minima are 0, 0, 0, 0, −2, 0, −4, −5 → MIN = −11. TRUE REACHABLE RANGE = [−11, +14]. The printed bands are “15–20 Bullet Train · 11–14 Strong · 7–10 Moderate · 3–6 Weak · ≤2 Exhausted”, so the single best market state the engine can ever observe scores 14 and is graded merely “Strong”. Shortfall: 1 point to enter the band at all, 6 points to reach its stated ceiling of 20. This BREAKS THREE OTHER RULINGS that gate on the bullet-train state: Q1 p.2 (Step 3 context validation, “Momentum strength (bullet-train vs. slowing market)”), Q2 p.4 (“Continue if: Momentum remains strong ('bullet train')”) and Q6 p.15 (“This commonly occurs during bullet-train momentum”). Do not silently pick a fix — either the positive components are missing 6 points, or the bands must be re-cut against a +14 ceiling, and the document gives no basis to choose. The bands are otherwise contiguous and non-overlapping, and ≤2 correctly absorbs the whole negative range down to −11.",
+      "statement": "The 8-component Momentum Score's printed per-component maxima are +3, +3, +3, +2, 0, +3, 0, 0 → MAX = +14; the minima are 0, 0, 0, 0, −2, 0, −4, −5 → MIN = −11. TRUE REACHABLE RANGE = [−11, +14]. The printed bands are “15–20 Bullet Train · 11–14 Strong · 7–10 Moderate · 3–6 Weak · ≤2 Exhausted”, so the single best market state the engine can ever observe scores 14 and is graded merely “Strong”. Shortfall: 1 point to enter the band at all, 6 points to reach its stated ceiling of 20. This BREAKS THREE OTHER RULINGS that gate on the bullet-train state: Q1 p.2 (Step 3 context validation, “Momentum strength (bullet-train vs. slowing market)”), Q2 p.4 (“Continue if: Momentum remains strong ('bullet train')”) and Q6 p.15 (“This commonly occurs during bullet-train momentum”). Do not silently pick a fix — either the positive components are missing 6 points, or the bands must be re-cut against a +14 ceiling, and the document gives no basis to choose. The bands are otherwise contiguous and non-overlapping, and ≤2 correctly absorbs the whole negative range down to −11.",
       "inputs": "The eight components: Structure Writing (+3/+2/+1/0) · Momentum Imbalance Quality (+3/+2/+1/0) · Impulse Candle Quality (+3/+2/+1/0) · Imbalance Respect (+2/+1/0) · Counter-Imbalance Obstacles (0/−1/−2) · Structure Box Quality (+3 Manipulated / +2 Super / +1 Standard / 0 none) · Trend Weakness (0/−2/−4) · Reverse Signals (0/−3/−5).",
       "output": "Any gate that consumes 'bullet train' must be marked unimplementable until ruled; log the raw score and the band assigned.",
       "citation": "§10.D D-2; §7.4 DEAD NUMBERS REGISTER; §2 D6 [R] ⚠ (PDF Q5, pp.8–11)",
       "authority_class": "D",
       "status": "WITHDRAWN",
-      "blocker": true,
+      "blocker": false,
       "values": {
         "printed_top_band": [
           15,
@@ -1300,7 +1416,7 @@
     },
     {
       "id": "GRADE-006",
-      "name": "DEFECT — two incompatible definitions of the Manipulated box",
+      "name": "Manipulated box = imbalance tap AND inner-liquidity sweep AND fake MSB — build from the workspace key, not PDF Q10 (defect resolved §C-3)",
       "kind": "grader",
       "enforceability": "HARD_GATE",
       "layer": "structure",
@@ -1310,7 +1426,7 @@
       "citation": "§8 'Box grading (drives risk %)' — 'Keep this key — the PDF does not replace it'; §10.F.2 item 15; §2 A3 [R] (PDF Q10, pp.22–24)",
       "authority_class": "R",
       "status": "READY",
-      "blocker": true,
+      "blocker": false,
       "depends_on": [
         "GRADE-002",
         "GRADE-003",
@@ -1394,7 +1510,7 @@
       "kind": "gate",
       "enforceability": "HARD_GATE",
       "layer": "alignment",
-      "statement": "HEAVY disturbance ⇒ risk = 0% ⇒ NO TRADE, regardless of the structure-box grade. This is a gate, not a size reduction. Implement the 'hard filter' formulation; do NOT implement the softer 'the trade should usually be skipped' or the workspace's 'i will 90% skip the trade' — an engine cannot implement 'usually' or '90%'. The three statements exist in the source at different strictnesses and must never be quoted interchangeably; the latest and most explicit one wins.",
+      "statement": "HEAVY disturbance ⇒ risk = 0% ⇒ NO TRADE, regardless of the structure-box grade. This is a gate, not a size reduction. Implement the 'hard filter' formulation; do NOT implement the softer 'the trade should usually be skipped' or the workspace's 'i will 90% skip the trade' — an engine cannot implement 'usually' or '90%'. The three statements exist in the source at different strictnesses and must never be quoted interchangeably; the latest and most explicit one wins. Scope: instrument_class = ALIGNED_MAJOR. For altcoins the disturbance grade is recorded, not consulted (GRADE-019, trader ruling round 3).",
       "inputs": "disturbance_grade from GRADE-010.",
       "output": "trade_permitted = false and risk_pct = 0 when HEAVY",
       "citation": "§2 F5 [R] (PDF Q14, p.29: 'Heavy Disturbance is a hard filter: no trade regardless of the Structure Box'); §10.A.1; §10.F.1 defect D6b; dead prose at §2 F5 / 027_RR_Ratio_and_Setup_Risk.md",
@@ -1506,7 +1622,7 @@
     },
     {
       "id": "GRADE-018",
-      "name": "DEFECT — the 'base risk × 0.5' modifier double-sizes the most common grade",
+      "name": "No multiplicative disturbance modifier in the sizing path (defect twin of GATE-033, resolved)",
       "kind": "sizer",
       "enforceability": "HARD_GATE",
       "layer": "risk",
@@ -1516,24 +1632,29 @@
       "citation": "§10.A.1 DEFECT block (PDF Q14, p.29); §10.D D-10; §7.4 DEAD NUMBERS REGISTER; §2 H3 warning line",
       "authority_class": "A",
       "status": "READY",
-      "blocker": true,
+      "blocker": false,
       "alias_of": "GATE-033",
       "resolution": "RESOLVED_FROM_CORPUS",
       "triage_note": "Same defect as GATE-033, second id."
     },
     {
       "id": "GRADE-019",
-      "name": "The Risk Altcoin column — half the matrix is unruled",
+      "name": "The Risk Altcoin column — a per-box constant, disturbance not an input (trader ruling round 3); Super+Heavy 0.05 ratified as a typo for 0.005",
       "kind": "sizer",
       "enforceability": "HARD_GATE",
       "layer": "risk",
-      "statement": "The source database has TWO risk outputs per row: Risk Alignment (ruled on, GRADE-017) and Risk Altcoin (0.0075 / 0.005 / 0.0025), which is disturbance-INVARIANT — identical at No and at Light — a structure no base-×-modifier scheme can express at all. The ruling declares the whole database authoritative and then every supplied number covers only Risk Alignment: 9 of the 18 cells are unanswered, whether the engine trades altcoins at all is unstated, and 'Heavy = hard filter' is only ASSUMED to override the database's non-zero altcoin Heavy cells (0.0075 / 0.05 / 0.0025). The 0.05 outlier is thereby made moot without ever being reconciled. The engine must refuse to size an altcoin trade rather than interpolate.",
-      "inputs": "instrument_class ∈ {aligned_major, altcoin}; box_grade; disturbance_grade.",
-      "output": "risk_pct for altcoins = UNDEFINED (refuse) until ruled.",
+      "statement": "The source database has TWO risk outputs per row: Risk Alignment (GRADE-017) and Risk Altcoin. Read cell by cell (053_untitled.md), 8 of the 9 Risk Altcoin cells are a per-box constant with no disturbance dependence — Manipulated 0.75% (0.0075) · Super 0.50% (0.005) · Standard 0.25% (0.0025) — and 066:13 explains why: “we can not rely on any kind of magic alignments when we trade Altcoins because altcoins can act very independently from each other”. The ninth cell, Super+Heavy = 0.05 (5%), is a dropped-zero typo for 0.005 — identical in the Mar-2026 native export and the crawl; breaks his own 1.5% top cell (053:8) and his 2% cap (027:7) — ratified by the trader round 3 (he is correcting the Notion cell). His own journal row for the BNB long of 26 Feb 2024 applies the column as written: “Entry and Risk Decision Setup: Altcoin Manipulated SB”, “HTF/LTF Analysis Magic Alignment: No Alignment (Altcoin)”, Risk 0.75%. Trader ruling round 3 on the former open half: the COLUMN STANDS — disturbance is not an input for altcoins; GATE-001 / GRADE-011 (Heavy hard filter) apply to instrument_class = ALIGNED_MAJOR only.",
+      "inputs": "instrument_class ∈ {ALIGNED_MAJOR, ALTCOIN} ([ENGINEERING] doctrine-derived class rule: ALIGNED_MAJOR = BTC, ETH per 066:11; ALTCOIN = any other crypto — his TOTAL 3 definition, slide 0798 / IM38); box_grade; disturbance_grade (the majors' layout grade — recorded, not consulted for altcoins).",
+      "output": "risk_pct(altcoin) = LOOKUP(box_grade) ∈ {0.0075, 0.005, 0.0025}; disturbance_grade recorded but not consulted. Sizing is reachable only while declared_parameters.altcoin_trading_enabled == true (product scope, not doctrine); otherwise block_reason = ALTCOIN_DISABLED (new token; supersedes the schema token ALTCOIN_UNRULED, which the registry prose calls REFUSE_ALTCOIN_UNRULED — deprecate, do not remove). Advisory flag when enabled: TOTALS_DIRECTION_ADVISORY = the TOTAL / TOTAL3 / TOTAL2 / USDT.D direction read (066:20–26), SOFT like GATE-042.",
       "citation": "§10.A.1 'The second column nobody addressed'; §10.F.2 item 13; §7.1.3; 053_untitled.md; §2 F6 (066_Magic_Quadrant_For_Altcoins.md — 'we can not rely on any kind of magic alignments when we trade Altcoins')",
       "authority_class": "R",
       "status": "READY",
       "values": {
+        "risk_altcoin_by_box": {
+          "MANIPULATED": 0.0075,
+          "SUPER": 0.005,
+          "STANDARD": 0.0025
+        },
         "risk_altcoin_no": [
           0.0075,
           0.005,
@@ -1549,13 +1670,19 @@
           0.05,
           0.0025
         ],
-        "unanswered_cells": 9
+        "risk_altcoin_heavy_corrected": [
+          0.0075,
+          0.005,
+          0.0025
+        ],
+        "heavy_override_applies_to_altcoins": false,
+        "instrument_class_rule": "[ENGINEERING] ALIGNED_MAJOR = {BTC, ETH}; ALTCOIN = other crypto",
+        "unanswered_cells": 0
       },
       "resolution": "RESOLVED_FROM_CORPUS",
-      "triage_note": "PARTIAL: ship risk_pct(altcoin) = f(box_grade) = {0.0075, 0.005, 0.0025}, disturbance-invariant. The Heavy-override half stays open (trader Q).",
-      "has_open_half": true,
-      "open_half_note": "Ships the altcoin box-grade scale; the Heavy-override half is unresolved (trader Q).",
-      "notes": "ROUND 2 — THE CONSTANT IS FLAT, NON-GATING, AND CARRIES THE TRADER'S OWN HEDGE. No scaling rule exists in either source, IN EITHER DIRECTION — flatness is an INFERENCE from the numbers being stated unqualified, not a ruling. His hedges, in his own words: 0.30% is “an initial calibration value and may be refined during validation” (answers Q4); ~1% are “approximate calibration values and should only be used as supporting information” (answers Q6); ~0.2% is “an engineering guideline, not a strict market rule” (answers Q8); the news rule “does not use a fixed number of minutes”. THE COUNTER-ARGUMENT IS NOT HIS: the “BTC on the 1H chart and BTC on the Weekly chart have completely different imbalance sizes” sentence is PRIOR-AI-ASSISTANT REGISTER (bracketed by “Option 2 (What I recommend)”, “For example, tell him:”, “I would tell your developer this:”, “My suggestion”) and is scoped to momentum-imbalance SIZE classification, where no fixed percentage was ever adopted. It does not bear on these constants. His actual bans and their scope: momentum is “not defined by candle body size, ATR ratios, or a fixed number” (answers Q5); a disturbance is “not determined by correlation coefficients, a fixed number of candles, or a time delay” (answers Q9). EACH PERCENTAGE'S DENOMINATOR IS UNSTATED and must be declared by the implementer and stamped on every record. [ENGINEERING] GRADE-019 SPECIFICALLY: this row's own gap is the Risk Altcoin column, not a percentage constant. The altcoin box-grade scale ships disturbance-invariant {0.0075, 0.005, 0.0025}; the Heavy-override half stays open and needs the trader. The engine must REFUSE to size an altcoin trade rather than interpolate."
+      "triage_note": "Structure ruled (round 3): column stands, disturbance-invariant, Super+Heavy read as 0.005. Scope (does v1 trade altcoins) is GATE-008's product question and altcoin_trading_enabled's switch, not a doctrine gap.",
+      "has_open_half": false,
+      "notes": "The former output (“UNDEFINED (refuse) until ruled”) and triage_note (“PARTIAL: ship f(box_grade)…”) were two layers of §B-2 — definition vs enablement posture — not two policies; the word UNDEFINED was wrong (the scale was defined; trading was refused). Round-2 REGISTRY_PATCH P2 mis-grouped GRADE-019 with “the four constants” — GRADE-019 carries no such constant; disregard that entry. Corrects §B-2:470–471: BNB is an altcoin by his own label and his TOTAL 3 definition; there is one altcoin execution (0.75%). [ENGINEERING] red-folder days for altcoins: no disturbance axis — see GATE-016 values."
     },
     {
       "id": "GRADE-020",
@@ -1755,7 +1882,7 @@
     },
     {
       "id": "GRADE-033",
-      "name": "DEFECT — the 'Bullet Train' score band 15–20 is arithmetically unreachable",
+      "name": "WITHDRAWN — same as GATE-034",
       "kind": "grader",
       "enforceability": "HARD_GATE",
       "layer": "momentum",
@@ -1765,7 +1892,7 @@
       "citation": "§10.D D-2 (PDF Q5, pp.8–11); §10.F.1 defect D1; §7.4 DEAD NUMBERS REGISTER; §2 D6 [R] warning",
       "authority_class": "D",
       "status": "WITHDRAWN",
-      "blocker": true,
+      "blocker": false,
       "alias_of": "GATE-034",
       "resolution": "WITHDRAWN_NO_CORPUS_BASIS",
       "triage_note": "WITHDRAWN: same as GATE-034."
@@ -2273,12 +2400,18 @@
       "kind": "primitive",
       "enforceability": "HARD_GATE",
       "layer": "primitives",
-      "statement": "Detect all four named inefficiency types and carry each with its fill state. Types: fair value gap (“classic imbalances”); volume imbalance (“the empty space between candle bodies with only wicks”); gap (“the large voids between candlesticks… gaps and volume imbalances are the same thing the only difference is the wicks”); BPR — the boxed OVERLAP of a minimum of two opposite-direction imbalances, extended right, with ≥3 overlapping gaps = SUPER BPR. Fill states, fixed by the images: half filled / fully filled / fully filled and violated / first-vs-second test; an imbalance “stays extremely reactive until it is fully filled”. Also carry MOMENTUM imbalances — the large gaps left behind by impulsive moves and never filled — separately, since they are simultaneously a momentum signal, an inner target after the switch, and stop anchor #2.",
+      "statement": "Detect all four named inefficiency types and carry each with its fill state. Types: fair value gap (“classic imbalances”); volume imbalance (“the empty space between candle bodies with only wicks”); gap (“the large voids between candlesticks… gaps and volume imbalances are the same thing the only difference is the wicks”); BPR — the boxed OVERLAP of a minimum of two opposite-direction imbalances, extended right, with ≥3 overlapping gaps = SUPER BPR. Fill states, fixed by the images: half filled / fully filled / fully filled and violated / first-vs-second test; an imbalance “stays extremely reactive until it is fully filled”. Also carry MOMENTUM imbalances — the gaps left OPEN (unmitigated) by impulsive moves — separately: “i mostly call them momentum imbalances, why? Because they pull the price so hard and price no need to go back to fill those imbalances” (062:22); “giant” in that sentence is a descriptor, not a threshold. NO minimum width exists anywhere in his material; his own Imbalance Detector [LuxAlgo] runs with Min Width unchecked/0 on FVG, OG and VI (Technical_Indicators/0365; live on untitled/1245, IM50), since they are simultaneously a momentum signal, an inner target after the switch, and stop anchor #2.",
       "inputs": "Candle series per timeframe.",
       "output": "imbalances[] {id, tf, bar_range, price_band, type ∈ {FVG, VOLUME, GAP, BPR, SUPER_BPR}, is_momentum: bool, fill_state, test_count}",
       "citation": "§2 C1–C6 (060_Inefficiency_Basics.md, 062_Momentum.md, 068, 105); §9.J IM61 (the four fill states), IM62, IM64, IM66; §2 L2 (033_Technical_Indicators.md — the two indicators run in parallel)",
       "authority_class": "documentary",
-      "status": "READY"
+      "status": "READY",
+      "values": {
+        "min_imbalance_width": 0,
+        "min_width_provenance": "his indicator setting IM50/0365/1245 — declared config, not a rule he wrote",
+        "geometry_ref": "Inefficiency_Basics/0661 (FVG = void between candle-1 extreme and candle-3 extreme; VI = body-to-body void; GAP = full void; BPR = overlap of ≥2 opposite gaps)"
+      },
+      "notes": "Trader ruling round 3: no size floor of any kind for the rung-2 anchor. is_momentum_imbalance stays on GRADE-037's discriminator (never retested / unmitigated); rung-2 ELIGIBILITY is a different predicate — “still left open”, fill_state ∈ {UNFILLED, HALF_FILLED} (∉ {FULLY_FILLED, FULLY_FILLED_AND_VIOLATED}) — and must not be gated on the flag (see GATE-027 values). Beyond-anchor margin: one declared stop_beyond_anchor_margin shared by rungs 2 and 4."
     },
     {
       "id": "PRIM-003",
@@ -2334,10 +2467,31 @@
       "layer": "primitives",
       "statement": "A support/resistance flip is a level or zone broken one way then retested from the other side and holding — break → retest → go. The images are explicit that these are ZONES, not thin lines, and that a stop placed at a flip zone must cover the WHOLE zone. Two mechanisms feed the inventory: failed imbalances that “mutate to resistance and support areas that can hold the price in the future just like regular S/R flips” (GRADE-038), and the reactive-level test — “draw a ligne, single line around your possible entry point… check if there are a lot of reactions to that price level… it can easily act as S/R flip level”. Flips are also one of the three amplifier classes (GATE-038), so the same object appears in two roles and must carry both.",
       "inputs": "Broken levels with subsequent opposite-side retests; the failed-imbalance stream; touch counts per price band.",
-      "output": "sr_flips[] {id, tf, price_band (never a single price), origin ∈ {FAILED_IMBALANCE, BROKEN_LEVEL}, touch_count, quality_factors}",
+      "output": "sr_flips[] {id, tf, price_band (never a single price), origin ∈ {FAILED_IMBALANCE, BROKEN_LEVEL, FAILED_OB}, touch_count, quality_factors}",
       "citation": "§2 A15 (060_Inefficiency_Basics.md, 023, 067_Magic_Amplifiers.md, 112_Examples.md); §2 C11; §9.J IM76 (zones-not-lines), IM77 (three quality factors), IM78, IM79 (stop covers the whole zone); §9.J IM69 (Breaker Block = failed Order Block ≡ an S/R flip)",
       "authority_class": "documentary",
       "status": "READY"
+    },
+    {
+      "id": "PRIM-007",
+      "name": "Order Block — the last opposite-colour candle before the structure-breaking impulse, boxed and extended right",
+      "kind": "primitive",
+      "enforceability": "HARD_GATE",
+      "layer": "primitives",
+      "statement": "For a bullish setup the Order Block is the LAST down-close candle immediately preceding the up-impulse that produced the aligned MSB / i-MSB (the small red candle of the ‘Engulfing Pattern’ before the big green); mirror for bearish. Box = that candle's range, drawn from the origin candle and extended right until first test / body-break. State ∈ {UNTESTED, TESTED, FAILED}; FAILED = a BODY close through the box (a wick through is not a flip), at which point the same band becomes a Breaker Block candidate for PRIM-006 (origin FAILED_OB) — “Breaker Block = Failed Order Block”. Walk-back algorithm: start at the break candle of linked_break_id (default: the break whose impulse produced the entry imbalance, ENTRY-001; the internal-scale i-MSB if both exist), step back one candle at a time, stop at the FIRST opposite-colour candle met (close < open for a bullish setup; a doji counts as same-colour; a pullback candle inside the leg counts); bound = rung 1's swing bar — if none is found use the origin candle with ob_at_origin = true. When several same-colour candles precede the impulse, box only the LAST one; do not merge into a zone by default (log the merged extreme as an alternative). Quality is graded separately by the 7-point checklist — six criteria + first-test flag (IM58/IM59) and NEVER touches structure-box grading or risk % (two different ‘Super’ scales). Stop use: GATE-027 rung 4 anchors on the candle's WICK extreme (trader ruling round 3), stop just beyond it.",
+      "inputs": "Candle series per timeframe; the break candle of the entry's MSB / i-MSB (PRIM-005); swing origin (PRIM-001) as the walk-back bound.",
+      "output": "order_blocks[] {id, tf, origin_candle_ts, box_high, box_low, wick_high, wick_low, body_high, body_low, direction, state ∈ {UNTESTED, TESTED, FAILED}, ob_grade {six criterion booleans, first_test: bool}, linked_break_id}",
+      "citation": "§9.J.3 IM58 (Technical_Concepts/0043, 0044, 0045, 0046, 0048), IM59 (0047, 0049), IM60 (0050); the Stop-Loss page slide Questionnaire/0301 (“OB STOP LOSS — Placing around the HIGH/LOW point of the Order Block Candlestick”, batch_077.md:91); Entry_Confluences/0828, 0829 (OB and BB drawn simultaneously on two different candles); his own chart Putting_All_Together/0445 (batch_035.md:175–186); 075_Stop_Loss_Decision.md:39 (“just using the OB high or low points”); 117_Examples.md:5; IM69 (Breaker = failed OB; body-break validation, codex :1744); IM72 (same construction grammar for MiB)",
+      "authority_class": "documentary",
+      "status": "READY",
+      "values": {
+        "anchor_point_for_stop": "WICK_EXTREME",
+        "box_bounds_default": "WICK_TO_WICK",
+        "multi_candle_policy": "LAST_CANDLE_ONLY",
+        "failure_test": "BODY_CLOSE_THROUGH"
+      },
+      "requires_telemetry": "primitives.order_blocks[] so stop.anchor_object_id can resolve (HG-11) — see TELEMETRY_PATCH.md",
+      "notes": "Trader ruling round 3: stop point = wick extreme. [ENGINEERING] walk-back bound; which OB when several qualify — default the one whose box overlaps/abuts the entry imbalance on the trigger TF (075:39; 0301; Examples/0515 stop on the refined ‘OB 1H’), log all candidates; no quality bar for the stop rung by default (Part 4 grades a range-break OB ‘OK’, not useless) — record the grade so a stricter ruling can be applied retroactively. Degenerate equality: for the EXTREME OB at the Deepest LL the OB low ≈ rung 1's swing low. Live placement is loose (Examples/1139 SL inside the 15m OB band; “i do not care for a perfect SL”). The third-party detector's 94.5% hit rate is not evidence about this definition. Provenance: course slides in his workspace + his own published chart 0445; treated as documentary workspace doctrine per pack convention."
     }
   ]
 }

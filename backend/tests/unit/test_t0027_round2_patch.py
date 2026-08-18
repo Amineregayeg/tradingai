@@ -72,13 +72,34 @@ ANCHORS_PRESENT = {
     "TARGET-005": ["ENTRY-003"],
     "TARGET-006": ["answers Q4"],
     "ENTRY-005": ["answers Q8"],
-    "GRADE-019": ["answers Q8"],
+    # ROUND 3 RETIRED THIS ANCHOR, IN ITS OWN WORDS. Round-2 grouped GRADE-019 with "the four
+    # constants" and the Q8 hedge (~0.2% "an engineering guideline") came with that grouping.
+    # Round-3 P5 says: "Round-2 REGISTRY_PATCH P2 mis-grouped GRADE-019 with 'the four
+    # constants' — GRADE-019 carries no such constant; disregard that entry." So the anchor is
+    # superseded by a later ruling rather than lost by an applier, and GRADE-019 is re-pinned
+    # to the anchors ROUND 3 requires. **Recorded rather than deleted: the test still checks
+    # GRADE-019, so it cannot drop out of THE_FOURTEEN's coverage requirement unnoticed.**
+    "GRADE-019": ["053_untitled.md", "066:13"],
 }
 
 # sha256[:16] over (id, statement, notes, inputs, values, triage_note, resolution, status)
 # of the 102 rules the patch does NOT touch, measured at f3bd716 — the tip before this
 # task's diff existed — and unchanged after it.
-UNTOUCHED_PROSE_FINGERPRINT = "66ced903c2cd4ad6"
+UNTOUCHED_PROSE_FINGERPRINT = "f49a2dd37b3afdec"
+
+# THE NINETEEN RULES T-0045 EDITED, applying MagicStrategy_Round3_Rulings (registry 1.2.1 ->
+# 1.2.2). They are excluded from the fingerprint below for the same reason round 2's fifteen
+# are: this guard asks "did a rule move that NO reviewed patch names?", and a rule named by a
+# later patch is not an unexplained move.
+#
+# **This list was DERIVED from the diff against the pre-patch registry, not typed from the
+# pack** — a hand-transcribed exclusion list excludes by construction exactly the wrong-row
+# edit the guard exists to catch. GATE-027 and GRADE-019 appear in BOTH rounds.
+ROUND3_TOUCHED = {
+    "GATE-001", "GATE-008", "GATE-012", "GATE-014", "GATE-015", "GATE-016", "GATE-027",
+    "GATE-028", "GATE-031", "GATE-033", "GATE-034", "GRADE-006", "GRADE-011", "GRADE-018",
+    "GRADE-019", "GRADE-033", "PRIM-002", "PRIM-006", "PRIM-007",
+}
 
 
 def _rule(rid: str) -> dict:
@@ -167,19 +188,28 @@ def test_no_rule_outside_the_patch_had_its_prose_touched():
     negatives (GATE-004 and GATE-022, genuinely rewritten without the phrase). A fingerprint
     over the untouched rules measures the property the test is named for.
 
-    Pinned at f3bd716, the commit before T-0027's diff existed. If this fails, a rule outside
-    the patch moved — read the diff before updating the constant.
+    Pinned at f3bd716, the commit before T-0027's diff existed, and RE-BASED at T-0045 when
+    round 3 legitimately touched nineteen rules outside round 2's fifteen. If this fails, a
+    rule outside BOTH patches moved — read the diff before updating the constant.
+
+    **Re-basing rather than deleting is the point.** The guard's question is "did a rule move
+    that no reviewed patch names?", and that question survives every round; only the set of
+    named rules grows. Deleting it at the first legitimate change would have retired the only
+    check that sees a right-text-wrong-row edit.
     """
     fp = hashlib.sha256()
     for rid in sorted(contract.rules()):
-        if rid in TOUCHED:
+        if rid in TOUCHED or rid in ROUND3_TOUCHED:
             continue
         r = contract.rule(rid)
         fp.update(rid.encode())
         for field in ("statement", "notes", "inputs", "values", "triage_note", "resolution", "status"):
             fp.update(repr(r.get(field)).encode())
     assert fp.hexdigest()[:16] == UNTOUCHED_PROSE_FINGERPRINT
-    assert len(contract.rules()) - len(TOUCHED) == 102
+    assert len(contract.rules()) - len(TOUCHED | ROUND3_TOUCHED) == 86, (
+        "the untouched population changed size — a rule was added or removed outside both "
+        "patches, which no ruling authorises"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -249,7 +279,7 @@ def test_gate_004_is_not_marked_settled_while_the_gate_does_not_exist():
 # ---------------------------------------------------------------------------
 def test_the_meta_block_no_longer_contradicts_itself():
     meta = contract.registry()["meta"]
-    assert meta["version"] == "1.2.1"
+    assert meta["version"] == "1.2.2"  # T-0045 applied round 3 on top of round 2
     assert meta["blockers"]["ids"] == []
     assert meta["counts"]["OPEN"] == len(meta["open_items"]["ids"]) == 14
     # A validator reading field_semantics.status would previously have rejected its own file.
@@ -281,7 +311,13 @@ def test_the_three_register_rule_and_the_source_table_are_in_the_registry():
 def test_the_changelog_records_the_divergences_and_what_was_not_applied():
     """A deliberate divergence recorded only in a work report is B82's shape: the report
     stops being read and the registry is what gets diffed."""
-    entry = contract.registry()["meta"]["changelog"][-1]
+    # The round-2 entry is no longer LAST — T-0045 appended 1.2.2 (and reconstructed the
+    # missing 1.2.0 line round-3 P7 asked for). This test is about ROUND 2's entry, so it
+    # selects that entry BY VERSION rather than by position; `[-1]` silently retargeted the
+    # assertions at whichever patch landed most recently.
+    changelog = contract.registry()["meta"]["changelog"]
+    entry = next(e for e in changelog
+                 if isinstance(e, dict) and e.get("version") == "1.2.1")
     assert entry["version"] == "1.2.1"
     assert "NONE" in entry["status_changes"]
     assert any("ENTRY-004" in d for d in entry["deliberate_divergences_from_the_patch"])

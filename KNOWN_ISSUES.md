@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-18 (B163 — AN INVERSION IS A TWO-PART EDIT AND ONLY THE EXECUTABLE HALF FAILS LOUDLY. Three residues in one file, one commit, all in artefacts whose assertions had just been correctly inverted: a test NAME stating the negation of what it asserts (`test_no_live_or_broker_module_imports_the_exit_model`, asserting `importers` NON-EMPTY — and a failure report prints the NAME, not the comment beside it); a comment claiming two directories over a loop iterating one (`# ...under live/ or broker/` over `for sub in ("live",)`); and a sibling test asserting GREEN a finding closed in the same commit. THE THIRD IS THE SHARPEST: `test_the_paper_broker_still_closes_whole_positions` said "there is no representation of a tranche" and its failure message named the exact event — "If it grew tranches, the T-0022 finding is stale and the wiring task has started" — while keying on `__slots__` GROWING. `T-0038` half 1 added the tranche by REDUCING `pos.units`, so the property changed, the shape did not, and the tripwire passed through the event it was written to catch. A TRIPWIRE KEYED ON A PROXY FOR THE EVENT RATHER THAN THE EVENT, and worse than one naming nothing, because the message is evidence to a reader that the event was covered. All three fixed; the `__slots__` assertion KEPT and the claim attached to it replaced with a direct assertion on the property. Standing practice: after flipping an assertion, grep the name, the docstring, the inline comments and the tests either side for the claim just retired.)
+Last updated: 2026-08-18 (B165 — AN ASSERTION KEYED ON “THE NEWEST ENTRY”, NAMED FOR A SPECIFIC ONE. `changelog[-1]` in a test named for ROUND 2's changelog entry: correct only while round 2 was newest, and silently retargeted at round 3 the moment `T-0045` appended `1.2.2`; it failed loudly only because round 3's text differs. `[-1]`, `[0]`, `max()` and “the latest” are one smell — a population decided by later events, the same defect as `__subclasses__()`. Fix: select by identity, never by position. See also B164 — the round-3 pack's machine-readable half carries `PRIM-007.statement = “see REGISTRY_PATCH.md P3”`, a POINTER, where its markdown half carries the full rule; scripting the `.json` would have installed a dangling reference to an absent file as Salim's doctrine, and every structural gate we own would still have passed because none of them read the prose.)
 
 ---
 
@@ -2441,6 +2441,97 @@ searched, at the moment of use** — not reused from a previous entry. **Prefer 
 task id and a nonce over a shared house token like `zzz_absent`**, because a shared one accumulates
 citations until it is present everywhere.
 
+### B165 — an assertion keyed on “the newest entry”, named for a specific one
+
+**Found by Execute during `T-0045`, in `test_the_changelog_records_the_divergences_and_what_was_not_applied`.**
+
+    entry = contract.registry()["meta"]["changelog"][-1]      <- THE NEWEST
+    assert entry["version"] == "1.2.1"                        <- ROUND 2's
+    ...then asserts ENTRY-004, main_asset_counted, CONFORMANCE_SUITE.md — all round 2's
+
+**Correct only while round 2 was the newest patch.** The moment `T-0045` appended `1.2.2` the
+selector pointed at round 3 and every assertion below it became a claim about the wrong entry. It
+failed loudly here only because round 3's divergences are different text — **had round 3's entry
+happened to mention `ENTRY-004`, the test would have PASSED while checking nothing it was named for.**
+
+> **`[-1]` is a population that depends on what else happened** — the same defect as
+> `BrokerAdapter.__subclasses__()` giving four adapters under `-k paper` and five under the full
+> suite. *A guard whose subject is decided by later events is not a guard about its subject.*
+
+**Fix applied:** select by identity, never by position — `next(e for e in changelog if e.get("version")
+== "1.2.1")`. **General form: when a test is named for a specific thing, it must SELECT that thing.**
+`[-1]`, `[0]`, `max()`, "the latest" and "the most recent" are one smell; each is correct exactly
+until a second member arrives.
+
+### B164 — the ruling pack's two halves disagree, and the machine-readable one would install a pointer as doctrine
+
+**Found by Execute during `T-0045`, in the read-only phase, before applying anything. This is what
+`apply_mode: REVIEW_THEN_APPLY` is for.**
+
+    REGISTRY_PATCH.json   PRIM-007.statement = "see REGISTRY_PATCH.md P3 (origin candle; box
+                          from it extended right; state UNTESTED/TESTED/FAILED; ...)"
+    REGISTRY_PATCH.md     PRIM-007.statement = the full rule — walk-back algorithm, body-close
+                          failure test, quality-scale separation, stop anchor
+
+**A seat that scripted the `.json` — the obvious move, it is the machine-readable half — would have
+written `"see REGISTRY_PATCH.md P3"` into the registry as `PRIM-007`'s doctrine**, pointing at a file
+this repository does not contain, in the field every downstream reader treats as Salim's words.
+
+> **The failure would have been INVISIBLE at every gate we own.** The id resolves, the rule
+> registers, `check_rule_coverage` passes, the status histogram is unchanged, `status_changes` is
+> `[]`, the hash pin is updated by the same hand. *A registry entry whose statement is a dangling
+> reference passes every structural check we have, because none of them read the prose.*
+
+**The two halves also list DIFFERENT FIELDS** — the `.json` carries `requires_telemetry`, the `.md`
+does not — so "apply the patch" has no single referent even before the pointer.
+
+#### AND THE PACK DESCRIBES A TREE THAT IS NOT OURS, IN FOUR PLACES
+
+    pack says                                       our tree
+    "Round-2 P1 is still unapplied on disk"         APPLIED. QML_SHAPE_UNDEFINED_IN_SOURCE is
+                                                    absent from every enum — established
+                                                    STRUCTURALLY, by walking the parsed schema
+                                                    for enum arrays, because grep finds the
+                                                    string alive in the description that RECORDS
+                                                    ITS REMOVAL (B161's shape, and it caught me)
+    P7 meta.blockers.ids -> []                      already [] since v1.2.1
+    P7 open_items remove GATE-016 / GRADE-019       already absent since v1.2.1
+    P7 status vocabulary gains CALIBRATED/WITHDRAWN already merged in v1.2.1
+
+**The pack was written against the EngineKnowledge copy, which is one registry version and two files
+behind ours.** *A fact about the pack, not a defect in it.* But it means **P7 is largely a NO-OP here
+and must not be reported as work done**, and the acceptance criterion *"apply round-2's P1 or record
+it outstanding"* is answered by NEITHER branch — it was already applied.
+
+#### THE ONE LIVE CONFLICT — ESCALATED, AND RULED: THE REMOVAL STANDS
+
+TELEMETRY_PATCH §7 says KEEP `QML_SHAPE_UNDEFINED_IN_SOURCE` and mark it deprecated — *"the pack's
+id/enum policy is stability"* — because *"a removal breaks every stored record carrying it."*
+**v1.2.1 removed it outright.** Execute applied neither direction (reinstating a token to satisfy a
+policy and deleting more to match are both doctrine edits) and escalated. **Ruled by the Manager,
+decidable without Salim, on two legs:**
+
+**(a) PROVENANCE. It is not `[ENGINEERING]` against `[ENGINEERING]`.** The token was removed because
+**HE withdrew the requirement** — *"it does not have to be QML, any old liquidity sweep level can act
+as SL level for me"* (`026_Stop_Loss_Decision.md:46`). §7 wants it kept for an **engineering
+stability policy.** The pack's own ladder puts `[RULING]` above `[ENGINEERING]`, and *keeping a
+deprecated token preserves a record of something he says is not a thing.*
+
+**(b) THE REMEDY DEFEATS ITS OWN STATED REASON, and this is the leg that settles it.**
+
+    §7's REASON     "a removal breaks every stored record carrying it"
+    §7's REMEDY     "keep the token, mark it deprecated, REJECT IT IN VALIDATION"
+
+> **A stored record carrying the token fails validation under the remedy EXACTLY AS IT FAILS UNDER
+> THE REMOVAL.** *The remedy does not restore the ability to read those records; it preserves the
+> token's presence in a list while rejecting every use of it.* **So the remedy does not achieve the
+> thing it is justified by** — and the justification is the whole of the argument for keeping it.
+
+**Stated honestly: the risk is unmeasurable here in the direction that matters.** There is no local
+record store to check, so nobody can prove no stored record carries the token. **What CAN be shown is
+that re-adding it would not help such a record** — which is (b), and is why the unmeasurable half
+does not decide anything. **Left removed. Nothing further deleted.**
+
 ### B163 — an inversion is a TWO-PART edit, and only the executable half fails loudly
 
 **Found by Review and the Manager in `T-0038`, in artefacts Execute had just correctly inverted.
@@ -2679,8 +2770,12 @@ correct history with the defect deleted — **the evidence for this entry is the
 
 **The prober figure was measured correctly and the suite figure beside it was a SELECTION QUOTED AS
 THE SUITE.** *`pytest tests/unit` is what ran; the word "suite" is what was written.* **Nothing
-stopped being collected** — the 199 are the integration tests, and the arithmetic reconciles to the
-test, so the number is TRUE of what it measured and FALSE of what it claimed.
+stopped being collected** — and the reconciliation needs no story: **`1503` unit + `173` integration +
+`26` top-level = `1702`.** *An earlier version of this entry said "the 199 are the integration
+tests", which is off by the twenty-six top-level tests (`test_exceptions`, `test_security`,
+`test_smoke`, `test_startup`) — **a figure claim off by 26 inside the entry about figure claims**,
+failing in the direction that made the account tidier than the facts. Caught by the Manager.* So the
+number is TRUE of what it measured and FALSE of what it claimed.
 
 > **B160's fix moved ONE measurement out of the chain. The class is every figure in the message.**
 > A fix aimed at the command that failed leaves every sibling command unguarded, and the sibling

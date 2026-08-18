@@ -468,9 +468,12 @@ def test_the_coverage_figure_CANNOT_DISTINGUISH_the_honest_work_from_the_refused
         [sys.executable, str(BACKEND.parent / "scripts" / "check_rule_coverage.py")],
         capture_output=True, text=True, cwd=BACKEND.parent,
     ).stdout
-    assert "51 / 79 distinct" in out, (
+    # T-0045 moved the DENOMINATOR and not the numerator: registering PRIM-007 (a HARD_GATE
+    # nothing implements) enlarges the space of rules without implementing one, so 79 -> 80
+    # while 51 stands. THE NUMERATOR IS THE CLAIM; the denominator is the size of the problem.
+    assert "51 / 80 distinct" in out, (
         "effective coverage is not where stage 2 left it — say which rule became able to reach "
-        "a verdict, or which CANNOT_FIRE_WITHOUT was cleared"
+        "a verdict, which CANNOT_FIRE_WITHOUT was cleared, or which HARD_GATE was registered"
     )
     # THE DISTINGUISHING EVIDENCE, and it is not the coverage number. The refused edit would
     # have SHORTENED this list; nine rules of honest work left it exactly as it was.

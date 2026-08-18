@@ -96,14 +96,16 @@ def test_the_vendored_artefacts_are_byte_for_byte_the_ones_analysed():
     """
     import hashlib
 
-    # Updated by T-0027, deliberately, applying MagicStrategy_Round2_Rulings.zip
-    # (package sha256 704afd7e9c7a8407…, 7/7 files verified against its MANIFEST.md).
-    # Registry v1.2.0 -> v1.2.1, prose only: no status field changed. Schema gained the
-    # fourth record type and lost the QML skip licence. This is the ONLY authorised reason
-    # these hashes have ever moved — a drop that changes them without a reviewed patch is
-    # still the failure this test exists to catch.
+    # Updated TWICE, both times deliberately, both times applying a reviewed ruling pack:
+    #   T-0027  MagicStrategy_Round2_Rulings  registry 1.2.0 -> 1.2.1  (prose only)
+    #   T-0045  MagicStrategy_Round3_Rulings  registry 1.2.1 -> 1.2.2  (7 sections, +PRIM-007)
+    # These are the ONLY authorised reasons these hashes have ever moved — a drop that changes
+    # them without a reviewed patch is still the failure this test exists to catch.
+    # T-0045 moved the REGISTRY hash only; TELEMETRY_SCHEMA.json is unchanged in that commit
+    # and its hash is deliberately untouched here, so the two artefacts move independently and
+    # a schema change smuggled in beside a registry change still fails.
     expected = {
-        "RULE_REGISTRY.json": "7ca2cdebcc0c055a",
+        "RULE_REGISTRY.json": "c7898fcf7baf0799",
         "TELEMETRY_SCHEMA.json": "c5c86c67c305fdff",
     }
     for name, prefix in expected.items():
@@ -112,10 +114,20 @@ def test_the_vendored_artefacts_are_byte_for_byte_the_ones_analysed():
 
 
 def test_the_pinned_registry_is_the_one_we_analysed():
-    """Guards against a package drop changing the rules underneath the engine."""
-    assert contract.registry_version() == "1.2.1"
-    assert len(contract.known_rule_ids()) == 117
-    assert len(contract.ids_with_enforceability("HARD_GATE")) == 91
+    """Guards against a package drop changing the rules underneath the engine.
+
+    T-0045 moved these by applying round 3: 117 -> 118 ids and 91 -> 92 HARD_GATEs, both
+    accounted for by the SINGLE rule the patch adds (PRIM-007, the Order Block primitive,
+    HARD_GATE). **PRIM-007 is REGISTERED here and IMPLEMENTED by T-0046** — so the coverage
+    NUMERATORS must not move with these denominators, which `check_rule_coverage` asserts
+    separately (67 distinct implemented, before and after).
+    """
+    assert contract.registry_version() == "1.2.2"
+    assert len(contract.known_rule_ids()) == 118
+    assert len(contract.ids_with_enforceability("HARD_GATE")) == 92
+    assert "PRIM-007" in contract.known_rule_ids(), (
+        "the +1 is not PRIM-007 — some other rule was added, which no ruling authorises"
+    )
     # Still 14 after the round-2 patch, and that is the point: the patch changes prose
     # only. REGISTRY_PATCH.md P4 would have made this 13 by closing ENTRY-004, but that
     # closure is conditional on an interval test nothing implements (B102), so it stayed
@@ -139,12 +151,12 @@ def test_the_delivered_artefacts_are_mutually_incompatible_and_we_say_so():
     """
     skew = contract.contract_version_skew()
     assert skew is not None, "skew resolved — remove the version relaxation in validate.py"
-    # T-0027 widened the gap rather than closing it: the registry moved 1.2.0 -> 1.2.1 and
-    # the schema's `const` was deliberately NOT touched. The round-2 telemetry patch says
-    # nothing about the pin, and editing it would have silently resolved a delivered-package
-    # defect nobody ruled on — and removed the tripwire that fires when a regenerated schema
-    # finally arrives.
-    assert "1.1.0" in skew and "1.2.1" in skew
+    # T-0027 widened the gap rather than closing it (1.2.0 -> 1.2.1) and T-0045 widened it
+    # again (-> 1.2.2). The schema's `const` is deliberately NOT touched by either: neither
+    # telemetry patch says anything about the pin, and editing it would silently resolve a
+    # delivered-package defect nobody ruled on — and remove the tripwire that fires when a
+    # regenerated schema finally arrives. THE GAP GROWING IS THE HONEST STATE.
+    assert "1.1.0" in skew and "1.2.2" in skew
 
 
 def test_records_report_the_registry_actually_in_force():
@@ -153,7 +165,7 @@ def test_records_report_the_registry_actually_in_force():
     Writing "1.1.0" into telemetry while running 1.2.0 would make stored evidence claim a
     registry it was never evaluated against — which defeats the only purpose of the field.
     """
-    assert rec.engine_identity()["rule_registry_version"] == "1.2.1"
+    assert rec.engine_identity()["rule_registry_version"] == "1.2.2"
 
 
 # ---------------------------------------------------------------------------

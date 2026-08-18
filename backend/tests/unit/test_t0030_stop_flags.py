@@ -332,16 +332,40 @@ def test_the_degenerate_flag_fires_at_two_r_and_not_at_three_r():
 
 
 def test_eps_is_declared_unratified_and_carries_an_authority():
-    """CRITERION 5b. `eps` is OURS: GATE-031 has no `values` block and no epsilon exists.
+    """CRITERION 5b. `eps` is STILL OURS — and the tripwire that said so has now FIRED.
+
+    Through T-0044 this asserted `"values" not in GATE-031`, with the message *"if GATE-031
+    ever gains a values block, eps stops being ours and this must be re-derived from it
+    rather than declared"*. **T-0045 gave GATE-031 a values block, so the tripwire fired
+    exactly as designed and the re-derivation it demanded was done — the answer is that eps
+    is still ours.**
+
+    The round-3 ruling settles the POLICY at 2R (`TAKE_AND_FLAG`, both tranches logged) and
+    explicitly declines to ratify an epsilon: `epsilon_note` reads *"K-14 uses planned_rr ≤
+    2.05 — engineering, declare it"*. **A registry that names our number and calls it
+    engineering has not adopted it.** So `DECLARED_EPS` stays `ratified=False`.
+
+    The tripwire is re-armed one level in: it now fires if the values block ever carries an
+    epsilon as a NUMBER, which would be a ratification.
 
     FAILING INPUT: drop the authority field, or set `ratified=True`. Either makes an engine
     choice read as a trader ruling, which is the thing declaration exists to prevent.
     """
     from app.services.telemetry import contract_loader as contract
 
-    assert "values" not in contract.rule("GATE-031"), (
-        "if GATE-031 ever gains a values block, eps stops being ours and this must be "
-        "re-derived from it rather than declared"
+    values = contract.rule("GATE-031").get("values", {})
+    assert "epsilon_note" in values, (
+        "GATE-031's values lost epsilon_note — re-read what the registry now says about eps"
+    )
+    assert "declare it" in values["epsilon_note"], (
+        f"GATE-031 no longer calls the epsilon engineering: {values['epsilon_note']!r}. If it "
+        "RATIFIED a number, eps stops being ours and DECLARED_EPS must be re-derived from the "
+        "registry rather than declared here."
+    )
+    assert not any(isinstance(v, (int, float)) and k.lower().endswith(("eps", "epsilon"))
+                   for k, v in values.items()), (
+        "GATE-031's values carry a NUMERIC epsilon — that is a ratification, and eps is no "
+        "longer ours to declare"
     )
     assert DECLARED_EPS.ratified is False
     assert DECLARED_EPS.authority.startswith("ENGINEERING")

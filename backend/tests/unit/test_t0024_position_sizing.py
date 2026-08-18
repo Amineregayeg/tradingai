@@ -670,21 +670,51 @@ def test_the_0_05_outlier_is_left_unreconciled_and_not_corrected() -> None:
     assert RiskCeilingConformance.check(0.05)["conforms"] is False
 
 
-def test_grade_019_output_governs_its_contradicting_triage_note() -> None:
-    """The Manager's 2026-08-16 ruling, pinned so the contradiction cannot be silently resolved.
+def test_grade_019s_contradiction_is_RESOLVED_and_the_sizer_refuses_for_a_DIFFERENT_reason() -> None:
+    """THE CONTRADICTION THIS TEST PINNED IS GONE, AND SALIM IS WHY.
 
-    `output` says refuse; `triage_note` says ship the partial. Both fields are still in the
-    registry and this task does not edit either — the registry is not the implementing seat's
-    to change. The ruling is that `output` governs, and the implementation follows `output`.
+    Through T-0044 this asserted the contradiction was still present: `output` said *"UNDEFINED
+    (refuse) until ruled"* while `triage_note` said *"PARTIAL: ship f(box_grade)"*. The
+    Manager's 2026-08-16 ruling was that `output` governs. Its failure message said: *"if this
+    ever fails, the registry was edited and the ruling needs revisiting rather than the test
+    relaxing."*
+
+    **The registry WAS edited — by T-0045, applying Salim's round-3 ruling — so the ruling is
+    revisited here rather than the assertion relaxed.** He ruled the column STANDS: altcoin risk
+    is a per-box constant, disturbance is not an input, and the Super+Heavy `0.05` cell is a
+    dropped-zero typo for `0.005` that he is correcting at source. `has_open_half` is now false.
+
+    > **The sizer's BEHAVIOUR is unchanged and its REASON is not.** It still returns no
+    > `risk_pct` for an altcoin — but because `altcoin_trading_enabled` is product scope and
+    > false, not because the column was unruled. *"We may not size this" and "nobody has told us
+    > how to size this" produced the same `None` and are now different facts.*
+
+    Emitting `ALTCOIN_DISABLED` for that refusal is downstream implementation work (the token is
+    added to the schema in T-0045's telemetry commit); this test asserts only that the doctrine
+    moved and the behaviour did not.
     """
     rule = contract.rule("GRADE-019")
-    assert "UNDEFINED (refuse)" in rule["output"]
-    assert "PARTIAL: ship" in rule["triage_note"], (
-        "the contradiction is still present — if this ever fails, the registry was edited "
-        "and the ruling needs revisiting rather than the test relaxing"
+    assert "UNDEFINED (refuse)" not in rule["output"], (
+        "the refuse-until-ruled text is back — round 3 ruled this column, so its return would "
+        "mean a revert, not a finding"
     )
-    # The implementation followed `output`, not `triage_note`: the partial scale never
-    # reaches a risk_pct.
+    assert "LOOKUP(box_grade)" in rule["output"]
+    assert "PARTIAL: ship" not in rule["triage_note"]
+    assert rule["has_open_half"] is False
+    assert "open_half_note" not in rule, "the open half is closed; its note must not survive it"
+
+    # THE TYPO, RATIFIED. Both readings are kept — the corrected one is what an engine may use,
+    # the as-written one is kept so the source cell can still be audited against the export.
+    assert rule["values"]["risk_altcoin_heavy_corrected"] == [0.0075, 0.005, 0.0025]
+    assert rule["values"]["risk_altcoin_heavy_as_written"] == [0.0075, 0.05, 0.0025], (
+        "the as-written row was deleted — then nothing records what the source database says "
+        "and the ratified correction becomes unauditable"
+    )
+    assert rule["values"]["unanswered_cells"] == 0
+
+    # BEHAVIOUR UNMOVED: the ruled scale still never reaches a risk_pct, because the product
+    # switch is false. This is the MUST-MISS half — without it, "the doctrine changed" would be
+    # indistinguishable from "the sizer quietly started sizing altcoins".
     for scale_value in (0.0075, 0.005, 0.0025):
         sizing = RiskMatrix.size(
             box_grade="STANDARD", disturbance_grade="NONE", instrument_class="ALTCOIN"
