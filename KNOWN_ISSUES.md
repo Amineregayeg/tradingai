@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-18 (B154 — `landed_sweep.py` discharged its own violation: the report and the snapshot refresh were in the SAME RUN, so closing `T-0035` raised its obligation, printed it, exited 1, and then dropped it from the snapshot — the next run exited 0 with the referencing sentence untouched. Observed, not reconstructed: the tool's considered verdict on a file it had correctly condemned twelve seconds earlier. The design assumed the reader acts before running again, which was never stated and is false in practice. Strongest form of the B151 family — the reading cannot vary with the property because the reading DELETES the property — and distinct from B147's benign twin, where a real edit carried a pointer away with no author, versus here where there is no edit and the obligation is simply gone. Fixed: violations persist under a reserved `_unresolved` key the refresh cannot clear, re-raised every run until the referencing text is gone, with a must-miss arm because a permanently red tool is one nobody reads. Also carries the `T-0035` guard-reach amendment: the SOURCE half is discharged, the GUARD-REACH half is an acceptance requirement of `T-0036`.)
+Last updated: 2026-08-18 (B155 — a mutation is a deliberate LIE about the code and it fails in two ways. THE LIE OUTLIVES THE MEASUREMENT: two plants in one session, one removed by an `rm` that happened to sit in the same command as its measurement and one left on disk for ninety minutes, found only because a peer's unrelated question prompted a `git worktree list` — and a mutation fixture is the ONE test artefact that cannot be labelled, since a plant carrying `# TEST FIXTURE` tests a scanner that ignores commented files rather than the scanner. THE LIE IS NOT THE ONE YOU MEANT: reverting a changed file wholesale to invert its arms gave `ImportError: cannot import name 'ABSENT'` at COLLECTION, 0 tests run — a well-formed red result sitting exactly where the check looks, proving only that the fix added some names; the same move is VALID on the frontend, where the test imports only the component, and nothing in either output says which happened. Fixes: plant-measure-remove as ONE operation with `cd` out before removal, because a `finally` is a mechanism where a removal step is a promise; and mutate the DECISION while keeping the NAMES, which turned 1 collection error into 12 failed / 16 passed with every must-fire arm firing. Measured while bounding this entry's own claim: `landed_sweep.py` was fixed-path-rooted and never printed the tree it scanned.)
 
 ---
 
@@ -2440,6 +2440,183 @@ register that records its own control pairs is exactly the corpus that will accu
 searched, at the moment of use** — not reused from a previous entry. **Prefer a token containing the
 task id and a nonce over a shared house token like `zzz_absent`**, because a shared one accumulates
 citations until it is present everywhere.
+
+### B155 — a mutation is a deliberate LIE about the code, and it fails in two ways: the lie OUTLIVES the measurement, or the lie is not the one you meant
+
+**Filed by Review 2026-08-18. Two halves, found a day apart in the same practice. Instance closed,
+class open. The exposure in part one is NARROWER than Review first stated it, and the correction is
+in the entry because the overstatement is the same defect this register is about.**
+
+    PART ONE   the lie outlives the measurement      a plant left in a worktree
+    PART TWO   the lie is not the one you meant      a whole-file revert as "the old behaviour"
+
+## The instance
+
+Verifying `T-0032` required planting rule-shaped files in detached worktrees. Two plants, one seat,
+one session:
+
+    wt-sel     compute_atr_threshold(...)  numeric volatility gate      planted, measured,
+                                                                        REMOVED in the same command
+    wt-claim   class VolatilityResumption(RuleImplementation)
+               RULE_ID = "GATE-014"                                     planted, measured,
+                                                                        LEFT ON DISK ~90 minutes
+
+**The difference between them is not care. It is whether the removal was in the same command as the
+measurement.** The surviving plant was found only because a peer's unrelated question made Review
+list its own worktrees.
+
+## The property that makes a plant valid is the property that makes it dangerous
+
+> **Every other test artefact can be labelled. A mutation fixture cannot** — a plant carrying
+> `# THIS IS A TEST FIXTURE` tests a scanner that ignores commented files, not the scanner. **It has
+> to look exactly like the thing it imitates, or it measures nothing.**
+
+So at rest it is a file that looks like production code, is untracked (**so no history says who
+wrote it or why**), and has no expiry. `git worktree list` advertises the path it sits in.
+
+## What the exposure actually is — measured, and smaller than first claimed
+
+**Review told the Manager the plant was *"discoverable by any tool that enumerates by worktree rather
+than by repo path."* Nothing does, and that matters:**
+
+    grep -rn "worktree" --include=*.py --include=*.sh --include=*.yml  tradingai/ agents/
+      -> 0 hits outside prose
+
+    check_rule_coverage.py:32   REPO    = Path(__file__).resolve().parent.parent
+                          :33   BACKEND = REPO / "backend"
+                          :155  BACKEND.glob("app/**/*.py")          CHECKOUT-rooted
+    landed_sweep.py:132         ROOT = Path(__file__).resolve().parent
+                    :133        REPO = ROOT.parent / "tradingai"     FIXED-PATH-rooted
+
+**Neither can reach a foreign worktree, and the two reasons are DIFFERENT — which matters, because
+stating one reason for both is the error this register keeps recording.**
+
+* `check_rule_coverage.py` roots on its own `__file__`, so a copy inside a worktree scans THAT
+  worktree. **That is why the claiming plant produced 5 failures where it was planted.** Correct
+  design: the scanner follows the checkout it was copied into.
+* `landed_sweep.py` roots on `agents/`, which exists exactly once and is in no repository at all
+  (`B147`). **So it ALWAYS scans the main checkout, wherever it is invoked from.**
+
+> **The second one carried a hazard of its own, in `B25`/`B63`'s family: run `landed_sweep.py` from
+> inside a pinned worktree and it silently reported on a DIFFERENT tree than the one you were
+> measuring** — the reader reads the writer's checkout no matter where it is standing, and nothing
+> in its output named which tree it read.
+
+**Load-bearing, because `landed_sweep` exit 0 is part of what closes a task and the seat running it
+is usually the one holding a pinned worktree: the wrong-object read was ONE INVOCATION away, and
+tonight it was correct for a reason nobody stated and nothing enforced.** The existing
+`files_scanned` 70% guard does not cover it — from a worktree `REPO` still resolves to main, **so
+the count is identical and the guard stays silent**; it catches a narrower scan, not a different
+tree of the same size.
+
+**FIXED the same night** (`landed_sweep.py:205-220`): the scanned path is now printed
+unconditionally, plus a note when the caller stands in a different worktree.
+
+    ARM A   invoked from agents/ (not a repo)      path printed, NO note   <- the common call
+    ARM B   invoked from the main tree             path printed, NO note
+    ARM C   invoked from a real linked worktree    NOTE FIRES              <- discriminating
+
+**The Manager's first version fired whenever cwd was outside `REPO` — which is the ordinary call,
+from `agents/`.** Caught before shipping, on the argument below: **a warning that always fires is a
+warning nobody reads, and the ignored version is worse than none because it looks like the hazard is
+covered.**
+
+> **The always-printed path is the guarantee; the note is a refinement, and the two cover different
+> things.** The note keys on CWD, while the hazard is about INTENT — a seat can invoke this from
+> `agents/` (ARM A, silent) while believing it reports on the worktree it is measuring. **So a quiet
+> run must never be read as "you are measuring the right tree"; only the `scanning:` line says
+> that.** If the note is ever trimmed as noisy, the path line must survive it.
+
+**And the escalation that would have made this serious did not occur:** a plant that is ever
+`git add`ed enters the SHARED object database and survives its worktree's removal as a dangling
+blob. Checked:
+
+    git fsck --dangling   ->   3 dangling blobs
+    all three are legitimate: two prior KNOWN_ISSUES.md revisions and a rules/__init__.py
+    git log --all --diff-filter=A -- '*news_resumption*'   ->   nothing
+
+**No plant blob is in the object database.** The exposure was one untracked file on disk for ninety
+minutes, reachable by a human or agent following `git worktree list`. **Real, narrow, and now zero.**
+
+## Why it is still worth an id
+
+**Because the cleanup is attentional and the register's whole subject is replacing attentional
+guarantees with structural ones.** The class is untouched: nothing makes a plant expire, nothing
+marks one as a fixture, and the only thing that removed the first plant was that its `rm` happened
+to be in the same command as its measurement.
+
+**Structural fix: plant, measure and remove must be ONE operation** — a context manager or a `trap`,
+so the fixture cannot outlive the measurement even if the measuring seat is interrupted, rotated, or
+distracted by a peer message. **A manual removal step is a promise; a `finally` is a mechanism.** The
+same reasoning as `setsid` for a long run: the guarantee has to survive the process that made it.
+
+## The fix, run under real conditions, and the one wrinkle that would kill it
+
+Used for an unrelated probe an hour later:
+
+    cleanup() { cd /somewhere-else; git worktree remove --force "$WT"; rm -f "$MSG"; git worktree prune; }
+    trap cleanup EXIT INT TERM
+    git worktree add --detach "$WT" HEAD && cd "$WT" && ...measure...
+
+**It worked: worktree gone, `git worktree prune -n` clean, and the probe string returns 0
+occurrences in the main checkout.** The `finally` did what the promise did not.
+
+**The wrinkle, and it is behavioural rather than cosmetic.** The first version had no `cd` in
+`cleanup`, so it removed the directory the shell was standing in and the run ended with
+`fatal: Unable to read current working directory` — **after the measurement had completed
+successfully.** A correct practice that always ends in a scary trailing error **is a practice people
+quietly stop using**: the first seat to read that line as a failed run replaces the `trap` with a
+manual `rm`, and the promise is back. **`cd` out before removing is not a tidiness note; it is what
+keeps the mechanism in use.**
+
+**Secondary, cheap:** a worktree used for mutation should be created under a name that says so and
+removed by the same script that created it, so `git worktree list` never advertises a path holding a
+fixture. **Neither half depends on anyone remembering.**
+
+
+# PART TWO — a whole-file revert measures SYMBOL EXISTENCE, not behaviour
+
+**Found while inverting `T-0035`'s arms, which is `B151`'s own requirement being carried out.**
+
+To check that a must-fire arm can actually fail, the obvious mutation is to revert the changed
+source to the baseline and re-run the new tests. On the frontend it worked:
+
+    frontend, delivered page                  9 passed
+    frontend, page reverted to 9ae14ca        7 failed, 2 passed     <- the arms fire
+
+On the backend the identical move produced:
+
+    backend, delivered source                 28 passed
+    backend, finnhub.py reverted to 9ae14ca   ImportError: cannot import name 'ABSENT'
+                                              1 error during COLLECTION, 0 tests run
+
+> **That is not the arms firing. It is the test file failing to load.** An `ImportError` at
+> collection is a well-formed red result that occupies exactly the place a passing-inversion check
+> looks, **and it proves only that the fix introduced some names — nothing about whether any single
+> arm can fail.**
+
+**The difference between the two halves is whether the test imports symbols the fix introduced.**
+The Python test imports `ABSENT`, `UNRECOGNISED`, `UNKNOWN_IMPACT` and `_resolve_impact`; the React
+test imports only the component. **Whole-file revert is a valid inversion in the second case and a
+category error in the first, and nothing in the output distinguishes them.**
+
+**The mutation that actually answers the question keeps the new NAMES and restores the old
+DECISION:**
+
+    def _resolve_impact(item):                      # symbols preserved, behaviour reverted
+        impact_raw = str(item.get("impact") or item.get("importance") or "low")
+        return _IMPACT_MAP.get(impact_raw.lower(), "low"), impact_raw, RESOLVED
+
+    -> 12 failed, 16 passed        every must-fire arm fires, in both fixture families
+
+**Practice:** a revert is a proxy for a behavioural mutation, and like every proxy it has a
+population where it does not hold — **here, any test that imports what the change added.** State
+which one you ran. **`the arms went red on the revert` and `the arms went red on the behaviour` are
+different claims, and only the second is the one `B151` asks for.**
+
+> **Both halves of this entry are the same shape: a mutation is only evidence about the thing it
+> actually mutated.** Part one is a fixture that kept lying after the measurement ended; part two is
+> a fixture that told a different lie than the one intended. **Neither is visible in the result.**
 
 ### B154 — `landed_sweep.py` DISCHARGED ITS OWN VIOLATION: the report and the snapshot refresh were in the same run, so a live obligation was silently eaten by the tool that found it
 
