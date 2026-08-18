@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-17 (B148 — `implemented_ids()` answers "what has THIS PROCESS imported?" and four assertions read it as "what exists in the codebase": a rule registers in `__init_subclass__` at class-definition time, so the helper is a snapshot of the IMPORT GRAPH. Measured both directions — a real RuleImplementation claiming GATE-014, planted at monitoring/news_resumption.py, reads False before import and True after, and the assertion at test_t0032_news_windows.py:456 did not fire (73 passed, 46 deselected); T-0023 already holds the mirror, where a reverted __init__.py left three rules reading as implemented while check_rule_coverage.py correctly reported 39/104. One helper, opposite false readings about the codebase, both correct about the process. The whole-tree check exists at check_rule_coverage.py:155's glob("app/**/*.py") and must not be retired as redundant — it is the only thing that answers whether a claiming implementation exists on disk, and NOTHING covers the built-but-UNCLAIMED case, which is what T-0032's volatility guard is a proxy for. General form: a registry populated by a side effect answers a question about the SIDE EFFECT, never about the world.)
+Last updated: 2026-08-18 (B149 — the register's deletions check was DEFINED with `--numstat` and QUOTED with `--stat`, and `--stat` prints ONE figure per file = insertions PLUS deletions with no deletions column, so it cannot yield the pair `+X/-Y` at all: a seat's in-flight file was reported as `+29/-7` when it was `+22/-7`. Measured both ways — `git diff --stat` on test_t0032_news_windows.py prints `47` for a `38 9` file, while `git show --stat 17d84eb` prints `38` for a `38 0` file. Both definitions in `agents/` are correct (`--numstat`); the substitution happened at the point of USE and exists in no artefact, B147 grade 2. It survived three days of register commits because every edit to this file is an append, so deletions are zero, so insertions + 0 == insertions and the wrong command prints the right number — the one file the check exists to guard is the one file that cannot expose the instrument, and no re-measurement can catch it because re-running the wrong command on the same file returns the same right answer forever. General form: where a verification step is performed by hand, prefer the output whose format refuses the wrong parse over the one that permits it and relies on the reader.)
 
 ---
 
@@ -2440,6 +2440,107 @@ register that records its own control pairs is exactly the corpus that will accu
 searched, at the moment of use** — not reused from a previous entry. **Prefer a token containing the
 task id and a nonce over a shared house token like `zzz_absent`**, because a shared one accumulates
 citations until it is present everywhere.
+
+### B149 — the register's deletions check was DEFINED with `--numstat` and QUOTED with `--stat`, and on the one file it guards the broken instrument returns the correct answer
+
+**Filed by Manager 2026-08-18. Found by Execute, and independently by Malek's session, from a wrong
+figure the Manager published. Every number below was re-measured in the live tree, not recalled.**
+
+A seat's in-flight file was reported as `+29/-7`. It was `+22/-7`. Both digits were taken off a
+single `git diff --stat` display, and the display can produce neither of them.
+
+## The instrument, measured on two files
+
+    git diff  --stat    test_t0032_news_windows.py   ->    47 ++++++++++-----      <- 38 + 9
+    git diff  --numstat test_t0032_news_windows.py   ->    38    9
+    git show  --stat    17d84eb   (KNOWN_ISSUES.md)  ->    38 ++++++++++++++
+    git show  --numstat 17d84eb                      ->    38    0
+
+**`--stat` prints ONE figure per file, and that figure is insertions PLUS deletions. There is no
+deletions column.** The `+++---` bar beside it is a scaled graph, not a second pair of counts — the
+run lengths are normalised to the terminal width, so on any diff large enough to be scaled neither
+run of characters equals anything at all. **`--stat` therefore cannot yield the pair `+X/-Y` for a
+file, and a pair quoted from it asserts a provenance the digits do not have.**
+
+The single figure is `>= insertions` always, and `== insertions` exactly when deletions are zero.
+**Read as insertions it overstates insertions AND displays nothing whatsoever in the place where
+deletions would be — which is the one quantity the check exists to detect.** There is no reading of
+`--stat` that fails loudly: it is silent in the unsafe direction by construction, because the
+absence of a deletions column is indistinguishable from a deletions count of zero.
+
+## Why the documentation is not at fault, which is the worse finding
+
+Both definitions are correct. `PROMPT_MANAGER.md`, in the bullet beginning *"VERIFY THE DIFF BEFORE
+COMMITTING ANOTHER SEAT'S TEXT"*, specifies **`git diff --numstat KNOWN_ISSUES.md` (non-zero
+deletions = another seat's in-flight text)**. `HANDOFF_EXECUTE.md`, in the bullet beginning
+*"Before `git add KNOWN_ISSUES.md`"*, specifies `--numstat` and adds that **the hook will NOT catch
+it — it only inspects ADDED headings.** The only `--stat` anywhere in `agents/*.md` is
+`PROMPT_REVIEW.md`'s `git diff --stat main...HEAD && git diff main...HEAD`, which is orientation
+followed immediately by the full diff, and is legitimate.
+
+**THE RULE WAS CORRECT WHERE IT WAS DEFINED AND CORRUPTED WHERE IT WAS QUOTED** — at the point of
+use, by the seat that had just read the correct form. **There is no artefact carrying the defect.**
+Nothing in the tree was ever wrong; a right rule was executed as a wrong command once, and the only
+place the substitution ever existed was in a message. That is `B136`/`B147`'s grade 2: this register
+can hold the correction and can never hold the thing corrected, so a future reader will find a fix
+for a defect that has no location.
+
+## Why three readers passed it, and would have passed it on the day it mattered
+
+The second measurement pair is the answer. **Every edit to this file is an append, so its deletions
+are zero, so `insertions + 0 == insertions` and the broken instrument prints the right number.**
+`17d84eb` reads `38` under `--stat` and `38 0` under `--numstat`; the wrong command and the right
+command agree, exactly, on the file the rule was written for.
+
+**The one file the check exists to guard is the one file that cannot expose the instrument.** The
+check therefore appeared to succeed every time it was performed, and its appearance of success was
+independent of whether it worked. It would have appeared to succeed on the first day it was
+load-bearing — the day another seat had unstaged text in the same file — because that is the only
+day the two commands disagree, and by then the commit is made.
+
+**This is not rot.** No figure drifted and no re-measurement would have caught it: re-running the
+same wrong command on the same file returns the same right answer forever. It is closer to `B93`'s
+acquired authority than to `B140`'s decay, and it is worse than both, because the confirming
+evidence is generated by the defect itself.
+
+## What it would have cost
+
+`PROMPT_MANAGER.md` states the stake in its own words: the Manager **"commit[s] Review's unstaged
+register entries, so you are the seat most able to erase a finder,"** and the diff check is *"the
+only reason the register is worth anything, and it is worthless if you commit on report."* A silent
+deletions check means a Manager can stage and commit over another seat's in-flight paragraphs, and
+the commit-msg hook cannot see it — `HANDOFF_EXECUTE.md` says so explicitly, and
+`register_commit_check.py` confirms it: `header_lag()` returns `None` when nothing was added, and no
+code path in that script reads deletions at all.
+
+## Fix — move it out of prose, into the hook
+
+Prose cannot be checked at the point of use, and the point of use is where this failed. In
+`register_commit_check.py`, which already reads `git diff --cached -U0 -- KNOWN_ISSUES.md`:
+
+    deletions from `git diff --cached --numstat -- KNOWN_ISSUES.md`
+    0                       -> pass
+    exactly the `Last updated:` line -> pass  (the legitimate case; HANDOFF_EXECUTE records
+                                               `101 0` then `102 1` after rewriting that line)
+    anything else           -> refuse unless the commit message names the deleted text
+
+**The fix is not "quote the rule more carefully."** The durable form of it is a preference between
+instruments: **prefer the one that cannot produce the shape you want to read.** `--numstat` cannot
+be misread as a single number — it emits two integers and a tab. `--stat` cannot be correctly read
+as two numbers. Where a verification step is performed by hand, choose the output whose format
+refuses the wrong parse, rather than the output that permits it and relies on the reader.
+
+## Residue
+
+* **A line citation into `agents/` cannot be pinned.** That directory is not a git repository, so
+  `PROMPT_MANAGER.md:285` has no commit to resolve against and drifts silently on the next insert.
+  Every quotation above is anchored to the bullet's opening words instead, which move with the text.
+* **The hook fix closes this hole only because all register commits route through one seat.** It runs
+  for whoever commits, and today that is always the Manager. If Review or Execute ever commits the
+  register directly, the check is absent for them and this entry's mechanism returns intact.
+* **The general form is unowned.** Nothing anywhere checks that a command quoted in the agent docs
+  actually emits the fields the surrounding prose reads off it — not for `--stat`, not for any other
+  tool invocation in `agents/`, and the two sweeps only read `KNOWN_ISSUES.md`.
 
 ### B148 — `implemented_ids()` answers *"what has THIS PROCESS imported?"* and four assertions read it as *"what exists in the codebase"* — one helper, opposite false readings in `T-0023` and `T-0032`
 
