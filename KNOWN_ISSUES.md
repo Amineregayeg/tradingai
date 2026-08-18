@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-18 (B153 — `T-0035` closed the calendar fail-open AT THE SOURCE, and the finding worth carrying is that the obvious fix would have made the thing it was making visible INVISIBLE: `finnhub.py` coerced an unrecognised or missing provider impact to `"low"` through TWO independent defaults, and the only live consumer of that value — `MorningBriefingPage.tsx` — grouped events with `['high','medium','low'].map(...)`, so a third state would have matched no bucket while the empty-state message stayed behind `events.length === 0` and the page drew an empty card in silence. Before the fix the event was VISIBLE AND MISLABELLED; a backend-only fix makes it invisible, which is strictly worse. And `['high','medium','low','unknown']` is the same defect one member over — an enumeration is a claim about its complement and this one had already been wrong once — so the buckets are DERIVED from the values present, the total pill counts what was RENDERED, and the `IMPACT_COLORS[k as keyof typeof]` cast is gone because it defeated the compiler at exactly the point it would have caught the missing key. `is_in_blackout`'s `!= "high"` is untouched and the verdict is asserted identical input-by-input against a reimplementation of the replaced line.)
+Last updated: 2026-08-18 (B154 — `landed_sweep.py` discharged its own violation: the report and the snapshot refresh were in the SAME RUN, so closing `T-0035` raised its obligation, printed it, exited 1, and then dropped it from the snapshot — the next run exited 0 with the referencing sentence untouched. Observed, not reconstructed: the tool's considered verdict on a file it had correctly condemned twelve seconds earlier. The design assumed the reader acts before running again, which was never stated and is false in practice. Strongest form of the B151 family — the reading cannot vary with the property because the reading DELETES the property — and distinct from B147's benign twin, where a real edit carried a pointer away with no author, versus here where there is no edit and the obligation is simply gone. Fixed: violations persist under a reserved `_unresolved` key the refresh cannot clear, re-raised every run until the referencing text is gone, with a must-miss arm because a permanently red tool is one nobody reads. Also carries the `T-0035` guard-reach amendment: the SOURCE half is discharged, the GUARD-REACH half is an acceptance requirement of `T-0036`.)
 
 ---
 
@@ -2441,6 +2441,69 @@ searched, at the moment of use** — not reused from a previous entry. **Prefer 
 task id and a nonce over a shared house token like `zzz_absent`**, because a shared one accumulates
 citations until it is present everywhere.
 
+### B154 — `landed_sweep.py` DISCHARGED ITS OWN VIOLATION: the report and the snapshot refresh were in the same run, so a live obligation was silently eaten by the tool that found it
+
+**Filed by the Manager 2026-08-18, against my own tool, one command after using it to close a task.
+Every figure re-measured, and the failing behaviour was OBSERVED rather than reconstructed.**
+
+## What happened, in the order it happened
+
+    1. T-0035 set DONE
+    2. landed_sweep.py   ->  !! SNAPSHOT VIOLATIONS: T-0035 recorded at KNOWN_ISSUES.md:3732,
+                             still present.   exit 1                      CORRECT
+    3. the SAME run refreshed the snapshot, which drops DONE tasks BY DESIGN
+    4. landed_sweep.py   ->  exit 0.  T-0035 absent from the snapshot.
+                             grep of the referencing sentence: still there, unchanged.
+
+**The obligation was discharged by the tool rather than by a fix, and nothing would ever have raised
+it again.** Step 4 is not a stale reading — it is the tool's considered verdict on a file it had
+correctly condemned twelve seconds earlier.
+
+## The mechanism, and it is not a bug in the snapshot logic
+
+**The design assumed the reader acts on the violation before running the tool again.** That
+assumption was never stated, and it is false in practice: I read the output, kept working, and ran
+the tool again as part of the next check. **A report and an erasure in the same run makes a finding
+ONE-SHOT and unreproducible** — and the evidence for the finding is destroyed by the act of looking
+at it a second time, which is the strongest form of the `B151` family: *the reading cannot vary with
+the property, because the reading deletes the property.*
+
+**Distinguish it from `B147`'s benign twin, which is the other way a violation vanishes without a
+fix.** There, `4261687` rewrote line 9 for an unrelated reason and carried a stale pointer away with
+it — **a real edit, no author.** Here there is no edit at all: the text is untouched and the
+obligation is gone. **Two mechanisms, and this register now holds both.**
+
+## Fix — obligations outlive the run that reports them
+
+Violations persist under a reserved `_unresolved` key that the refresh does not clear, and are
+re-raised every run **until the referencing text is actually gone**.
+
+    ARM  a violation reported in run N is still reported in run N+1     PASS  (was: cleared)
+    ARM  an obligation whose text has GONE clears itself                PASS  T-9999 seeded, cleared
+    ARM  the tool exits 1 for as long as an obligation stands           PASS
+    ARM  cannot read the referencing file  ->  treated as PRESENT       fail CLOSED, deliberate
+
+**The must-miss arm is not optional decoration: an `_unresolved` list that never empties makes the
+tool permanently red, and a permanently red tool is one nobody reads** — the same argument that
+killed the first version of `landed_sweep`'s worktree warning, which fired on the commonest
+invocation.
+
+**And one trap inside the fix, caught before it shipped:** `_unresolved` had to be added to the
+reserved-key exclusion beside `_meta`, because the snapshot validator rejects any top-level key that
+is not a task id. **Without that line, the durability fix makes every later run read the whole
+snapshot as malformed — a fix that destroys the baseline it exists to protect.**
+
+## Residue
+
+* **The lost `T-0035` obligation was restored by hand** into `_unresolved` and then discharged
+  properly by the amendment above. **It is the only one known to have been eaten. Whether earlier
+  closures ate others is UNMEASURED and unmeasurable from here** — the evidence for each would have
+  been the snapshot entry that the same run deleted.
+* **The tool's docstring says *"Run this BEFORE closing a task, or there is nothing to compare
+  against."*** That is advice about the opposite direction and reads as complete. **Nothing warned
+  that running it AFTER closing discharges the obligation**, which is why the instruction felt
+  followed.
+
 ### B153 — a fix whose purpose was VISIBILITY would have ended in CONCEALMENT, and the obvious repair was the same defect one member over
 
 **Established by Execute during `T-0035`, with the frontend scope ruled in by the Manager on the
@@ -3729,8 +3792,21 @@ that a guard keyed on volatility vocabulary cannot be both complete and quiet** 
 identifiers live legitimately elsewhere, so a total population fires on correct code. **That covers
 the existing-file case and the not-yet-written one alike, which the original reason did not.**
 
-**`T-0035` owns `finnhub.py`'s fail-open. It does not own this — the SOURCE being unguarded and the
-GUARD not reaching the source are different gaps and only one of them has a task.**
+**AMENDED 2026-08-18, on `T-0035`'s closure — the first half is DISCHARGED and the second is not.**
+`T-0035` owned `finnhub.py`'s fail-open and closed it at `b3c5290`: `UNKNOWN` is a third state, the
+provider's original string is preserved, and both independent defaults are covered by fixtures that
+each discriminate. **The GUARD-REACH gap is untouched and still has no task of its own:** `T-0032`'s
+volatility guard derives a population that `app/services/calendar/finnhub.py` falls outside of, and a
+working numeric volatility threshold planted in that file passes silently today.
+**Escalated by Execute rather than decided by it** — *the seat closing a task should not be the one
+deciding that the task closed the other half too* — and dispositioned by the Manager as an acceptance
+requirement of `T-0036` rather than a new task: it is not strategy work, "widen the population" is
+disproved (84 `atr` identifiers outside the news modules, so a total population fires on correct
+code), and it becomes load-bearing exactly when the news subsystem is wired to the order path,
+because that is when `finnhub.py` stops being a source the guard ignores and starts being a file
+whose contents can decide a trade. **`T-0036` must therefore leave that plant failing, with a
+must-fire arm proving it.** The original sentence, kept because its distinction is the useful part:
+*the SOURCE being unguarded and the GUARD not reaching the source are different gaps.*
 
 #### 3. TWO FIGURES THAT WENT WRONG WITHOUT ROTTING, and the second is a category this register lacks
 
