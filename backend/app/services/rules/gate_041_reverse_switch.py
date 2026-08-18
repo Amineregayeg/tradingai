@@ -62,9 +62,13 @@ from app.services.telemetry.records import RuleEvaluation, derived, from_record
 #: `producer=None` means NO producer exists. That is not the same as a producer that
 #: returned nothing, and conflating them is how a dead check reads as a quiet market.
 CONDITIONS: tuple[tuple[str, str | None], ...] = (
-    ("price_slows_after_destination", None),          # GRADE-028 / GRADE-035 — neither exists
-    ("momentum_deteriorating", None),                 # GRADE-028 — SOFT_PREFERENCE, unimplemented
-    ("momentum_imbalance_failures", None),            # GRADE-028 / GRADE-038 — unimplemented
+    # T-0039 BUILT GRADE-028, SO THESE THREE MOVE FROM "no producer exists" TO "we have not
+    # read it". That is a category change, not a satisfaction: the producer is now real and
+    # GATE-041 still does not call it. `CANNOT_FIRE_WITHOUT` is deliberately NOT cleared --
+    # see the note below and GRADE-028's COVERAGE_NOTE.
+    ("price_slows_after_destination", "GRADE-028"),
+    ("momentum_deteriorating", "GRADE-028"),
+    ("momentum_imbalance_failures", "GRADE-028"),
     ("new_opposite_imbalances", "PRIM-002"),
     ("failed_imbalances_became_sr_flips", "PRIM-006"),
     ("new_imbalances_hold_price", "PRIM-002"),

@@ -237,6 +237,18 @@ from app.services.rules.gate_041_reverse_switch import (  # noqa: F401
     MANDATORY_CONDITION,
     ReverseSwitchConfirmations,
 )
+from app.services.rules.grade_027_momentum_signs import (  # noqa: F401
+    MOMENTUM_CLASSIFICATION_NOTE,
+    ForwardMomentumSigns,
+    MomentumLeg,
+    MomentumSlowdownSigns,
+    legs_from_breaks,
+    unmitigated,
+)
+from app.services.rules.grade_032_bullet_train import (  # noqa: F401
+    DIAGNOSTIC_CHECKLIST,
+    BulletTrainRegime,
+)
 from app.services.rules.grade_031_declared_quorums import (  # noqa: F401
     DECLARED_QUORUMS,
     DeclaredQuorum,

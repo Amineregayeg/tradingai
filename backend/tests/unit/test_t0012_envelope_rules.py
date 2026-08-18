@@ -202,28 +202,32 @@ def test_below_the_quorum_returns_continue():
     assert ReverseSwitchConfirmations.evaluate(readings).values["outcome"] == "CONTINUE"
 
 
-def test_live_evaluation_marks_exactly_the_unproduced_conditions():
-    """CRITERION 10b's live half — not zero, and not seven.
+def test_no_condition_claims_a_producer_that_does_not_exist():
+    """INVERTED BY T-0039, AND THE INVERSION IS THAT TASK'S DELIVERABLE.
 
-    NOTE A PLAN INCONSISTENCY, resolved in favour of the registry: criterion 10b says
-    'exactly the two momentum conditions', but the plan's own STEP 0 table lists THREE
-    without producers — momentum deteriorating, momentum-imbalance failures, AND price
-    slows after the destination (which needs GRADE-035, removed from this task). Three is
-    correct; the criterion's 'two' is a miscount.
+    Through `T-0012` this asserted THREE conditions with NO producer — *"exactly the two
+    momentum conditions"* was a miscount and three was correct. **`T-0039` built `GRADE-028`,
+    so "no producer exists" is now false for all three and the count is ZERO.**
+
+    They did not become satisfied. They became `NOT_READ`: the producer is real and `GATE-041`
+    still does not call it. **That is a CATEGORY change backed by a capability**, and it is the
+    honest form of this task's deliverable — effective coverage is unchanged at `50/79`,
+    because clearing `CANNOT_FIRE_WITHOUT` would have moved the number for an edit rather than
+    for a capability.
     """
     ev = ReverseSwitchConfirmations.evaluate()
     assert ev.verdict == "NOT_APPLICABLE"
     assert ev.values["outcome"] == "CONTINUE"
-    assert ev.values["not_evaluable_count"] == 3, (
-        f"expected 3 unproduced conditions, got {ev.values['not_evaluable_count']}"
+    assert ev.values["not_evaluable_count"] == 0, (
+        "GRADE-028 exists; nothing may still say its conditions have no producer"
     )
-    assert set(ev.values["not_evaluable"]) == {
-        "price_slows_after_destination",
-        "momentum_deteriorating",
-        "momentum_imbalance_failures",
-    }
-    # Each names WHY, so "no producer exists" cannot be read as "the producer found nothing".
-    assert all("GRADE-028" in v for v in ev.values["not_evaluable"].values())
+    assert ev.values["not_evaluable"] == {}
+
+    # AND THEY MOVED RATHER THAN VANISHED — named, with GRADE-028 as the producer they now
+    # have and are still not read from.
+    for name in ("price_slows_after_destination", "momentum_deteriorating",
+                 "momentum_imbalance_failures"):
+        assert ev.values["not_read"][name] == "GRADE-028"
 
 
 def test_no_quorum_is_claimed_while_a_condition_is_unreadable():
@@ -367,11 +371,16 @@ def test_producer_backed_conditions_are_not_reported_as_FALSE():
                 f"{name} has producer {producer} and is reported {states[name]} — FALSE "
                 "claims the producer ran"
             )
-    assert ev.values["unread_count"] == 4
-    # The two absences stay APART in the record, each naming its producer.
+    # SEVEN, not four: T-0039 built GRADE-028, so its three conditions moved from "no producer
+    # exists" into this set rather than out of the blockage. All seven now have a real producer
+    # and none of them is read.
+    assert ev.values["unread_count"] == 7
+    # The absences stay APART in the record, each naming its producer.
     assert set(ev.values["not_read"]) == {
         "new_opposite_imbalances", "failed_imbalances_became_sr_flips",
         "new_imbalances_hold_price", "micro_msb_confirms",
+        "price_slows_after_destination", "momentum_deteriorating",
+        "momentum_imbalance_failures",
     }
     assert ev.values["not_read"]["micro_msb_confirms"] == "PRIM-005"
     assert "micro_msb_confirms" not in ev.values["not_evaluable"]

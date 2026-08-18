@@ -123,7 +123,22 @@ def resolve_block_chain(
     cls = impls.get(rule_id)
     blockers = tuple(getattr(cls, "CANNOT_FIRE_WITHOUT", ()) or ()) if cls else ()
     if not blockers:
-        return [rule_id]
+        # `[*_seen, rule_id]`, NOT `[rule_id]`. THIS BRANCH WAS DORMANT UNTIL T-0039 AND IT
+        # DROPPED THE CHAIN WHEN IT WOKE.
+        #
+        # It is only reached on a RECURSIVE call, and the recursion only happens when the
+        # named blocker is itself implemented. Until GRADE-028 landed, every terminal blocker
+        # in the tree was unimplemented, so the leaf return below was always the one taken and
+        # `_seen` was never discarded. The day GRADE-028 was implemented,
+        # `resolve_block_chain("GATE-040")` collapsed from
+        # ["GATE-040", "GATE-041", "GRADE-028"] to ["GRADE-028"] -- and a single-element list
+        # is this function's documented signal for NOT BLOCKED, so a two-hop blockage would
+        # have reported itself clear.
+        #
+        # Same shape as the multi-blocker branch below, which this function's own comment
+        # calls "currently DORMANT ... activates silently the first time someone declares
+        # two". One branch over, and it activated first.
+        return [*_seen, rule_id]
     # POSITIONAL-FIRST, and the choice is recorded because it is currently DORMANT: no
     # rule declares more than one blocker today (all four are single), so this branch is
     # untested and activates silently the first time someone declares two. Same shape as
