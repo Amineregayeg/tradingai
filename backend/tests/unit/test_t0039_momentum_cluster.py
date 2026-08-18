@@ -441,10 +441,24 @@ def test_the_block_chain_survives_an_implemented_terminal_blocker():
     ]
 
 
-def test_effective_coverage_is_UNCHANGED_and_that_is_the_honest_result():
-    """PRE-RECORDED. `GRADE-028` resolves three of `GATE-041`'s seven conditions and the
-    MANDATORY one is not among them, so nothing became able to reach a verdict. **`51/79` was
-    available for a twelve-character edit and was not taken.**"""
+def test_the_coverage_figure_CANNOT_DISTINGUISH_the_honest_work_from_the_refused_edit():
+    """**MEASURED AFTER STAGE 2, AND IT IS THE SHARPEST THING IN THIS WAVE.**
+
+    Stage 1 held effective coverage at `50/79` and the refused twelve-character edit would have
+    made it `51/79`. **Stage 2 implemented six more rules and the honest figure is now `51/79`
+    — the same number.**
+
+    Of the nine rules this wave built, exactly ONE is `HARD_GATE` (`GATE-035`); seven are
+    `SOFT_PREFERENCE` and one `ADVISORY`, so only one lands in the `79` population. **So nine
+    rules of real work move the headline by the same `+1` that deleting `"GRADE-028",` from a
+    tuple would have moved it.**
+
+    > **The figure is identical either way, so the figure cannot tell them apart.** `B150`'s
+    > family: a number that moves for two incomparable reasons and reports neither. **What
+    > distinguishes them is the CANNOT-FIRE list, which the edit would have shortened and the
+    > work did not** — and that is why the census, not the coverage number, is this task's
+    > deliverable.
+    """
     import subprocess
     import sys
 
@@ -454,8 +468,244 @@ def test_effective_coverage_is_UNCHANGED_and_that_is_the_honest_result():
         [sys.executable, str(BACKEND.parent / "scripts" / "check_rule_coverage.py")],
         capture_output=True, text=True, cwd=BACKEND.parent,
     ).stdout
-    assert "50 / 79 distinct" in out, (
-        "effective coverage moved. If GATE-041 became able to fire, say which condition "
-        "changed; if CANNOT_FIRE_WITHOUT was cleared, that is the edit this task refused."
+    assert "51 / 79 distinct" in out, (
+        "effective coverage is not where stage 2 left it — say which rule became able to reach "
+        "a verdict, or which CANNOT_FIRE_WITHOUT was cleared"
     )
+    # THE DISTINGUISHING EVIDENCE, and it is not the coverage number. The refused edit would
+    # have SHORTENED this list; nine rules of honest work left it exactly as it was.
     assert "implemented but CANNOT FIRE    6 distinct" in out
+    assert "GATE-040" in out and "GATE-041" in out
+
+    # And the +1 is attributable: exactly one of the nine is HARD_GATE, so exactly one lands in
+    # the 79-rule population. A figure whose movement cannot be attributed is not evidence.
+    hard = [
+        rid for rid in ("GRADE-032", "GRADE-027", "GRADE-028", "GATE-035", "GATE-039",
+                        "GRADE-036", "GRADE-037", "GRADE-038", "GRADE-034")
+        if contract.rule(rid).get("enforceability") == "HARD_GATE"
+    ]
+    assert hard == ["GATE-035"], f"the +1's attribution changed: {hard}"
+
+
+# ===========================================================================
+# STAGE 2 — GATE-035, GATE-039, GRADE-034, GRADE-036, GRADE-037, GRADE-038
+# ===========================================================================
+
+from app.services.rules.gate_035_structural_momentum import (  # noqa: E402
+    MOMENTUM_MODULES,
+    SELF_EXEMPT,
+    MomentumIsStructural,
+    MomentumScoreIsNotDoctrine,
+    _tokens,
+)
+from app.services.rules.gate_039_do_not_fade import DoNotFadeABulletTrain  # noqa: E402
+from app.services.rules.grade_036_momentum_preference import (  # noqa: E402
+    PURPOSE_FIELDS,
+    ImbalancePurposeTest,
+    PreferSlowedMomentum,
+    TwoTierTrendGrade,
+)
+
+
+def test_gate_035_passes_over_the_cluster_and_publishes_its_denominator():
+    values = MomentumIsStructural.evaluate().values
+    assert MomentumIsStructural.evaluate().verdict == "PASS"
+    assert values["modules_examined"] > 0, "a clean result over zero modules is not a result"
+    assert values["modules_examined"] == len(MOMENTUM_MODULES) - len(values["modules_exempt"])
+    assert values["modules_missing"] == []
+
+
+def test_gate_035_can_see_a_banned_input_when_one_is_there(tmp_path):
+    """MUST-FIRE on the guard itself. The offenders map must be reachable."""
+    planted = tmp_path / "grade_planted.py"
+    planted.write_text("def f(atr_ratio=0.8):\n    return atr_ratio\n", encoding="utf-8")
+
+    import app.services.rules.gate_035_structural_momentum as mod
+
+    original = mod._RULES_DIR
+    try:
+        mod._RULES_DIR = tmp_path
+        offenders = MomentumIsStructural.offenders(("grade_planted.py",))
+    finally:
+        mod._RULES_DIR = original
+
+    assert offenders, "the guard cannot see a planted banned input"
+    assert "atr_ratio" in offenders["grade_planted.py"]
+
+
+def test_the_token_split_does_not_collide_with_ordinary_english():
+    """MEASURED, NOT FORESEEN. The first version matched `atr` inside `RISK_MATRIX_MODULE` —
+    m-**atr**-ix — and reported a banned ATR input inside the guard that bans ATR inputs."""
+    assert "atr" not in _tokens("RISK_MATRIX_MODULE")
+    assert "atr" in _tokens("atr_period")
+    assert "atr" in _tokens("computeAtrRatio")
+
+
+def test_the_enforcing_module_is_exempt_from_its_own_scan_and_says_so():
+    """`B136`'s control-token contamination, hit while citing `B136`.
+
+    `GRADE-034` cannot forbid a *score* without naming one — `MomentumScoreIsNotDoctrine`,
+    `SCORE_FRAGMENTS`, `scoring` — so the vocabulary the guard needs is the vocabulary it bans.
+    **A prohibition guard cannot be inside its own population**, and the exemption is exactly one
+    module, named, and PUBLISHED in `values` rather than silently applied.
+    """
+    assert SELF_EXEMPT == "gate_035_structural_momentum.py"
+    assert SELF_EXEMPT in MOMENTUM_MODULES, "exempting a module outside the set would hide nothing"
+    for values in (MomentumIsStructural.evaluate().values,
+                   MomentumScoreIsNotDoctrine.evaluate().values):
+        assert values["modules_exempt"] == [SELF_EXEMPT]
+
+
+def test_grade_034_publishes_its_arm_count_so_a_dropped_assertion_is_visible():
+    """A guard that stops checking a property while still reporting PASS is `B150`'s shape: the
+    count of assertions stops corresponding to the count of properties checked."""
+    values = MomentumScoreIsNotDoctrine.evaluate().values
+    assert values["arms_checked"] == values["arms_expected"] == 3
+    assert values["arms_failed"] == []
+
+
+def test_grade_034s_coupling_arm_names_a_real_path():
+    """RANKED FIRST because it is the only arm naming a PATH rather than a vocabulary, and the
+    only one with a live consequence — the scale it names sets `risk_pct`."""
+    from app.services.rules.gate_035_structural_momentum import (
+        RISK_MATRIX_MODULE, RISK_SCALE_MODULE, imported_modules,
+    )
+
+    matrix = RULES / f"{RISK_MATRIX_MODULE}.py"
+    assert matrix.exists()
+    assert any(RISK_SCALE_MODULE in m for m in imported_modules(matrix)), (
+        "the coupling this arm guards no longer exists — the arm is asserting a stale path"
+    )
+    arm = MomentumScoreIsNotDoctrine.arms()["no_path_from_momentum_to_the_risk_scale"]
+    assert arm["held"] is True and arm["offenders"] == {}
+
+
+def test_gate_039_computes_no_trigger_and_says_the_rule_says_so():
+    """*"Documented preference with NO automatable trigger."* A rule that says it has no trigger
+    and is given one is off-doctrine even if the trigger is sensible."""
+    values = DoNotFadeABulletTrain.evaluate(fade_proposed=True).values
+    assert values["automatable_trigger"] is False
+    assert "no automatable trigger" in values["declared_preference"].lower()
+
+
+def test_gate_039_is_NOT_APPLICABLE_when_nobody_is_fading():
+    """A rule about what to do BEFORE fading has nothing to say when no fade was proposed.
+    `None` means NOT ASKED and is distinct from `False`, which means considered and declined."""
+    assert DoNotFadeABulletTrain.evaluate().verdict == "NOT_APPLICABLE"
+    assert DoNotFadeABulletTrain.evaluate(fade_proposed=False).verdict == "NOT_APPLICABLE"
+    assert DoNotFadeABulletTrain.evaluate(fade_proposed=True).verdict == "FAIL", (
+        "five of six checklist questions have no producer, so a proposed fade cannot pass today"
+    )
+
+
+def test_gate_039_reads_the_checklist_rather_than_rebuilding_it():
+    """A second construction of the same list is `GATE-011`'s shape."""
+    from app.services.rules.grade_032_bullet_train import BulletTrainRegime
+
+    assert (
+        DoNotFadeABulletTrain.evaluate(fade_proposed=True).values["checklist"]
+        == BulletTrainRegime.checklist(None)
+    )
+
+
+def test_grade_037s_two_tiers_separate_on_mitigation_and_not_on_size():
+    """THE RULE THE WHOLE CLUSTER LEANS ON. A hundred-unit filled box and a one-unit unfilled one
+    must land in different tiers, which no size test could produce."""
+    consumed_only = MomentumLeg(0, 10, "UP", imbalances=(_imb(1, fill_state="FILLED", width=1000.0),))
+    plus_momentum = MomentumLeg(
+        0, 10, "UP",
+        imbalances=(_imb(1, fill_state="FILLED", width=1000.0), _imb(2, width=0.01)),
+    )
+    nothing = MomentumLeg(0, 10, "UP", imbalances=(_imb(1),))
+
+    assert TwoTierTrendGrade.grade(consumed_only) == "STRONG_TREND"
+    assert TwoTierTrendGrade.grade(plus_momentum) == "STRONG_TREND_PLUS_MOMENTUM"
+    assert TwoTierTrendGrade.grade(nothing) == "NOT_A_TREND", (
+        "a leg that consumed no imbalance is not a weak trend — it is not this rule's subject"
+    )
+
+
+def test_grade_037_reports_both_sides_of_the_count_the_statement_asks_for(corpus):
+    """*"Count the IMB boxes that were retested versus the Momentum IMB boxes that never were."*
+    A comparison, and either number alone cannot express it."""
+    _b, _s, _br, _inv, legs = corpus
+    leg = next(l for l in legs if len(l.imbalances) > 1)
+    values = TwoTierTrendGrade.evaluate(leg).values
+
+    assert values["retested_boxes"] + values["never_retested_boxes"] == values["imbalances_in_leg"]
+    assert "fill_state" in values["discriminator"]
+
+
+def test_grade_037_discriminates_on_real_bars(corpus):
+    _b, _s, _br, _inv, legs = corpus
+    tiers = {TwoTierTrendGrade.grade(l) for l in legs}
+    assert tiers == {"NOT_A_TREND", "STRONG_TREND", "STRONG_TREND_PLUS_MOMENTUM"}, (
+        f"a tier is unreachable on real bars: {tiers}"
+    )
+
+
+def test_grade_036_is_NOT_APPLICABLE_when_there_is_nothing_to_compare():
+    one = MomentumLeg(0, 10, "UP", imbalances=(_imb(1),))
+    slowing = MomentumLeg(0, 10, "UP", imbalances=(_imb(1, width=50.0), _imb(2, width=5.0)))
+    speeding = MomentumLeg(0, 10, "UP", imbalances=(_imb(1, width=5.0), _imb(2, width=50.0)))
+
+    assert PreferSlowedMomentum.evaluate(one).verdict == "NOT_APPLICABLE"
+    assert PreferSlowedMomentum.evaluate(slowing).verdict == "PASS"
+    assert PreferSlowedMomentum.evaluate(speeding).verdict == "FAIL"
+    assert PreferSlowedMomentum.evaluate(speeding).values["deviation_is_a_flag_not_a_failure"] is True
+
+
+def test_grade_038_reports_its_own_declared_inputs_as_unpopulated(corpus):
+    """T-0033's SUBJECT, FOUND BY THE RULE THOSE FIELDS WERE DECLARED FOR — the best available
+    witness. **A rule reporting that its own declared inputs have no producer is a stronger
+    finding than a verdict computed from defaults.**"""
+    _b, _s, _br, inventory, _l = corpus
+    ev = ImbalancePurposeTest.evaluate(inventory)
+
+    assert ev.verdict == "NOT_APPLICABLE", "a verdict here would be computed from None"
+    assert ev.values["imbalances_examined"] == len(inventory) > 100
+    assert ev.values["imbalances_classified"] == 0
+    assert set(ev.values["fields_not_read"]) == {f for f, _ in PURPOSE_FIELDS}
+
+
+def test_grade_038s_location_rule_is_implemented_and_reachable():
+    """The rule is not merely deferred: the day the fields are populated, the INDUCEMENT versus
+    PERMANENT_TREND_CHANGE distinction already works. Asserted on constructed imbalances so the
+    NOT_READ above is a statement about the DATA, not about missing logic."""
+    import dataclasses
+
+    base = _imb(1)
+    before = dataclasses.replace(base, purpose_verdict="FAILED", target_cleared_at_failure=False)
+    after = dataclasses.replace(base, purpose_verdict="FAILED", target_cleared_at_failure=True)
+    served = dataclasses.replace(base, purpose_verdict="SERVED")
+
+    assert ImbalancePurposeTest.classify(before)["meaning"] == "INDUCEMENT"
+    assert ImbalancePurposeTest.classify(after)["meaning"] == "PERMANENT_TREND_CHANGE"
+    assert ImbalancePurposeTest.classify(served)["meaning"] == "SERVED"
+    assert ImbalancePurposeTest.classify(base)["not_read"] == "purpose_verdict"
+
+
+def test_all_nine_targets_are_now_implemented_and_gate_034_still_is_not():
+    """THE WAVE'S OWN CENSUS, with the must-miss arm on the same lookup."""
+    impl = implementations()
+    for rid in ("GRADE-032", "GRADE-027", "GRADE-028", "GATE-035", "GATE-039",
+                "GRADE-036", "GRADE-037", "GRADE-038", "GRADE-034"):
+        assert rid in impl, f"{rid} was named by T-0039 and is not implemented"
+
+    assert "GATE-034" not in impl, "GATE-034 is WITHDRAWN and a wave must not complete it"
+    assert contract.rule("GATE-034").get("status") == "WITHDRAWN"
+
+
+def test_the_guarded_set_is_the_cluster_this_task_built():
+    """MOMENTUM_MODULES is ENUMERATED — these rules share no registry `layer` and no filename
+    pattern, so `T-0032`'s derivation has nothing to key on. **This is the converse assertion:**
+    every module implementing one of the nine must be in the guarded set, so a member added
+    without being watched fails BY NAME rather than going quietly unguarded."""
+    impl = implementations()
+    modules = {
+        impl[rid].__module__.rsplit(".", 1)[-1] + ".py"
+        for rid in ("GRADE-032", "GRADE-027", "GRADE-028", "GATE-035", "GATE-039",
+                    "GRADE-036", "GRADE-037", "GRADE-038", "GRADE-034")
+    }
+    missing = modules - set(MOMENTUM_MODULES)
+    assert not missing, f"momentum modules outside GATE-035's guarded set: {sorted(missing)}"

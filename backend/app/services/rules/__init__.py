@@ -237,6 +237,24 @@ from app.services.rules.gate_041_reverse_switch import (  # noqa: F401
     MANDATORY_CONDITION,
     ReverseSwitchConfirmations,
 )
+from app.services.rules.gate_039_do_not_fade import (  # noqa: F401
+    DECLARED_PREFERENCE,
+    DoNotFadeABulletTrain,
+)
+from app.services.rules.grade_036_momentum_preference import (  # noqa: F401
+    PURPOSE_FIELDS,
+    ImbalancePurposeTest,
+    PreferSlowedMomentum,
+    TwoTierTrendGrade,
+)
+from app.services.rules.gate_035_structural_momentum import (  # noqa: F401
+    BANNED_INPUT_FRAGMENTS,
+    MOMENTUM_MODULES,
+    MomentumIsStructural,
+    MomentumScoreIsNotDoctrine,
+    code_identifiers,
+    imported_modules,
+)
 from app.services.rules.grade_027_momentum_signs import (  # noqa: F401
     MOMENTUM_CLASSIFICATION_NOTE,
     ForwardMomentumSigns,
