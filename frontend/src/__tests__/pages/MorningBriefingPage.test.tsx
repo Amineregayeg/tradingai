@@ -93,7 +93,13 @@ describe('MorningBriefingPage — the unknown-impact bucket', () => {
     expect(screen.queryByText(/^LOW IMPACT$/)).not.toBeInTheDocument()
   })
 
-  it('CONTROL: the known tiers still render, so the change is additive', async () => {
+  it('MIXED — known and unclassified render together. NOT a control: this arm FAILS on the pre-fix page', async () => {
+    // Labelled `CONTROL` in the first draft, and Review caught that the label was wrong: the
+    // fixture carries an unclassified event, so the assertion goes RED on the page this task
+    // replaced. An arm that discriminates is a must-fire arm no matter what it is called, and
+    // calling it a control claims the opposite — that it holds either way.
+    // The genuine control is `a known impact never lands in the residual bucket` below, whose
+    // fixture is HIGH_EVENT alone and which passes on both pages.
     serve([UNKNOWN_EVENT, HIGH_EVENT])
     render(<MorningBriefingPage />)
 
