@@ -724,7 +724,7 @@ def test_an_inverted_or_zero_stop_is_refused():
 # ---------------------------------------------------------------------------
 # Criterion 7 — shadow only. Nothing wires this into the live exit path.
 # ---------------------------------------------------------------------------
-def test_no_live_or_broker_module_imports_the_exit_model():
+def test_the_exit_model_IS_wired_into_live_and_executes_nothing():
     """CRITERION 7. A green suite here must not be readable as a live 70/30 exit.
 
     `broker/paper.py:on_tick` still closes positions WHOLE at sl/tp. Wiring this in is a
@@ -761,12 +761,20 @@ def test_no_live_or_broker_module_imports_the_exit_model():
     )
 
     # AND IT STILL EXECUTES NOTHING. `close_position` is never called with a lot_size anywhere
-    # under live/ or broker/ outside the adapters' own definitions, so no tranche is taken.
-    # Stage B is what changes that, and it is gated on this record being non-empty and read.
+    # under the directories walked below, so no tranche is taken. Stage B is what changes that,
+    # and it is gated on this record being non-empty and read.
+    #
+    # BOTH DIRECTORIES ARE WALKED, and the first version of this comment claimed two while the
+    # loop iterated one -- `for sub in ("live",)`. Latent (no partial call exists under
+    # `broker/` outside the adapters' own definitions) and load-bearing the day Stage B lands.
+    # B149's shape: defined one way and described another, in adjacent lines.
     import ast
 
+    for sub in ("live", "broker"):
+        assert (app_dir / "services" / sub).is_dir(), f"{sub}/ is not where this walk looks"
+
     partial_calls = []
-    for sub in ("live",):
+    for sub in ("live", "broker"):
         for path in (app_dir / "services" / sub).rglob("*.py"):
             for node in ast.walk(ast.parse(path.read_text())):
                 if (isinstance(node, ast.Call)
@@ -780,21 +788,43 @@ def test_no_live_or_broker_module_imports_the_exit_model():
     )
 
 
-def test_the_paper_broker_still_closes_whole_positions():
-    """The finding this task was asked to report, asserted so it cannot rot silently.
+def test_a_tranche_IS_representable_and_it_arrived_without_changing_the_shape():
+    """THE CLAIM THIS TEST CARRIED IS NOW FALSE, AND ITS TRIPWIRE DID NOT FIRE.
 
-    `PaperPosition` has ONE `units`, ONE `sl`, ONE `tp` and `_settle` pops the whole
-    position. There is no representation of a tranche, so the 70/30 model does not fit the
-    existing shape — recorded in KNOWN_ISSUES rather than forced.
+    Through `T-0022` the docstring said: *"There is no representation of a tranche, so the
+    70/30 model does not fit the existing shape."* **`T-0038` half 1 made a tranche
+    representable** — `_settle(..., units=...)` settles part of a position and leaves the
+    remainder open by REDUCING `pos.units`.
+
+    **So the property changed and the shape did not.** And the failure message named this exact
+    event — *"If it grew tranches, the T-0022 finding is stale and the wiring task has
+    started"* — **while keying on `__slots__` GROWING.** The tranche arrived by MUTATION, the
+    slots are unchanged, and the test stayed green through the event it was written to catch.
+
+    > **A tripwire keyed on a PROXY for the event rather than on the event.** The proxy was
+    > reasonable — a new field is the obvious way to add a tranche — and the implementation
+    > took the other route. *Same lesson as the `320`-bar tripwire: name the property, not the
+    > shape it is expected to take.*
+
+    The `__slots__` assertion is KEPT, because an unexpected field on a broker position is
+    still worth catching. What is retired is the claim attached to it.
     """
-    from app.services.broker.paper import PaperPosition
+    from app.services.broker.paper import PaperBroker, PaperPosition
 
     assert PaperPosition.__slots__ == (
         "id", "pair", "direction", "entry", "units", "sl", "tp", "open_time", "mark"
-    ), (
-        "PaperPosition changed shape. If it grew tranches, the T-0022 finding is stale and "
-        "the wiring task has started; if it grew something else, check this still holds."
+    ), "PaperPosition grew a field — check what it is for and whether this test still holds"
+
+    # THE PROPERTY, asserted directly rather than through a proxy: a partial settle leaves the
+    # position open with less of it. This is what `__slots__` could not see.
+    import inspect
+
+    source = inspect.getsource(PaperBroker._settle)
+    assert "units" in inspect.signature(PaperBroker._settle).parameters, (
+        "the partial path is gone — T-0038 half 1 was reverted and the 70/30 model is again "
+        "unrepresentable in simulation"
     )
+    assert "remaining" in source, "a partial settle must leave a remainder, not just close less"
 
 
 # ---------------------------------------------------------------------------

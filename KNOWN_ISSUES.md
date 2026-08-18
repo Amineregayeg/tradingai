@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-18 (B162 — `strategy_step` SPENT THE PARTIAL'S CONSTANT ON THE TARGET. `backtest/engine.py` has a real two-stage exit: `:464` computes `entry + rr_partial * risk`, `:469` banks `partial_frac * rr_partial` there, sets a trail and RUNS THE REMAINDER, and `:511` blends `partial_frac * rr_partial + (1 - partial_frac) * r`. `strategy_step.py:202` passes that same `entry + rr_partial * risk` as the Signal's **`tp`** — a FULL exit — and uses `partial_frac` ZERO times. So it is not that two constants coincide: ONE CONSTANT IS DOING A JOB IT WAS NOT NAMED FOR, in the file that places live orders. Consequences: every live signal's take-profit sits exactly on `EXIT-001`'s 2R partial level, so under the ratified model every live trade is the DEGENERATE RUNNER and the ratified 30% runner CANNOT EXIST on the live path; and the backtest and the live path are DIFFERENT EXIT MODELS, so a strategy validated in the backtest does not describe what the live path does — the same validation-versus-execution divergence as `B161`'s sibling in the broker layer, found in the same task, in opposite components. Surfaced by `T-0038`'s Stage A shadow rather than asserted about it, with a must-miss arm — a 4R target DOES produce a runner — so the zero is a fact about the config and not about the recorder.)
+Last updated: 2026-08-18 (B163 — AN INVERSION IS A TWO-PART EDIT AND ONLY THE EXECUTABLE HALF FAILS LOUDLY. Three residues in one file, one commit, all in artefacts whose assertions had just been correctly inverted: a test NAME stating the negation of what it asserts (`test_no_live_or_broker_module_imports_the_exit_model`, asserting `importers` NON-EMPTY — and a failure report prints the NAME, not the comment beside it); a comment claiming two directories over a loop iterating one (`# ...under live/ or broker/` over `for sub in ("live",)`); and a sibling test asserting GREEN a finding closed in the same commit. THE THIRD IS THE SHARPEST: `test_the_paper_broker_still_closes_whole_positions` said "there is no representation of a tranche" and its failure message named the exact event — "If it grew tranches, the T-0022 finding is stale and the wiring task has started" — while keying on `__slots__` GROWING. `T-0038` half 1 added the tranche by REDUCING `pos.units`, so the property changed, the shape did not, and the tripwire passed through the event it was written to catch. A TRIPWIRE KEYED ON A PROXY FOR THE EVENT RATHER THAN THE EVENT, and worse than one naming nothing, because the message is evidence to a reader that the event was covered. All three fixed; the `__slots__` assertion KEPT and the claim attached to it replaced with a direct assertion on the property. Standing practice: after flipping an assertion, grep the name, the docstring, the inline comments and the tests either side for the claim just retired.)
 
 ---
 
@@ -2440,6 +2440,53 @@ register that records its own control pairs is exactly the corpus that will accu
 searched, at the moment of use** — not reused from a previous entry. **Prefer a token containing the
 task id and a nonce over a shared house token like `zzz_absent`**, because a shared one accumulates
 citations until it is present everywhere.
+
+### B163 — an inversion is a TWO-PART edit, and only the executable half fails loudly
+
+**Found by Review and the Manager in `T-0038`, in artefacts Execute had just correctly inverted.
+Three instances, one file, one commit.**
+
+    the guard's NAME       test_no_live_or_broker_module_imports_the_exit_model
+                           ...asserts `importers` NON-EMPTY. The name states the negation.
+    the guard's SCOPE      # ...anywhere under live/ or broker/...
+                           for sub in ("live",):        ONE element. Two directories described.
+    the sibling's CLAIM    "There is no representation of a tranche, so the 70/30 model does not
+                           fit the existing shape" -- asserted GREEN in the commit that made a
+                           tranche representable.
+
+**What it is:** when a test's meaning is reversed, the assertion, the name, the comment and the
+neighbouring test all carry the old claim. Changing the assertion is the only one of the four that
+announces itself — the other three go on stating the retired position, in the artefact whose whole
+job is to be read. **The name is what a failure report prints.**
+
+**Why it matters:** each residue is a lie with an audience. A future reader greps the NAME and
+concludes the exit model is unwired. A future author adds a partial call under `broker/` and the
+comment says it is watched. And the third is worse than stale prose — see below.
+
+## THE THIRD IS A TRIPWIRE THAT ANTICIPATED THE EVENT AND WATCHED THE WRONG SIGNAL
+
+    docstring   "no representation of a tranche ... does not fit the existing shape"
+    assertion   PaperPosition.__slots__ == (... 'units', 'sl', 'tp', ...)
+    message     "If it grew tranches, the T-0022 finding is stale and the wiring task has started"
+    event       T-0038 half 1 made a tranche representable -- by REDUCING pos.units through
+                _settle(..., units=...), NOT by adding a field
+    result      __slots__ unchanged -> the test PASSED THROUGH THE EVENT IT WAS WRITTEN TO CATCH
+
+**The property changed and the shape did not.** The tripwire keyed on a PROXY for the event — a new
+field is the obvious way to add a tranche — and the implementation took the other route.
+
+> **Same defect as the `320`-bar tripwire: assert the PROPERTY, not the shape it is expected to take.**
+> A tripwire that names the event in its failure message and keys on a proxy is more dangerous than
+> one that names nothing, because the message is evidence to a reader that the event was covered.
+
+**Fix applied:** all three corrected. The `__slots__` assertion is KEPT — an unexpected field on a
+broker position is still worth catching — and the claim attached to it is retired and replaced by a
+direct assertion on the property (`_settle` takes `units`, and a partial leaves a `remaining`).
+
+**Standing practice:** an inversion is not done when the assertion flips. **Grep the name, the
+docstring, the inline comments and the tests either side of it for the claim you just retired** —
+Execute made exactly this correction in `T-0037` (`CONTROL` renamed to `MIXED ... NOT a control`), so
+the practice is known; what fails is remembering that the descriptive half exists.
 
 ### B162 — `strategy_step` spent the PARTIAL's constant on the TARGET, and dropped the fraction
 
