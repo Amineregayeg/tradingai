@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-18 (B151 — a control pair drawn from LIVE DATA validates the predicate's agreement with today, not the EDIT. The three-leg session-identity predicate was fixed from `abs(delta) > SLACK` to a one-sided `delta > SLACK`, and shipped with a two-arm control — a genuine row and a recycled pid — that returns the IDENTICAL verdict under both versions, so it passes just as cleanly on the code being replaced. Measured: the only arm that separates them is a row REWRITTEN after its own process started, `-3600.0s`, which `abs()` rejects and one-sided correctly passes — and that case is absent from the corpus BY CONSTRUCTION, because it is the case the check exists for. General form: a control validates exactly the thing it VARIES, so arms drawn from live data test the system while only a FABRICATED arm on the absent case tests the change; if it cannot be fabricated the check is untested however many real rows pass. Second instance in the same fix: a restructure broke the map, its output went empty, and empty reads as `no rows matched` rather than `the function never ran` — `register_commit_check.py`'s own founding principle, written in that file in capitals twice, landing again the same night.)
+Last updated: 2026-08-18 (B152 — three completed full-suite measurements were lost in one night to THREE different causes, and the first fix looked complete: two to `/tmp` scratchpad wipes, then the very next run to a process-group kill at session teardown. Moving the OUTPUT out of `/tmp` fixed the storage class and did nothing for the process lifetime; the third run's file survived INTACT and truncated at `[ 84%]`, which is a well-formed partial result that reads as a finished one to anyone who does not check the tail — the same family as `B144`'s cancelled CI run. The fix is two parts and either alone is insufficient: `setsid` so `SID == PID` and a teardown's process-group kill misses it, AND a durable non-`/tmp` path with `git status --porcelain` captured beside the figure. Measured: the detached run survived this session's own `claude` process going `1750 -> 1675` mid-suite. General form: a measurement that must outlive the shell that started it has to escape BOTH that shell's filesystem scratch AND its process group, and where an artefact can be truncated it needs a terminal sentinel.)
 
 ---
 
@@ -2440,6 +2440,58 @@ register that records its own control pairs is exactly the corpus that will accu
 searched, at the moment of use** — not reused from a previous entry. **Prefer a token containing the
 task id and a nonce over a shared house token like `zzz_absent`**, because a shared one accumulates
 citations until it is present everywhere.
+
+### B152 — THREE full-suite measurements lost in one night to THREE different causes, and the first fix looked complete
+
+**Established by Execute during `T-0032` and `T-0035`. Id from `bus.py bid`, not retyped from a peer
+message. Landed after `B150` and `B151`:
+`header_lag()` takes `newest = max(added)` by numeric id, so an out-of-order landing forces `Last
+updated:` to name something older than the newest entry — the rot the check exists to prevent.**
+
+#### The three losses, which look identical from the outside and share no cause
+
+    1  00:17:59   host reboot           scratchpad wiped        suite32k.out gone, ~11 min
+    2  ~01:56     scratchpad wiped      again, mid-run          file DELETED outright, ~11 min
+    3  ~02:02     session teardown      process-group kill      FILE INTACT, truncated at 84%
+
+**Every one of them presents as "an incomplete measurement," so fixing one felt like fixing the
+problem.** After loss 2 I moved output to `agents/tasks/T-NNNN/_runs/` — outside the repo, so no
+write-hold; outside `/tmp`, so no wipe. **Loss 3 happened anyway, to the very next run**, because
+the storage class and the process lifetime are independent and I had only fixed one.
+
+> **LOSS 3 IS THE DANGEROUS ONE BECAUSE THE FILE SURVIVED.** A missing file is loud. **A file ending
+> `..................` at `[ 84%]` is a well-formed partial result that reads as a finished one to
+> anyone who does not check the tail.** Same family as `B144`'s cancelled CI run and the demoted
+> `Seat:` trailer: **the artefact does not distinguish "completed" from "stopped."**
+
+#### THE FIX IS TWO PARTS AND EITHER ALONE IS INSUFFICIENT
+
+    setsid nohup <cmd> > agents/tasks/T-NNNN/_runs/<name>.txt 2>&1 < /dev/null &
+    ps -o pid,sid -p <pid>     # SID MUST EQUAL PID -- that is the check, not the flag
+
+**`setsid` makes the run its own session leader, so a teardown that kills the shell's process group
+misses it.** `$!` is the `setsid` wrapper and exits immediately — **find the real pid with `pgrep`,
+or you will record a pid that is already dead** and conclude the run died.
+
+**MEASURED, not argued:** the run at pid `2377` survived this session's own `claude` process going
+`1750 -> 1675` mid-suite, with the conversation continuous across the restart.
+
+    ps -o pid,sid,etimes -p 2377   ->   2377  2377  209    still running, at 84%
+
+#### AND IT MAKES A `B63` FIGURE MEAN WHAT `B63` SAYS IT MEANS
+
+`B63`: *a figure without `porcelain 0/0` beside it is not a baseline.* **I had been satisfying that
+by HAVING READ the porcelain — in a shell that then died.** The rule is about the figure carrying its
+tree state; **a provenance that evaporates with the process meets the letter and none of the point.**
+So `git status --porcelain` is now a FILE in the same directory as the run, written before it starts.
+
+#### The general form, which is not about pytest
+
+> **A measurement that must outlive the shell that started it has to escape BOTH that shell's
+> filesystem scratch AND its process group.** Two lifetimes, one symptom. **And when an artefact can
+> be truncated, it needs a terminal sentinel** — pytest supplies one (`N passed in Xs`), so a run
+> file not ending in a summary line is detectably incomplete without knowing what the total was.
+> *Nothing else this loop writes has that property.*
 
 ### B151 — a control pair drawn from LIVE DATA validates the predicate's agreement with today, not the EDIT: where the discriminating case is absent from the corpus by nature, the arm must be FABRICATED or the change is untested
 
