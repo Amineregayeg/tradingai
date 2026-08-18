@@ -42,7 +42,12 @@ _COUNTRY_TO_CURRENCY: dict[str, str] = {
 # Pair → set of two currencies
 _PAIR_CURRENCIES: dict[str, list[str]] = {}
 
-# Finnhub impact values → normalised strings
+# Finnhub impact values → normalised strings.
+#
+# DO NOT WIDEN THIS MAP TO SILENCE AN UNKNOWN. A wider map makes the NEXT unrecognised
+# value silently "low" again — the same shape as loosening a grep pattern to clear a
+# false positive, which `check_partial_rules.py` refuses in its own failure message.
+# An unrecognised value is a fact about the provider and belongs in UNKNOWN_IMPACT.
 _IMPACT_MAP: dict[str, str] = {
     "1": "low",
     "2": "medium",
@@ -52,8 +57,57 @@ _IMPACT_MAP: dict[str, str] = {
     "high": "high",
 }
 
+#: The third state. An impact we could not resolve is NOT "low" (T-0035, B126 1a).
+#:
+#: **THIS IS DELIBERATELY NON-BLOCKING.** `is_in_blackout` skips anything that is not
+#: "high", so an UNKNOWN event is treated exactly as a "low" one was — the recording
+#: changes and the decision does not. Whether an unclassifiable event should BLOCK is a
+#: safety-versus-availability trade on live trading; it is Malek's call, it needs the
+#: count `resolution_stats()` starts accruing here, and `B126` criterion 1b is explicit
+#: that the operational cost is unknowable without it.
+UNKNOWN_IMPACT = "unknown"
+
+#: Why an impact resolved the way it did. The three are NOT interchangeable:
+#: `_parse_events` has TWO independent fail-open defaults and a fixture that exercises
+#: one does not exercise the other.
+RESOLVED = "resolved"        # the provider sent a value this map knows
+ABSENT = "absent"            # neither `impact` nor `importance` was present or truthy
+UNRECOGNISED = "unrecognised"  # a value was sent and this map does not know it
+
 _CACHE_KEY_PREFIX = "calendar"
 _CACHE_TTL_SECONDS = 3600  # 1 hour
+
+
+def _resolve_impact(item: dict) -> tuple[str, str | None, str]:
+    """Return `(impact, raw_value, reason)` for one raw provider event.
+
+    **THE OLD LINE COLLAPSED THREE DIFFERENT SITUATIONS INTO ONE ANSWER:**
+
+        impact_raw = str(item.get("impact") or item.get("importance") or "low")
+        impact = _IMPACT_MAP.get(impact_raw.lower(), "low")
+
+    **Two independent defaults, and a fix that handled only the second would pass three
+    of the four fixtures `T-0035` names.** `{}`, `{"impact": ""}` and `{"impact": None}`
+    are decided by the `or` chain and never reach the dict lookup at all; only
+    `{"impact": "tier-1"}` reaches the dict's default. Both said `"low"`, and `"low"`
+    is a CLAIM about the event rather than an admission that we have none.
+
+    **`raw_value` is returned, and kept on the event, because criterion 2 needs to count
+    WHICH values the provider actually sends.** A count of unknowns tells you how often;
+    the values tell you whether the map is missing a tier or the provider changed its
+    schema, and those have opposite fixes.
+    """
+    raw = item.get("impact")
+    if raw is None or str(raw).strip() == "":
+        raw = item.get("importance")
+    if raw is None or str(raw).strip() == "":
+        return UNKNOWN_IMPACT, None, ABSENT
+
+    raw_str = str(raw).strip()
+    mapped = _IMPACT_MAP.get(raw_str.lower())
+    if mapped is None:
+        return UNKNOWN_IMPACT, raw_str, UNRECOGNISED
+    return mapped, raw_str, RESOLVED
 
 
 def _pair_to_currencies(pair: str) -> list[str]:
@@ -74,9 +128,13 @@ class CalendarEvent:
     time: datetime
     event: str
     currency: str
-    impact: str  # "high", "medium", "low"
+    impact: str  # "high", "medium", "low", or UNKNOWN_IMPACT
     forecast: str | None = None
     previous: str | None = None
+    #: The provider's own string, kept verbatim when it did not resolve. `None` means the
+    #: provider sent nothing to keep — which is a DIFFERENT fact from sending something
+    #: we could not read, and the two have opposite fixes.
+    impact_raw: str | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -86,10 +144,13 @@ class CalendarEvent:
             "impact": self.impact,
             "forecast": self.forecast,
             "previous": self.previous,
+            "impact_raw": self.impact_raw,
         }
 
     @classmethod
     def from_dict(cls, d: dict) -> "CalendarEvent":
+        # `.get`, not `[...]`: a Redis entry cached BEFORE this field existed has a live
+        # TTL of up to an hour, so the first hour after any deploy reads dicts without it.
         return cls(
             time=datetime.fromisoformat(d["time"]),
             event=d["event"],
@@ -97,6 +158,7 @@ class CalendarEvent:
             impact=d["impact"],
             forecast=d.get("forecast"),
             previous=d.get("previous"),
+            impact_raw=d.get("impact_raw"),
         )
 
 
@@ -108,11 +170,45 @@ class CalendarService:
         calendar_service.init(api_key=settings.finnhub_api_key, redis_client=redis)
         events = await calendar_service.get_today_events()
         in_blackout, next_event = await calendar_service.is_in_blackout("EURUSD", 30)
+
+    An event's `impact` is one of "high", "medium", "low" or `UNKNOWN_IMPACT`. **The
+    fourth is not a severity — it is the absence of one**, and it is non-blocking by
+    construction; see `is_in_blackout` and `resolution_stats`.
     """
 
     def __init__(self) -> None:
         self._redis: Any = None
         self._api_key: str = ""
+        # T-0035 criterion 2. Per-instance, not module-level: production has one
+        # singleton so this IS the process count, and a test constructing its own
+        # service gets a clean slate rather than whatever ran before it.
+        self._impact_resolution: dict[str, int] = {RESOLVED: 0, ABSENT: 0, UNRECOGNISED: 0}
+        self._unrecognised_values: dict[str, int] = {}
+
+    def resolution_stats(self) -> dict[str, Any]:
+        """Return the impact-resolution counts seen by THIS service since construction.
+
+        **This exists because `B126` criterion 1b is blocked on a count that could not be
+        taken.** The old code coerced an unresolvable impact to `"low"` before anything
+        could observe it, so *"how often does this fire?"* had no answer and the question
+        of whether an unknown event should block could not be decided. **You cannot count
+        what you do not record, so the recording comes first.**
+
+        **`unrecognised_values` is the half that says what to DO about the count.** A high
+        `unrecognised` count with one repeated value means `_IMPACT_MAP` is missing a tier
+        the provider has always sent; the same count spread across many values means the
+        provider's schema moved. **Opposite fixes, and the bare total distinguishes
+        neither** — a figure whose population is unnamed is this register's most repeated
+        finding.
+
+        NOTE the counters advance only on a live PARSE. A cache hit rebuilds events from
+        Redis via `from_dict` and does not re-resolve, so these are counts of parses and
+        not of events served. Stated because the difference is invisible in the number.
+        """
+        return {
+            "counts": dict(self._impact_resolution),
+            "unrecognised_values": dict(self._unrecognised_values),
+        }
 
     def init(self, api_key: str, redis_client: Any) -> None:
         """Initialise the service with API credentials and a Redis client.
@@ -185,6 +281,24 @@ class CalendarService:
         window = timedelta(minutes=blackout_minutes)
 
         for event in events:
+            # T-0035 CRITERION 1, AND IT IS THE LINE THAT MAKES THE CHANGE SAFE.
+            #
+            # `!= "high"` is UNCHANGED, so UNKNOWN_IMPACT skips here exactly as "low" did
+            # and this function's verdict is identical for every input, before and after.
+            # `test_t0035_impact_unknown.py` asserts that pairwise rather than describing
+            # it -- the assertion is what a later seat can re-run.
+            #
+            # STATED SO IT CANNOT EXPIRE QUIETLY: today NOTHING IN PRODUCTION CALLS THIS.
+            # `grep -rn is_in_blackout backend --include=*.py` returns this def, the class
+            # docstring above, and seven test lines. The control arm is `get_today_events`,
+            # which the same command finds at `api/routers/calendar.py:26`. So the live
+            # blast radius of the old fail-open was `GET /calendar/today` and the UI it
+            # feeds -- NOT the engine, whose `engine.py:173` reads a `news_blackout`
+            # boolean that nothing writes (B125).
+            #
+            # T-0036 IS WHAT MAKES THIS LINE MATTER. Making UNKNOWN block is a live
+            # safety-versus-availability decision that needs `resolution_stats()`'s count
+            # and belongs to Malek -- not to whichever seat wires the news seam.
             if event.impact != "high":
                 continue
             if event.currency not in currencies:
@@ -259,8 +373,25 @@ class CalendarService:
             if event_time is None:
                 continue
 
-            impact_raw = str(item.get("impact") or item.get("importance") or "low")
-            impact = _IMPACT_MAP.get(impact_raw.lower(), "low")
+            impact, impact_raw, reason = _resolve_impact(item)
+            self._impact_resolution[reason] = self._impact_resolution.get(reason, 0) + 1
+            if reason == UNRECOGNISED:
+                assert impact_raw is not None  # UNRECOGNISED means a value was present
+                self._unrecognised_values[impact_raw] = (
+                    self._unrecognised_values.get(impact_raw, 0) + 1
+                )
+                logger.warning(
+                    "Calendar impact UNRECOGNISED — recorded as unknown, NOT as low",
+                    impact_raw=impact_raw,
+                    event=str(item.get("event") or item.get("name") or ""),
+                    currency=currency,
+                )
+            elif reason == ABSENT:
+                logger.warning(
+                    "Calendar impact ABSENT — recorded as unknown, NOT as low",
+                    event=str(item.get("event") or item.get("name") or ""),
+                    currency=currency,
+                )
 
             forecast = item.get("estimate") or item.get("forecast")
             previous = item.get("prev") or item.get("previous") or item.get("actual")
@@ -279,6 +410,7 @@ class CalendarService:
                     impact=impact,
                     forecast=fmt_val(forecast),
                     previous=fmt_val(previous),
+                    impact_raw=impact_raw,
                 )
             )
 

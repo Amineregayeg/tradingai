@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-18 (B152 — three completed full-suite measurements were lost in one night to THREE different causes, and the first fix looked complete: two to `/tmp` scratchpad wipes, then the very next run to a process-group kill at session teardown. Moving the OUTPUT out of `/tmp` fixed the storage class and did nothing for the process lifetime; the third run's file survived INTACT and truncated at `[ 84%]`, which is a well-formed partial result that reads as a finished one to anyone who does not check the tail — the same family as `B144`'s cancelled CI run. The fix is two parts and either alone is insufficient: `setsid` so `SID == PID` and a teardown's process-group kill misses it, AND a durable non-`/tmp` path with `git status --porcelain` captured beside the figure. Measured: the detached run survived this session's own `claude` process going `1750 -> 1675` mid-suite. General form: a measurement that must outlive the shell that started it has to escape BOTH that shell's filesystem scratch AND its process group, and where an artefact can be truncated it needs a terminal sentinel.)
+Last updated: 2026-08-18 (B153 — `T-0035` closed the calendar fail-open AT THE SOURCE, and the finding worth carrying is that the obvious fix would have made the thing it was making visible INVISIBLE: `finnhub.py` coerced an unrecognised or missing provider impact to `"low"` through TWO independent defaults, and the only live consumer of that value — `MorningBriefingPage.tsx` — grouped events with `['high','medium','low'].map(...)`, so a third state would have matched no bucket while the empty-state message stayed behind `events.length === 0` and the page drew an empty card in silence. Before the fix the event was VISIBLE AND MISLABELLED; a backend-only fix makes it invisible, which is strictly worse. And `['high','medium','low','unknown']` is the same defect one member over — an enumeration is a claim about its complement and this one had already been wrong once — so the buckets are DERIVED from the values present, the total pill counts what was RENDERED, and the `IMPACT_COLORS[k as keyof typeof]` cast is gone because it defeated the compiler at exactly the point it would have caught the missing key. `is_in_blackout`'s `!= "high"` is untouched and the verdict is asserted identical input-by-input against a reimplementation of the replaced line.)
 
 ---
 
@@ -2440,6 +2440,123 @@ register that records its own control pairs is exactly the corpus that will accu
 searched, at the moment of use** — not reused from a previous entry. **Prefer a token containing the
 task id and a nonce over a shared house token like `zzz_absent`**, because a shared one accumulates
 citations until it is present everywhere.
+
+### B153 — a fix whose purpose was VISIBILITY would have ended in CONCEALMENT, and the obvious repair was the same defect one member over
+
+**Established by Execute during `T-0035`, with the frontend scope ruled in by the Manager on the
+argument below and the enumerated-fix shape caught by Review at PLANNING.** `T-0032` closed the RULE
+half of `B126` criterion `1a`; this closed the SOURCE.
+
+#### The fail-open was TWO defaults, and a fix could pass three of the four fixtures
+
+    :262  str(item.get("impact") or item.get("importance") or "low")   {}, "", None -> the `or` chain
+    :263  _IMPACT_MAP.get(impact_raw.lower(), "low")                   "tier-1"     -> the dict default
+
+**`{}`, `{"impact": ""}` and `{"impact": None}` never reach `:263`, and `{"impact": "tier-1"}` never
+reaches `:262`'s literal.** So the task's four fixtures are a **must-fire inventory**, not a list —
+and a repair that only replaced the dict's default, or that widened the map, would have gone green on
+three of them while leaving the commoner case (a field the provider simply omitted) still saying
+`"low"`. **The tests assert WHICH BRANCH each fixture exercises, not only their shared outcome.**
+
+#### THE FINDING: the only live consumer dropped the new state entirely
+
+The plan said the laundered impact was *"served as tradeable to the engine and to `GET
+/calendar/today`."* **Measured, the first half is false** — `is_in_blackout` has zero production
+callers (control must-hit: `get_today_events` at `api/routers/calendar.py:26`), and `engine.py:173`
+reads a `news_blackout` boolean that nothing writes, `B125`'s dead branch. **So the live surface was
+exactly one path: the API, and the one page that renders it.**
+
+    MorningBriefingPage.tsx:130   ['high','medium','low'].map(...)     an ENUMERATED bucket list
+                          :132    if (filtered.length === 0) return null
+                          :126    events.length === 0 ? "No economic events today"
+                          :117    `${events.length} Total Events`
+
+> **An `"unknown"` event matched no bucket. `events.length > 0`, so the empty-state message did not
+> fire either — the page drew an empty bordered card and said nothing.** *The container cannot
+> distinguish "nothing arrived" from "everything arrived and none of it matched."*
+
+**Before the fix the event was VISIBLE AND MISLABELLED as low. A backend-only fix makes it
+INVISIBLE, which is strictly worse: "visible and wrong" at least gets looked at.** A change whose
+stated purpose is visibility must not end in concealment — **so the frontend SATISFIES the criterion
+rather than widening it**, and a task boundary drawn at the language barrier would have shipped the
+inversion.
+
+#### AND `['high','medium','low','unknown']` IS THE SAME DEFECT ONE MEMBER OVER
+
+**`T-0032`'s cycle-2 finding verbatim: an enumeration is a claim about its complement, and this one
+had already been wrong once.** It fixes today's value and re-arms for the next one the provider
+invents. *My first draft was the enumerated version; Review flagged the SHAPE at `PLANNING` rather
+than at cycle 1.*
+
+    KNOWN_IMPACTS = ['high','medium','low'] as const   what the UI has a DESIGNED APPEARANCE for
+    groupByImpact(events)                              residual = the distinct impacts PRESENT and
+                                                       not in the known set, sorted, rendered FIRST
+    impactColor(key: string)                           Record<string,string> lookup ?? RESIDUAL_COLOR
+    total pill                                         counts what was RENDERED, not events.length
+
+**`sum(rendered) === events.length` by construction, so rendering-nowhere is UNREPRESENTABLE rather
+than fixed for today.** *Review's standard and it is the right one: make the blank impossible to
+print.* **The must-fire arm is a value no list in this repo mentions — `sev-9` — asserted against the
+rendered DOM, because a guard that greps the JSX proves the author read the file and only a render
+proves the user sees the row.**
+
+#### THE CAST WAS LOAD-BEARING SCAFFOLDING FOR THE ENUMERATION, NOT AN UNRELATED WART
+
+`IMPACT_COLORS[impact as keyof typeof IMPACT_COLORS]`.
+
+> **It defeats the compiler at exactly the point where it would otherwise catch a missing key.**
+> Widen the bucket list without widening the colour map and it **type-checks**, returns `undefined`,
+> and emits `color: undefined` — **so unrecognised events render in the inherited colour: the
+> fail-open one layer below the one being closed, compiling clean.**
+
+**And the cast exists BECAUSE the enumeration widened its own element type** — `['high','medium',
+'low']` is `string[]`, so the lookup needs help and the help chosen was an assertion that the string
+*is* one of the three keys. **It would have survived the enumerated fix.** *(The Manager's leg. The
+correct idiom was already eight lines below it: `FLAGS[ev.currency] ?? ''`.)*
+
+**A second instance, found by my own test rather than by review:** the raw-value badge was gated on
+`ev.impact === 'unknown'`, so with a derived header naming `sev-9` the provider's own string stayed
+hidden for every value except today's. **Now gated on `!isKnown`.** *The enumeration reappears
+wherever a literal is easier to type than a predicate.*
+
+#### CRITERION 2 IS BLOCKED AND THE BLOCK IS NOT A DELAY
+
+`B126` criterion `1b` asks how often `UNKNOWN` fires before deciding whether it should block.
+**`resolution_stats()` now records it — counts by reason AND the distinct raw values**, because a
+high total against one repeated value means the map is missing a tier the provider always sent, while
+the same total spread across many values means the schema moved. **Opposite fixes, and the bare total
+distinguishes neither.**
+
+    1. there is no Finnhub key in this repository -- no .env, no cached events, no fixture, so a
+       live-feed study is not available to a seat in this environment AT ALL
+    2. the counters advance only on a live PARSE. A cache hit rebuilds events from Redis via
+       `from_dict` and does not re-resolve, so these count PARSES and not events served --
+       stated in the docstring because the difference is invisible in the number
+
+**`refresh()` runs hourly at `xx:05`, so it is one parse per hour per process.** No threshold is
+proposed and no proxy substituted: **an adjacent quantity is `B140`'s wrong-target layer.**
+
+#### THE `T-0031` OBLIGATION IS DISCHARGED HERE, AND ITS MEASURE STAYS NON-ZERO
+
+`landed_sweep.py` prints `WHOEVER CLOSES T-0031 MUST DISCHARGE N REFERENCE(S)`. **`T-0031` never
+existed** — a folder created before `task-new`, so the ledger allocated `T-0032`. **Nobody will ever
+close it.** Discharged by RECORDING, which is the only form available, and the references are **not**
+re-pointed: *a stale pointer whose target does not exist is LOUD; one re-aimed at a plausible target
+is SILENT*, and the loud failure is what produced the task.
+
+> **THE COUNT CANNOT REACH ZERO BY CONSTRUCTION, so `N → 0` MUST NOT BE A SUCCESS CRITERION.** The
+> artefact taking the obligation is counted inside it, and the discharge guarantees the recording
+> mentions `T-0031` again. **A seat optimising the count will do the forbidden edit for the
+> right-looking reason.**
+
+#### NOT DEPLOYED
+
+**`finnhub.py` is live code, served hourly and by `GET /calendar/today`.** Committed and pushed, NOT
+deployed — **a live engine on the other side makes that Malek's decision, and a peer cannot supply
+it.** What makes it cheap to reason about: `is_in_blackout`'s `!= "high"` is untouched, so
+`UNKNOWN_IMPACT` skips exactly as `"low"` did, **asserted input-by-input against a reimplementation
+of the replaced line rather than described.** *The API response and the UI do change, by design and
+visibly.*
 
 ### B152 — THREE full-suite measurements lost in one night to THREE different causes, and the first fix looked complete
 
