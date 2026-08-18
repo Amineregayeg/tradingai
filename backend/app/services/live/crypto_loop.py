@@ -19,6 +19,7 @@ from app.core.logging import logger
 from app.services.broker.paper import PaperBroker
 from app.services.execution.service import ExecMode, ExecutionService
 from app.services.live import fixed_config as fixed
+from app.services.live import exit_shadow
 from app.services.live.entry_comparison import compare_entry
 from app.services.live.news_context import (
     NewsContext,
@@ -1102,6 +1103,11 @@ class LiveCryptoLoop:
             await self._record_abstention(pair, entry, trace)
             await self._act("eval", f"{pair} {self.entry_tf} bar closed — {trace.summary}")
             return
+        # T-0038 HALF 2, STAGE A: record the tranche plan EXIT-001 WOULD produce. Executes
+        # nothing -- the position is still opened whole below, and `close_position` is not
+        # called with a lot_size anywhere on this path. The count has to exist before the
+        # behaviour does, which is the same staging T-0036 used for the news verdict.
+        exit_shadow.record_from_loop(trace, sig)
         await self._act("signal", f"{pair} {sig.direction.value} setup @ {sig.entry:.0f}")
         res = await self.execution.execute(sig)
         if res.get("status") == "FILLED":

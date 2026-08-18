@@ -217,6 +217,30 @@ class DecisionEngine:
                 logger.error("Failed to generate risk warning", error=str(exc))
 
         # 10. Exit management ------------------------------------------------
+        #
+        # THE 1.5R BELOW CONTRADICTS RATIFIED DOCTRINE, AND IT IS MARKED RATHER THAN CHANGED.
+        #
+        # `EXIT-001` is ratified at `partial_at_r: 2.0` with a 70/30 split, read from the
+        # registry at `exit_001_v1_model.py`. This branch advises a partial at 1.5R. Two
+        # statements of one rule, and they disagree on the number.
+        #
+        # SEVERITY, STATED SO IT IS NOT OVER-WEIGHTED: this builds a `suggested_action` payload
+        # for an ALERT. Nothing executes it -- every consumer of `suggested_action` was
+        # enumerated and none places an order. So the platform ADVISES a partial at 1.5R while
+        # doctrine says 2R. That is real, because it trains the trader against the doctrine,
+        # and it is NOT in the class of an absent gate on the order path.
+        #
+        # NOT CHANGED HERE, and the reason is not caution. Moving 1.5 -> 2.0 would make this
+        # branch agree with EXIT-001 while remaining a SECOND statement of it -- GATE-011's
+        # defect with a corrected constant, which is harder to notice than a disagreement.
+        # Retiring it means reading the verdict from the rule, and the rule's verdict is not
+        # on this path: `live/exit_shadow.py` records the tranche plan on the ORDER path and
+        # executes nothing (T-0038 Stage A). Wiring the alerts path to a verdict that has never
+        # been observed to fire is the thing the staging exists to prevent.
+        #
+        # And it is NOT DELETED, for the three legs recorded at step 9 above: this module is
+        # the only caller of `generate_risk_warning`, `AlertType.RISK_WARNING` is produced only
+        # inside it, and that value is in the DB enum at `alembic/versions/0001_initial.py`.
         open_positions = candle.get("open_positions", [])
         for position in open_positions:
             try:

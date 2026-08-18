@@ -734,16 +734,49 @@ def test_no_live_or_broker_module_imports_the_exit_model():
     """
     app_dir = Path(model.__file__).parents[2]
     needles = ("exit_001_v1_model", "exit_002_ladder_off", "V1ExitModel", "LadderOffForV1")
-    offenders = []
+    importers = []
     for sub in ("live", "broker"):
         for path in (app_dir / "services" / sub).rglob("*.py"):
             text = path.read_text()
             for needle in needles:
                 if needle in text:
-                    offenders.append(f"{path.name}: {needle}")
-    assert offenders == [], (
-        "the v1 exit model is wired into the live path, which T-0022 criterion 7 puts out "
-        f"of scope: {offenders}"
+                    importers.append(f"{path.name}: {needle}")
+
+    # INVERTED BY T-0038, AND THE INVERSION IS WHAT THIS TEST WAS FOR.
+    #
+    # Through T-0022 this asserted `importers == []` and its own docstring said the assertion
+    # "goes red the moment someone wires it, which is the moment the claim stops being true."
+    # T-0038 wired it. THE TEST WENT RED AND WAS RIGHT.
+    #
+    # What replaces it is the property that now matters. Criterion 7's real content was never
+    # "stay unimported" — it was "a green suite here is not a live 70/30 exit". So the claim to
+    # keep checkable is that the wiring EXECUTES NOTHING.
+    assert importers, (
+        "nothing under live/ or broker/ references the exit model. If it was unwired "
+        "deliberately, this test should go back to asserting that; if by accident, T-0038's "
+        "Stage A shadow is gone."
+    )
+    assert any("exit_shadow" in name for name in importers), (
+        f"the importer is not the shadow recorder — something else wired it: {importers}"
+    )
+
+    # AND IT STILL EXECUTES NOTHING. `close_position` is never called with a lot_size anywhere
+    # under live/ or broker/ outside the adapters' own definitions, so no tranche is taken.
+    # Stage B is what changes that, and it is gated on this record being non-empty and read.
+    import ast
+
+    partial_calls = []
+    for sub in ("live",):
+        for path in (app_dir / "services" / sub).rglob("*.py"):
+            for node in ast.walk(ast.parse(path.read_text())):
+                if (isinstance(node, ast.Call)
+                        and isinstance(node.func, ast.Attribute)
+                        and node.func.attr == "close_position"
+                        and any(k.arg == "lot_size" for k in node.keywords)):
+                    partial_calls.append(path.name)
+    assert partial_calls == [], (
+        f"a PARTIAL close is being executed from the live path: {partial_calls}. That is "
+        "Stage B, and Stage A must record without enforcing."
     )
 
 
