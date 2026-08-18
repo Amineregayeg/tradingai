@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-18 (B157 — the evidence format built to expose an inert instrument became its disguise. `NewsContext.detail` guarded on `if not self.would_block` where `would_block` is `bool | None`, and `not None` is True — so an UNREAD calendar would have rendered `"no news blackout — 0 blocking of 0 scoped of 0 provider events"`, which is exactly what a WORKING gate emits on a quiet day. Those funnel counts exist for one reason: to tell an inert gate from a working one. Rendering an absence through them makes the false reading MORE convincing than a bare "no blackout" would have been, and the reader who had learned to trust the funnel is the one it deceives most. General form: any "show your work" format applied to a state where the work was not done prints zeros indistinguishable from work that found nothing, so a format that enumerates its inputs must REFUSE TO RENDER when it had none. This is `B10` generalised and the two point OPPOSITE ways — `B10`'s zero is a FACT the code observed and must be emitted; `B157`'s zeros are an ABSENCE it never looked at and must not be. `T-0037`'s `"undefined (0 comparable)"` rather than `0%` is the same rule at the aggregate layer, derived independently hours earlier for a different reason.)
+Last updated: 2026-08-18 (B158 — THE FALSE-ALARM INVERSION. Every defect found this week fails toward false comfort; this one fails toward false ALARM, and it is worse despite being louder. `ENTRY-001.evaluate`'s `at_price` is a keyword WITH A DEFAULT, so `evaluate(candidates, blocks)` compiles and returns a verdict — and `select()` skips its price filter entirely when `at_price is None`, making the verdict *"an admissible imbalance exists ANYWHERE in the inventory"*. Measured over 21 windows of `btcusdtp_5m_1500.csv`: `at_price=None` PASSes 21/21, a CONSTANT; `at_price=close` PASSes 16/21. The constant is PASS while the live path DECLINES on most bars, so the least-effort wiring produces a LARGE disagreement rate that is entirely an artefact of the argument nobody passed. A reassuring wrong number gets ignored; AN ALARMING WRONG NUMBER GETS ACTED ON — a defect that announces itself RECRUITS EFFORT, and the effort goes into the engine rather than into the call site. And the same convention has a MIRROR: `ENTRY-001` on an empty inventory returns FAIL with `candidates_considered: 0`, and FAIL AGREES with a declining live path — a spurious AGREEMENT pushing the rate DOWN. Same defaulted-parameter convention, opposite directions, neither visible from the verdict. Fixed by DERIVING emptiness from the counts the rules already publish rather than by checking one call site.)
 
 ---
 
@@ -2440,6 +2440,84 @@ register that records its own control pairs is exactly the corpus that will accu
 searched, at the moment of use** — not reused from a previous entry. **Prefer a token containing the
 task id and a nonce over a shared house token like `zzz_absent`**, because a shared one accumulates
 citations until it is present everywhere.
+
+### B158 — the FALSE-ALARM inversion: a defect that announces itself recruits effort, and the least-effort wiring is the broken one
+
+**Established by Execute during `T-0037`, before a line of the comparison was written.** Every
+defect this register has recorded this week fails toward false comfort. **This one fails the other
+way, and the asymmetry is why it is worse despite being louder.**
+
+#### The mechanism
+
+    ENTRY-001.evaluate(candidates, blocks, *, at_price=None)      <- a KEYWORD WITH A DEFAULT
+    select():  ... and (at_price is None or imb.price_low <= at_price <= imb.price_high)
+
+**With `at_price` unpassed the price filter is skipped entirely**, so `PASS` means *"an admissible
+imbalance exists ANYWHERE in the inventory"* — and over a 320-bar window the inventory is 183–334
+objects. **It is never empty, so the verdict is never `FAIL`.** Measured over 21 windows of
+`btcusdtp_5m_1500.csv`:
+
+    at_price=None     PASS 21/21     a CONSTANT
+    at_price=close    PASS 16/21     it moves
+
+**`evaluate(candidates, blocks)` compiles, runs, and returns a verdict. The least-effort wiring is
+the broken one and nothing signals it.**
+
+#### WHY IT IS WORSE THAN THE COMFORT CASES, WHICH IS THE ONLY REASON IT NEEDS ITS OWN ID
+
+**The constant is `PASS`, and the live path DECLINES on most bars.** So the naive wiring does not
+produce a reassuring `0%` — **it produces a LARGE disagreement rate that is entirely an artefact of
+the argument nobody passed.** It would read as *"the rules and the engine disagree constantly."*
+
+> **A reassuring wrong number gets ignored. AN ALARMING WRONG NUMBER GETS ACTED ON.** A defect that
+> announces itself **recruits effort**, and the effort goes where the number points — **into the
+> engine, which is working, rather than into the call site, which is not.** *The cost is not a missed
+> finding; it is a manufactured one, paid for with someone changing correct code.*
+
+    B156   a fail-open rebuilt one layer up          false comfort   ignored
+    B157   an absence rendered as a measurement      false comfort   trusted
+    B150   a figure that cannot move                 false comfort   quoted
+    B158   an artefact that reads as a real defect   FALSE ALARM     ACTED ON
+
+#### AND THE SAME CONVENTION HAS A MIRROR, IN THE OPPOSITE DIRECTION
+
+**`ENTRY-001` on an EMPTY inventory returns `FAIL` with `candidates_considered: 0` — and `FAIL`
+AGREES with a live path that declined.** So the same defaulted-parameter convention produces a
+**spurious AGREEMENT** that pushes the rate DOWN.
+
+> **Two failure directions from one convention, neither visible from the verdict**, and which one you
+> get depends on which argument you happened to omit. **A defect whose SIGN depends on the caller's
+> mistake cannot be caught by reading the output.**
+
+#### THE FIX IS NOT A CHECK AT THE CALL SITE
+
+**Every parameter of every bar-shaped `evaluate` is defaulted — it is a property of the
+`RuleImplementation` convention, not of one rule.** Swept: of 67 registered rules, 9 are callable
+with zero arguments; **3 expose their own emptiness in `values`** (`ENTRY-001`
+`candidates_considered`, `GATE-037` `paths_examined`, `GATE-038` `amplifier_levels_examined`), **4
+decline with `NOT_APPLICABLE`**, and 2 are constant by nature. *Note which is the plurality: the
+safe idiom already wins, and the rules that answer on no input are the outliers.*
+
+    INPUT_ABSENT is DERIVED:  the rule ran and its OWN values say it examined nothing
+
+**Keyed on the `_examined` / `_considered` suffixes the rules already publish** — so a rule nobody
+has wired yet is covered on the day it is. **`_count` is excluded deliberately: `amplifier_count: 0`
+is an OUTPUT count, and a rule that FOUND nothing is not a rule that LOOKED AT nothing.**
+
+> **This is `B10`'s practice already implemented inside the rules — *0 examined* recorded rather than
+> left silent — so the harness consumes a discriminator the rules publish instead of inventing one.**
+> *Checking `at_price` at one call site fixes one instance; keying on the input counts makes the
+> class unrepresentable.*
+
+#### THE ARGUMENT IS STILL PASSED EXPLICITLY, AND THE ORDER OF THE REASONING MATTERS
+
+`at_price=close` is passed with the `21/21` versus `16/21` measurement in the comment, because a
+later seat "simplifying" the call would reintroduce the artefact with no error. **But `close` was
+chosen because it is the price the live retrace test uses — `lo <= ph and cl > pl` — so it asks the
+rule the same question about the same price.** *The variation is the evidence that it is the
+comparable proposition, not the reason for choosing it.* **Selecting an argument because it makes a
+figure move is selecting for interestingness, and after the fact the two are indistinguishable —
+which is why the proposition has to be named first.**
 
 ### B157 — the evidence format built to expose an inert instrument became the disguise: a funnel of zeros reads as a MEASURED quiet calendar
 
