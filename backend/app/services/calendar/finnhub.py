@@ -296,9 +296,41 @@ class CalendarService:
             # feeds -- NOT the engine, whose `decision/engine.py` reads a `news_blackout`
             # boolean that nothing writes (B125).
             #
-            # T-0036 IS WHAT MAKES THIS LINE MATTER. Making UNKNOWN block is a live
-            # safety-versus-availability decision that needs `resolution_stats()`'s count
-            # and belongs to Malek -- not to whichever seat wires the news seam.
+            # T-0035 SAID "T-0036 IS WHAT MAKES THIS LINE MATTER". IT DID NOT, AND THE
+            # REASON IS WORTH MORE THAN THE PREDICTION WAS.
+            #
+            # T-0036 wired the news subsystem onto the order path and DELIBERATELY BYPASSED
+            # this function: `live/news_context.py` calls `get_today_events()` and then the
+            # RULE modules directly. Measured after that task landed, `is_in_blackout` still
+            # has ZERO production callers -- its only hits in `app/` are this def, the class
+            # docstring, and these comments.
+            #
+            # IT WAS BYPASSED BECAUSE IT IMPLEMENTS A DIFFERENT, PRE-CONTRACT DOCTRINE.
+            # Three measurable disagreements with the ratified rules:
+            #
+            #   window     here `abs(now - event) <= blackout_minutes`, SYMMETRIC
+            #              GATE-012 blocks [event-15, event); GATE-013 blocks [event,
+            #              first M15 close at or after event+30) -- ASYMMETRIC, and the
+            #              M15 term is a ratchet the symmetric form has no expression for
+            #   pre-window at the caller's `blackout_minutes` (30 in the docstring example)
+            #              versus the rule's declared 15
+            #   impact     `!= "high"` reads the NORMALISED value, so UNKNOWN_IMPACT never
+            #              blocks here. That is the fail-open T-0035 closed at the source,
+            #              still live INSIDE this function -- harmless only because nothing
+            #              calls it
+            #
+            # SO THIS IS A SECOND STATEMENT OF THE NEWS DOCTRINE THAT DISAGREES WITH THE
+            # RATIFIED ONE, in live code, now shadowed by a correct implementation. It is
+            # not dead-and-marked like `decision/engine.py`'s branch -- it reads as the
+            # platform's news gate, and a seat reaching for "the blackout function" gets the
+            # wrong doctrine with no warning. Recorded rather than deleted or rewritten:
+            # deleting live code is not this task's scope, and rewriting it to match the
+            # rules would create a THIRD implementation of them.
+            #
+            # `!= "high"` is therefore still UNCHANGED, and the identical-verdict assertion
+            # in `test_t0035_impact_unknown.py` still holds. Whether UNKNOWN should BLOCK
+            # anywhere is a live safety-versus-availability decision that needs the count
+            # `resolution_stats()` accrues, and it belongs to Malek.
             if event.impact != "high":
                 continue
             if event.currency not in currencies:
