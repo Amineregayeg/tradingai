@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-18 (B158 — THE FALSE-ALARM INVERSION. Every defect found this week fails toward false comfort; this one fails toward false ALARM, and it is worse despite being louder. `ENTRY-001.evaluate`'s `at_price` is a keyword WITH A DEFAULT, so `evaluate(candidates, blocks)` compiles and returns a verdict — and `select()` skips its price filter entirely when `at_price is None`, making the verdict *"an admissible imbalance exists ANYWHERE in the inventory"*. Measured over 21 windows of `btcusdtp_5m_1500.csv`: `at_price=None` PASSes 21/21, a CONSTANT; `at_price=close` PASSes 16/21. The constant is PASS while the live path DECLINES on most bars, so the least-effort wiring produces a LARGE disagreement rate that is entirely an artefact of the argument nobody passed. A reassuring wrong number gets ignored; AN ALARMING WRONG NUMBER GETS ACTED ON — a defect that announces itself RECRUITS EFFORT, and the effort goes into the engine rather than into the call site. And the same convention has a MIRROR: `ENTRY-001` on an empty inventory returns FAIL with `candidates_considered: 0`, and FAIL AGREES with a declining live path — a spurious AGREEMENT pushing the rate DOWN. Same defaulted-parameter convention, opposite directions, neither visible from the verdict. Fixed by DERIVING emptiness from the counts the rules already publish rather than by checking one call site.)
+Last updated: 2026-08-18 (B159 — a DORMANT BRANCH woke and reported a blocked rule as CLEAR, in the tool the task was measured with, activated by that task's own deliverable. `resolve_block_chain`'s `if not blockers: return [rule_id]` DISCARDS its accumulator, and that branch is reachable only on a RECURSIVE call — which happens only when the named blocker is itself IMPLEMENTED. Until `T-0039` built `GRADE-028`, every terminal blocker in the tree was unimplemented, the leaf return was always taken, and the branch had never run in the tool's lifetime. The moment it did, `resolve_block_chain("GATE-040")` collapsed from `["GATE-040","GATE-041","GRADE-028"]` to `["GRADE-028"]` — and a single-element list is that function's OWN documented signal for NOT BLOCKED. The sharpest half: the branch IMMEDIATELY BELOW it carries the comment *"currently DORMANT ... activates silently the first time someone declares two"*, so the author saw the class, labelled one instance, and THE OTHER ONE FIRED FIRST. A dormant-branch warning is a claim about a specific branch, and the class it belongs to is not bounded by the branch that carries the comment. Caught because four existing tests went red; two were fixed by the fix and two were INVERTED rather than repaired.)
 
 ---
 
@@ -2440,6 +2440,98 @@ register that records its own control pairs is exactly the corpus that will accu
 searched, at the moment of use** — not reused from a previous entry. **Prefer a token containing the
 task id and a nonce over a shared house token like `zzz_absent`**, because a shared one accumulates
 citations until it is present everywhere.
+
+### B159 — a dormant branch woke and reported a blocked rule as CLEAR, in the tool the task was measured with
+
+**Established by Execute during `T-0039`, and the activation condition was the task's own
+deliverable.** Latent for as long as `scripts/check_rule_coverage.py` has existed.
+
+#### The collapse
+
+    resolve_block_chain("GATE-040")   was     ["GATE-040", "GATE-041", "GRADE-028"]
+                                      became  ["GRADE-028"]
+
+    if not blockers:
+        return [rule_id]              # <- DISCARDS `_seen`
+
+> **A single-element list is that function's OWN documented signal for NOT BLOCKED** — *"Returns
+> the chain from `rule_id` to its ROOT cause ... A single-element list means not blocked."* **So a
+> two-hop blockage reported itself clear.**
+
+#### WHY IT HAD NEVER RUN, WHICH IS WHAT MAKES IT AN ENTRY RATHER THAN A BUG
+
+**That branch is reachable ONLY on a recursive call**, and the recursion happens only when the named
+blocker is **itself implemented**:
+
+    nxt = blockers[0]
+    if nxt in impls and nxt in registry_ids:
+        return resolve_block_chain(nxt, ...)      # <- the only way in
+    return [*_seen, rule_id, nxt]                 # <- the leaf, which carried the whole tree
+
+**Until `GRADE-028` landed, every terminal blocker in the tree was UNIMPLEMENTED** — `GRADE-028`,
+`order_block_detector`, `instrument_class`, `active_institutional_destination`,
+`v_shaped_liquidity`. **So the leaf return was always the one taken and the accumulator was never
+discarded.** The defect required an implemented terminal blocker to exist, and **`T-0039`'s
+deliverable was to create one.**
+
+> **The tool measuring the task was broken by the task, in the direction that would have flattered
+> it.** `GATE-040` reporting itself unblocked is exactly the outcome `T-0039`'s original criterion
+> asked for — **so the defect and the target were the same shape**, and a seat chasing the criterion
+> would have found the tool agreeing.
+
+#### THE SHARPEST HALF: THE AUTHOR SAW THE CLASS AND LABELLED THE WRONG INSTANCE
+
+**The branch IMMEDIATELY BELOW this one carries its own warning:**
+
+> *"POSITIONAL-FIRST, and the choice is recorded because it is currently **DORMANT**: no rule
+> declares more than one blocker today (all four are single), so this branch is untested and
+> **activates silently** the first time someone declares two."*
+
+**The same function, six lines apart. The author identified the hazard, wrote it down, and the
+sibling fired first.**
+
+    labelled dormant   the multi-blocker branch   activates when a rule declares TWO blockers
+    UNLABELLED         `if not blockers`          activates when a blocker is IMPLEMENTED
+
+> **A dormant-branch warning is a claim about ONE branch, and the class it belongs to is not
+> bounded by the branch that carries the comment.** *Writing "this is untested and will activate
+> silently" identifies a hazard and does nothing about its siblings — and the comment's presence
+> makes the FILE look audited for the class.*
+
+**The general form: where a function has one branch labelled dormant, ask which OTHER branches are
+unreached, and by what.** The answer here was mechanical — *reachable only when a named blocker is
+implemented, and none ever was.*
+
+#### HOW IT WAS CAUGHT, AND IT WAS NOT BY READING
+
+**Four existing tests went red.** Two asserted the chain and were fixed BY the fix; two asserted
+`GATE-041`'s condition census as `3 NOT_EVALUABLE / 4 NOT_READ`, which was correct until
+`GRADE-028` existed. **Those two were INVERTED rather than repaired** — see the practice below.
+
+**Nothing in the new code failed.** The defect was in a script the new code does not import, found
+because the suite exercises the script's consumers. *A wave that only ran its own tests would have
+shipped it.*
+
+#### THE PRACTICE, WHICH IS THE OTHER HALF OF `B157`'s RETAIN-AND-NEGATE
+
+> **A test going red because the thing it recorded became false is the test WORKING, and deleting
+> it would remove the record of the transition.**
+
+`3 NOT_EVALUABLE / 4 NOT_READ` was true and is now `0 / 7` — **the three did not disappear, they
+moved category**: the producer became real and `GATE-041` still does not call it. **Quietly updating
+the numbers would leave no trace that the CATEGORIES moved rather than the count.** So the tests
+were rewritten to assert the new figure *and to say what it replaced and why*, which is the same
+move `B157` made for prose: **the wrong figure keeps its pointer, and the transition keeps its
+evidence.**
+
+#### THE FIX
+
+    return [*_seen, rule_id]
+
+**One line, with arms on BOTH return paths** — a must-fire on the recursive path (`GATE-040` is
+three elements again), a must-miss on the genuinely-unblocked case (`GRADE-028` alone stays one
+element, so the fix did not make everything look blocked), and one on the leaf path
+(`GATE-027 -> order_block_detector`) which is the branch that carried the tree before this.
 
 ### B158 — the FALSE-ALARM inversion: a defect that announces itself recruits effort, and the least-effort wiring is the broken one
 
