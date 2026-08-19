@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-19 (B189 — B171's fix used the TASK ID as a proxy for TIME: `any(r > t for r in reviewed)` compares ids, but ids are ASSIGNMENT order while reviews happen in whatever order the queue runs. T-0048 was planned before T-0050/T-0051 and reviewed after them, because both jumped the queue on Malek's directives — so the arm reported T-0048 SKIPPED sixty seconds after I assigned it, and would have forever. B171 was filed as a fix and its fix was keyed on the wrong quantity; it worked only while the queue ran in id order, and out-of-order running is what a directive produces every time. My first correction was worse: widening to 'a later task ADVANCED' fires whenever Execute starts the next task while Review reviews the previous one, which is the pipeline WORKING — and I reached for that arm because the ten-hour T-0047 stall was fresh, when that stall was never this arm's case. Widening the wrong instrument because it is nearby is how a real gap gets a fake fix. Shipped version asks whether the reviewer filed a verdict on ANOTHER task since this one entered REVIEWING, with must-fire and must-miss demonstrated. Filed alongside Execute's B188.)
+Last updated: 2026-08-19 (B191 — B188's tripwire enumerates SYNTACTIC SHAPES and catches one of three: it requires the call base to be ast.Name(id='RiskMatrix'), so `RM.size(...)` via an alias import and `g32.RiskMatrix.size(...)` via a module path both evade it. Review added all three to strategy_step.py: 1 failed, 2 passed. 'It uses AST' is not evidence that it covers the class — the guard is better than a grep and still an enumeration. Fix is free and measured: assert NO `.size(` call of ANY form under app/, a population verified at ZERO by AST, so the wider predicate is already true and an over-fire would be a visible failure where the current version is a silent pass. Queued as T-0055. Filed with B190 — a DEFAULTED PARAMETER means the least-effort call exercises one branch, and three times running the unmeasured branch was the one the task existed to add: at_price=None, swing_bound_index=None, is_red_folder_day=False. The third is worst because there the default reaches PRODUCTION — PRIM-007's only production caller supplies no bound, so the ruling's 'bound = rung 1's swing bar' has never been given to the code that implements it, while that module passes its suite.)
 
 ---
 
@@ -3255,6 +3255,61 @@ gap gets a fake fix***, and the fake fix then breaks a working arm.
 **Kept from the widening: the `parked` arm** — every in-flight task in `REVIEWING` with no verdict while
 NOTHING is `EXECUTING`. *That one needs no ordinal comparison and no clock: it is the whole loop stopped on
 one unreviewed task, which the idle warning cannot see because `REVIEWING` counts as activity.*
+
+
+### B190 — a DEFAULTED PARAMETER means the least-effort call exercises one branch, and three times running the unmeasured branch was the one the task existed to add
+
+**Review's pattern, third measured instance 2026-08-19. Not a defect in one place — a defect shape that has
+now produced three separate findings, each found by a different route and none by the tests that owned the
+contract.**
+
+    T-0037/T-0040   at_price=None            the comparison harness's price argument
+    B175/T-0049     swing_bound_index=None   PRIM-007's walk-back bound — the ONLY production caller
+                                             passes nothing, so the ruling's bound is never supplied
+    T-0048          is_red_folder_day=False  RiskMatrix.size()'s eco-day flag
+
+**Measured for the third: `size()` has 24 call sites in `test_t0024_position_sizing.py` and EXACTLY ONE
+passes `is_red_folder_day` — `:194`, added by `T-0048` itself. The other 23 omit it and default `False`.**
+
+> **So the six assertion sites `T-0048` was written to correct had never FAILED. They were BLIND.** *The
+> stepped path was unreachable from every pre-existing call, and a test suite that covers the function
+> without covering the parameter reports the same green either way.*
+
+**THE SHAPE, stated so it can be checked ahead of time rather than found afterwards:** a keyword argument
+with a default makes the *cheapest possible call* the one that exercises the default branch. **Every caller
+written for convenience takes it. The other branch accumulates no coverage and no callers, and its absence
+is invisible because nothing errors.** *In all three instances the un-defaulted branch was precisely the
+behaviour the ruling specified and the task existed to implement.*
+
+**AND THE THIRD INSTANCE IS THE WORST, because there the default reaches PRODUCTION:** `B175` —
+`swing_bound_index=None` is what the one production caller passes, so *the ruling's `bound = rung 1's swing
+bar` has never been supplied to the code that implements it.* **A defaulted parameter did not merely leave a
+branch untested; it left a ruling unimplemented while the module that implements it passed its suite.**
+
+**Remedy that costs nothing and is checkable: for any parameter whose non-default value is the RULED
+behaviour, assert that at least one PRODUCTION call site supplies it.** *`B188`'s guard is that assertion for
+a whole function; this is the same idea one argument down.*
+
+### B191 — `B188`'s tripwire enumerates syntactic shapes and catches one of three
+
+**Found by Review in `T-0048`'s PASS verdict; confirmed by the Manager. NOT FIXED — queued as `T-0055`.**
+
+    the guard requires the call's base to be ast.Name(id="RiskMatrix"):
+      RiskMatrix.size(...)        base Name('RiskMatrix')   -> CAUGHT
+      RM.size(...)                base Name('RM')           -> MISSED   (import ... as RM)
+      g32.RiskMatrix.size(...)    base Attribute(...)        -> MISSED   (module path)
+
+**Review added all three to `app/services/live/strategy_step.py`: 1 failed, 2 passed. A test-only caller
+correctly did NOT satisfy it — the walk is rooted at `parents[2]/"app"`, so that half of the guard holds.**
+
+> **`"it uses AST"` is not evidence that it covers the class.** *The guard is better than a grep and it is
+> still an ENUMERATION — this time of syntactic shapes rather than of strings.* **Same correction `T-0050`'s
+> runner-stop arm needed, and `B184`'s force-include list is the same error in vocabulary rather than syntax.**
+
+**The fix is free and measured: assert NO `.size(` call of ANY form under `app/`.** *That population is
+**zero** today — verified by AST — so the wider predicate is already true and covers all three shapes. It
+would over-fire if some unrelated class later grows a `.size()` method, and **an over-fire is a visible
+failure that gets read, where the current version is a silent pass.***
 
 
 ### B169 — a criterion keyed on a metric THE GRADED SEAT CAN EDIT, and which the honest work cannot move
