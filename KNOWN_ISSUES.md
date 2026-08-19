@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-19 (B176 — `crypto_loop.py:1215` says `T-0038 HALF 2, STAGE A ... Executes nothing` about EXIT-001, and every clause is LITERALLY TRUE of `_tick_symbol` because the tranched close lives at :914 in `_take_partials`, a different method — so the scope qualifier `on this path` carries the whole sentence while the headline describes a staging state T-0050 ENDED and the rule now decides a live exit at a62baed. The INVERSE of the usual rot: nothing incorrect to detect, so no assertion or test can catch it, and a seat reading the place where EXIT-001 is named in the trading loop concludes it is still shadow-only. B175 amended the same day with the measurement that retires its own milder wording: wiring rung 4 to the unfixed rung 1 does not shrink or relocate the order-block population, it ANNIHILATES it — `return None` fires only when the bound sits at or ahead of the break bar, PRIM-007's `:106` fallback is correct, and `at_origin_count` then reads 0, indistinguishable from 'this data has no order blocks'. Landed with B172, B173 settled at 0-of-10, and B174.)
+Last updated: 2026-08-19 (B177 — T-0040's criterion asserts in bold that DIRECTION NEEDS NO NEW INSTRUMENTATION because RuleComparison already stores live_verdict and rule_verdict. True of the in-memory dataclass, false of anything outliving the bar: observe() parks them in Gate.values, `.gates` has ZERO consumers outside decision_trace.py against 9 for `.reasons` and 3 for `.summary`, DecisionRecord has no column for them, and reasons renders one STRING per gate and drops values entirely. So production retains the AGGREGATE rate and not the directional split — and the criterion's own argument is that a single scalar CANNOT be the criterion, because rules-looser is new live exposure while rules-stricter is missed opportunity. The one quantity we keep is the one it forbids relying on, which blocks T-0041 on more than Malek's two bounds. `wired` and `executes` are different predicates and this needs a third: RETAINED. Landed with B176, and B175's annihilation measurement.)
 
 ---
 
@@ -2607,6 +2607,51 @@ it.**
 **Fix: state where the tranche exit DOES execute (`_take_partials:914`) and that `STAGE A` refers to the
 ENTRY path only.** A cross-reference, not a correction — *and do not delete the staging note, because the
 entry path really does still open whole.*
+
+
+### B177 — `T-0040`'s criterion says direction needs no new instrumentation. It needs some: `Gate.values` is never persisted, so only the AGGREGATE survives
+
+**Found 2026-08-19 tracing what actually blocks `T-0041`, the entry cutover — the single task that would put
+the rule engine on the order path. NOT FIXED.**
+
+`T-0040/criterion.md` §2 states the two bounds must be reported separately, and then:
+
+    "DIRECTION NEEDS NO NEW INSTRUMENTATION — verified in the landed harness:
+     `RuleComparison` stores `live_verdict: bool | None` and `rule_verdict: str | None`
+     (entry_comparison.py:110-114), so direction is derived from the pair already recorded.
+     No change to T-0037 is required and none should be made to satisfy this."
+
+**True of the in-memory dataclass. FALSE of anything that outlives the bar.**
+
+    entry_comparison.py:211   record_on -> trace.observe(GATE_NAME, False, self.detail, **self.values())
+    decision_trace.py:119     observe  -> self.gates.append(Gate(..., values=values, ...))
+    grep -rn '\.gates\b' outside decision_trace.py                       -> ZERO hits
+    decision_record.py                                                    -> NO column for gates/values
+    crypto_loop.py:506,978    DecisionRecord(... reasons=trace.reasons ...) -> the ONLY channel
+
+**`DecisionTrace.reasons` renders one STRING per gate — `f"{verdict} {g.name}: {g.detail}"` — and drops
+`g.values` entirely.** So what reaches the database is exactly this line:
+
+    entry rules: disagree=N agree=M not_comparable=K rate=R [X of 6 rules comparable]
+
+> **The AGGREGATE is recoverable from production today by parsing `DecisionRecord.reasons`. The DIRECTIONAL
+> SPLIT is not recoverable at all** — `live_verdict`/`rule_verdict` live in `values()`, which is populated,
+> attached to a `Gate`, and then read by nothing. **`B142`'s family: `wired` and `executes` are different
+> predicates, and here a third is needed — `RETAINED`.**
+
+**Why this matters more than its size:** `T-0040` §2's own argument is that **a single scalar cannot be the
+criterion**, because rules-looser is new live exposure and rules-stricter is missed opportunity. **The one
+quantity production keeps is the single scalar the criterion forbids relying on.** *So `T-0041` is blocked
+not only on the two bounds being Malek's to set, but on the measurement that would test them not being
+stored — and the criterion document asserts the opposite in bold.*
+
+**The fix is small and must not be smuggled into a cutover commit:** persist the per-comparison pair, or add
+directional counts to `detail` so the existing text channel carries them. **`detail`'s docstring already
+says *"Always all three terms, never a bare rate"* — the same discipline, one field short.**
+
+**Control, stated because a null grep is worth nothing without one:** `\.reasons` and `\.summary` both have
+live consumers outside `decision_trace.py`, so the zero on `\.gates` is an absence rather than a pattern
+that missed the mechanism.
 
 
 ### B169 — a criterion keyed on a metric THE GRADED SEAT CAN EDIT, and which the honest work cannot move
