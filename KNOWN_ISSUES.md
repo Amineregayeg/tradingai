@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-19 (B193 — a seat that stops BEFORE writing anything leaves NO ARTEFACT, so all three board arms are silent by construction. T-0052 sat EXECUTING for 127 minutes with a clean tree, no process and no commit naming it; the idle warning counts EXECUTING as activity, `parked` and `skipped` require REVIEWING, and B183's arm requires a commit. The three arms added today all key on an ARTEFACT and this state's defining feature is that none exists, so a fourth artefact-keyed check would have missed it too — the only available signal is elapsed time. Threshold 30 min, ARBITRARY and declared as such in the code, because a false positive costs one message and this false negative cost two hours of both seats; the comment forbids lowering it to make a past incident fire. Must-fire and three must-misses demonstrated: just-assigned, landed, actively-writing, STOPPED — four states the board previously collapsed into EXECUTING. Root cause is the MODEL, not the arm: a peer advances ONE TURN PER MESSAGE and then waits, and treating an assignment as self-sustaining has now cost this loop time three times today.)
+Last updated: 2026-08-19 (B194 — the live entry-comparison corpus is 97% UNUSABLE and the field that says why is discarded on every bar. First read after the engine started 13:16:43 UTC: of 34 rows, 33 carry 'disagree=0 agree=0 not_comparable=1 rate=undefined (0 comparable)' and ONE carries 'disagree=1 rate=1.000' — so the rate I reported to Malek as the first live disagreement rests on a denominator of 1. The harness is behaving as designed: entry_comparison.py:317 excludes the bar when the rule examined nothing, because calling that an AGREEMENT with a live decline would manufacture agreement. But the content is the news: on 33 of 34 live bars ENTRY-001 EXAMINES NO INPUTS — B190's shape at the top of the order path, the rule called and not fed. And B177 bites exactly here: not_comparable_reason and inventory_size live in values(), which never reaches the database, so the corpus records THAT it is unusable and never WHY. Comparable bars accrue at ~3%, roughly 24/day over two symbols, so T-0040's criterion needs DAYS of running unless the 97% is fixed first — which is the better trade.)
 
 ---
 
@@ -3389,6 +3389,52 @@ collapsed into "EXECUTING".**
 waits. It is not a loop.** *Assigning a task starts one turn; it does not start a task.* **This is the third
 time that has cost this loop time today** — Review's ten hours, `T-0047`'s ten hours mislabelled, and now
 `T-0052`'s two — **and each time the Manager's error was treating an assignment as self-sustaining.**
+
+
+### B194 — the live corpus is 97% UNUSABLE, and the field that says why is discarded on every bar
+
+**First read of the live entry-comparison corpus, 2026-08-19. Engine started 13:16:43 UTC; 34 rows at the
+time of reading. Prompted by Review's discriminating question — *how many DISTINCT triples appear, because if
+the answer is 1 the comparison is constant and measures nothing.*** **The answer is 2, and the split is the
+finding:**
+
+    33 rows   entry rules: disagree=0 agree=0 not_comparable=1 rate=undefined (0 comparable)
+     1 row    entry rules: disagree=1 agree=0 not_comparable=0 rate=1.000
+
+> **`rate=1.000` — the figure the Manager reported to Malek as the first live disagreement — rests on ONE
+> comparable bar out of thirty-four.** *The other 33 produced no comparison at all.* **The reported rate was
+> true and its denominator was 1.**
+
+**WHY, and the harness is behaving as DESIGNED:** `entry_comparison.py:317` marks the comparison
+`NOT_COMPARABLE(INPUT_ABSENT)` when `rule_verdict == "NOT_APPLICABLE" or examined_nothing(...)`, with the
+reason stated in the code:
+
+    # FAIL AGREES with a live path that declined, so the naive harness records a SPURIOUS
+    # AGREEMENT and the rate falls.
+
+**That choice is right — calling a rule's *"I examined nothing"* an AGREEMENT with a live decline would
+manufacture agreement. So the 33 are honestly excluded.** *But their content is the real news:* **on 33 of 34
+live bars, `ENTRY-001` EXAMINES NO INPUTS.** `B190`'s shape at the top of the order path — **the rule is
+called and not fed.**
+
+**AND `B177` BITES EXACTLY HERE, which raises that entry's priority from tidiness to blocking:**
+
+    detail   (PERSISTED via reasons)  disagree · agree · not_comparable · rate · [X of 6]
+    values() (DISCARDED, B177)        not_comparable_reason · inventory_size · at_price
+                                      live_verdict · rule_verdict · missing_input
+
+> **The corpus records THAT it is unusable and never WHY.** *`not_comparable_reason` and `inventory_size` are
+> computed on every bar and dropped on every bar* — **and they are the only two fields that could distinguish
+> "the inventory is empty", "the producer did not run", and "the rule declined for a real reason".**
+
+**CONSEQUENCE FOR `T-0041`, and it is a scheduling fact rather than an opinion:** the comparable population
+accrues at **1 bar in 34 ≈ 3%**. *At 5m bars over two symbols that is roughly 24 comparable comparisons per
+day of continuous running.* **So `T-0040`'s criterion cannot be met from hours of data at this rate, and the
+honest statement is that the cutover evidence base needs DAYS — or that the 97% must be fixed first, which
+is the better trade.**
+
+**Not filed as a defect in the harness. Filed as a defect in what we can LEARN from it** — *the exclusion is
+correct and the diagnosis is unrecoverable, and only the second half is broken.*
 
 
 ### B169 — a criterion keyed on a metric THE GRADED SEAT CAN EDIT, and which the honest work cannot move
