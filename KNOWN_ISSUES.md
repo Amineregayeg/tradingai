@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-19 (B171 — a task parked in `REVIEWING` COUNTS AS ACTIVITY in `bus.py`'s idle check, so the longer it is stuck the more effectively it suppresses the warning: `T-0046` sat unreviewed through FOUR consecutive reviews while the board looked busy. General form — a liveness check keyed on the EXISTENCE of activity cannot see activity that has STOPPED MID-STATE, which is `B160`'s family. Fixed both directions, derivable from the tree with no clock, and tested by reproducing the state that occurred. Landed with B169 — a criterion keyed on a metric THE GRADED SEAT CAN EDIT and which the honest work cannot move, where deleting twelve characters and nine rules of real work both give `+1` and only the CANNOT-FIRE list tells them apart — and B170, where a declared RULE-ID blocker is never re-checked although it is the one case that could be, so the flag is a manual assertion wearing a computed bucket's clothing.)
+Last updated: 2026-08-19 (B174 — the platform ADVISES a partial at 1.5R while `EXIT-001` ratifies 70% at 2R, and the advice IS the harm: nothing executes `suggested_action`, so changing 1.5 to 2.0 would convert a VISIBLE contradiction into an invisible one. Filed with the Manager's own inflated first version retained — `wired` and `executes` are different predicates and `grep` answers only the first. Landed with B172, where `candidate_object_ids_considered` is assigned `inputs.swings` VERBATIM one line above the pool it is named for, so all three words are false of the contents and the artefact built to make a reason refutable READS AS THE REFUTATION and is the input; B173, rung 1's missing `< entry_index` bound letting a swing that forms AFTER the entry become that trade's stop; and a second amendment to B125, because T-0036 shipped a LIVE news path beside the dead `news_blackout` read and `GATE_NAME = "news_blackout"` now makes ONE STRING name both, aiming the original trap rather than reducing it.)
 
 ---
 
@@ -2441,6 +2441,35 @@ searched, at the moment of use** — not reused from a previous entry. **Prefer 
 task id and a nonce over a shared house token like `zzz_absent`**, because a shared one accumulates
 citations until it is present everywhere.
 
+### B174 — the platform ADVISES a partial at 1.5R while doctrine ratifies 2R, and the advice is the harm
+
+**Queued 2026-08-18, re-measured and filed 2026-08-19. STILL PRESENT after `T-0038` and `T-0050`.**
+`decision/engine.py:221-233` now carries a comment block that marks it and states why it was not changed:
+
+    :221   # THE 1.5R BELOW CONTRADICTS RATIFIED DOCTRINE, AND IT IS MARKED RATHER THAN CHANGED.
+    :229   # ...none places an order. So the platform ADVISES a partial at 1.5R while
+    :233   # NOT CHANGED HERE, and the reason is not caution. Moving 1.5 -> 2.0 would make this
+
+**`EXIT-001` is ratified at 70% at 2R (`rules/exit_001_v1_model.py`), and `T-0050` put that on the LIVE
+exit path. This advisory branch was left alone deliberately and correctly** — *changing `1.5` to `2.0`
+would make the number agree with doctrine while the branch still only advises, converting a visible
+contradiction into an invisible one.*
+
+> **THIS ENTRY EXISTS BECAUSE THE MANAGER FIRST FILED IT WRONG.** I wrote *"a wired contradiction decides
+> trades."* **False.** Malek's session enumerated every consumer of `suggested_action` — `models/alert.py`,
+> `schemas/alert.py`, `decision/engine.py`, `decision/alerts.py`, `governance/queue.py` where a human edits
+> it field by field — and **nothing executes it.** `AlertType.EXIT_MGMT` reaches only `db/enums.py` and
+> `decision/alerts.py`.
+>
+> ***`wired` and `executes` are different predicates, and `grep` answers only the first.***
+> **Severity direction: mine was inflated.** Found-by: Malek's session (`6801bd71`).
+
+**The residual harm is real and is NOT the same class as an absent gate on the order path: wrong advice
+behind a human gate trains the trader against the ratified doctrine, and habit ratifies faster than the
+registry does.** Closes when the advisory number is derived from `EXIT-001` rather than restated, so the
+two cannot drift again.
+
+
 ### B169 — a criterion keyed on a metric THE GRADED SEAT CAN EDIT, and which the honest work cannot move
 
 **Filed by the Manager 2026-08-19. Found and measured by Execute BEFORE building `T-0039`, and reported
@@ -2591,6 +2620,72 @@ failure with the seats swapped:**
 **Tested by reproducing `T-0046`'s actual stalled state: both arms fire on the states they name, silent when
 clean, state restored after.** *And the second arm matters because it is the failure this loop would enter
 if a verdict were filed and the Manager missed it.*
+
+### B172 — `candidate_object_ids_considered` records the INPUT, not the candidates, so the reason string and its own evidence disagree
+
+**Found by Review while probing `T-0049`'s `10/49` baseline; confirmed by the Manager against
+`gate_027_stop_ladder.py:419-425`. NOT FIXED.** Rung 1 returns, when it locates nothing:
+
+    considered = [s.id for s in inputs.swings]      # ALL swings: no kind, window, or side filter
+    pool = [s for s in inputs.swings
+            if s.kind == wanted and s.bar_index > after and inputs.is_on_stop_side(s.price)]
+    if not pool:
+        return None, considered                     # <- the UNFILTERED population
+
+**Measured: all 39 non-locating setups report `unlocatable_reason = NO_SUCH_PRIMITIVE_IN_SEARCH_WINDOW`
+with a NON-EMPTY `candidate_object_ids_considered`.** *That non-emptiness is uninformative* — the field is
+assigned the whole swing input, **so a setup with zero swings of the wanted `kind` populates it
+identically to one whose swings were all rejected on the stop side.**
+
+> **THREE layers of the same substitution in one return statement, and the field NAME carries two of
+> them.** `candidate_object_ids_considered`: **they are not `candidate`s** — no filter selected them; **and
+> they were not `considered`** — nothing examined them individually. *The variable is `inputs.swings`
+> verbatim.* **Three words, three claims, and the assignment supports none of them.**
+
+**Layer one is the reason string;** The reason string
+> `NO_SUCH_PRIMITIVE_IN_SEARCH_WINDOW` is a claim about a **PREDICATE** worded as a claim about **DATA** —
+> no primitive *passed the three filters*, not no primitive *was there*. And the evidence field is **named
+> for a filtering it never performs**, so the artefact built to make the reason checkable inherits the
+> reason's own error.
+
+**Consequence: nothing in the corpus can attribute the 39.** Review's decomposition of this field was
+stopped mid-run because no breakdown of it can separate the three conjuncts. **Attribution requires a NEW
+measurement — per-setup counts of failures on `kind`, on `bar_index > after`, and on `is_on_stop_side`.**
+`T-0049` therefore inherits `10/49` as **SOUND BUT UNATTRIBUTED**, and its verdict must say so rather than
+carry a number nobody qualified.
+
+**`HG-28`'s validator forcing the evidence field to exist is the only reason this was findable at all — and
+it is also the defect's other half: the validator constrains the field's EXISTENCE and never its
+INFORMATIVENESS, so it accepts a field that cannot contradict anything.** The artefact was required
+precisely so a reason could be refuted from the record, and *this* one **reads as the refutation and is the
+input.** **The reason string at least fails honestly when read carefully; the evidence field does not.**
+
+**How it survived a careful reader, recorded because it is the transferable part:** Review's own report said
+*"dozens each, both `H` and `L` kinds"* — **and the presence of BOTH kinds is itself proof that no `kind`
+filter had run.** *The single observation that refuted the claim was written down as corroborating it.* Same
+shape as the Manager's baseline error the same night: **the figures that disprove a diagnosis can sit inside
+the output of the check run to confirm it, and be read as agreement.**
+
+### B173 — rung 1 has no upper bar bound, so a swing forming AFTER the entry can become the stop
+
+**Found by Review, confirmed by the Manager at `gate_027_stop_ladder.py:422`. NOT FIXED. Separate sign from
+`B172` and deliberately not merged with it.**
+
+    if s.kind == wanted and s.bar_index > after and inputs.is_on_stop_side(s.price)
+                            ^^^^^^^^^^^^^^^^^^^ lower bound only — no `< entry_index` conjunct exists
+
+**`after = inputs.msb.bar_index if inputs.msb is not None else -1`.** So the window is open-ended above:
+**a swing that forms after the trade is entered is eligible to be selected as that trade's stop.** That is
+**lookahead in a stop locator** — the rung can choose a level that did not exist when the stop had to be
+placed. And with `msb is None` the lower bound is `-1`, so **every swing in the setup passes conjunct 2**.
+
+> **This points OPPOSITE to `B172`'s scarcity finding: the filter is LOOSER than the reason string's
+> "search window" wording implies, not tighter.** The two were found in the same probe and must stay
+> separate entries — *merging a too-permissive bound with a too-scarce result cancels one against the
+> other and loses both.*
+
+**Untested either way:** whether any of the 10 locating setups selected a post-entry swing. If any did, the
+`10/49` figure contains lookahead-derived stops and the rate is not merely unattributed but wrong.
 
 ### B168 — a one-parameterisation exit measurement, whose sign flipped when the arm was widened
 
@@ -6361,6 +6456,32 @@ is at `app/services/calendar/finnhub.py`, and the obvious guess is `market_data/
 a reference with half an address**, which is the same rule as *name the sha you are reading*.
 
 ### B125 — the news blackout is DORMANT, and it activates on the FIRST HALF of its own fix: populate the key and you ship "trading suspended" while taking every trade
+
+> ## `[AMENDED AGAIN 2026-08-19 by the Manager. T-0036 shipped a LIVE news path and did NOT retire this one, so the trap now has a SECOND trigger and a name collision pointing straight at it.]`
+>
+> **Re-measured after `T-0036`/`T-0047`:**
+>
+>         decision/engine.py:206     if candle.get("news_blackout"):      <- STILL the dead read
+>         writes of that key, all of app/                                  <- STILL ZERO
+>         live/news_context.py:91    GATE_NAME = "news_blackout"           <- NEW, and it is the SAME STRING
+>         live/crypto_loop.py                                     22 news hits   (was 0)
+>         live/strategy_step.py                                   13 news hits   (was 0)
+>
+> **There are now TWO news mechanisms with ONE name.** The live one gates trades through `NewsContext`;
+> the dead one is a key nobody writes. **`grep -rn news_blackout` returns hits from both and reads as a
+> single wired mechanism** — *`wired` and `executes` are different predicates, and the collision now
+> defeats the grep that used to distinguish them.*
+>
+> > **The original trap is not reduced by the live path — it is aimed.** A seat wiring news into
+> > `decision/engine.py`, seeing `GATE_NAME = "news_blackout"` already defined in the live module, would
+> > populate `candle["news_blackout"]` **as the obviously-correct integration**. That is exactly the
+> > half-hour change this entry warns about, and `T-0036` has now made it look like the sanctioned one.
+>
+> **`gate_012_news_blackout.py:289` states the invariant — *"populating `news_blackout` and enforcing the
+> block are one change or neither"* — and it is the module the LIVE path imports, so the warning is
+> present and is not where the mistake would be made.** Renaming one of the two is the cheap half; the
+> entry stays open until the dead read is removed or enforced.
+
 
 > ## `[AMENDED 2026-08-16 by Review, and the amendment makes this worse rather than smaller.]`
 >
