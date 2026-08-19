@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-18 (B168 — A ONE-PARAMETERISATION EXIT MEASUREMENT WHOSE SIGN FLIPPED WHEN THE ARM WAS WIDENED. `T-0050`'s before/after realised-R first read as "the passive runner gave back in 32 of 32 trades and added in 0, -0.228 R/trade" — one side, one stop distance, one 1500-bar window. Swept across both sides and four stop distances the SIGN FLIPS: LONG -0.202/-0.228, SHORT +0.045/+0.054. The window trends down, so longs stop out and the passive 30% bleeds back to the original stop while shorts run and it adds. The corpus cannot settle whether the passive runner helps or hurts, and the `32/0` that looked like a mechanism is a fact about direction. Two rows are noise printed in the same format as evidence: 1 and 0 trades reached 2R at the widest stops. CLASS: a measurement taken at ONE point in its parameter space and reported as a property of the thing measured — B150's family reached from the other side, a number that VARIES across a condition nobody varied. Practice: sweep both signs and three magnitudes before reporting a comparison; if the conclusion survives it costs one command, and if it does not, the sweep IS the finding. NOT a reason to hold the cutover — it is the evidence that EXIT-003's runner-management gap is worth Salim's time, and its shape is "we cannot tell from this corpus".)
+Last updated: 2026-08-19 (B171 — a task parked in `REVIEWING` COUNTS AS ACTIVITY in `bus.py`'s idle check, so the longer it is stuck the more effectively it suppresses the warning: `T-0046` sat unreviewed through FOUR consecutive reviews while the board looked busy. General form — a liveness check keyed on the EXISTENCE of activity cannot see activity that has STOPPED MID-STATE, which is `B160`'s family. Fixed both directions, derivable from the tree with no clock, and tested by reproducing the state that occurred. Landed with B169 — a criterion keyed on a metric THE GRADED SEAT CAN EDIT and which the honest work cannot move, where deleting twelve characters and nine rules of real work both give `+1` and only the CANNOT-FIRE list tells them apart — and B170, where a declared RULE-ID blocker is never re-checked although it is the one case that could be, so the flag is a manual assertion wearing a computed bucket's clothing.)
 
 ---
 
@@ -2440,6 +2440,157 @@ register that records its own control pairs is exactly the corpus that will accu
 searched, at the moment of use** — not reused from a previous entry. **Prefer a token containing the
 task id and a nonce over a shared house token like `zzz_absent`**, because a shared one accumulates
 citations until it is present everywhere.
+
+### B169 — a criterion keyed on a metric THE GRADED SEAT CAN EDIT, and which the honest work cannot move
+
+**Filed by the Manager 2026-08-19. Found and measured by Execute BEFORE building `T-0039`, and reported
+rather than quietly earned.** The Manager wrote that task's acceptance as *"`check_rule_coverage.py` must
+move `GATE-040` and `GATE-041` out of the implemented-but-CANNOT-FIRE list; `50/79` today."* **Both halves
+of that are wrong and they are wrong in opposite directions.**
+
+## It was satisfiable by deleting twelve characters
+
+    gate_041_reverse_switch.py:123   CANNOT_FIRE_WITHOUT = ("GRADE-028",)  ->  ()
+      before  CANNOT FIRE 6 distinct · effective coverage 50/79
+      after   CANNOT FIRE 5 distinct · effective coverage 51/79
+      GRADE-028 still unimplemented. NOTHING else changed.
+
+**`CANNOT_FIRE_WITHOUT` is DECLARED by the implementation** — `base.py:184` defaults it to `()` — **and the
+declaration is correct design for a reason the file states: 82 of 117 rules write their `inputs` as DATA
+NAMES, so a rule-id graph cannot see those edges at all (`B44`). The rule knows; the graph does not.**
+
+> ***A criterion that can be met by an edit and cannot be met by the work is worse than no criterion,
+> because the seat that meets it honestly reports FAILURE and the seat that meets it cheaply reports
+> SUCCESS.*** Execute's sentence. **The incentive points at the twelve-character edit, and no instrument
+> here would have caught it — `check_rule_coverage.py` READS that flag, so it would have agreed.**
+
+## And the honest work could not move it either
+
+**`GRADE-028` resolves 3 of `GATE-041`'s 7 conditions. The other 4 are `NOT_READ` — their producers exist
+and are implemented, and the rule does not read them — and `MANDATORY_CONDITION = "micro_msb_confirms"` is
+among the four, not the three.** So after `GRADE-028` landed, `GATE-041` still could not authorise a
+Reverse.
+
+**The module predicted it:** *"GATE-041 would return CONTINUE forever while reporting itself unblocked, and
+the flag that currently tells the truth would be removed by the same edit that activates the bug."*
+
+## Measured after the wave: the metric moved anyway, for a third reason
+
+    stage 1   effective 50/79    the refused twelve-character edit would ALSO have given 51/79
+    stage 2   effective 51/79    nine rules of honest work
+
+**Exactly one of the nine is `HARD_GATE` (`GATE-035`), so only one lands in the 79-rule population.**
+`:304` is `effective = len(implemented & hard) - len(blocked_hard)` — **the bucket is the SUBTRAHEND, and
+the minuend moved.** *Both the Manager (who predicted it would not move) and Review (who ruled it COULD not
+move) reasoned from `:257-261` and neither read `:304`.*
+
+> **So the figure moves by the same `+1` whether the work is done or the flag is deleted. It cannot tell
+> them apart. What distinguishes them is the CANNOT-FIRE list — which the edit would have shortened and the
+> work did not: `6 distinct` before and after.**
+
+**This is not `B150`.** `B150` is a figure that cannot move. **This is a figure that moves for the wrong
+reason and IS WRITABLE BY THE PARTY IT GRADES** — a governance defect rather than a measurement one, and
+the first of its kind here.
+
+## Practice
+
+**Before writing an acceptance criterion, ask WHO CAN CHANGE THE NUMBER WITHOUT DOING THE WORK. Where the
+answer is the graded seat, key it on something that seat does not declare** — here `GATE-041`'s own
+condition census, computed from the producers' existence rather than asserted by the consumer. **And a
+criterion whose honest outcome is *"the number did not move"* must say so IN ADVANCE, or the seat
+delivering it looks like it failed.**
+
+### AMENDMENT — the replacement criterion was itself wrong, twice
+
+**`3 NOT_EVALUABLE / 4 NOT_READ -> 0 / 4` was pre-registered by the Manager and measured `0 / 7`.** The
+three did not become evaluable — **they MOVED CATEGORY:** `GRADE-028` exists, so *"no producer exists"* is
+false for them, and `GATE-041` still does not call them. **Total `NOT_READ` goes 4 to 7.** *Caught by
+Review and independently by Execute; the Manager had it wrong in the direction that looked like progress.*
+
+**And `effective coverage 50/79 MUST NOT MOVE` was also pre-registered, and it moved to `51/80`.** *Second
+wrong pre-registered figure in one task, both the Manager's, both caught by a seat measuring rather than by
+the author re-reading the prediction.* **That is pre-registration's own failure mode: the figure is written
+once and never checked again until it is contradicted.**
+
+### B170 — the same metric's OTHER defect: a declared rule-id blocker is never re-checked, and it is the one case that COULD be
+
+    check_rule_coverage.py:257-261
+        blocked = sorted(rid for rid, cls in sorted(rules_pkg.implementations().items())
+                         if getattr(cls, "CANNOT_FIRE_WITHOUT", None))
+
+**A truthiness test on the DECLARATION. It never asks whether the declared blockers are SATISFIED.**
+Verified against a tree where the blocker is already implemented: `GRADE-028` implemented, `GATE-041`'s flag
+still `('GRADE-028',)`, still truthy, **still counted blocked.**
+
+**The tool treats two different kinds of blocker identically:**
+
+    a DATA-NAME blocker   unverifiable from a rule-id graph — trust the declaration. CORRECT (B44).
+    a RULE-ID blocker     trivially verifiable: `implementations()` already knows. NOT CHECKED.
+
+> **So the one case that could be verified is the one that is not** — and a rule whose blocker has been
+> satisfied stays in the bucket until a human edits the flag, while a rule whose blocker is unsatisfied
+> drops out the moment someone clears it. ***The flag is a manual assertion wearing a computed bucket's
+> clothing.***
+
+## THE FIX WENT THROUGH THREE PREDICATES AND ONLY THE THIRD IS RIGHT
+
+    1. IS THE BLOCKER IN `implementations()`?     the Manager's — WRONG. Review built it and it
+       fired falsely on GATE-040 and GRADE-035, both of which declare GATE-041: GATE-041 IS
+       implemented AND CANNOT FIRE, so their declarations are not stale at all.
+       ***IMPLEMENTED IS NOT SATISFIED.***
+    2. CAN THE PROXIMATE BLOCKER FIRE?            Review's — and NOT refuted. Correct at baseline.
+       *The Manager first recorded this as "can the CHAIN ROOT fire", a predicate NEITHER seat
+       proposed, and then refuted that — a wrong wrong-predicate inside the entry whose content
+       IS the wrong predicates.*
+    3. THERE IS NO THIRD PREDICATE. THERE IS A SCOPE LIMIT.
+       "Can the proximate blocker reach a verdict — answerable only by evaluating it" fails too:
+       evaluating `GATE-041` returns `NOT_APPLICABLE`, which is what it returns ON NO INPUT. To
+       evaluate it meaningfully you need its seven inputs, which are DATA NAMES WITH NO PRODUCERS —
+       the thing in question. **The regress does not terminate in a predicate.**
+
+**So the resolution is the WORDING, not a predicate: report `DECLARED BLOCKER SATISFIED` — a statement
+about the DECLARATION — and never *"the rule can now fire."*** Measured: **all seven of `GATE-041`'s
+conditions are `NOT_READ` and NOT ONE of the seven names appears in its `CANNOT_FIRE_WITHOUT`**, so the
+flag is structurally blind to every one of them.
+
+> **General form: a flag-based check sees only DECLARED dependencies, so "not blocked" from any flag means
+> "no declared blocker remains" and NEVER "able to fire."**
+
+**First real instance, created by the honest work and by nobody's error: after `T-0039`, `GRADE-028` is
+implemented and declares no blocker of its own — so `GATE-041`'s declaration is now genuinely STALE, and
+`GATE-041` still cannot fire. Both true at once. THE FLAG MUST NOT BE CLEARED.**
+
+### B171 — a task parked in `REVIEWING` SUPPRESSES the idle warning that would have found it
+
+**Filed by the Manager 2026-08-19 against the Manager's own instrument. `T-0046` sat in `REVIEWING` with no
+reviewer and no verdict through FOUR consecutive reviews.** Measured: `tasks/T-0046/` held `plan.md`,
+`_runs`, `state.json` and **no `review-01.md`**, while `T-0045` and `T-0050` both had one.
+
+**How: Execute reported it done, the Manager verified its figures and released the next task, then a
+directive from Malek arrived and `T-0050` jumped the queue. Review reviewed the task that ARRIVED rather
+than the task that was WAITING — and nothing in the loop names the difference.** *The Manager's omission was
+never sending a sha; Review's was never reading the board — only its inbox.*
+
+    bus.py, the idle check:
+        active = [st for st in rows if st.get("status") in ("EXECUTING", "REVIEWING")]
+        if not active:  ...warn...
+
+> **A task parked in `REVIEWING` COUNTS AS ACTIVITY. It makes the board look busy while nothing happens to
+> it, and THE LONGER IT IS STUCK THE MORE EFFECTIVELY IT SUPPRESSES THE WARNING.** *The instrument built to
+> catch an idle loop is defeated by the specific way this loop went idle.*
+
+**General form: a liveness check keyed on the EXISTENCE of activity cannot see activity that has STOPPED
+MID-STATE.** `B160`'s family — the check exists, and the state it cannot represent is the one that occurred.
+
+**FIXED, both directions, derivable from the tree with no clock — and the mirror is Review's find, the same
+failure with the seats swapped:**
+
+    REVIEWING and NO review-01.md while a LATER task has one   -> the reviewer moved past it
+    REVIEWING and review-01.md EXISTS                          -> a verdict filed, nobody acted
+
+**Tested by reproducing `T-0046`'s actual stalled state: both arms fire on the states they name, silent when
+clean, state restored after.** *And the second arm matters because it is the failure this loop would enter
+if a verdict were filed and the Manager missed it.*
 
 ### B168 — a one-parameterisation exit measurement, whose sign flipped when the arm was widened
 
