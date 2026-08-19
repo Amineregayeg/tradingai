@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-19 (B180 — one shared INDEX, not just one shared tree: my register commit 97c3db0 swallowed Execute's in-flight T-0047 work, +1012/-62 across six files, under my message and Seat: manager trailer, because `git add KNOWN_ISSUES.md` and `git commit -F` are two statements about different objects and Execute staged in the window between them. The five preceding register commits were clean, and `git diff --cached --numstat` before the FIRST one showed a single file — a check that passed five commits ago carried forward as a property of the procedure when it was a property of that moment. The credit line is the smaller half: the code landed BEFORE its author's verification sequence ran, so a commit that lands unverified code is indistinguishable in the log from one that lands verified code. Not repaired by rewriting pushed history with two peers holding clones. Procedure changed to `git commit -o <path>`, which commits only the named path regardless of the index. Filed with B178 and B179.)
+Last updated: 2026-08-19 (B182 — A FAITHFUL TRANSCRIPTION OF A RULING THAT SILENTLY DROPPED A GUARD THE RULING NEVER MENTIONED. Implementing Salim's round-3 news filter as `if impact_class == "RED_FOLDER" or forced` is a CORRECT reading of what he said, and it re-opened the fail-open `T-0035` found in `finnhub.py` and `T-0036` closed: the third state UNKNOWN is neither RED nor forced, so an impact we cannot parse became tradeable again. He ruled on events whose impact we CAN read; an unreadable vendor string was never in scope of his ruling, which is precisely why transcribing the ruling removed the guard with no step that looked wrong. CLASS: a ruling replaces a predicate, and the old predicate may carry obligations the ruling never addressed — invisible in the diff, because the diff shows the new predicate matching the new doctrine and that is the thing under review. Caught only by a test written two tasks earlier for an unrelated property. FIX: the survivor is a NAMED CONSTANT with its own reason token so a faithful rewrite cannot absorb it again. PRACTICE: when a ruling replaces a predicate, enumerate what the OLD one did that the ruling does not mention and carry each survivor forward by name. See also B181 and the Manager's B180 — the shared-index race that landed this work under another seat's message.)
 
 ---
 
@@ -2690,7 +2690,58 @@ seat's.** Paper mode throughout — `ExecMode` has no `LIVE` member and `execute
 is not `is_simulation` — but *starting an engine that will place orders and flatten positions at 19:00 is
 still an operator decision.*
 
-### B180 — `git add -A` in a shared tree commits whatever another seat is mid-write on
+### B182 — a FAITHFUL TRANSCRIPTION of a ruling that silently dropped a guard the ruling never mentioned
+
+**Found by `T-0036`'s own guard during `T-0047`, on Execute's code, in the commit that implements
+Salim's round-3 filter.**
+
+    the ruling      blocks = (impact == RED OR force_included)
+                             AND taxonomy IN his six AND currency IN scope
+    what I wrote    if impact_class == "RED_FOLDER" or forced: ...
+    what was there  UNKNOWN impact BLOCKS  (DECLARED_UNKNOWN_POLICY, T-0036)
+
+**`T-0035` found that `finnhub.py` collapsed an unreadable provider impact to `"low"` through a
+double fall-through, so an event we could not read arrived as harmless and the trade was TAKEN.
+`T-0036` made `UNKNOWN` block.** *Transcribing the ruling's disjunction re-opened it* — the third
+state is neither `RED_FOLDER` nor forced, so it fell out of the filter entirely.
+
+> **THE DEFECT IS THAT THE CODE WAS FAITHFUL.** *`impact_class == "RED_FOLDER"` is a correct reading
+> of what Salim said.* He ruled on events whose impact we CAN read — red versus not-red — and said
+> nothing about a vendor string we cannot parse, **because that is not a question about his doctrine
+> at all.** The guard it removed was never in scope of the ruling, which is exactly why transcribing
+> the ruling removed it without any step that looked wrong.
+
+#### THE CLASS, AND IT IS NOT "BE CAREFUL WHEN IMPLEMENTING RULINGS"
+
+**A ruling replaces a predicate. The predicate it replaces may be carrying obligations the ruling
+never addressed.** *Those obligations are invisible in the diff*, because the diff shows the new
+predicate matching the new doctrine — which is the thing under review, and it passes.
+
+    what review sees   old predicate -> new predicate, and the new one matches the ruling   PASS
+    what is lost       every clause of the old predicate that the ruling did not speak to
+
+**Neither the ruling nor the diff can show you the second.** The only thing that did was a test
+written for a defect two tasks earlier, asserting a property that had nothing to do with round 3.
+
+**FIX APPLIED, and its shape is the point:** the surviving obligation is now a NAMED CONSTANT with
+its own reason token, so the ruled disjunction cannot absorb it again by being rewritten faithfully.
+
+    IMPACT_TREATED_AS_RED = ("RED_FOLDER", "UNKNOWN")
+    reason token          UNKNOWN_IMPACT_BLOCKED_DECLARED_POLICY
+
+*Kept separate from the ruled branch and reported under its own reason, so a reader can count how
+often the vendor MAPPING is failing rather than how often the news is red* — two facts that a single
+`blocks=True` would merge.
+
+**STANDING PRACTICE: when a ruling replaces a predicate, enumerate what the OLD predicate did that
+the ruling does not mention, and carry each survivor forward under its own name.** *"The new code
+matches the ruling" is a claim about the ruling, not about the code it replaced.*
+
+### B181 — MY OWN B180 FIX WAS WRONG: it is the shared INDEX, and staging by path does not help
+
+**Found by the commit-msg hook during `T-0047`. The Manager's `B180` records the same incident from
+the other side and carries the correct mechanism; this entry exists for the part that is mine — I
+diagnosed it wrong first.**
 
 **Found by the commit-msg hook during `T-0047`, and the hook is the only reason it was found at
 all. Three seats share one working tree and `git add -A` does not know whose changes it is taking.**
@@ -2729,17 +2780,38 @@ rewrite here is the exact class of action that destroyed a seat's work four time
 attribution error is cheaper than a lost-work error by orders of magnitude, and the cure must not
 be more dangerous than the disease.*
 
-**THE FIX IS PER-SEAT AND MECHANICAL: never `git add -A` in a shared tree.** Stage BY PATH — the
-paths the task actually touched, which every seat already knows because it wrote them. `git add -A`
-is a convenience whose failure mode is silent and whose blast radius is another agent's uncommitted
-work.
+#### THE FIX I FIRST WROTE HERE WAS WRONG, AND THAT IS THE ENTRY
 
-    git add -A                          takes whatever is dirty, including mid-write files
-    git add <the paths this task wrote> takes what this task did
+**I filed this as *"never `git add -A` in a shared tree; stage BY PATH"*.** The Manager then supplied
+the actual mechanism, and it defeats that fix completely:
 
-**And the second half: `git status --porcelain` before staging is NOT a guard against this.** *It
-is a read of a moment, and the write happens after it* — the same window defect as re-measuring
-mtimes against a fresh baseline. **The only real guard is never staging by wildcard.**
+    the Manager ran   git add KNOWN_ISSUES.md     <- A PATHSPEC. Exactly my prescription.
+                      (hook dry-run)
+                      git commit -F ...
+    Execute ran       git add <T-0047 paths>       in the window between them
+    git commit commits THE INDEX — so it took both.
+
+> **Staging by path is what the Manager DID.** *My fix would not have prevented the incident it was
+> written for, and it would have read as a solved problem to everyone downstream* — a remedy that
+> matches the story and not the mechanism. **`B63` says one shared working TREE; the sharper half is
+> that it is one shared INDEX, and two seats staging concurrently means whoever commits first takes
+> the other's work with a correct-looking diff.**
+
+**THE ACTUAL FIX: commit with an explicit pathspec, so the rest of the index is ignored.**
+
+    git add -A                  takes whatever is dirty              WRONG
+    git add <paths>             still leaves the INDEX shared        NOT ENOUGH  <- my first fix
+    git commit -- <paths>       commits ONLY those paths             THE FIX
+    git commit --only <paths>   same, explicit spelling
+
+**And `git status --porcelain` beforehand is not a guard either**, for a different reason that
+survives the correction: *it reads a moment and the write happens after it* — the same window defect
+as re-measuring mtimes against a fresh baseline. **A check whose window closes before the event
+cannot see the event.**
+
+*(Ids: this entry was first written as a second `B180`, colliding with the Manager's — two seats bid
+from one ledger and the file cannot see an uncommitted entry, which is the same shared-state class
+one level up. Renumbered to B181; B183 was a bid spent reading these ids back and is unused.)*
 
 ### B179 — production has no Finnhub key, so the calendar is ALWAYS EMPTY and every news gate is inert regardless of correctness
 
