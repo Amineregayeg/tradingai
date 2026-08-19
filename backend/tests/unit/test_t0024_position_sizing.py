@@ -68,6 +68,22 @@ EXPECTED_CELLS: dict[tuple[str, str], float] = {
     ("STANDARD", "HEAVY"): 0.0,
 }
 
+#: THE RED-FOLDER EXPECTATION IS DERIVED FROM THE HAND-WRITTEN COPY ABOVE, ONE RUNG ALONG.
+#:
+#: **Not a second literal table, and the reason is the ruling itself:** Salim's red-folder cells
+#: are the existing column shifted one rung — Manipulated/NONE 1.50% -> 0.75% IS
+#: Manipulated/LIGHT — so a nine-value fixture would restate numbers already written twice and
+#: become the THIRD copy, drifting in the direction of whichever one is edited next (`B93`).
+#:
+#: **The independence that matters is preserved**: these values still come from the hand
+#: transcription of his statement and NOT from `RISK_MATRIX`, so the cross-check at
+#: `test_the_nine_cells...` still compares two sources rather than one source with itself.
+def _red_folder_expected(box: str, disturbance: str) -> float:
+    """`EXPECTED_CELLS` at the next rung. HEAVY has none and stays 0.0 — by the same rule."""
+    order = ("NONE", "LIGHT", "HEAVY")
+    i = order.index(disturbance)
+    return 0.0 if i + 1 >= len(order) else EXPECTED_CELLS[(box, order[i + 1])]
+
 #: The banned vector. Its middle cell is 0.05 — ten times its siblings, 3.33x over
 #: SIZE-004's ceiling, in the column GATE-032 sets to zero.
 BANNED_ALTCOIN_VECTOR = "risk_altcoin_heavy_as_written"
@@ -153,6 +169,9 @@ def test_the_public_sizing_path_returns_the_table_value_for_every_one_of_the_nin
     )
     assert sizing.risk_pct == RISK_MATRIX[(box_grade, disturbance_grade)]
     assert sizing.matrix_cell == f"{box_grade}_{disturbance_grade}"
+    # NORMAL DAY: the applied value IS the graded cell, and no step was taken. Asserted so that
+    # "a step happened" is a fact in the record rather than an inference from two equal numbers.
+    assert sizing.matrix_risk_pct == expected and sizing.eco_day_step_applied is False
 
     # ...and the same value survives into the record, so telemetry cannot drift from the path.
     ev = RiskMatrix.evaluate(sizing)
@@ -160,6 +179,47 @@ def test_the_public_sizing_path_returns_the_table_value_for_every_one_of_the_nin
     assert ev.values["matrix_cell"] == f"{box_grade}_{disturbance_grade}"
     assert ev.values["sizer_implementation"] == "LOOKUP_TABLE"
     assert sizing.as_risk_assessment()["risk_pct"] == expected
+
+    # ===================================================================================
+    # THE RED-FOLDER DAY — the same six sites, on the path they were BLIND to.
+    #
+    # These assertions did not FAIL before T-0048; they were SILENT. `size()` was only ever
+    # driven with the flag defaulted off, so the entire rung-down path was unasserted by the
+    # test that owns the sizing contract. **The hazard the plan named is real and arrives the
+    # other way round**: extending them to red-folder days WITHOUT deriving a new expectation
+    # would assert NORMAL-DAY values against the stepped path — and `:159`/`:162` would do it
+    # to the telemetry and the risk assessment, which is exactly where `matrix_risk_pct ==
+    # risk_pct` would come from.
+    # ===================================================================================
+    red = RiskMatrix.size(
+        box_grade=box_grade, disturbance_grade=disturbance_grade, is_red_folder_day=True
+    )
+    red_expected = _red_folder_expected(box_grade, disturbance_grade)
+    assert red.risk_pct == red_expected, (
+        f"{box_grade}/{disturbance_grade} on a red-folder day: got {red.risk_pct}, the ruling "
+        f"says {red_expected} (the graded cell one rung down the disturbance axis)"
+    )
+    # STILL FAILS A GENUINELY WRONG VALUE: exact equality against a value derived from the hand
+    # transcription, never a membership test and never a tolerance. An amendment that accepted
+    # the rung-down cell AND anything else would have removed the assertion, not corrected it.
+    assert red.risk_pct != expected or red_expected == expected
+
+    # THE GRADED CELL IS UNCHANGED AND STILL NAMED. A record whose cell id moved would attribute
+    # a smaller position to a WORSE BOX — a different fact from the calendar shrinking it.
+    assert red.matrix_cell == f"{box_grade}_{disturbance_grade}"
+    assert red.matrix_risk_pct == expected
+    assert red.eco_day_step_applied is True
+    assert red.eco_day_risk_policy == "ONE_RUNG_DOWN"
+
+    # ...and into BOTH records, which is the half that was silently validated against a
+    # normal-day table.
+    red_ev = RiskMatrix.evaluate(red)
+    assert red_ev.values["risk_pct"] == red_expected
+    assert red_ev.values["matrix_risk_pct"] == expected
+    assert red_ev.values["sizer_implementation"] == "LOOKUP_TABLE", (
+        "the eco-day step must be a CELL RE-SELECTION, not arithmetic"
+    )
+    assert red.as_risk_assessment()["risk_pct"] == red_expected
 
 
 def test_no_single_multiplicative_modifier_can_reproduce_the_table() -> None:

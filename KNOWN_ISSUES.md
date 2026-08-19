@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-19 (B187 — a FOURTH terminal condition for the 30% runner, in the broker: paper.py's `_settle` partial path sets pos.units = remaining and keeps the position WITHOUT touching pos.tp or pos.sl, and on_tick closes on pos.tp — so a partialled remainder is closed by the TP path, a reason not in EXIT-001's TERMINAL_REASONS = (FINAL_TARGET, STOP_HIT, SESSION_CLOSE) and invisible to the rule that owns the exit. LATENT only because T-0050 sets tp=None on the live signal and FINAL_TARGET has ZERO occurrences under app/services/live/, confirmed in production where the trace reads '70% at 1964.2546 then a 30% runner to None'. It fires the moment anything places a take-profit on a position that will later be partialled — which is exactly what implementing TARGET-001 does, so the activating task will look unrelated. Found by Review, which nearly filed it ACTIVE on reasoning that was true at T-0038 and fixed by T-0050: a finding retired by a later task stays true in a reviewer's head unless re-measured.)
+Last updated: 2026-08-19 (B188 — THE RATIFIED 9-CELL RISK MATRIX HAS ZERO PRODUCTION CALLERS. `RiskMatrix.size(` appears in exactly one file in the repository and it is a TEST; every live trade is sized from `fixed.RISK_PCT`, a single constant that does not vary with box grade, disturbance grade, or anything else the strategy grades. `GATE-032` is Salim's sizing doctrine and nothing on the order path consults it. It looked fine because `check_rule_coverage` reports GATE-032/GRADE-017/GATE-016 as IMPLEMENTED and inside effective coverage — "implemented" means a module claims the id and can reach a verdict, NOT that anything calls it, and no figure we publish separates those. B179's shape and worse: that one is inert for a missing KEY, which config reaches; this is inert for a missing CALL SITE, which only wiring reaches. So T-0048's rung-down is correct and cannot affect a trade for two independent sufficient reasons, and a `0 rung-downs` figure is consistent with no red-folder days, no calendar, AND no sizer — three causes, one null. NOT wired here: putting GATE-032 on the order path changes the size of every live trade and is Malek's call, like T-0050's cutover.)
 
 ---
 
@@ -2725,6 +2725,60 @@ rule affects a live trade must cite `running: true` and a `decision_records` row
 seat's.** Paper mode throughout — `ExecMode` has no `LIVE` member and `execute()` refuses any adapter that
 is not `is_simulation` — but *starting an engine that will place orders and flatten positions at 19:00 is
 still an operator decision.*
+
+### B188 — the ratified 9-cell risk matrix has ZERO production callers; every live trade is sized from one constant
+
+**Found by Execute during `T-0048`, while looking for where to pass `is_red_folder_day` into the
+sizer. There was nowhere to pass it to.**
+
+    RiskMatrix.size(   call sites in the whole repository:
+                       tests/unit/test_t0024_position_sizing.py      <- ONE, and it is a test
+                       app/**                                        <- ZERO
+
+    what sizes a live trade instead:
+      crypto_loop      self.risk_pct = fixed.RISK_PCT        a single configured constant
+      strategy_step    Signal(..., risk_pct=risk_pct)        passed straight through
+      execution        size_position(equity, sig.risk_pct, price, sl)
+
+> **`GATE-032` is Salim's sizing doctrine — the nine cells of `053_untitled.md`, box grade ×
+> disturbance grade, ratified — and NOTHING ON THE ORDER PATH CONSULTS IT.** *Every live trade is
+> sized from one percentage that does not vary with the box grade, the disturbance grade, or
+> anything else the strategy grades.*
+
+#### WHY IT LOOKED FINE
+
+    check_rule_coverage   GATE-032 IMPLEMENTED · GRADE-017 IMPLEMENTED (alias) ·
+                          GATE-016 IMPLEMENTED · all inside effective coverage
+    the tests             44 of them, exhaustive over all nine cells, every one GREEN
+    the module            complete, correct, and exercised only by its own test file
+
+**"Implemented" means a module claims the id and can reach a verdict. It does not mean anything
+CALLS it.** *`T-0046` built the same distinction for `PRIM-007` and the coverage tool reports it
+honestly — the gap here is that a rule can be implemented, evaluable, inside effective coverage, and
+still have no caller, and no figure we publish separates those.*
+
+**This is `B179`'s shape and worse in one respect.** B179's classifier is inert because a KEY is
+missing — a config change reaches it. **This is inert because there is no CALL SITE**, which only a
+wiring task reaches, and nothing in the record says so.
+
+#### WHAT `T-0048` THEREFORE IS AND IS NOT
+
+**`T-0048` implements the rung-down correctly** — nine cells verified against
+`RISK_MATRIX[(box, next_rung(dist))]`, no new numeric literal, both record types carrying
+`matrix_risk_pct` / `eco_day_step_applied`. **And it cannot affect a trade**, for two independent
+reasons that would each be sufficient:
+
+    1. no Finnhub key, so `is_red_folder_day` is FALSE on every bar          (B179)
+    2. nothing on the order path calls the sizer AT ALL                      (this entry)
+
+**Its arms are FIXTURE arms twice over, and a `0 rung-downs applied` figure would be consistent with
+all three of: no red-folder days, no calendar, and no sizer.** *Three causes, one null.*
+
+**NOT WIRED HERE.** Putting `GATE-032` on the order path changes the size of every live trade, is
+not in `T-0048`'s plan, and is a decision about live behaviour rather than a correction — **it is
+its own task and Malek's call**, in the same class as `T-0050`'s exit cutover which he authorised
+explicitly. *Escalated rather than fixed in passing, which is the standing rule for the difference
+between the two.*
 
 ### B182 — a FAITHFUL TRANSCRIPTION of a ruling that silently dropped a guard the ruling never mentioned
 

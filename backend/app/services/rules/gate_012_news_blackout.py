@@ -500,14 +500,34 @@ class PostEventBlackout(RuleImplementation):
 
 
 class RedFolderDayFlag(RuleImplementation):
-    """GATE-016: record `is_red_folder_day`. GATE NOTHING ON IT."""
+    """GATE-016: record `is_red_folder_day`. **BLOCK nothing on it; SIZE from it.**
+
+    **Both halves are Salim's round-3 item 1, and they pull in different directions.**
+
+        ruling (a)  the flag does NOT block. Blocking stays per EVENT — GATE-012/013, and
+                    GATE-014 for the exceptional class. T-0032's deferral was RATIFIED.
+        ruling (b)  a red-folder day sizes ONE RUNG DOWN the disturbance axis.
+
+    So *"GATE NOTHING ON IT"* — this docstring through `T-0047` — is now half true and half
+    false, which is worse than either. **The flag gates no ENTRY and re-selects the risk CELL**,
+    and those are different verbs on different paths: `GATE-012` decides whether to trade in a
+    window, `GATE-032` decides how much when a trade is allowed.
+    """
 
     RULE_ID = "GATE-016"
 
     CANNOT_FIRE_WITHOUT = ()
 
     COVERAGE_NOTE = (
-        "TELEMETRY ONLY, BY THE RULE'S OWN OUTPUT FIELD: 'Undefined until ruled — record "
+        "NO LONGER TELEMETRY ONLY. Round-3 ruling (b) makes this flag SIZE: GATE-032 re-selects "
+        "one rung down the disturbance axis when it is true (T-0048). Ruling (a) ratified the "
+        "other half -- it still BLOCKS nothing, and blocking stays per event. AND IT CANNOT "
+        "REACH A TRADE TODAY, for two independent reasons: B179, no Finnhub key, so the flag is "
+        "FALSE on every production bar; and B188, RiskMatrix.size() has ZERO production callers "
+        "-- live trades are sized from fixed.RISK_PCT, one constant. A '0 rung-downs' figure is "
+        "therefore consistent with no red-folder days, no calendar, AND no sizer. "
+        "THE ORIGINAL NOTE FOLLOWS, kept because it records why the flag was built inert: "
+        "'Undefined until ruled — record "
         "is_red_folder_day on every trade so the two readings can be tested against "
         "outcomes.' The workspace reads eco-data avoidance as a DAY gate; the engine "
         "constants are a MINUTES gate; nothing reconciles them and this rule must not pick. "

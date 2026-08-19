@@ -112,7 +112,7 @@ from app.services.rules.base import RuleImplementation
 from app.services.rules.gate_002_disturbance import DisturbanceGrade
 from app.services.rules.grade_002_box_grade import BoxGrade
 from app.services.telemetry import contract_loader as contract
-from app.services.telemetry.records import RuleEvaluation, derived, from_registry
+from app.services.telemetry.records import RuleEvaluation, derived, from_record, from_registry
 
 #: GRADE-019's declared input. `ALIGNED_MAJOR` is what both production paths hardcode.
 InstrumentClass = Literal["ALIGNED_MAJOR", "ALTCOIN"]
@@ -144,6 +144,28 @@ ALTCOIN_REFUSAL_REASON = "ALTCOIN_RISK_UNDEFINED"
 #: GATE-032's HEAVY column, as a token distinct from the refusal above. Same numeric shape,
 #: opposite meaning.
 HEAVY_SKIP_REASON = "HEAVY_DISTURBANCE_SKIP"
+#: GATE-016 ruling (b): a red-folder day sizes one rung DOWN the disturbance axis.
+ECO_DAY_SKIP_REASON = "ECO_DAY_RUNG_DOWN_TO_SKIP"
+#: The policy name that ships on every sized evaluation, so a record says WHICH rule moved the cell.
+ECO_DAY_RISK_POLICY = "ONE_RUNG_DOWN"
+
+
+def next_rung(disturbance: DisturbanceGrade) -> DisturbanceGrade | None:
+    """One step down the disturbance axis. `None` past the end.
+
+    **THE RULING INTRODUCES NO NEW NUMBER.** Every red-folder cell Salim named is already in
+    `RISK_MATRIX` one rung along — Manipulated/NONE 1.50% -> 0.75% IS Manipulated/LIGHT, and every
+    LIGHT cell steps to HEAVY, which is already `0.0`. So "one rung down" is a LOOKUP into the
+    table we hold, not arithmetic and not a second table.
+
+    *A nine-cell literal would restate what the matrix already says and drift from it silently, in
+    the direction of whichever copy someone edits next* — `B93`'s shape, and the reason this is a
+    derivation. HEAVY has no next rung and is already `0.0`, so it stays SKIP **by the same rule
+    rather than by an exception**, which is what keeps the rule uniform.
+    """
+    order = DISTURBANCE_GRADES
+    i = order.index(disturbance)
+    return order[i + 1] if i + 1 < len(order) else None
 
 #: No box grade, so no row. GRADE-001/GRADE-006: a box with no imbalance tap has no grade at
 #: all, "which is what stops the risk matrix from being looked up".
@@ -232,6 +254,13 @@ class RiskSizing:
     instrument_class: InstrumentClass
     reason_code: str | None
     reason: str
+    #: GATE-016. `matrix_risk_pct` is the GRADED cell (box x disturbance) BEFORE any eco-day
+    #: step; `risk_pct` above is the APPLIED value. Equal on a normal day, and the pair is what
+    #: lets a record show that a step happened rather than asserting it.
+    matrix_risk_pct: float | None = None
+    eco_day_step_applied: bool = False
+    eco_day_risk_policy: str = ECO_DAY_RISK_POLICY
+    is_red_folder_day: bool = False
 
     @property
     def is_tradeable(self) -> bool:
@@ -250,11 +279,29 @@ class RiskSizing:
         member exists for exactly this state and is NOT the disturbance grade of the same
         name, which is why the two are never compared.
         """
-        return {
+        out = {
             "box_grade": self.box_grade if self.box_grade is not None else "NONE",
             "matrix_cell": self.matrix_cell,
             "risk_pct": self.risk_pct if self.risk_pct is not None else 0.0,
             "sizer_implementation": SIZER_IMPLEMENTATION,
+        }
+        out.update(self.eco_day_values())
+        return out
+
+    def eco_day_values(self) -> dict[str, Any]:
+        """GATE-016's trio, emitted on EVERY evaluation and on BOTH record types.
+
+        **`matrix_risk_pct` and `risk_pct` are equal on a normal day and that is the point**: the
+        pair is what lets a stored record show a step HAPPENED rather than leaving it to be
+        inferred from two numbers that differ. `eco_day_step_applied` says which.
+        """
+        return {
+            "eco_day_risk_policy": self.eco_day_risk_policy,
+            "matrix_risk_pct": (
+                self.matrix_risk_pct if self.matrix_risk_pct is not None else 0.0
+            ),
+            "eco_day_step_applied": self.eco_day_step_applied,
+            "is_red_folder_day": self.is_red_folder_day,
         }
 
 
@@ -291,6 +338,7 @@ class RiskMatrix(RuleImplementation):
         box_grade: BoxGrade | None,
         disturbance_grade: DisturbanceGrade,
         instrument_class: InstrumentClass = "ALIGNED_MAJOR",
+        is_red_folder_day: bool = False,
     ) -> RiskSizing:
         """Look up one cell, or say why no cell applies.
 
@@ -347,8 +395,47 @@ class RiskMatrix(RuleImplementation):
                 ),
             )
 
-        risk_pct = RISK_MATRIX[(box_grade, disturbance_grade)]
+        matrix_risk_pct = RISK_MATRIX[(box_grade, disturbance_grade)]
+        risk_pct = matrix_risk_pct
         cell = _matrix_cell_id(box_grade, disturbance_grade)
+        stepped = False
+
+        if is_red_folder_day:
+            # GATE-016 RULING (b), and it is a CELL RE-SELECTION rather than arithmetic —
+            # `sizer_implementation` stays LOOKUP_TABLE. The stepped cell is read from the SAME
+            # matrix at the next rung, so no number enters here that Salim did not write.
+            #
+            # `matrix_cell` KEEPS NAMING THE GRADED CELL (box x disturbance). The eco-day step is
+            # recorded ALONGSIDE it and never folded into the grade: a record whose cell id moved
+            # would attribute a smaller position to a worse box, which is a different fact.
+            stepped_grade = next_rung(disturbance_grade)
+            risk_pct = 0.0 if stepped_grade is None else RISK_MATRIX[(box_grade, stepped_grade)]
+            stepped = True
+
+        eco = {
+            "matrix_risk_pct": matrix_risk_pct,
+            "eco_day_step_applied": stepped,
+            "is_red_folder_day": is_red_folder_day,
+        }
+
+        if risk_pct == 0.0 and stepped and matrix_risk_pct != 0.0:
+            # THE RUNG-DOWN LANDED ON SKIP. Distinct from a HEAVY skip: the box was tradeable
+            # today and the calendar removed it, which is the fact GATE-016 exists to record.
+            return RiskSizing(
+                outcome="SKIP",
+                risk_pct=risk_pct,
+                matrix_cell=cell,
+                box_grade=box_grade,
+                disturbance_grade=disturbance_grade,
+                instrument_class=instrument_class,
+                reason_code=ECO_DAY_SKIP_REASON,
+                reason=(
+                    f"GATE-016: red-folder day steps {cell} one rung down the disturbance axis "
+                    f"to 0% (skip). The graded cell was {matrix_risk_pct:.2%} — this trade is "
+                    "refused by the CALENDAR, not by the layout."
+                ),
+                **eco,
+            )
 
         if risk_pct == 0.0:
             return RiskSizing(
@@ -365,6 +452,7 @@ class RiskMatrix(RuleImplementation):
                     "with no override path, so nothing downstream may build a position from "
                     "this."
                 ),
+                **eco,
             )
 
         return RiskSizing(
@@ -375,7 +463,12 @@ class RiskMatrix(RuleImplementation):
             disturbance_grade=disturbance_grade,
             instrument_class=instrument_class,
             reason_code=None,
-            reason=f"GATE-032 cell {cell} = {risk_pct}",
+            reason=(
+                f"GATE-032 cell {cell} = {risk_pct}"
+                + (f" (GATE-016: one rung down from {matrix_risk_pct} on a red-folder day)"
+                   if stepped else "")
+            ),
+            **eco,
         )
 
     @classmethod
@@ -400,6 +493,7 @@ class RiskMatrix(RuleImplementation):
             "is_tradeable": sizing.is_tradeable,
             "reason": sizing.reason,
             "matrix_cell_count": len(RISK_MATRIX),
+            **sizing.eco_day_values(),
         }
         if sizing.reason_code is not None:
             values["reason_code"] = sizing.reason_code
@@ -424,6 +518,17 @@ class RiskMatrix(RuleImplementation):
             "matrix_cell_count": derived(
                 "len(RISK_MATRIX) — the DENOMINATOR. Without it a record cannot show the "
                 "lookup covered the whole table rather than the row it happened to hit"
+            ),
+            "eco_day_risk_policy": from_registry("GATE-016", "values.eco_day_risk_policy"),
+            "matrix_risk_pct": derived(
+                "the GRADED cell (box x disturbance) BEFORE any eco-day step — equal to "
+                "risk_pct on a normal day, and the pair is what shows a step happened"
+            ),
+            "eco_day_step_applied": derived(
+                "GATE-016 ruling (b): true when the red-folder day moved the cell one rung"
+            ),
+            "is_red_folder_day": from_record(
+                "GATE-016 — EXISTS an event on the NY day with blocks == true (GATE-015)"
             ),
         }
 
