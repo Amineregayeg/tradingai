@@ -2613,8 +2613,11 @@ just of the schema edit: those 26 are the places a false `[]` would have been wr
 
 **RESOLUTION.** The PROPERTY is added — that is the structural fix rung 4 actually needed, because
 `stop.anchor_object_id` had nowhere to resolve to and `HG-11` could never be satisfied, which is what
-guaranteed the `0/529`. **`required` is deferred to `T-0046`, the commit that makes the array
-answerable.**
+guaranteed the `0/529`. **`required` was deferred to `T-0046`, the commit that makes the array
+answerable — and `T-0046` DISCHARGED IT at `1c302d8`: `order_blocks` joined `primitives.required` in
+the same commit that made `PRIM-007` run, verified on both halves (`shadow.py:49` imports it, `:668`
+calls `OrderBlocks.detect`, `:785` writes the result), so an empty array now means the walk RAN and
+found nothing.** *The deferral is closed; this paragraph records what it was for.*
 
 **And the tripwire is keyed on the EVENT, not a proxy** (`B163`'s lesson, applied rather than
 repeated): it does not watch for a field, a version or a filename — it watches for `PRIM-007`
