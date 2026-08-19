@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-19 (B184 — GATE-015's force-include list carries the VERB forms 'Fed Chair Powell speaks' and 'testifies' and matches by case-insensitive substring, so a vendor rendering of 'Fed Chair Powell Testimony' matches NOTHING — while the same function's taxonomy branch tests for the token 'testimony' three lines away and :130 maps it to SPEECHES. The branch written for the event exists and the event never reaches it; the word's presence in the taxonomy path is evidence the rendering was anticipated. Root cause is duplication: two places in one function encode 'the Fed Chair is speaking' and only one knows the noun form, so appending one string leaves the mechanism that produced the divergence. Exposure is narrow and lands on the ruling's own sentence — force-include decides only the NON-RED case, which is exactly 'block these even when the vendor rates them medium'. Inert until a Finnhub key exists, per B179. Found by Review in T-0047's PASS verdict.)
+Last updated: 2026-08-19 (B185 — the session-identity predicate's 'negative AND SMALL' boundary is wrong and its third leg is load-bearing rather than lucky. Re-measured: the genuine live rows are at -86083s, -85707s and -86085s, not the -1.0..-1.5s item 6 recorded from fresh sessions, because the session file is REWRITTEN as a session progresses — so the magnitude measures UPTIME and a predicate keyed on 'negative and small' rejects every long-running seat, exactly the set it protects. The sign separates; the magnitude carries no information. And pid 933 tradingai-51 is comm=claude WITH a live socket at +36912.2s, so it passes both original legs and fails only the starttime test — the leg introduced as an anti-recycled-pid guard is the only thing between a lookup and the wrong LIVE session. Worse, sessionId 6801bd71 maps to THREE names, two alive, so item 6's remedy of storing sessionId and resolving at send time replaces a stale name with an ambiguous lookup. Not currently firing: manager resolves to tradingai-8c, pid 1303, sessionId 54aec8d6.)
 
 ---
 
@@ -2982,6 +2982,61 @@ use for a scheduled Congressional appearance.
 do not force-include, and that is FAITHFUL rather than narrow — **the ruling is Fed-specific by its own
 wording** (*"his card rates FOMC talks/statements/conferences/projections VERY HIGH"*). *Review nearly filed
 it and read the scoping docstring first.*
+
+
+### B185 — the session-identity predicate's "negative AND SMALL" boundary is wrong, and its third leg is load-bearing rather than lucky
+
+**Re-measured 2026-08-19 while working `REGISTER_QUEUE.md` item 6, which was written 2026-08-18 and states
+the boundary from a measurement taken when every session was FRESH.**
+
+    btime=1787058541  HZ=100          start-minus-filewrite, per session row:
+
+    pid 2060  tradingai-78  claude          sock=True    -86083.5s   GENUINE
+    pid 1675  tradingai-1e  claude          sock=True    -85707.9s   GENUINE
+    pid 1303  tradingai-8c  claude          sock=True    -86085.4s   GENUINE (this seat)
+    pid  933  tradingai-51  claude          sock=True    +36912.2s   STALE
+    pid 1017  tradingai-6e  SessionLeader   sock=False   +70704.1s   STALE
+    pid 1083  tradingai-a0  (dead)          sock=False        n/a
+
+**Item 6 records the live rows at `-1.0 … -1.5s` and derives three verdicts, one of which is
+*"negative-and-small genuine"*.**
+
+> **`-86085s` is negative and it is not small. The session file is REWRITTEN as a session progresses, so
+> `start - filewrite` grows more negative for the whole life of a healthy session** — *the magnitude measures
+> UPTIME, not genuineness.* **A predicate keyed on "negative and small" rejects every long-running seat,
+> which is precisely the set it exists to protect.** The SIGN separates cleanly and the MAGNITUDE carries no
+> information about validity. **The `+5` slack for clock granularity is still right and must not be confused
+> with a magnitude bound on the negative side.**
+
+**AND THE THIRD LEG IS NOT LUCK.** Item 6 says the two-leg predicate excluded the squatter *"only because
+that squatter is not a claude process with a socket — luck, and nothing in the output could show the
+difference."*
+
+    pid 933   comm == "claude"   socket EXISTS   alive   delta = +36912.2s
+
+**`tradingai-51` passes BOTH original legs and fails only the starttime test.** *So the leg introduced as an
+anti-recycled-pid guard is the only thing standing between a lookup and the wrong live session.*
+
+**AND THE AMBIGUITY IS WORSE THAN ITEM 6'S FIX ASSUMES.** Its remedy is *"store `sessionId`; resolve `name`
+at send time."*
+
+    sessionId 6801bd71  ->  tradingai-51 (pid 933, alive)
+                        ->  tradingai-6e (pid 1017, alive)
+                        ->  tradingai-a0 (pid 1083, dead)
+
+> **One `sessionId` maps to THREE names, two of them live processes.** So `sessionId` is not a unique
+> messaging key either — **the resolution is one-to-many and the disambiguation IS the three-leg predicate,
+> not a tiebreak after it.** *Storing `sessionId` alone would replace a stale name with an ambiguous
+> lookup, and both fail by addressing the wrong session rather than by erroring.*
+
+**`registry.json` still holds `"session": "tradingai-1e"` — a NAME in a field whose own name asserts it is a
+session id — and `grep -rlE 'sessionId|session_id' agents/` returns exactly ONE file: `REGISTER_QUEUE.md`,
+the note describing the problem.** *So nothing has been done, and the only occurrence of the word is the
+complaint about its absence.*
+
+**Verified NOT stale right now, stated so the entry is not read as an active outage:** `manager` resolves to
+`tradingai-8c`, pid `1303`, sessionId `54aec8d6` — this seat. **The defect is structural, not currently
+firing.**
 
 
 ### B169 — a criterion keyed on a metric THE GRADED SEAT CAN EDIT, and which the honest work cannot move
