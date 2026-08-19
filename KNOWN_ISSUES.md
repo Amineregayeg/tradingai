@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-19 (B186 — the platform has NO working news warning to the user: `generate_risk_warning` has exactly ONE call site, engine.py:208, inside `if candle.get("news_blackout")` — a key with ZERO writes anywhere in app/ (B125) — and the production `alerts` table has 0 rows EVER. It shares its edit with B125's trap, so populating the key is the obvious first step and is exactly the half that ships 'trading suspended' while the engine takes every trade; gate_012_news_blackout.py:289 states the invariant as one change or neither. Malek's decision, three-way. — AND B178 IS RESOLVED at 13:16 UTC the same day: the live engine is RUNNING and the deployed rules are deciding. running:true with session_flatten_enabled false per Malek's decision and T-0051's gate; decision_records 685->687 with the newest row at 2026-08-19 13:16:52 against a previous newest of 2026-08-14 15:50, nine seconds after started_at. The rows carry OBSERVED entry_rule_comparison 'disagree=1 agree=0 not_comparable=0 rate=1.000 [1 of 6 rules comparable]' and OBSERVED exit_tranche_plan '70% at 1964.25 then a 30% runner to None'. wired/executes/RETAINED/RUNNING satisfied, proved by a row NEWER than the deploy rather than by running:true or the version sha. rate=1.000 is one comparison, its direction is unrecoverable per B177, and the news gate is inert and says so.)
+Last updated: 2026-08-19 (B187 — a FOURTH terminal condition for the 30% runner, in the broker: paper.py's `_settle` partial path sets pos.units = remaining and keeps the position WITHOUT touching pos.tp or pos.sl, and on_tick closes on pos.tp — so a partialled remainder is closed by the TP path, a reason not in EXIT-001's TERMINAL_REASONS = (FINAL_TARGET, STOP_HIT, SESSION_CLOSE) and invisible to the rule that owns the exit. LATENT only because T-0050 sets tp=None on the live signal and FINAL_TARGET has ZERO occurrences under app/services/live/, confirmed in production where the trace reads '70% at 1964.2546 then a 30% runner to None'. It fires the moment anything places a take-profit on a position that will later be partialled — which is exactly what implementing TARGET-001 does, so the activating task will look unrelated. Found by Review, which nearly filed it ACTIVE on reasoning that was true at T-0038 and fixed by T-0050: a finding retired by a later task stays true in a reviewer's head unless re-measured.)
 
 ---
 
@@ -3111,6 +3111,50 @@ already defined in the live module and populate the candle key as the obviously-
 **Inert twice over today: `B179` no Finnhub key so the calendar is empty, and `B178` the engine is stopped.**
 *So even the working half of this could not fire right now, and that is why it is safe to leave open — not
 because the gap is small.*
+
+
+### B187 — a FOURTH terminal condition for the runner, in the broker, not in `TERMINAL_REASONS` and not named by `EXIT-001`
+
+**Found by Review in `T-0051`'s verdict; confirmed by the Manager reading `_settle` and `on_tick`. LATENT.**
+
+    paper.py `_settle`, partial path:
+        closed    = pos.units if units is None else min(float(units), pos.units)
+        remaining = round(pos.units - closed, 10)
+        if remaining > 0:
+            pos.units = remaining        <- position KEPT in self._positions
+                                         <- pos.tp and pos.sl are NOT touched
+
+    paper.py `on_tick`, ~:102:
+        elif pos.tp is not None and price >= pos.tp:   hit = ("TP", pos.tp)
+
+**So a partialled remainder keeps the tp of the whole position, and the tick loop will close it on that tp.**
+Review's reproduction: `open LONG 10 @100 sl 90 tp 120`, `close_position(lot_size=7.0)` leaves `3.0`, and
+`on_tick(120)` closes the remainder by the TP path.
+
+> **`EXIT-001` declares `TERMINAL_REASONS = (FINAL_TARGET, STOP_HIT, SESSION_CLOSE)`. A broker-level TP close
+> is a fourth, and it is invisible to the rule that is supposed to own the exit.**
+
+**LATENT, and the reason it is latent is the reason it will stop being latent.** `T-0050` sets `tp=None` on
+the live signal (`strategy_step.py:211/235`), and `FINAL_TARGET` has **zero occurrences under
+`app/services/live/`** — verified in production, where the trace reads *"70% at 1964.2546 then a 30% runner
+to **None**"*. **The branch cannot fire today. It fires the moment anything places a take-profit on a
+position that will later be partialled — which is precisely what implementing `FINAL_TARGET` does.**
+
+**So `TARGET-001`'s implementation is the task that activates this, and it will look unrelated.** *Record the
+dependency now: whoever gives the runner a final target must also decide whether the BROKER may close it.*
+
+## The transferable half is Review's, and it is not about this defect
+
+**Review nearly filed this as ACTIVE.** The reasoning that would have produced that — `strategy_step` spending
+`rr_partial` as the whole-position tp — **was true at `T-0038` and `T-0050` fixed it.** What stopped it was
+checking what the live path places TODAY rather than carrying an earlier finding forward.
+
+> ***A FINDING RETIRED BY A LATER TASK STAYS TRUE IN A REVIEWER'S HEAD UNLESS RE-MEASURED.***
+
+**Same defect as `REGISTER_QUEUE.md` item 1, where the Manager nearly filed *"no news gate on the order path
+at all"* four tasks after `T-0036` closed it** — but Review's statement names the MECHANISM rather than the
+instance, and it applies to a reviewer's memory rather than only to a written queue. **Both are the same
+thing: a correct finding whose premise expired, and nothing anywhere changes when it does.**
 
 
 ### B169 — a criterion keyed on a metric THE GRADED SEAT CAN EDIT, and which the honest work cannot move
