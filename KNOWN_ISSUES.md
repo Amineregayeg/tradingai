@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-19 (B188 — THE RATIFIED 9-CELL RISK MATRIX HAS ZERO PRODUCTION CALLERS. `RiskMatrix.size(` appears in exactly one file in the repository and it is a TEST; every live trade is sized from `fixed.RISK_PCT`, a single constant that does not vary with box grade, disturbance grade, or anything else the strategy grades. `GATE-032` is Salim's sizing doctrine and nothing on the order path consults it. It looked fine because `check_rule_coverage` reports GATE-032/GRADE-017/GATE-016 as IMPLEMENTED and inside effective coverage — "implemented" means a module claims the id and can reach a verdict, NOT that anything calls it, and no figure we publish separates those. B179's shape and worse: that one is inert for a missing KEY, which config reaches; this is inert for a missing CALL SITE, which only wiring reaches. So T-0048's rung-down is correct and cannot affect a trade for two independent sufficient reasons, and a `0 rung-downs` figure is consistent with no red-folder days, no calendar, AND no sizer — three causes, one null. NOT wired here: putting GATE-032 on the order path changes the size of every live trade and is Malek's call, like T-0050's cutover.)
+Last updated: 2026-08-19 (B189 — B171's fix used the TASK ID as a proxy for TIME: `any(r > t for r in reviewed)` compares ids, but ids are ASSIGNMENT order while reviews happen in whatever order the queue runs. T-0048 was planned before T-0050/T-0051 and reviewed after them, because both jumped the queue on Malek's directives — so the arm reported T-0048 SKIPPED sixty seconds after I assigned it, and would have forever. B171 was filed as a fix and its fix was keyed on the wrong quantity; it worked only while the queue ran in id order, and out-of-order running is what a directive produces every time. My first correction was worse: widening to 'a later task ADVANCED' fires whenever Execute starts the next task while Review reviews the previous one, which is the pipeline WORKING — and I reached for that arm because the ten-hour T-0047 stall was fresh, when that stall was never this arm's case. Widening the wrong instrument because it is nearby is how a real gap gets a fake fix. Shipped version asks whether the reviewer filed a verdict on ANOTHER task since this one entered REVIEWING, with must-fire and must-miss demonstrated. Filed alongside Execute's B188.)
 
 ---
 
@@ -3209,6 +3209,52 @@ checking what the live path places TODAY rather than carrying an earlier finding
 at all"* four tasks after `T-0036` closed it** — but Review's statement names the MECHANISM rather than the
 instance, and it applies to a reviewer's memory rather than only to a written queue. **Both are the same
 thing: a correct finding whose premise expired, and nothing anywhere changes when it does.**
+
+
+### B189 — `B171`'s fix used the TASK ID as a proxy for TIME, so on an out-of-order queue it fires forever and means nothing
+
+**Found 2026-08-19 by watching the arm fire on a task assigned sixty seconds earlier.** `bus.py`:
+
+    skipped = [t for t in in_review if t not in reviewed and any(r > t for r in reviewed)]
+
+**`any(r > t)` compares TASK IDS. Ids are ASSIGNMENT order; reviews happen in whatever order the queue
+actually runs.** `T-0048` was planned before `T-0050`/`T-0051` and reviewed after them — because `T-0050`
+jumped the queue on Malek's directive and `T-0051` jumped it to unblock the engine. **So the moment
+`T-0048` entered `REVIEWING`, the arm reported it as SKIPPED and would have done so forever.**
+
+> **`B171` was filed as a fix and its fix was keyed on the wrong quantity. It worked only while the queue
+> ran in id order — and out-of-order running is not an anomaly here, it is what a directive from Malek
+> produces every time.** *The arm's correctness was a property of the board's history, not of the arm.*
+
+**THE THREE WRONG VERSIONS, all cheap, all plausible, and the failures are the entry:**
+
+    ORIGINAL   a LATER-NUMBERED task has a verdict            -> fires forever on out-of-order queues
+    MY WIDENING a LATER-NUMBERED task has ADVANCED past
+               PLANNING. Reasoned: advancement proves the
+               loop moved on.                                 -> fires whenever Execute starts the
+                                                                 NEXT task while Review reviews the
+                                                                 PREVIOUS one, WHICH IS THE PIPELINE
+                                                                 WORKING. Same failure as this arm's
+                                                                 own first draft and as B183's
+                                                                 attempt 1: true of the healthy case,
+                                                                 failing in the direction that looks
+                                                                 vigilant.
+    SHIPPED    has the reviewer filed a verdict on ANOTHER
+               task SINCE this one entered REVIEWING?
+               `state.json` mtime vs other `review-01.md`
+               mtimes — chronological, no clock argument.
+               MUST-MISS: T-0048 at its real mtime -> silent.
+               MUST-FIRE: same task, entered 24h earlier ->
+                          8 verdicts since -> fires.
+
+**And the widening was a SECOND error on top of the first: I reached for the nearest instrument because the
+ten-hour `T-0047` stall was fresh, and that stall was never this arm's case** — `T-0047` was mislabelled
+`EXECUTING`, which `B183`'s arm catches. ***Widening the wrong instrument because it is nearby is how a real
+gap gets a fake fix***, and the fake fix then breaks a working arm.
+
+**Kept from the widening: the `parked` arm** — every in-flight task in `REVIEWING` with no verdict while
+NOTHING is `EXECUTING`. *That one needs no ordinal comparison and no clock: it is the whole loop stopped on
+one unreviewed task, which the idle warning cannot see because `REVIEWING` counts as activity.*
 
 
 ### B169 — a criterion keyed on a metric THE GRADED SEAT CAN EDIT, and which the honest work cannot move
