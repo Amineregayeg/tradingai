@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-19 (B175 — `GATE-027` rung 1 filters `s.bar_index > msb.bar_index`, but `msb` is a BreakEvent and a break PRINTS AFTER the swing it breaks, so a wanted-kind swing surviving that filter is a PULLBACK extreme — the NARROWEST cushion — while the registry's own statement declares the ladder cushion-monotonic with rung 1 widest and defines rung 2's window as lying BETWEEN entry and rung 1's swing. Measured across the 39 non-locating setups: ~119 correct-kind candidates each, ZERO survivors, max(bar_index) minus msb_idx median -4 and max 0 against a strict comparison. NOT RESOLVED — `after the MSB` is the trader's wording, both readings fit it, and picking the one that explains our own 10/49 is how an invented parameter enters; it goes to round 4 as a choice between two described behaviours, and T-0049 must not close it by measurement. B173 amended the same day: the Manager classified it LATENT from the 39, which are exactly the setups where rung 1 locates NOTHING and no stop is placed, so the defect cannot occur there — it lives in the 10 that DO locate. Landed with B172, B174 and B125's second amendment at 5a6e253.)
+Last updated: 2026-08-19 (B176 — `crypto_loop.py:1215` says `T-0038 HALF 2, STAGE A ... Executes nothing` about EXIT-001, and every clause is LITERALLY TRUE of `_tick_symbol` because the tranched close lives at :914 in `_take_partials`, a different method — so the scope qualifier `on this path` carries the whole sentence while the headline describes a staging state T-0050 ENDED and the rule now decides a live exit at a62baed. The INVERSE of the usual rot: nothing incorrect to detect, so no assertion or test can catch it, and a seat reading the place where EXIT-001 is named in the trading loop concludes it is still shadow-only. B175 amended the same day with the measurement that retires its own milder wording: wiring rung 4 to the unfixed rung 1 does not shrink or relocate the order-block population, it ANNIHILATES it — `return None` fires only when the bound sits at or ahead of the break bar, PRIM-007's `:106` fallback is correct, and `at_origin_count` then reads 0, indistinguishable from 'this data has no order blocks'. Landed with B172, B173 settled at 0-of-10, and B174.)
 
 ---
 
@@ -2542,13 +2542,71 @@ is **geometry, not scarce data** — measured across the 39 non-locating setups:
 > the two contradicting halves are NEVER CONNECTED.** *The contradiction is masked by absent wiring, not by
 > a fallback firing.* **`T-0049` plans to locate rung 4 via `PRIM-007` — which is precisely the wiring that
 > would connect them.** So the ordering is forced: **fix rung 1's window semantics BEFORE wiring rung 4, or
-> the wiring lands on a bound that cannot be satisfied and falls to `ob_at_origin` on every setup.**
+> the wiring lands on a bound that cannot be satisfied — and it does NOT fall to `ob_at_origin`, it produces
+NOTHING.**
+
+**MEASURED 2026-08-19, and it retires the milder version of this paragraph.** Review swept a global bound
+over the pinned corpus's first window (863 bars, 222 breaks) and the block population fell `222 → 0` while
+`at_origin_count` never exceeded `2`. **Tested in isolation on all-same-colour bars — the configuration where
+the walk can never find an opposite candle — with the break at bar 30:**
+
+    bound=None/0/10/25/29    blocks=1   ob_at_origin=True   bar_index=29
+    bound=30 / 35            blocks=0   <- NO BLOCK
+
+> **`PRIM-007` implements `:106`'s fallback CORRECTLY: bounded-and-not-found yields an origin block and says
+> so. `return None` fires on ONE condition — `origin_index >= start`, the bound sitting AT OR AHEAD of the
+> break bar.** *That is not the ruling's "none is found" case; it is a bound on the wrong side of its own
+> walk.* **And the only thing in this repo that produces such a bound is THIS ENTRY'S DEFECT.**
+>
+> **So wiring rung 4 to the unfixed rung 1 does not shrink or relocate the order-block population — it
+> ANNIHILATES it, and `at_origin_count` reads `0`, which is indistinguishable from "this data contains no
+> order blocks."** A green suite, an empty list, and a bound that was never on the correct side of anything.
+
+**The arm this forces is DIFFERENTIAL, because there is no field to assert against:** `OrderBlock` records
+`ob_at_origin` and `bar_index` and **nothing that says the walk stopped AT the bound.** A presence check on
+`swing_bound_index` is satisfied by `None`, and `max(0, swing_bound_index)` makes `0` inert across most of
+the corpus — **two values cheaper than the correct one, both passing a keyword check.** *The arm must be that
+the bounded and unbounded calls produce DIFFERENT block sets on the pinned corpus.*
+
+**And the null direction separates two failures that look alike: if rung 4's location rate merely fails to
+fall, the bound is not binding; if it goes to ZERO, that is the bound-ahead-of-break signature and rung 1
+was not fixed first.**
 
 **Consequence for `T-0049`, which is planned and not yet executed:** its stated deliverable is a re-run of
 the 529 setups diffing the selected-rung distribution, expecting *"rung 3 should stop being the de-facto
 default."* **If rung 1's window semantics are wrong, that diff moves the numbers and leaves the ladder
 mis-anchored beneath a healthier-looking distribution.** Deleting `min_imbalance_width` and wiring rung 4
 are both real and neither touches this. **`T-0049` must not close this by measurement.**
+
+
+### B176 — a STAGE-A comment that is literally true and reads as false, on the one rule that now decides a live exit
+
+**Found 2026-08-19 while answering "which rules affect a live trade". NOT FIXED — comment-only, and the fix
+must not touch behaviour.** `crypto_loop.py:1215-1217`, inside `_tick_symbol`:
+
+    # T-0038 HALF 2, STAGE A: record the tranche plan EXIT-001 WOULD produce. Executes
+    # nothing -- the position is still opened whole below, and `close_position` is not
+    # called with a lot_size anywhere on this path.
+
+**Every clause is TRUE of `_tick_symbol`.** `close_position(pid, lot_size=lot)` lives at `:914` in
+**`_take_partials`**, a different method — so *"on this path"* is doing load-bearing work and the literal
+claim survives `T-0050`.
+
+> **But the headline does not. `STAGE A` and `Executes nothing` describe a staging state `T-0050` ENDED:
+> `EXIT-001` now decides the live exit, tranched 70% at 2R, deployed at `a62baed`.** A seat reading this
+> block — the natural place to look, since it is where `EXIT-001` is named in the trading loop — **concludes
+> the rule is still shadow-only.** *That is the exact opposite of production behaviour, on the single
+> question this project is currently organised around.*
+
+**The inverse of the usual rot, and worth recording as its own shape:** the register is full of comments that
+became FALSE and read as true. **This one stayed true by virtue of a scope qualifier while its emphasis went
+stale, so no assertion and no test can catch it** — *there is nothing incorrect to detect.* **`B93`'s family
+seen from the other side: correct when written, correct still, and no longer the thing a reader takes from
+it.**
+
+**Fix: state where the tranche exit DOES execute (`_take_partials:914`) and that `STAGE A` refers to the
+ENTRY path only.** A cross-reference, not a correction — *and do not delete the staging note, because the
+entry path really does still open whole.*
 
 
 ### B169 — a criterion keyed on a metric THE GRADED SEAT CAN EDIT, and which the honest work cannot move
