@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-19 (B191 — B188's tripwire enumerates SYNTACTIC SHAPES and catches one of three: it requires the call base to be ast.Name(id='RiskMatrix'), so `RM.size(...)` via an alias import and `g32.RiskMatrix.size(...)` via a module path both evade it. Review added all three to strategy_step.py: 1 failed, 2 passed. 'It uses AST' is not evidence that it covers the class — the guard is better than a grep and still an enumeration. Fix is free and measured: assert NO `.size(` call of ANY form under app/, a population verified at ZERO by AST, so the wider predicate is already true and an over-fire would be a visible failure where the current version is a silent pass. Queued as T-0055. Filed with B190 — a DEFAULTED PARAMETER means the least-effort call exercises one branch, and three times running the unmeasured branch was the one the task existed to add: at_price=None, swing_bound_index=None, is_red_folder_day=False. The third is worst because there the default reaches PRODUCTION — PRIM-007's only production caller supplies no bound, so the ruling's 'bound = rung 1's swing bar' has never been given to the code that implements it, while that module passes its suite.)
+Last updated: 2026-08-19 (B192 — B188 is THREE gaps, not one, and T-0054's 'wire the sizer' framing is retired. gate_032_risk_matrix.py is NOT IN the order path's 69-module transitive import cone, so it is unreachable without a new import rather than merely uncalled. evaluator.py:219 evaluate_layout calls classify AND grade_box and has ZERO callers under app/ against 13 under tests/ — B188 one level up, and it is the only place in the tree computing the PAIR size() takes. Both producers exist, so this is not T-0033's declared-and-unproducible shape. And one grade is ALREADY COMPUTED LIVE: _tick_symbol:1206 -> _shadow_evaluate:750 -> shadow.evaluate_detailed -> _evaluate_layout -> DisturbanceClassifier.classify at :537, traced by AST — so the disturbance half is REACHED-BUT-DISCARDED while the box grade is computed nowhere on the order path. The work splits three ways and only wiring size() changes a trade's size, so only that inherits T-0050's authorisation precedent; bundling them made the old plan undeployable. Review found the producer by searching RETURN ANNOTATIONS, not names — a grep for 'disturbance_grade' finds the parameter and misses the producer.)
 
 ---
 
@@ -3310,6 +3310,51 @@ correctly did NOT satisfy it — the walk is rooted at `parents[2]/"app"`, so th
 **zero** today — verified by AST — so the wider predicate is already true and covers all three shapes. It
 would over-fire if some unrelated class later grows a `.size()` method, and **an over-fire is a visible
 failure that gets read, where the current version is a silent pass.***
+
+
+### B192 — `B188` is three gaps, not one: the sizer is not even IMPORTED, the only function computing both grades has no caller, and one grade IS computed live and thrown away
+
+**Found by Review answering `T-0054`'s existence question; the open link Review declined to guess at was
+settled by the Manager. This retires `T-0054`'s framing as a single "wire the sizer" task.**
+
+    gate_032_risk_matrix.py    NOT IN the order path's transitive import cone (69 modules)
+                               -> B188 from a THIRD angle: not "no caller" but UNREACHABLE
+                                  without a new import. No refactor gets there by accident.
+    evaluator.py:219  evaluate_layout  calls classify(:292) AND grade_box(:296)
+                               callers under app/ NONE · under tests/ 13 · scripts/ 0
+                               -> B188 one level up, and it is the ONLY place in the tree
+                                  where the PAIR size() takes is computed together
+    grade_002_box_grade.py:320  grade_for/grade_box EXIST — not reached from the order path
+    gate_002_disturbance.py     DisturbanceClassifier.classify EXISTS
+
+**So this is NOT `T-0033`'s declared-and-unproducible shape. Both producers are implemented.**
+
+**AND ONE OF THEM IS ALREADY RUNNING ON THE LIVE PATH. Chain traced by AST:**
+
+    _tick_symbol:1206  ->  _shadow_evaluate:750  ->  shadow.evaluate_detailed
+                       ->  shadow._evaluate_layout (490-589)
+                       ->  DisturbanceClassifier.classify  at :537
+
+> **A disturbance grade is computed on every live bar, inside the shadow recorder, and discarded as far as
+> sizing is concerned.** *So the disturbance half is REACHED-BUT-DISCARDED, not unreached* — **and those need
+> different work: routing an existing value versus reaching a producer.** `_evaluate_layout` computes only the
+> disturbance grade; **the box grade is not computed anywhere on the order path.**
+
+**THE PLAN THAT MUST REPLACE THE OLD ONE — Review's split, and only the third part is Malek's:**
+
+    (a)  reach a BOX-GRADE producer from the order path            no size change
+    (b)  ROUTE the disturbance grade shadow already computes        no size change
+    (c)  wire size()                                               CHANGES EVERY TRADE'S SIZE
+                                                                   -> T-0050's authorisation precedent
+
+**Bundling them is what made the old plan undeployable: (a) and (b) need no deploy decision and (c) needs
+one, so a single task inherits the strictest gate for work that does not require it.**
+
+**METHOD NOTE, and it is why the vocabulary trap did not bite:** Review searched by **return annotation and
+typed attribute**, not by name — *which is how `DisturbanceClassifier.classify` surfaced at all.* **A grep for
+`disturbance_grade` finds the PARAMETER and misses the PRODUCER**, because the producer's name contains
+neither word in that form. *`B184`'s shape inverted: there a list of names was too narrow; here a search by
+name would have been.*
 
 
 ### B169 — a criterion keyed on a metric THE GRADED SEAT CAN EDIT, and which the honest work cannot move
