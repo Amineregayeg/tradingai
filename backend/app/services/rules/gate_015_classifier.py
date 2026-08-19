@@ -158,6 +158,33 @@ _PATTERNS: tuple[tuple[str, str], ...] = (
     ("bond auction", "BONDS"), ("treasury", "BONDS"), ("bund", "BONDS"),
 )
 
+#: THE SPEECH TOKENS, DERIVED FROM THE TAXONOMY TABLE ABOVE — one source, not two.
+#:
+#: `B184`: these four were written TWICE — once in `_PATTERNS` as the SPEECHES rows, and once as a
+#: literal tuple inside `force_include`. **Two places in one function encoded "the Fed Chair is
+#: speaking" and only one of them knew the noun form**, so `FORCE_INCLUDE_BY_NAME`'s verb entries
+#: ("Fed Chair Powell speaks" / "testifies") missed `Fed Chair Powell Testimony` while the taxonomy
+#: branch classified it SPEECHES correctly, one function apart.
+#:
+#: *Appending the missing string would have fixed the instance and left the mechanism* — and the
+#: next vendor rendering diverges again with no reviewer reading both branches side by side.
+SPEECH_TOKENS: tuple[str, ...] = tuple(
+    pattern for pattern, taxonomy in _PATTERNS if taxonomy == "SPEECHES"
+)
+
+#: [ENGINEERING] OURS. The Fed-Chair marker that NARROWS the derived force-include.
+#:
+#: **DERIVING FORCE-INCLUSION FROM `SPEECH_TOKENS` ALONE OVER-MATCHES, and the case is the one the
+#: registry explicitly forbids:** `FOMC Member Bowman Speaks` carries a speech token and is NOT
+#: force-included — several a week, orange on Forex Factory, outside his RED filter, and
+#: `fomc_member_speeches_force_included` is declared `false` and goes to round 4.
+#:
+#: So the narrower shape is a CONJUNCTION: a Fed-Chair marker AND a speech token. That covers every
+#: rendering of the ruled event (`speaks` / `testifies` / `testimony` / `press conference`) without
+#: reaching a single event the exact-name list was written to exclude.
+FED_CHAIR_MARKERS: tuple[str, ...] = ("fed chair",)
+
+
 DECLARED_CLASSIFIER = DeclaredClassifier(
     name="calendar_classifier_version",
     version="t0047.1",
@@ -215,16 +242,27 @@ def force_include(event_name: str) -> tuple[bool, str | None, TaxonomyClass | No
     anything else, **so that it can satisfy the type conjunct and actually block**; without the
     reassignment the force-include would be inert against its own filter.
     """
+    lowered = (event_name or "").lower()
+    speaks = any(token in lowered for token in SPEECH_TOKENS)
+
     matched = _matches_by_name(event_name, FORCE_INCLUDE_BY_NAME)
     origin = "ruling"
     if matched is None:
         matched = _matches_by_name(event_name, FORCE_INCLUDE_DOCTRINE_EXTENSION)
         origin = "doctrine_extension" if matched else origin
+    if matched is None and speaks and any(m in lowered for m in FED_CHAIR_MARKERS):
+        # B184. THE EXACT-NAME LIST CARRIES VERB FORMS ONLY, so a vendor rendering the same ruled
+        # event as a NOUN — "Fed Chair Powell Testimony" — was not force-included, while the
+        # taxonomy branch one function away classified it SPEECHES from the very same token.
+        #
+        # This is a CONJUNCTION and not a widening of the list: a Fed-Chair marker AND a speech
+        # token drawn from `SPEECH_TOKENS`, which is now derived from the taxonomy table so the
+        # two branches cannot diverge again. `FOMC Member Bowman Speaks` still does not match,
+        # which is what the exact-name list exists to prevent.
+        matched = f"FED_CHAIR + {next(t for t in SPEECH_TOKENS if t in lowered)}"
+        origin = "derived_fed_chair"
     if matched is None:
         return False, None, None
-    lowered = event_name.lower()
-    speaks = any(token in lowered for token in ("speaks", "testifies", "testimony",
-                                                "press conference"))
     return True, f"{matched} ({origin})", ("SPEECHES" if speaks else "CENTRAL_BANK")
 
 
