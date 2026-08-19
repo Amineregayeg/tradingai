@@ -3433,6 +3433,48 @@ day of continuous running.* **So `T-0040`'s criterion cannot be met from hours o
 honest statement is that the cutover evidence base needs DAYS — or that the 97% must be fixed first, which
 is the better trade.**
 
+> ## `[DIAGNOSIS CORRECTED 2026-08-19 by Review, within the hour, and the dump I produced is what disproved it.]`
+>
+> **I wrote that `ENTRY-001` EXAMINES NO INPUTS on 33 of 34 bars — `B190`'s shape, the rule called and not
+> fed. WRONG. The 33 are `LIVE_NOT_REACHED`, not `INPUT_ABSENT`.**
+>
+>         entry_comparison.py:244   if getattr(trace, "blocked_by", None) is not None:
+>                                       return None, "LIVE_NOT_REACHED"
+>         :256   called BEFORE the INPUT_ABSENT branch at :318
+>         :341   detail=f"live stopped at {trace.blocked_by!r}; rule said {rule_verdict}"
+>         :238   the docstring says it outright — "a bar stopped by history, daily_bias or
+>                ltf_bos never reached the candidate loop ... That is LIVE_NOT_REACHED"
+>
+> **And the correlation in my own dump is exact: 33 `FAIL ltf_bos` ↔ 33 `not_comparable`; 1 `PASS ltf_bos` ↔
+> 1 comparable.** *`PASS history: 324 bars available` on all 34 — the inputs were there the whole time.*
+>
+> **So the LIVE path declined before the comparison point. The rule is FED. This is not `B190`'s shape.**
+>
+> **TWO CONCLUSIONS RETIRED:**
+>
+> **(1) It is not a wiring defect.** *The live path declines 97% of bars because the LTF break does not match
+> the daily bias — the strategy being SELECTIVE, not the harness being broken.*
+>
+> **(2) The `T-0041` scheduling trade INVERTS.** I put it to Malek as *"either the evidence base needs days,
+> or the 97% gets fixed first, and the second is the better trade."* **There is nothing to fix. "Fixing the
+> 97%" would mean making the strategy take trades it currently declines — a STRATEGY CHANGE, not a repair.**
+> *So days of running is the only option, not the worse of two.*
+>
+> > **AND THE SHAPE OF MY ERROR IS THE ONE THIS ENTRY HAD JUST NAMED: I argued that the record cannot tell
+> > you WHY, and then told Malek why.** *The reason was available to me only because the abstention lines
+> > happened to sit beside the comparison lines in a file I made for a different purpose.* **The persisted row
+> > still cannot separate `LIVE_NOT_REACHED` from `INPUT_ABSENT` — which is the strongest possible argument
+> > for `T-0053`, since those two states have OPPOSITE responses and I just demonstrated how easily they are
+> > confused.**
+>
+> **WHY THE FIXTURE SAID 100% AND PRODUCTION SAYS 3% — Review's, and it is the transferable part:**
+> `T-0037`'s arm 2 measured `comparable = 11 of 11` on the pinned corpus, because its `_trace()` helper only
+> calls `t.gate(blocked, False, ...)` when a `blocked` argument is passed **and arm 2 passes none — so
+> `blocked_by` is `None` on every fixture bar and `LIVE_NOT_REACHED` is UNREACHABLE.**
+> ***The fixture exercises the comparable path exclusively; production is 97% the path the fixture never
+> takes.*** **Not a defect in the arm — its job was the denominator — but it is why a green suite predicted
+> nothing at all about the live rate.**
+
 **Not filed as a defect in the harness. Filed as a defect in what we can LEARN from it** — *the exclusion is
 correct and the diagnosis is unrecoverable, and only the second half is broken.*
 
