@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-19 (B183 — bus.py could not see a task that had LANDED while still labelled EXECUTING: T-0047's code sat on main for TEN HOURS unreviewed with every arm silent, because the idle check counts EXECUTING as activity and both stall arms key on REVIEWING — landed-and-mislabelled is a third state nothing represented, which is B171's family inside the instrument built to catch B171. Fixed, and the two rejected fixes are the entry: attempt 1 fired on state.json mtime < HEAD, true of almost every legitimate in-flight task, and its except swallowed a git failure as a CLEAN TREE while `_git` did not exist in the file at all; attempt 2 used `git log --grep=<id>`, which matched commits merely DISCUSSING a task, so an unstarted T-0049 read as landed. Shipped version anchors on a subject beginning `T-NNNN:` with a demonstrated must-fire and two must-misses. Both rejects were caught by asking for a MUST-MISS case rather than by re-reading them.)
+Last updated: 2026-08-19 (B184 — GATE-015's force-include list carries the VERB forms 'Fed Chair Powell speaks' and 'testifies' and matches by case-insensitive substring, so a vendor rendering of 'Fed Chair Powell Testimony' matches NOTHING — while the same function's taxonomy branch tests for the token 'testimony' three lines away and :130 maps it to SPEECHES. The branch written for the event exists and the event never reaches it; the word's presence in the taxonomy path is evidence the rendering was anticipated. Root cause is duplication: two places in one function encode 'the Fed Chair is speaking' and only one knows the noun form, so appending one string leaves the mechanism that produced the divergence. Exposure is narrow and lands on the ruling's own sentence — force-include decides only the NON-RED case, which is exactly 'block these even when the vendor rates them medium'. Inert until a Finnhub key exists, per B179. Found by Review in T-0047's PASS verdict.)
 
 ---
 
@@ -2944,6 +2944,44 @@ mislabelled, a third state nothing represented.** `B171`'s family, in the instru
 **The transferable part: all three versions were cheap to write and only one is specific. The two rejected
 ones were caught by asking each for a MUST-MISS case, not by re-reading them** — *attempt 2 was rejected by
 the same class of test it exists to perform.*
+
+
+### B184 — the force-include list knows `testifies` and not `Testimony`, while the SAME function tests for `testimony` three lines away
+
+**Found by Review in `T-0047`'s verdict (PASS, one finding); confirmed by the Manager by direct call.**
+
+    _matches_by_name('Fed Chair Powell Testimony')  -> None   on BOTH lists
+    _matches_by_name('Fed Chair Powell testifies')  -> matched
+    _matches_by_name('Fed Chair Powell Speaks')     -> matched  (matching IS case-insensitive)
+
+`FORCE_INCLUDE_BY_NAME` carries the VERB forms — `'Fed Chair Powell speaks'`, `'Fed Chair Powell testifies'`
+— and the match is a case-insensitive SUBSTRING, so a vendor rendering of `…Testimony` reaches nothing.
+
+**And the same function classifies on the NOUN, at `:226`:**
+
+    speaks = any(token in lowered for token in ("speaks", "testifies", "testimony", "press conference"))
+
+> **The code recognises `testimony` for CLASSIFICATION and cannot MATCH it for FORCE-INCLUSION. The branch
+> written for the event exists and the event never reaches it — dead vocabulary whose presence is evidence
+> the rendering was ANTICIPATED.** *`:130` carries `("testimony", "SPEECHES")` as well, so the word appears
+> twice in the taxonomy path and zero times in the force-include path.*
+
+**ROOT CAUSE, and it is why adding one string is the wrong fix: two places in one function encode *"the Fed
+Chair is speaking"* and only one of them knows the noun form.** A patch that appends `'Fed Chair Powell
+Testimony'` leaves the duplication that produced the divergence, and the next vendor rendering diverges
+again. **The fix is to derive force-inclusion from the same token set the taxonomy branch uses.**
+
+**EXPOSURE IS NARROW AND LANDS EXACTLY ON THE RULING'S PURPOSE.** Force-include decides only the NON-RED
+case, so a RED-rated testimony still blocks by the ordinary path. **What fails is the ruling's own sentence —
+*block these even when the vendor rates them medium*** — for the one rendering the vendor is most likely to
+use for a scheduled Congressional appearance.
+
+**Inert today (`B179`: no Finnhub key, `0 events`), and it stops being inert the moment Malek supplies one.**
+
+**Checked and deliberately NOT filed, recorded so nobody re-opens it:** `ECB` / `BOE Interest Rate Decision`
+do not force-include, and that is FAITHFUL rather than narrow — **the ruling is Fed-specific by its own
+wording** (*"his card rates FOMC talks/statements/conferences/projections VERY HIGH"*). *Review nearly filed
+it and read the scoping docstring first.*
 
 
 ### B169 — a criterion keyed on a metric THE GRADED SEAT CAN EDIT, and which the honest work cannot move
