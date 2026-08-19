@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-19 (B185 — the session-identity predicate's 'negative AND SMALL' boundary is wrong and its third leg is load-bearing rather than lucky. Re-measured: the genuine live rows are at -86083s, -85707s and -86085s, not the -1.0..-1.5s item 6 recorded from fresh sessions, because the session file is REWRITTEN as a session progresses — so the magnitude measures UPTIME and a predicate keyed on 'negative and small' rejects every long-running seat, exactly the set it protects. The sign separates; the magnitude carries no information. And pid 933 tradingai-51 is comm=claude WITH a live socket at +36912.2s, so it passes both original legs and fails only the starttime test — the leg introduced as an anti-recycled-pid guard is the only thing between a lookup and the wrong LIVE session. Worse, sessionId 6801bd71 maps to THREE names, two alive, so item 6's remedy of storing sessionId and resolving at send time replaces a stale name with an ambiguous lookup. Not currently firing: manager resolves to tradingai-8c, pid 1303, sessionId 54aec8d6.)
+Last updated: 2026-08-19 (B186 — the platform has NO working news warning to the user: `generate_risk_warning` has exactly ONE call site, engine.py:208, inside `if candle.get("news_blackout")` — a key with ZERO writes anywhere in app/ (B125) — and the production `alerts` table has 0 rows EVER, so no alert of any type has been created. AlertType.RISK_WARNING is declared, constructible and unreachable. It shares its edit with B125's trap, which is why it cannot be fixed casually: populating the key is the obvious first step and is exactly the half that ships 'trading suspended' while the engine takes every trade — gate_012_news_blackout.py:289 states the invariant as one change or neither. Malek's decision, genuinely three-way: do nothing, warn AND enforce, or route the warning off NewsContext and leave the block staged. Inert twice over today per B178 and B179.)
 
 ---
 
@@ -3037,6 +3037,44 @@ complaint about its absence.*
 **Verified NOT stale right now, stated so the entry is not read as an active outage:** `manager` resolves to
 `tradingai-8c`, pid `1303`, sessionId `54aec8d6` — this seat. **The defect is structural, not currently
 firing.**
+
+
+### B186 — the platform has NO working news warning to the user, and its only route is behind the dead `news_blackout` key
+
+**Queued 2026-08-18 as `REGISTER_QUEUE.md` item 11; re-measured and filed 2026-08-19 with production evidence
+it did not previously have.**
+
+    alerts.py:153        async def generate_risk_warning(...)
+    engine.py:208        the ONE call site — inside `if candle.get("news_blackout"):`
+    engine.py:192        the code says so itself: "called from HERE AND NOWHERE ELSE"
+    writes of `news_blackout`, all of app/                              ZERO   (B125)
+    production `alerts` table                                    0 ROWS, EVER
+
+> **`AlertType.RISK_WARNING` is declared in `db/enums.py:25`, constructible at `alerts.py:171`, reachable
+> from exactly one branch, and that branch is dead. So the user is never warned about news — and the empty
+> `alerts` table confirms no alert of ANY type has ever been created in production.**
+
+**THIS SHARES ITS EDIT WITH `B125`'S TRAP, WHICH IS WHY IT CANNOT BE FIXED CASUALLY.** *Populating
+`news_blackout` is the obvious first step toward a working warning, and it is exactly the half that ships
+`"High-impact news event imminent — trading suspended"` while the engine takes every trade.*
+**`gate_012_news_blackout.py:289` states the invariant: populating the key and enforcing the block are ONE
+CHANGE OR NEITHER.**
+
+**And `T-0036` built the real news path without retiring this one, so there are now two mechanisms and one
+name** (`B125`'s second amendment) — **a seat wiring the warning would find `GATE_NAME = "news_blackout"`
+already defined in the live module and populate the candle key as the obviously-correct integration.**
+
+**MALEK'S DECISION, not a seat's, and it is genuinely three-way:**
+
+    do nothing              the user is never warned. Safe, and silently so.
+    warn AND enforce        one change, per the invariant. Behaviour change on the order path.
+    warn from the LIVE path route the warning off `NewsContext` instead of the dead candle key,
+                            leaving the block staged. Warns without gating — which is
+                            defensible for a co-pilot and must be STATED as that choice.
+
+**Inert twice over today: `B179` no Finnhub key so the calendar is empty, and `B178` the engine is stopped.**
+*So even the working half of this could not fire right now, and that is why it is safe to leave open — not
+because the gap is small.*
 
 
 ### B169 — a criterion keyed on a metric THE GRADED SEAT CAN EDIT, and which the honest work cannot move
