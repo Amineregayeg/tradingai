@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-19 (B192 — B188 is THREE gaps, not one, and T-0054's 'wire the sizer' framing is retired. gate_032_risk_matrix.py is NOT IN the order path's 69-module transitive import cone, so it is unreachable without a new import rather than merely uncalled. evaluator.py:219 evaluate_layout calls classify AND grade_box and has ZERO callers under app/ against 13 under tests/ — B188 one level up, and it is the only place in the tree computing the PAIR size() takes. Both producers exist, so this is not T-0033's declared-and-unproducible shape. And one grade is ALREADY COMPUTED LIVE: _tick_symbol:1206 -> _shadow_evaluate:750 -> shadow.evaluate_detailed -> _evaluate_layout -> DisturbanceClassifier.classify at :537, traced by AST — so the disturbance half is REACHED-BUT-DISCARDED while the box grade is computed nowhere on the order path. The work splits three ways and only wiring size() changes a trade's size, so only that inherits T-0050's authorisation precedent; bundling them made the old plan undeployable. Review found the producer by searching RETURN ANNOTATIONS, not names — a grep for 'disturbance_grade' finds the parameter and misses the producer.)
+Last updated: 2026-08-19 (B193 — a seat that stops BEFORE writing anything leaves NO ARTEFACT, so all three board arms are silent by construction. T-0052 sat EXECUTING for 127 minutes with a clean tree, no process and no commit naming it; the idle warning counts EXECUTING as activity, `parked` and `skipped` require REVIEWING, and B183's arm requires a commit. The three arms added today all key on an ARTEFACT and this state's defining feature is that none exists, so a fourth artefact-keyed check would have missed it too — the only available signal is elapsed time. Threshold 30 min, ARBITRARY and declared as such in the code, because a false positive costs one message and this false negative cost two hours of both seats; the comment forbids lowering it to make a past incident fire. Must-fire and three must-misses demonstrated: just-assigned, landed, actively-writing, STOPPED — four states the board previously collapsed into EXECUTING. Root cause is the MODEL, not the arm: a peer advances ONE TURN PER MESSAGE and then waits, and treating an assignment as self-sustaining has now cost this loop time three times today.)
 
 ---
 
@@ -3355,6 +3355,40 @@ typed attribute**, not by name — *which is how `DisturbanceClassifier.classify
 `disturbance_grade` finds the PARAMETER and misses the PRODUCER**, because the producer's name contains
 neither word in that form. *`B184`'s shape inverted: there a list of names was too narrow; here a search by
 name would have been.*
+
+
+### B193 — a seat that stops BEFORE writing anything leaves no artefact, so all three board arms are silent by construction
+
+**Measured 2026-08-19: `T-0052` sat `EXECUTING` from 14:49:28 to 16:54 — 127 minutes — with a CLEAN TREE, no
+process, and no commit naming it.** *The seat stopped before producing anything at all.* **Every arm in
+`bus.py` was silent:**
+
+    idle warning              EXECUTING counts as ACTIVITY
+    parked                    requires REVIEWING
+    landed-while-EXECUTING    requires a COMMIT, and there was none  (B183)
+    skipped                   requires REVIEWING                     (B189)
+
+> **The three arms added today all key on an ARTEFACT — a `review-01.md`, a commit subject. This state's
+> DEFINING FEATURE is that no artefact exists.** *So no artefact-keyed check can see it, and adding a fourth
+> artefact-keyed check would have missed it too.* **The only available signal is elapsed time.**
+
+**THE THRESHOLD IS ARBITRARY AND DECLARED AS SUCH: 30 minutes, not tuned against any run.** *I have refused
+tuned constants elsewhere in this register, and the difference is stated in the code: here a false positive
+costs ONE MESSAGE and a false negative cost two hours of both seats doing nothing.* **The comment forbids
+lowering it to make a specific incident fire, which is fitting to the past.**
+
+    MUST-FIRE   T-0052 at 127 min, nothing landed, clean tree     fires
+    MUST-MISS   the same task at 5 min (just assigned)            silent
+    MUST-MISS   T-0051 at 999 min — a commit subject names it     silent
+    MUST-MISS   127 min but the tree is DIRTY (actively writing)  silent
+
+**So it separates just-assigned, landed, actively-writing and STOPPED — four states the board previously
+collapsed into "EXECUTING".**
+
+**AND THE ROOT CAUSE IS NOT THE ARM, IT IS THE MODEL: a peer seat advances ONE TURN PER MESSAGE and then
+waits. It is not a loop.** *Assigning a task starts one turn; it does not start a task.* **This is the third
+time that has cost this loop time today** — Review's ten hours, `T-0047`'s ten hours mislabelled, and now
+`T-0052`'s two — **and each time the Manager's error was treating an assignment as self-sustaining.**
 
 
 ### B169 — a criterion keyed on a metric THE GRADED SEAT CAN EDIT, and which the honest work cannot move
