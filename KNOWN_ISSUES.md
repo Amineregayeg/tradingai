@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-19 (B177 — T-0040's criterion asserts in bold that DIRECTION NEEDS NO NEW INSTRUMENTATION because RuleComparison already stores live_verdict and rule_verdict. True of the in-memory dataclass, false of anything outliving the bar: observe() parks them in Gate.values, `.gates` has ZERO consumers outside decision_trace.py against 9 for `.reasons` and 3 for `.summary`, DecisionRecord has no column for them, and reasons renders one STRING per gate and drops values entirely. So production retains the AGGREGATE rate and not the directional split — and the criterion's own argument is that a single scalar CANNOT be the criterion, because rules-looser is new live exposure while rules-stricter is missed opportunity. The one quantity we keep is the one it forbids relying on, which blocks T-0041 on more than Malek's two bounds. `wired` and `executes` are different predicates and this needs a third: RETAINED. Landed with B176, and B175's annihilation measurement.)
+Last updated: 2026-08-19 (B178 — the live engine is STOPPED in production: `GET /api/engine/status` returns running:False, the newest decision_records row is 2026-08-14 15:50 against a clock of 2026-08-19, main.py:239 logs 'idle until started', and the only caller of start() is POST /api/engine/start — so nothing auto-starts it and a DEPLOY IS A BOOT. EXIT-001's tranche, GATE-022's 19:00 flatten and the whole news subsystem are reachable and have decided nothing; the count of rules affecting a live trade is ZERO for an operational reason a coverage figure could never find. It corrects my own report of 'made a ratified rule decide a live trade' — /api/system/version returning the new sha is evidence the CODE is present, not that it is in effect. `wired`/`executes`/`RETAINED` needs a fourth: RUNNING. Filed with B179 — production has no Finnhub key, so the calendar is always empty and every news gate is correct and inert, which makes a '0 blocked' figure indistinguishable from a working gate on a quiet calendar.)
 
 ---
 
@@ -2652,6 +2652,66 @@ says *"Always all three terms, never a bare rate"* — the same discipline, one 
 **Control, stated because a null grep is worth nothing without one:** `\.reasons` and `\.summary` both have
 live consumers outside `decision_trace.py`, so the zero on `\.gates` is an absence rather than a pattern
 that missed the mechanism.
+
+
+### B178 — the live engine is STOPPED in production, every deploy resets it to idle, and nothing auto-starts it: zero rules are affecting any live trade
+
+**Measured on the VPS 2026-08-19, and it corrects a claim the Manager made to Malek.** `T-0050` put
+`EXIT-001` on the live exit path and `GATE-022`'s 19:00 flatten went live at `a62baed`. **I reported that as
+*"made a ratified rule decide a live trade."* The code path is live. Nothing exercises it.**
+
+    GET /api/engine/status          running: False    paused: False    open_positions: 0
+    main.py:239 (startup log)       "Live crypto engine ready — idle until started"
+    decision_records                685 rows, newest 2026-08-14 15:50:25+00
+    telemetry_records               1822 rows, newest 2026-08-17 00:35:17+00
+    alerts                          0 rows, ever
+    today                           2026-08-19
+
+**`main.py:232-243` constructs `LiveCryptoLoop`, sets `app.state.live_task = None`, and logs *idle until
+started*. The only caller of `start()` is `POST /api/engine/start` (`engine.py:73`).** *Nothing in the
+application starts it, so it is idle on every boot* — **and a deploy is a boot.**
+
+> **So the engine has not processed a bar since 14 August. `EXIT-001`'s 70%-at-2R tranche, `GATE-022`'s daily
+> flatten, `T-0036`'s news verdict and `T-0047`'s classifier are all reachable and none of them has decided
+> anything.** *The number of rules affecting a live trade is ZERO, and it is zero for an operational reason
+> rather than a wiring one — which is the reason a coverage figure could never have found it.*
+
+**AND THE DEPLOY MADE IT WORSE IN A WAY I DID NOT ANTICIPATE OR REPORT.** I recreated `api` twice tonight.
+**Each `--force-recreate` resets `live_task` to `None`.** The loop was already idle before I started
+(newest record predates the deploy), so I did not stop a running engine — **but I shipped a live behaviour
+change to an engine I had just reset and never restarted, and I did not check.** *`/api/system/version`
+returning the new sha was treated as evidence the change was in effect; it is evidence the CODE is present.*
+
+**`wired` / `executes` / `RETAINED` (`B177`) now needs a fourth: `RUNNING`.** **Every future claim that a
+rule affects a live trade must cite `running: true` and a `decision_records` row NEWER than the deploy.**
+
+**Not fixed here, and deliberately: starting the engine is a live action and it is Malek's call, not a
+seat's.** Paper mode throughout — `ExecMode` has no `LIVE` member and `execute()` refuses any adapter that
+is not `is_simulation` — but *starting an engine that will place orders and flatten positions at 19:00 is
+still an operator decision.*
+
+### B179 — production has no Finnhub key, so the calendar is ALWAYS EMPTY and every news gate is inert regardless of correctness
+
+**Measured on the VPS 2026-08-19, same session as `B178`.**
+
+    calendar.finnhub:362   "Finnhub API key not set; returning empty calendar."
+    calendar.finnhub:255   "Calendar refreshed: 0 events for 2026-08-19"
+    app/config.py:34       finnhub_api_key: str = ""        <- default, unset in production
+
+> **`GATE-012`, `GATE-013`, `GATE-014`, `GATE-015`, `GATE-016` and `is_red_folder_day` all derive from the
+> event list. An empty list means no event is ever in a window, no day is ever a red-folder day, and no
+> classifier is ever consulted.** *The entire news subsystem — `T-0032`, `T-0035`, `T-0036`, `T-0047` — is
+> correct and inert.*
+
+**This is NOT the fail-open `T-0035` fixed.** *That one served an unrecognised impact as tradeable; this one
+serves nothing at all,* so the gates abstain rather than pass wrongly. **The behaviour is safe and the
+measurement is worthless: a `0 blocked` figure from production is indistinguishable from a working gate on a
+quiet calendar.**
+
+**Consequence for `T-0047`, landing now:** its classifier cannot be validated against production traffic —
+**only against fixtures** — until a key exists. *And the `classifier_miss` default Malek owns cannot be
+exercised at all, so choosing it has no observable consequence yet.* **State that in the task's close rather
+than letting a green suite imply live validation.**
 
 
 ### B169 — a criterion keyed on a metric THE GRADED SEAT CAN EDIT, and which the honest work cannot move

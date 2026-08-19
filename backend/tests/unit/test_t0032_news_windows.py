@@ -914,17 +914,46 @@ def test_the_optional_confluence_ships_off_and_is_recorded_either_way():
     assert set(CalendarScope.currency_set(confluence=True)) == {"USD", "EUR", "GBP"}
 
 
-def test_gate_015_never_reports_pass_while_the_category_half_is_unbuilt():
-    """Half a two-part filter is not the filter. A PASS would claim conformance to a filter
-    half of which has never run."""
+def test_gate_015_reports_PASS_now_that_BOTH_halves_of_the_filter_run():
+    """**THE REFUSAL THIS PINNED IS DISCHARGED BY A RULING, NOT BY AN EDIT.**
+
+    Through T-0046 this asserted `NOT_APPLICABLE` and `category_filter_applied is False`, on the
+    ground that *"half a two-part filter is not the filter; a PASS would claim conformance to a
+    filter half of which has never run."* **That was right for as long as no feed mapped onto his
+    six categories** — filed as round-3 question 6j, and the refusal was to invent a mapping.
+
+    **Salim answered 6j in round 3**: six types included, four excluded and IGNORE-AND-LOG,
+    FOMC-class force-included by name. `T-0045` put them in the registry and `T-0047` built the
+    classifier. So the taxonomy is HIS and only the RECOGNITION is ours — a far smaller claim
+    than the one the refusal existed to prevent.
+
+    **PASS here means "the two-part filter ran and produced this list", never "the market is
+    safe":** GATE-015 produces the list GATE-012/013/014 decide from and decides nothing itself.
+    """
     record = CalendarScope.evaluate([
         {"time": at(9, 0), "currency": "USD", "event": "CPI", "impact": "high"},
     ])
-    assert record.verdict == "NOT_APPLICABLE"
-    assert record.values["category_filter_applied"] is False
-    assert record.values["conditions"]["red_folder_category_matched"] == "NOT_EVALUABLE"
-    assert "6j" in record.values["unreadable_conditions"]["red_folder_category_matched"]
+    assert record.verdict == "PASS"
+    assert record.values["category_filter_applied"] is True
+    assert record.values["conditions"]["red_folder_category_matched"] == "TRUE"
+    assert record.values["scope_outcome"] == "BOTH_HALVES_APPLIED"
     assert list(RED_FOLDER_CATEGORIES) == record.values["red_folder_categories_declared"]
+    # The classifier is OURS and unratified, and the record says so on every evaluation — the
+    # ruling settled the TYPES, not our ability to recognise them in a vendor's free text.
+    assert record.values["calendar_classifier_version_ratified"] is False
+
+
+def test_gate_015_still_refuses_a_PASS_when_the_category_half_did_not_RUN():
+    """MUST-MISS for the arm above. The discharge is of a PRODUCER GAP, not of the discipline.
+
+    With nothing to classify the condition is `NOT_READ` — *the producer exists and was not
+    called* — and the rule must not report PASS off the impact half alone, which is the exact
+    thing the original refusal protected.
+    """
+    record = CalendarScope.evaluate([])
+    assert record.verdict == "NOT_APPLICABLE"
+    assert record.values["conditions"]["red_folder_category_matched"] == "NOT_READ"
+    assert record.values["scope_outcome"] == "IMPACT_HALF_ONLY"
 
 
 def test_the_provider_and_raw_impact_are_on_every_scoped_event():
@@ -935,7 +964,19 @@ def test_the_provider_and_raw_impact_are_on_every_scoped_event():
     ])
     d = e.as_dict()
     assert d["provider"] == "finnhub" and d["impact_raw"] == "3"
-    assert d["category_checked"] is False
+    # `category_checked` WAS False here and is True from T-0047: `scope()` now runs the
+    # classifier on every event it emits. **The field has not lost its job** — it still carries
+    # NOT CHECKED for a `ScopedEvent` built directly, which is the state the ruled
+    # `taxonomy_class` enum has no token for (`UNCLASSIFIED` means RAN AND MATCHED NOTHING).
+    # Asserted both ways, because "always True" would be a field that stopped distinguishing.
+    assert d["category_checked"] is True
+    assert d["taxonomy_class"] == "INFLATION"
+    unchecked = ScopedEvent(
+        event_id="x", time_ny=at(9, 0), name="CPI", currency="USD",
+        impact_raw="3", impact_class="UNKNOWN",
+    )
+    assert unchecked.as_dict()["category_checked"] is False
+    assert "taxonomy_class" not in unchecked.as_dict()
 
 
 # ===========================================================================

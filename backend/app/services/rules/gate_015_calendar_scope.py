@@ -58,12 +58,24 @@ Factory's red folder and no ruling has ever equated them.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import Any, Literal, Sequence
 
 from app.services.rules.base import (
     ConditionReading, RuleImplementation, quorum_blocked,
+)
+from app.services.rules.gate_015_classifier import (
+    DECLARED_CLASSIFIER,
+    EXCEPTIONAL_CLASS_BY_NAME,
+    _matches_by_name,
+    TYPES_EXCLUDED,
+    TYPES_INCLUDED,
+    UNCLASSIFIED_RED_POLICY,
+    UNMATCHED_VENDOR_HIGH_POLICY,
+    blocks_under_ruling,
+    classify,
+    force_include,
 )
 from app.services.telemetry import contract_loader as contract
 from app.services.telemetry.ny_time import iso_ny, to_ny
@@ -199,25 +211,65 @@ class ScopedEvent:
     impact_raw: str
     impact_class: ImpactClass
     provider: str = DECLARED_IMPACT_MAPPING.provider
-    #: The category half of GATE-015's filter, when a ruling eventually supplies one.
-    #: None means NOT CHECKED — never "checked and found none".
+    #: The category half of GATE-015's filter. Salim RULED it in round 3 and `T-0047` built the
+    #: classifier, so this is now populated on every scoped event.
+    #: **`None` STILL MEANS NOT CHECKED — never "checked and found none".** That distinction has
+    #: no token in the ruled `taxonomy_class` enum (`UNCLASSIFIED` means RAN AND MATCHED NOTHING),
+    #: which is why this boolean-by-absence field survives the ruling rather than being folded
+    #: into it. Question 13 to Salim.
     category: str | None = None
     #: Set when the caller has classified this as one of GATE-014's exceptional classes.
     exceptional_class: str | None = None
+    #: [RULING] force-included BY NAME regardless of vendor impact, and which list matched.
+    force_included: bool = False
+    force_include_match: str | None = None
+    #: [ENGINEERING, OURS] RED and in scope and the name table did not recognise it.
+    classifier_miss: bool = False
+    #: Which pattern recognised the type, so a wrong classification is attributable to a line.
+    classifier_pattern: str | None = None
 
     @property
     def blocks(self) -> bool:
-        """Does this event participate in a blackout at all?
+        """THE RULED DISJUNCTION, round 3:
 
-        UNKNOWN blocks under the declared policy. That is the whole reason the third state
-        exists — a two-valued impact would have forced it into one of the other two, and the
-        upstream code forces it into the tradeable one.
+            blocks = (impact == RED OR force_included) AND type IN his six AND currency IN scope
+
+        **Before `T-0047` this was the impact half alone**, so it was wrong in BOTH directions: a
+        vendor-high housing print blocked (his ruling says it must not) and a vendor-medium FOMC
+        item did not (his ruling says it must). *A one-conjunct filter standing in for a
+        three-conjunct one does not merely under-block; it blocks the wrong set.*
+
+        The currency conjunct is satisfied by construction — `scope()` drops out-of-scope events
+        before they become `ScopedEvent`s — and is passed explicitly anyway rather than assumed,
+        because "true by construction" is a claim about a caller.
         """
-        if self.impact_class == "RED_FOLDER":
-            return True
-        if self.impact_class == "UNKNOWN":
-            return DECLARED_UNKNOWN_POLICY == "BLOCK_ON_UNKNOWN"
-        return False
+        blocked, _reason, _miss = self.block_verdict
+        return blocked
+
+    @property
+    def block_verdict(self) -> tuple[bool, str, bool]:
+        """`(blocks, reason, classifier_miss)` — the reason is what makes a NON-block auditable.
+
+        The two non-blocking exits fail in OPPOSITE directions and must never share a
+        representation: `RULED_EXCLUDED_TYPE` is HIS ruling failing toward more exposure, and
+        `CLASSIFIER_MISS_BLOCKED_ENGINEERING` is OURS failing toward fewer trades.
+        """
+        if self.category is None:
+            # NOT CHECKED. The classifier did not run on this event, so the type conjunct cannot
+            # be evaluated -- and `UNCLASSIFIED` would be a lie about it. Falls back to the
+            # pre-ruling impact-only behaviour and SAYS SO in the reason.
+            if self.impact_class == "RED_FOLDER":
+                return True, "TYPE_NOT_CHECKED_IMPACT_ONLY", False
+            if self.impact_class == "UNKNOWN":
+                return (DECLARED_UNKNOWN_POLICY == "BLOCK_ON_UNKNOWN",
+                        "TYPE_NOT_CHECKED_IMPACT_UNKNOWN", False)
+            return False, "TYPE_NOT_CHECKED_NOT_RED", False
+        return blocks_under_ruling(
+            impact_class=self.impact_class,
+            taxonomy=self.category,  # type: ignore[arg-type]
+            in_currency_scope=True,
+            forced=self.force_included,
+        )
 
     def as_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -232,8 +284,46 @@ class ScopedEvent:
         }
         if self.category is not None:
             out["category"] = self.category
+            out["taxonomy_class"] = self.category
         if self.exceptional_class is not None:
             out["exceptional_class"] = self.exceptional_class
+            # [ENGINEERING] OURS, AND IT IS A CHOICE BETWEEN TWO UNSAFE BEHAVIOURS.
+            #
+            # Arming GATE-014 from the TWO-name list rather than the EIGHT-name force-include
+            # list makes this gate LOOSER, not stricter: a rate decision and a Fed-Chair speech
+            # no longer reach the indefinite disable. **That is the direction we chose, and we
+            # chose it because the strict version fails a different way** — GATE-014 has NO
+            # DEFINED RESUMPTION CONDITION, so an event reaching it stops trading with nothing
+            # specified to restart it.
+            #
+            # The missing half is the RESUMPTION, not the list. Question 14 to Salim: does a
+            # rate decision halt trading, and if so what resumes it? Until then this is INTERIM.
+            out["exceptional_class_authority"] = (
+                "[ENGINEERING] OURS, unratified, INTERIM. Armed from exceptional_class_by_name "
+                "(2 names) and NOT from force_include_by_name (8). This makes GATE-014 LOOSER, "
+                "deliberately: GATE-014 has no defined resumption, so a scheduled event reaching "
+                "it stops trading with nothing specified to restart it. A trade between two "
+                "unsafe behaviours, and not ours to settle — question 14, round 4."
+            )
+        blocked, reason, miss = self.block_verdict
+        # WHAT C-14 NEEDS TO RECOMPUTE THE WINDOWS WITHOUT THE ENGINE, and to see WHY.
+        out["vendor_impact_raw"] = self.impact_raw
+        out["force_included"] = self.force_included
+        out["blocks"] = blocked
+        out["block_reason"] = reason
+        out["classifier_miss"] = miss
+        # THE ONE BRANCH THAT IS NOT HIS, LABELLED IN THE RECORD ITSELF rather than only in a
+        # comment: T-0042's round-4 set must be able to quote what we did.
+        if miss:
+            out["classifier_miss_authority"] = (
+                "[ENGINEERING] OURS, unratified. His ruling covers events KNOWN to be outside "
+                "the six; a miss on a RED in-scope event is more likely one OF the six, so the "
+                "default BLOCKS and fails toward fewer trades. Question to Salim, round 4."
+            )
+        if self.force_include_match is not None:
+            out["force_include_match"] = self.force_include_match
+        if self.classifier_pattern is not None:
+            out["classifier_pattern"] = self.classifier_pattern
         return out
 
 
@@ -281,23 +371,71 @@ class CalendarScope(RuleImplementation):
         return CRYPTO_CURRENCY_SET
 
     @classmethod
-    def category_condition(cls) -> ConditionReading:
-        """The half of the filter that does not run, reported as unreadable rather than passed.
+    def category_condition(cls, events: Sequence[ScopedEvent] | None = None) -> ConditionReading:
+        """**THE REFUSAL THIS CARRIED IS DISCHARGED, and by a ruling rather than by an edit.**
 
-        NOT_EVALUABLE and not FALSE: no producer maps a provider event onto his six
-        categories, so "the category check ran and the event did not match" has never
-        happened. Reporting it as FALSE would make an absent check read as a working one.
+        Through `T-0046` this returned `NOT_EVALUABLE` with `missing_producer="event_category"`,
+        because *"no feed we hold maps onto them; deriving a mapping would install our taxonomy
+        as his doctrine"* — filed as round-3 question 6j. **He answered it:** six types included,
+        four excluded and IGNORE-AND-LOG, FOMC-class force-included by name.
+
+        So the TAXONOMY is his and only the RECOGNITION is ours, which is a different and much
+        smaller claim than the one the refusal was protecting against. `T-0047` built the
+        classifier and it is `DECLARED_CLASSIFIER` — versioned, unratified, stamped on every
+        record.
+
+        `events=None` is still `NOT_EVALUABLE`, and NOT because a producer is missing: it means
+        nobody supplied events to check. *"No producer exists" and "you did not ask" are
+        different absences and the second must not inherit the first's vocabulary.*
         """
+        if events is None:
+            # `unread_producer`, NOT `missing_producer`. The producer EXISTS as of T-0047; it
+            # was not read because nobody supplied events. Filing "you did not ask" under
+            # "no producer exists" would resurrect a refusal that a ruling discharged.
+            return ConditionReading(
+                name="red_folder_category_matched",
+                state="NOT_READ",
+                unread_producer=(
+                    f"{DECLARED_CLASSIFIER.name} {DECLARED_CLASSIFIER.version} exists and was "
+                    "not asked — no events were supplied to classify"
+                ),
+            )
+        if not events:
+            # ZERO EVENTS IS NOT "CLASSIFIED AND NONE MATCHED". The classifier ran on nothing, so
+            # the condition did not read — reporting FALSE here would make an empty calendar
+            # indistinguishable from a calendar of events none of which are his six, and those
+            # are exactly the two facts GATE-012/013 need kept apart.
+            # `NOT_READ`, NOT `NOT_EVALUABLE`, and the type enforces the difference: the
+            # first names a producer that EXISTS and was not called, the second one that does
+            # not exist. Using NOT_EVALUABLE here would re-file a discharged refusal under the
+            # vocabulary of an open one — the classifier exists as of T-0047.
+            return ConditionReading(
+                name="red_folder_category_matched",
+                state="NOT_READ",
+                unread_producer=(
+                    f"{DECLARED_CLASSIFIER.name} {DECLARED_CLASSIFIER.version} exists and ran on "
+                    "zero events — nothing was in scope to classify"
+                ),
+            )
+        matched = [e for e in events if e.category in TYPES_INCLUDED]
         return ConditionReading(
             name="red_folder_category_matched",
-            state="NOT_EVALUABLE",
-            missing_producer=(
-                "event_category — GATE-015 names six categories (growth, inflation, "
-                "employment, central bank, business surveys, speeches) and no feed we hold "
-                "maps onto them; deriving a mapping would install our taxonomy as his "
-                "doctrine. Round-3 question 6j."
-            ),
+            state="TRUE" if matched else "FALSE",
         )
+
+    @classmethod
+    def is_red_folder_day(cls, events: Sequence[ScopedEvent]) -> bool:
+        """`GATE-016`'s input: **∃ an event on the NY calendar day with `blocks == true`.**
+
+        The existential is over the RULED disjunction, not over impact — which is the whole
+        point of the round-3 item. **A vendor-MEDIUM FOMC item makes the day red; a vendor-HIGH
+        housing print does not.** Those two rows are the entire ruling.
+
+        The caller supplies one NY calendar day's events. This does not re-derive the day
+        boundary: `GATE-016.values.day_boundary` is `America/New_York calendar day` and the
+        events already carry `time_ny`, so grouping is the caller's and is asserted there.
+        """
+        return any(e.blocks for e in events)
 
     @classmethod
     def scope(
@@ -331,14 +469,42 @@ class CalendarScope(RuleImplementation):
             impact_raw = raw.get("impact")
             if impact_raw is None:
                 impact_raw = raw.get("importance")
-            out.append(ScopedEvent(
+            name = str(raw.get("event") or raw.get("name") or "")
+            # THE TYPE CONJUNCT, RUN HERE — so that a `ScopedEvent` built directly by any other
+            # caller keeps `category is None` meaning NOT CHECKED. `UNCLASSIFIED` is a RESULT of
+            # running the classifier and is never the state of not having run it.
+            taxonomy, pattern = classify(name)
+            forced, match, forced_as = force_include(name)
+            if forced and forced_as is not None and taxonomy != forced_as:
+                # [RULING] a force-included event is REASSIGNED to CENTRAL_BANK (SPEECHES for a
+                # Fed-Chair speech) so it can satisfy the type conjunct. Without the
+                # reassignment the force-include would be inert against its own filter.
+                taxonomy = forced_as
+            # GATE-014's ROUTING, and the list is deliberately NOT the force-include list.
+            #
+            # `exceptional_class_by_name` is TWO names (FOMC Statement / FOMC Press Conference,
+            # answers Q12); `force_include_by_name` is EIGHT. Arming GATE-014 from the wider list
+            # would route rate decisions and Fed-Chair speeches onto the INDEFINITE-DISABLE path
+            # — and **GATE-014 has no defined resumption condition**, so a scheduled event
+            # reaching it is a worse failure than a missed blackout window: one costs a trade,
+            # the other stops trading with nothing specified to restart it.
+            exceptional = _matches_by_name(name, EXCEPTIONAL_CLASS_BY_NAME)
+            event = ScopedEvent(
                 event_id=str(raw.get("id") or f"ev-{i}"),
                 time_ny=to_ny(time_raw),
-                name=str(raw.get("event") or raw.get("name") or ""),
+                name=name,
                 currency=currency,
                 impact_raw="" if impact_raw is None else str(impact_raw),
                 impact_class=DECLARED_IMPACT_MAPPING.classify(impact_raw),
-            ))
+                category=taxonomy,
+                classifier_pattern=pattern,
+                force_included=forced,
+                force_include_match=match,
+                exceptional_class=exceptional,
+            )
+            # Computed from the finished event rather than passed in, so the flag cannot
+            # disagree with the verdict it is supposed to describe.
+            out.append(replace(event, classifier_miss=event.block_verdict[2]))
         return out
 
     @classmethod
@@ -365,7 +531,7 @@ class CalendarScope(RuleImplementation):
         them apart from an empty list.
         """
         scoped = cls.scope(raw_events, confluence=confluence)
-        category = cls.category_condition()
+        category = cls.category_condition(scoped)
 
         by_class = {k: 0 for k in ("RED_FOLDER", "NOT_RED_FOLDER", "UNKNOWN")}
         for e in scoped:
@@ -381,7 +547,27 @@ class CalendarScope(RuleImplementation):
             "events_blocking": sum(1 for e in scoped if e.blocks),
             "calendar_timezone": "America/New_York",
             "red_folder_categories_declared": list(RED_FOLDER_CATEGORIES),
-            "category_filter_applied": False,
+            # WAS `False` UNTIL T-0047, and it was the honest value then: half a two-part filter
+            # is not the filter, and saying so is what kept this rule from reading as satisfied.
+            "category_filter_applied": True,
+            **DECLARED_CLASSIFIER.as_values(),
+            "event_types_included": list(TYPES_INCLUDED),
+            "event_types_excluded": list(TYPES_EXCLUDED),
+            "taxonomy_counts": {
+                t: sum(1 for e in scoped if e.category == t)
+                for t in sorted({e.category for e in scoped if e.category is not None})
+            },
+            "classifier_misses": sum(1 for e in scoped if e.classifier_miss),
+            "force_included_count": sum(1 for e in scoped if e.force_included),
+            "is_red_folder_day": cls.is_red_folder_day(scoped),
+            # THE ONE BRANCH THAT IS NOT HIS, named in the record and not only in a comment.
+            "unclassified_red_policy": UNCLASSIFIED_RED_POLICY,
+            "unclassified_red_policy_authority": (
+                "[ENGINEERING] OURS, unratified — his ruling covers events KNOWN to be outside "
+                "the six; a miss on a RED in-scope event fails toward fewer trades by our "
+                "choice. Question to Salim, round 4."
+            ),
+            "unmatched_vendor_high_policy": UNMATCHED_VENDOR_HIGH_POLICY,
             "conditions": {category.name: category.state},
             "unreadable_conditions": {category.name: category.missing_producer},
             **cls.declared_parameters(),
@@ -415,30 +601,75 @@ class CalendarScope(RuleImplementation):
         for key in cls.declared_parameters():
             provenance[key] = derived(f"GATE-015 declared parameter {key}")
 
-        # NEVER PASS, and routed through the SHARED invariant rather than asserted here.
-        # The category half of a two-part filter is permanently unreadable, so a PASS would
-        # claim conformance to a filter half of which has never run — the shrinking
-        # denominator `base.quorum_blocked` exists to refuse.
+        # T-0047's keys. Bound explicitly rather than swept in by a prefix loop: an unbound key
+        # is what `test_every_value_names_where_it_came_from` exists to catch, and a loop that
+        # binds "whatever I emitted" satisfies that test without anyone stating a provenance.
+        provenance.update({
+            "category_filter_applied": derived(
+                "TRUE from T-0047 — the classifier discharges round-3 question 6j"
+            ),
+            "event_types_included": from_registry("GATE-015", "values.event_types_included"),
+            "event_types_excluded": from_registry("GATE-015", "values.event_types_excluded"),
+            "taxonomy_counts": derived(
+                f"{DECLARED_CLASSIFIER.name} {DECLARED_CLASSIFIER.version} over the scoped events"
+            ),
+            "classifier_misses": derived(
+                "RED and in scope and unrecognised — OURS, and the count is the denominator for "
+                "how badly the pattern table is doing"
+            ),
+            "force_included_count": from_registry("GATE-015", "values.force_include_by_name"),
+            "is_red_folder_day": derived(
+                "GATE-016's input: EXISTS an event on the NY calendar day with blocks == true"
+            ),
+            "unclassified_red_policy": from_registry("GATE-015", "values.unclassified_red_policy"),
+            "unclassified_red_policy_authority": derived(
+                "[ENGINEERING] OURS — the one branch of the filter that is not his"
+            ),
+            "unmatched_vendor_high_policy": from_registry(
+                "GATE-015", "values.unmatched_vendor_high_policy"
+            ),
+            DECLARED_CLASSIFIER.name: derived("OURS, versioned, unratified"),
+            f"{DECLARED_CLASSIFIER.name}_ratified": derived(
+                "the unratified claim is that THESE PATTERNS RECOGNISE HIS SIX TYPES"
+            ),
+            f"{DECLARED_CLASSIFIER.name}_authority": derived("ENGINEERING, ours"),
+            f"{DECLARED_CLASSIFIER.name}_source": derived(
+                "seeded from IM44 and extended; cross-validation against a Forex Factory export "
+                "is the pack's instruction and is UNMET"
+            ),
+            f"{DECLARED_CLASSIFIER.name}_pattern_count": derived(
+                "size of the pattern table — a denominator, published always"
+            ),
+        })
+
+        # THIS ASSERTION FIRED AT T-0047, AND IT WAS RIGHT TO.
         #
-        # GATE-015's own default is IMPACT_HALF_ONLY, and it points differently from
-        # GATE-013's BLOCK one file away: this rule PRODUCES a list rather than deciding a
-        # trade, so its conservative outcome is to emit the list it can justify and say which
-        # half produced it. Defaulting to "emit nothing" would blind GATE-012/013 entirely,
-        # which is the opposite of conservative for a safety filter.
+        # It read: "the category condition is permanently NOT_EVALUABLE, so this rule can never
+        # reach the unblocked path; if it does, the condition has been SILENTLY CHANGED." The
+        # condition did change — not silently, and not by an edit: **Salim ruled question 6j in
+        # round 3**, `T-0045` put the six types and the four exclusions in the registry, and
+        # `T-0047` built the classifier. The guard demanded that someone look, and this is that.
+        #
+        # BOTH PATHS ARE NOW REACHABLE, so the assertion is replaced by handling rather than
+        # deleted. `quorum_blocked` returning None means the condition READ — the rule reaches a
+        # real verdict on a real two-part filter for the first time.
         blocked = quorum_blocked([category], default_outcome=SCOPE_BLOCKED_DEFAULT)
-        assert blocked is not None, (
-            "the category condition is permanently NOT_EVALUABLE, so this rule can never "
-            "reach the unblocked path; if it does, the condition has been silently changed"
-        )
-        unreadable, default_scope = blocked
-        values["scope_outcome"] = default_scope
-        values["not_applicable_reason"] = (
-            "GATE-015 is a TWO-PART filter and only the impact half is implemented. The "
-            "category half is NOT_EVALUABLE — no feed we hold maps onto his six categories "
-            "and deriving one would install our taxonomy as his doctrine (round-3 6j). The "
-            "scoped list above is real and the gates consume it; this rule is not thereby "
-            "satisfied."
-        )
+        if blocked is None:
+            # The category half RAN. The filter is whole and the rule is genuinely satisfied.
+            values["scope_outcome"] = "BOTH_HALVES_APPLIED"
+            provenance["scope_outcome"] = derived(
+                "the impact half and the category half both ran — GATE-015's two-part filter is "
+                "whole as of T-0047, discharging round-3 question 6j"
+            )
+        else:
+            unreadable, default_scope = blocked
+            values["scope_outcome"] = default_scope
+            values["not_applicable_reason"] = (
+                "The category half did not read on this evaluation — no events were supplied to "
+                "classify. THIS IS NO LONGER A PRODUCER GAP: the classifier exists as of "
+                "T-0047 and is versioned and declared. The scoped list above is real and the "
+                "gates consume it."
+            )
         provenance["scope_outcome"] = derived(
             f"GATE-015's own blocked-state default, {SCOPE_BLOCKED_DEFAULT}: a producer's "
             "conservative outcome is to emit the list it can justify and name the half that "
@@ -447,6 +678,14 @@ class CalendarScope(RuleImplementation):
         provenance["not_applicable_reason"] = derived(
             "base.quorum_blocked over GATE-015's category condition"
         )
+        # **GATE-015 CAN REACH A VERDICT FOR THE FIRST TIME.** It returned NOT_APPLICABLE
+        # unconditionally while half its filter had no producer — the honest value then, because
+        # a PASS would have claimed conformance to a filter half of which never ran.
+        #
+        # PASS means "the two-part filter ran and produced this list", not "the market is safe":
+        # this rule PRODUCES the list GATE-012/013/014 decide from and decides nothing itself.
+        # NOT_APPLICABLE survives for the case that is still real — nothing to classify.
         return cls.evaluation(
-            "NOT_APPLICABLE", values=values, value_provenance=provenance
+            "NOT_APPLICABLE" if blocked is not None else "PASS",
+            values=values, value_provenance=provenance,
         )

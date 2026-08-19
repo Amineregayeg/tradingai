@@ -128,6 +128,11 @@ from app.services.rules.gate_015_calendar_scope import (  # noqa: F401
     DECLARED_UNKNOWN_POLICY, RED_FOLDER_CATEGORIES, CalendarScope, DeclaredMapping,
     ScopedEvent,
 )
+from app.services.rules.gate_015_classifier import (  # noqa: F401
+    DECLARED_CLASSIFIER,
+    classify,
+    force_include,
+)
 from app.services.rules.gate_017_analysis_only_tfs import (  # noqa: F401
     ANALYSIS_ONLY_TFS,
     TRADING_MODE,
@@ -358,6 +363,9 @@ __all__ = [
     "PanelVerdict",
     "PoiTimingGate",
     "RuleImplementation",
+    "DECLARED_CLASSIFIER",
+    "classify",
+    "force_include",
     "SRFlip",
     "SRFlipZones",
     "OrderBlock",

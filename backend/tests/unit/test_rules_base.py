@@ -64,7 +64,15 @@ RULES_PKG_DIR = Path(rules_pkg.__file__).parent
 #: which would have separated the measurement from what it measures and diverged from the
 #: precedent `consolidation` already sets. It is still imported by `rules/__init__.py`, as
 #: `consolidation` is.
-NOT_RULES = {"__init__", "base", "consolidation", "stop_ladder_corpus"}
+# Modules that are NOT expected to register a rule id of their own. `gate_015_classifier` is
+# T-0047's name-pattern classifier: it IMPLEMENTS half of GATE-015's filter, and GATE-015 is
+# claimed by `CalendarScope` in gate_015_calendar_scope.py — two modules claiming one id is
+# exactly what `ALLOW_SHARED_ID` exists to police.
+#
+# **AN EXEMPTION CAN HIDE AN ORPHAN**, which is the failure this list could introduce: a module
+# nobody imports would sit here looking sanctioned. `test_the_exempted_helpers_are_actually_
+# REACHED_by_a_rule` below is the paired arm, so nothing enters this set by assertion alone.
+NOT_RULES = {"__init__", "base", "consolidation", "stop_ladder_corpus", "gate_015_classifier"}
 
 
 def rule_modules_on_disk() -> set[str]:
@@ -428,3 +436,45 @@ def test_every_alias_in_the_registry_points_at_a_real_rule():
         assert target in contract.known_rule_ids()
         assert rule_id in contract.aliases_of(target)
         assert contract.alias_target(target) is None, "an alias may not point at an alias"
+
+
+def test_the_exempted_helpers_are_actually_REACHED_by_a_rule():
+    """THE ARM THAT PAYS FOR `NOT_RULES`.
+
+    Exempting a module from "must register a rule" is correct for a helper and is also how an
+    ORPHAN would hide: dead code in `rules/` that nothing imports would look sanctioned rather
+    than unused. So every exempted module that is not infrastructure must be IMPORTED by a
+    module that does claim an id.
+    """
+    import ast
+
+    infrastructure = {"__init__", "base"}
+    importers: dict[str, set[str]] = {}
+    for path in RULES_PKG_DIR.glob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module:
+                importers.setdefault(node.module.rsplit(".", 1)[-1], set()).add(path.stem)
+
+    # TWO TIERS, REPORTED SEPARATELY, because they are different kinds of reachable and this
+    # arm found the difference the first time it ran: `stop_ladder_corpus` is re-exported by
+    # `__init__` and imported by no rule module, which is legitimate (it is a corpus measurement
+    # driven from tests) and is NOT the same as being used by the engine.
+    weak_only: list[str] = []
+    for helper in sorted(NOT_RULES - infrastructure):
+        seen = importers.get(helper, set()) - {helper}
+        assert seen, (
+            f"{helper} is exempted from registering a rule AND is imported by nothing in the "
+            "package — an exemption is not a licence to be unreachable"
+        )
+        if not (seen - infrastructure):
+            weak_only.append(helper)
+
+    # Recorded rather than forbidden: a helper reached only by re-export is a fact about the
+    # package's shape, and asserting it away would either delete a real module or force a fake
+    # importer. What must not happen is it becoming invisible.
+    assert weak_only == ["stop_ladder_corpus"], (
+        f"the set of re-export-only helpers changed: {weak_only}. A NEW one means a module was "
+        "added to NOT_RULES that no rule actually uses; a MISSING one means stop_ladder_corpus "
+        "gained an engine caller, which is a bigger change than it looks."
+    )
