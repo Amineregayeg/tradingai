@@ -2504,10 +2504,45 @@ is **geometry, not scarce data** — measured across the 39 non-locating setups:
                     MSB established               and consistent with rung 2 searching BETWEEN
                                                   entry and it.
 
-**NOT RESOLVED HERE, and the reason is not caution.** The wording is the trader's, both readings fit it, and
-**choosing the structural one BECAUSE it explains our own 10/49 is exactly how an invented parameter
-enters** — `GATE-014`'s trap with the seat that would benefit doing the ruling. **Goes to the round-4
-question set with the measurement as evidence, phrased as a choice between two described behaviours.**
+> ## `[DISPOSITION CORRECTED 2026-08-19, same day. The Manager filed this as a ROUND-4 QUESTION. Review refused that and it was right: the source we ALREADY HOLD separates the two readings, in four places, one of them mechanically conclusive.]`
+>
+> **I wrote *"both readings fit his wording, so choosing one is how an invented parameter enters."* That
+> reasoning was sound and its premise was false — I never checked whether the round-3 pack decides it.**
+>
+>         REGISTRY_PATCH.md:106   "Walk-back algorithm: start at the break candle ..., step back one
+>                                  candle at a time, stop at the FIRST opposite-colour candle met;
+>                                  BOUND = RUNG 1'S SWING BAR"
+>         REGISTRY_PATCH.md:107   "swing origin (PRIM-001) as the walk-back bound"
+>         REGISTRY_PATCH.md:112   "for the EXTREME OB at the Deepest LL the OB low ~ rung 1's swing low"
+>         RULINGS.md:583          "the search window (default: RUNG 1'S DEEPEST SWING -> ENTRY BAR)"
+>
+> **`:106` settles it mechanically and needs no interpretation: a walk that starts at the break candle and
+> steps BACKWARD can only be bounded by a bar BEHIND its start.** *So rung 1's swing must PRECEDE the
+> break, and our filter requires it to FOLLOW it.* **`:107` says the bound is the swing ORIGIN — the start
+> of a leg, which is not a pullback within one.** And `:112`'s degenerate equality puts rung 1 at the OB,
+> defined as *"the LAST down-close candle immediately preceding the up-impulse that produced the MSB"* —
+> **before the impulse, therefore before the break.**
+>
+> > **Review's disposition argument is the part to keep: *asking him to choose between two readings when
+> > one of them makes his own bounded walk-back unsatisfiable would be asking him to adjudicate our bug.***
+> > **This is a DEFECT with four citations, not a pending ruling — which changes who it waits on from the
+> > trader to us.**
+>
+> **And the `10/49` reading gets STRONGER, not weaker: it is neither scarcity nor geometry — it is the
+> WRONG END OF THE DISTRIBUTION, selected ten times.**
+
+**WHY IT HAS NEVER BROKEN ANYTHING YET — measured, and it is not the `ob_at_origin` fallback:**
+
+    prim_007_order_blocks.py:237   swing_bound_index: int | None = None
+    shadow.py:668                  OrderBlocks.detect(bars, breaks, tf=schema_tf(signal_tf))
+                                     -> the ONLY production caller, and it passes NO bound
+    test_t0046_order_blocks.py:123 ...swing_bound_index=1        -> a TEST is the only thing that does
+
+> **The ruling's bound is never supplied in production, so the declared `[ENGINEERING]` cap runs instead and
+> the two contradicting halves are NEVER CONNECTED.** *The contradiction is masked by absent wiring, not by
+> a fallback firing.* **`T-0049` plans to locate rung 4 via `PRIM-007` — which is precisely the wiring that
+> would connect them.** So the ordering is forced: **fix rung 1's window semantics BEFORE wiring rung 4, or
+> the wiring lands on a bound that cannot be satisfied and falls to `ob_at_origin` on every setup.**
 
 **Consequence for `T-0049`, which is planned and not yet executed:** its stated deliverable is a re-run of
 the 529 setups diffing the selected-rung distribution, expecting *"rung 3 should stop being the de-facto
@@ -2748,6 +2783,29 @@ placed. And with `msb is None` the lower bound is `-1`, so **every swing in the 
 > separate measurement.** *I inferred a property of a defect from the population in which the defect cannot
 > occur* — same shape as the `4 of 9` / `2 of 7` alias error and the `50/79` subtrahend error: **the figure
 > was real and the population was not the one the claim was about.**
+
+> ## `[SETTLED 2026-08-19 by Review, on the RIGHT population, after a frame conversion it flagged BEFORE reading the number.]`
+>
+> **Raw, the comparison was invalid and the probe SAID SO rather than printing a plausible figure:** anchor
+> `bar_index` is within-window (`854-860` of `0..862`) while `decision_index` indexes the full series
+> (`874-1474`). **Converted via `windows()` yielding `start + CORPUS_BARS - 1`, so `start = decision_index -
+> 862`:**
+>
+>         setup  decision  anchor_within  anchor_FULL   bars BEFORE decision
+>             1       874            857          869            5
+>            22      1138            860         1136            2
+>            46      1474            854         1466            8
+>         anchors AFTER the decision bar:   0 of 10       (2-8 bars before, every one)
+>
+> **`B173` IS LATENT — measured on the 10 where the defect CAN occur, not inferred from the 39 where it
+> cannot.** *And it is latent structurally rather than by luck:* **the only swings passing `bar_index > msb`
+> are the few between break and entry, so they necessarily sit just before the decision bar.**
+>
+> **`B175`'s correction therefore DISCHARGES this one — but not by fixing it.** *Moving the anchor behind
+> the break makes an upper bound unreachable for a DIFFERENT reason than the one measured here.* **Keep the
+> missing bound recorded: it is unreachable under the correct semantics and was unreachable under the wrong
+> ones, and only one of those two facts survives the fix — so a later seat re-adding an unbounded search
+> must not read this entry as evidence that unboundedness is safe.**
 
 ### B168 — a one-parameterisation exit measurement, whose sign flipped when the arm was widened
 
