@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-19 (B174 — the platform ADVISES a partial at 1.5R while `EXIT-001` ratifies 70% at 2R, and the advice IS the harm: nothing executes `suggested_action`, so changing 1.5 to 2.0 would convert a VISIBLE contradiction into an invisible one. Filed with the Manager's own inflated first version retained — `wired` and `executes` are different predicates and `grep` answers only the first. Landed with B172, where `candidate_object_ids_considered` is assigned `inputs.swings` VERBATIM one line above the pool it is named for, so all three words are false of the contents and the artefact built to make a reason refutable READS AS THE REFUTATION and is the input; B173, rung 1's missing `< entry_index` bound letting a swing that forms AFTER the entry become that trade's stop; and a second amendment to B125, because T-0036 shipped a LIVE news path beside the dead `news_blackout` read and `GATE_NAME = "news_blackout"` now makes ONE STRING name both, aiming the original trap rather than reducing it.)
+Last updated: 2026-08-19 (B175 — `GATE-027` rung 1 filters `s.bar_index > msb.bar_index`, but `msb` is a BreakEvent and a break PRINTS AFTER the swing it breaks, so a wanted-kind swing surviving that filter is a PULLBACK extreme — the NARROWEST cushion — while the registry's own statement declares the ladder cushion-monotonic with rung 1 widest and defines rung 2's window as lying BETWEEN entry and rung 1's swing. Measured across the 39 non-locating setups: ~119 correct-kind candidates each, ZERO survivors, max(bar_index) minus msb_idx median -4 and max 0 against a strict comparison. NOT RESOLVED — `after the MSB` is the trader's wording, both readings fit it, and picking the one that explains our own 10/49 is how an invented parameter enters; it goes to round 4 as a choice between two described behaviours, and T-0049 must not close it by measurement. B173 amended the same day: the Manager classified it LATENT from the 39, which are exactly the setups where rung 1 locates NOTHING and no stop is placed, so the defect cannot occur there — it lives in the 10 that DO locate. Landed with B172, B174 and B125's second amendment at 5a6e253.)
 
 ---
 
@@ -2470,6 +2470,52 @@ registry does.** Closes when the advisory number is derived from `EXIT-001` rath
 two cannot drift again.
 
 
+### B175 — rung 1's window selects the NARROWEST swing while the registry declares rung 1 the WIDEST cushion, and that is the whole 39/49
+
+**Found 2026-08-19: Review measured it, the Manager pulled the registry wording, and NEITHER OF US MAY
+RESOLVE IT — the two readings are both consistent with the trader's own text.** `GATE-027`, rung 1.
+
+    gate_027_stop_ladder.py:418   after = inputs.msb.bar_index if inputs.msb is not None else -1
+    gate_027_stop_ladder.py:422   ... and s.bar_index > after ...
+    gate_027_stop_ladder.py:332   msb: BreakEvent | None        <- a BREAK, not a swing
+
+**A break PRINTS AFTER the swing it breaks.** So *"the latest wanted-kind swing sits at or before the MSB"*
+is **geometry, not scarce data** — measured across the 39 non-locating setups: `median −4`, `max 0`,
+`min −18`, with ~119 correct-kind candidates per setup and **zero survivors in every one.**
+
+**RULE_REGISTRY.json, `GATE-027`, three quotes that pull against the implementation:**
+
+    statement  "The first options provide more room for natural pullbacks, while the later options
+                progressively reduce that cushion."   It is cushion-monotonic.
+    inputs     "deepest LL/HH after the MSB (rung 1)"                    <- HIS wording, not ours
+    values     rung2 window: far edge "between the entry and rung 1's swing", stop side
+
+> **Rung 1 is declared the WIDEST cushion and the FAR bound of rung 2's search window. But for a LONG, a
+> wanted-kind LOW printing AFTER an upward break and still below entry is a PULLBACK low — the NARROWEST
+> swing available.** *The filter selects the opposite end of the distribution from the one the ladder's own
+> rationale assigns to rung 1.* **The widest low is the impulse ORIGIN, and it prints BEFORE the break.**
+
+**Two readings of `after the MSB`, and we shipped the one that contradicts its surroundings:**
+
+    CHRONOLOGICAL   bar_index > msb.bar_index     what we built. Unlocatable 39/49; when it DOES
+                                                 locate it yields the narrowest cushion, which also
+                                                 leaves rung 2's window nearly empty by construction.
+    STRUCTURAL      the extreme of the leg the     widest cushion, always available, cushion-monotonic,
+                    MSB established               and consistent with rung 2 searching BETWEEN
+                                                  entry and it.
+
+**NOT RESOLVED HERE, and the reason is not caution.** The wording is the trader's, both readings fit it, and
+**choosing the structural one BECAUSE it explains our own 10/49 is exactly how an invented parameter
+enters** — `GATE-014`'s trap with the seat that would benefit doing the ruling. **Goes to the round-4
+question set with the measurement as evidence, phrased as a choice between two described behaviours.**
+
+**Consequence for `T-0049`, which is planned and not yet executed:** its stated deliverable is a re-run of
+the 529 setups diffing the selected-rung distribution, expecting *"rung 3 should stop being the de-facto
+default."* **If rung 1's window semantics are wrong, that diff moves the numbers and leaves the ladder
+mis-anchored beneath a healthier-looking distribution.** Deleting `min_imbalance_width` and wiring rung 4
+are both real and neither touches this. **`T-0049` must not close this by measurement.**
+
+
 ### B169 — a criterion keyed on a metric THE GRADED SEAT CAN EDIT, and which the honest work cannot move
 
 **Filed by the Manager 2026-08-19. Found and measured by Execute BEFORE building `T-0039`, and reported
@@ -2686,6 +2732,22 @@ placed. And with `msb is None` the lower bound is `-1`, so **every swing in the 
 
 **Untested either way:** whether any of the 10 locating setups selected a post-entry swing. If any did, the
 `10/49` figure contains lookahead-derived stops and the rate is not merely unattributed but wrong.
+
+> ## `[AMENDED 2026-08-19 — the Manager tried to classify this LATENT from the wrong population, and Review refused it.]`
+>
+> **Measured: all 39 non-locating setups die on `bar_index > msb`, unanimously** — survivors after `kind`
+> median 119, survivors after `after` **median 0, max 0**; `max(wanted-kind bar_index) − msb_idx` runs
+> `min −18 / median −4 / max 0`, and the comparison is strict so even a swing ON the MSB bar fails.
+>
+> **From that I inferred this entry was LATENT — no swing after the MSB means the missing upper bound is
+> unreachable. WRONG, and wrong in a way this register keeps recording: the 39 are exactly the setups where
+> rung 1 LOCATES NOTHING, so no stop is placed and THERE IS NOTHING TO BE LOOKAHEAD ABOUT.**
+>
+> ***`B173` lives entirely in the 10 that DO locate*** — where a wanted-kind swing exists strictly after the
+> MSB by construction, which is why they located. **Whether it also sits after the DECISION bar is a
+> separate measurement.** *I inferred a property of a defect from the population in which the defect cannot
+> occur* — same shape as the `4 of 9` / `2 of 7` alias error and the `50/79` subtrahend error: **the figure
+> was real and the population was not the one the claim was about.**
 
 ### B168 — a one-parameterisation exit measurement, whose sign flipped when the arm was widened
 
