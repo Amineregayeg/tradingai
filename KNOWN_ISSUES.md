@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-19 (B180 — `git add -A` IN A SHARED TREE COMMITS WHATEVER ANOTHER SEAT IS MID-WRITE ON. `97c3db0`, titled "register: B178/B179 — the live engine is stopped and the calendar is empty", contains ALL SEVEN of Execute's `T-0047` files: 1,073 insertions, the GATE-015 classifier and its 324-line test file, stamped `Seat: manager` and pushed. The content is fine — `git diff HEAD` is empty against the tree Execute tested — but a 1,073-line feature landed under a message that does not mention it, so nobody grepping `GATE-015`, `classifier` or `T-0047` finds it, and the commit message is the primary record this loop runs on. Found by the commit-msg hook from the OTHER end: Execute's subsequent `git add -A` staged only the Manager's KNOWN_ISSUES text and was refused for adding B178/B179 UNNAMED. NOT amended, reverted or rebased — the commit is pushed and the tree is shared, and a history rewrite is the class of action that destroyed a seat's work four times. FIX: never `git add -A` in a shared tree; stage BY PATH. And `git status --porcelain` first is NOT a guard — it reads a moment and the write happens after it, the same window defect as re-measuring mtimes against a fresh baseline.)
+Last updated: 2026-08-19 (B180 — one shared INDEX, not just one shared tree: my register commit 97c3db0 swallowed Execute's in-flight T-0047 work, +1012/-62 across six files, under my message and Seat: manager trailer, because `git add KNOWN_ISSUES.md` and `git commit -F` are two statements about different objects and Execute staged in the window between them. The five preceding register commits were clean, and `git diff --cached --numstat` before the FIRST one showed a single file — a check that passed five commits ago carried forward as a property of the procedure when it was a property of that moment. The credit line is the smaller half: the code landed BEFORE its author's verification sequence ran, so a commit that lands unverified code is indistinguishable in the log from one that lands verified code. Not repaired by rewriting pushed history with two peers holding clones. Procedure changed to `git commit -o <path>`, which commits only the named path regardless of the index. Filed with B178 and B179.)
 
 ---
 
@@ -2763,6 +2763,46 @@ quiet calendar.**
 **only against fixtures** — until a key exists. *And the `classifier_miss` default Malek owns cannot be
 exercised at all, so choosing it has no observable consequence yet.* **State that in the task's close rather
 than letting a green suite imply live validation.**
+
+
+### B180 — one shared INDEX, not just one shared tree: my register commit swallowed Execute's unfinished task and pushed it
+
+**The Manager's own defect, 2026-08-19, and the attribution is the smaller half.**
+
+    97c3db0  "register: B178/B179 — the live engine is stopped ..."
+       61   1  KNOWN_ISSUES.md                                <- mine
+        8   0  app/services/rules/__init__.py                 <- EXECUTE'S, mid-task
+      292  53  app/services/rules/gate_015_calendar_scope.py
+      288   0  app/services/rules/gate_015_classifier.py
+       51   1  tests/unit/test_rules_base.py
+       49   8  tests/unit/test_t0032_news_windows.py
+      324   0  tests/unit/test_t0047_news_classifier.py
+
+**`+1012/−62` of `T-0047` under the Manager's message and `Seat: manager` trailer.**
+
+**Mechanism:** `git add KNOWN_ISSUES.md` → hook dry-run → `git commit -F`. **Execute ran `git add` in the
+window between them, and `git commit` commits THE INDEX.** *The five preceding register commits were
+`KNOWN_ISSUES.md` alone; the race bit only where the timings overlapped.*
+
+> **`B63` records one shared working TREE. The sharper fact is one shared INDEX: two seats staging
+> concurrently means WHOEVER COMMITS FIRST TAKES THE OTHER'S WORK — silently, with a diff that looks
+> correct to whoever is reading for their own files.** *And I had verified exactly this: `git diff --cached
+> --numstat` before the FIRST commit showed one file.* **A check that passed five commits ago was carried
+> forward as a property of the procedure, and it was a property of that moment.**
+
+**THE CONSEQUENCE THAT OUTRANKS THE CREDIT LINE: the code landed BEFORE its author's verification sequence
+ran.** No prober as its own command with its exit read, no coverage, no sweep, no suite figure naming its
+selection. **My commit did not merely take Execute's work — it bypassed the gate sequence that makes landing
+mean something.** *A commit that lands unverified code is indistinguishable in the log from one that lands
+verified code, and the trailer names the wrong seat as the one who checked.*
+
+**NOT repaired by rewriting history.** Two peers hold clones; **a force-push to correct a credit line is a
+worse trade than an accurate record.** Remedy is forward: the author re-runs the full sequence against the
+landed sha and fixes forward, saying in the message that the code landed unverified here.
+
+**Procedure changed, in `PROMPT_MANAGER.md`:** register commits use an explicit pathspec —
+`git commit -o KNOWN_ISSUES.md` — **which commits ONLY the named path regardless of what else the index
+holds.** *`git add` + `git commit` is two statements about different objects; `commit -o` is one.*
 
 
 ### B169 — a criterion keyed on a metric THE GRADED SEAT CAN EDIT, and which the honest work cannot move
