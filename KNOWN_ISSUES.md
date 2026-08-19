@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-19 (B178 — the live engine is STOPPED in production: `GET /api/engine/status` returns running:False, the newest decision_records row is 2026-08-14 15:50 against a clock of 2026-08-19, main.py:239 logs 'idle until started', and the only caller of start() is POST /api/engine/start — so nothing auto-starts it and a DEPLOY IS A BOOT. EXIT-001's tranche, GATE-022's 19:00 flatten and the whole news subsystem are reachable and have decided nothing; the count of rules affecting a live trade is ZERO for an operational reason a coverage figure could never find. It corrects my own report of 'made a ratified rule decide a live trade' — /api/system/version returning the new sha is evidence the CODE is present, not that it is in effect. `wired`/`executes`/`RETAINED` needs a fourth: RUNNING. Filed with B179 — production has no Finnhub key, so the calendar is always empty and every news gate is correct and inert, which makes a '0 blocked' figure indistinguishable from a working gate on a quiet calendar.)
+Last updated: 2026-08-19 (B180 — `git add -A` IN A SHARED TREE COMMITS WHATEVER ANOTHER SEAT IS MID-WRITE ON. `97c3db0`, titled "register: B178/B179 — the live engine is stopped and the calendar is empty", contains ALL SEVEN of Execute's `T-0047` files: 1,073 insertions, the GATE-015 classifier and its 324-line test file, stamped `Seat: manager` and pushed. The content is fine — `git diff HEAD` is empty against the tree Execute tested — but a 1,073-line feature landed under a message that does not mention it, so nobody grepping `GATE-015`, `classifier` or `T-0047` finds it, and the commit message is the primary record this loop runs on. Found by the commit-msg hook from the OTHER end: Execute's subsequent `git add -A` staged only the Manager's KNOWN_ISSUES text and was refused for adding B178/B179 UNNAMED. NOT amended, reverted or rebased — the commit is pushed and the tree is shared, and a history rewrite is the class of action that destroyed a seat's work four times. FIX: never `git add -A` in a shared tree; stage BY PATH. And `git status --porcelain` first is NOT a guard — it reads a moment and the write happens after it, the same window defect as re-measuring mtimes against a fresh baseline.)
 
 ---
 
@@ -2689,6 +2689,57 @@ rule affects a live trade must cite `running: true` and a `decision_records` row
 seat's.** Paper mode throughout — `ExecMode` has no `LIVE` member and `execute()` refuses any adapter that
 is not `is_simulation` — but *starting an engine that will place orders and flatten positions at 19:00 is
 still an operator decision.*
+
+### B180 — `git add -A` in a shared tree commits whatever another seat is mid-write on
+
+**Found by the commit-msg hook during `T-0047`, and the hook is the only reason it was found at
+all. Three seats share one working tree and `git add -A` does not know whose changes it is taking.**
+
+    03:2x  Execute  porcelain check    -> 6 files, KNOWN_ISSUES.md CLEAN
+    03:3x  Manager  git add -A ; commit -> 97c3db0 "register: B178/B179 — the live engine is
+                                            stopped and the calendar is empty"
+                                         ...containing ALL SEVEN of Execute's T-0047 files,
+                                            1073 insertions, the classifier and its 324-line
+                                            test file, stamped `Seat: manager`, and PUSHED
+    03:3x  Execute  git add -A ; commit -> hook REFUSES: "ADDS B178 B179 ... UNNAMED"
+
+**Execute's `git add -A` staged only the Manager's `KNOWN_ISSUES` text, because Execute's own
+files had already been committed by the Manager seconds earlier.** *The hook read that as Execute
+about to commit someone else's register entries — which is exactly what it was seeing, from the
+other end of the same collision.*
+
+#### THE CODE IS FINE. THE RECORD IS NOT, AND THE RECORD IS WHAT THIS LOOP RUNS ON
+
+    content     `git diff HEAD` EMPTY — HEAD is byte-identical to the tree Execute tested
+                (1801 passed, 1 xfailed, prober exit 0, coverage PASSED, sweep exit 0)
+    message     describes a REGISTER ENTRY about the engine being stopped
+    attribution `Seat: manager` on a commit that is 95% another seat's feature work
+
+> **A 1,073-line feature landed under a message that does not mention it.** *Nobody grepping for
+> `GATE-015`, `classifier`, `T-0047` or the fail-open finds this commit* — and the commit message
+> is the primary record in this loop, the thing Review reads and the thing the next round consults.
+> **`B160` established that a figure in a commit message has no arm; this is the message itself
+> having no relationship to its diff.**
+
+#### WHY THE OBVIOUS FIX IS WRONG
+
+**Not amended, not reverted, not rebased.** The commit is PUSHED and the tree is SHARED; a history
+rewrite here is the exact class of action that destroyed a seat's work four times and is why
+`git reset --hard`, `git checkout --`, `git stash` and `git clean` are banned in this tree. *An
+attribution error is cheaper than a lost-work error by orders of magnitude, and the cure must not
+be more dangerous than the disease.*
+
+**THE FIX IS PER-SEAT AND MECHANICAL: never `git add -A` in a shared tree.** Stage BY PATH — the
+paths the task actually touched, which every seat already knows because it wrote them. `git add -A`
+is a convenience whose failure mode is silent and whose blast radius is another agent's uncommitted
+work.
+
+    git add -A                          takes whatever is dirty, including mid-write files
+    git add <the paths this task wrote> takes what this task did
+
+**And the second half: `git status --porcelain` before staging is NOT a guard against this.** *It
+is a read of a moment, and the write happens after it* — the same window defect as re-measuring
+mtimes against a fresh baseline. **The only real guard is never staging by wildcard.**
 
 ### B179 — production has no Finnhub key, so the calendar is ALWAYS EMPTY and every news gate is inert regardless of correctness
 
