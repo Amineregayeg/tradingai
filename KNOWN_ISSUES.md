@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-19 (B182 — A FAITHFUL TRANSCRIPTION OF A RULING THAT SILENTLY DROPPED A GUARD THE RULING NEVER MENTIONED. Implementing Salim's round-3 news filter as `if impact_class == "RED_FOLDER" or forced` is a CORRECT reading of what he said, and it re-opened the fail-open `T-0035` found in `finnhub.py` and `T-0036` closed: the third state UNKNOWN is neither RED nor forced, so an impact we cannot parse became tradeable again. He ruled on events whose impact we CAN read; an unreadable vendor string was never in scope of his ruling, which is precisely why transcribing the ruling removed the guard with no step that looked wrong. CLASS: a ruling replaces a predicate, and the old predicate may carry obligations the ruling never addressed — invisible in the diff, because the diff shows the new predicate matching the new doctrine and that is the thing under review. Caught only by a test written two tasks earlier for an unrelated property. FIX: the survivor is a NAMED CONSTANT with its own reason token so a faithful rewrite cannot absorb it again. PRACTICE: when a ruling replaces a predicate, enumerate what the OLD one did that the ruling does not mention and carry each survivor forward by name. See also B181 and the Manager's B180 — the shared-index race that landed this work under another seat's message.)
+Last updated: 2026-08-19 (B183 — bus.py could not see a task that had LANDED while still labelled EXECUTING: T-0047's code sat on main for TEN HOURS unreviewed with every arm silent, because the idle check counts EXECUTING as activity and both stall arms key on REVIEWING — landed-and-mislabelled is a third state nothing represented, which is B171's family inside the instrument built to catch B171. Fixed, and the two rejected fixes are the entry: attempt 1 fired on state.json mtime < HEAD, true of almost every legitimate in-flight task, and its except swallowed a git failure as a CLEAN TREE while `_git` did not exist in the file at all; attempt 2 used `git log --grep=<id>`, which matched commits merely DISCUSSING a task, so an unstarted T-0049 read as landed. Shipped version anchors on a subject beginning `T-NNNN:` with a demonstrated must-fire and two must-misses. Both rejects were caught by asking for a MUST-MISS case rather than by re-reading them.)
 
 ---
 
@@ -2901,6 +2901,49 @@ landed sha and fixes forward, saying in the message that the code landed unverif
 **Procedure changed, in `PROMPT_MANAGER.md`:** register commits use an explicit pathspec —
 `git commit -o KNOWN_ISSUES.md` — **which commits ONLY the named path regardless of what else the index
 holds.** *`git add` + `git commit` is two statements about different objects; `commit -o` is one.*
+
+
+### B183 — `bus.py` could not see a task that had LANDED while still labelled EXECUTING, and my first two fixes for it were both wrong
+
+**`T-0047`'s code sat on `main` for TEN HOURS, unreviewed, with the board reading `EXECUTING` and every arm
+in `bus.py` silent.** Neither seat was idle, so the idle check counted it as activity; `skipped`/`unacted`
+both key on `REVIEWING`, so neither looked at it. **It was neither idle nor in review — it was LANDED and
+mislabelled, a third state nothing represented.** `B171`'s family, in the instrument built to catch `B171`.
+
+**FIXED. And the two failed attempts are the entry, because both looked correct and one looked vigilant.**
+
+    ATTEMPT 1   fire when `state.json` mtime < HEAD commit time, with a clean tree
+                -> TRUE OF ALMOST EVERY LEGITIMATE IN-FLIGHT TASK: the status is set at
+                   assignment and commits follow. Tested: would fire on `T-0047` for the
+                   right reason and on everything else for none.
+                   AN ARM THAT ALWAYS FIRES IS AS USELESS AS ONE THAT NEVER DOES — it just
+                   fails in the direction that looks like vigilance.
+                Also: its `except` swallowed a git failure as a CLEAN TREE, and `_git` did
+                not exist in the file at all, so the whole arm was a silent no-op on write.
+
+    ATTEMPT 2   fire when `git log --grep=<task-id>` finds a commit
+                -> MATCHED COMMITS THAT MERELY DISCUSS THE TASK. `--grep=T-0049` hit two
+                   register commits whose BODIES say "T-0049 must not close this by
+                   measurement", so a task nobody had started read as landed.
+                   `grep` answered *"is this id mentioned anywhere"*; the question is
+                   *"does a commit CLAIM to be this task"*.
+
+    SHIPPED     match commits whose SUBJECT begins `T-NNNN:`, the landing convention.
+                MUST-FIRE  T-0050 -> `7f53fb3 T-0050: EXIT-001 decides the live exit`
+                MUST-MISS  T-0049 (discussed only)      -> no hit
+                MUST-MISS  T-0051 (assigned, unstarted) -> no hit
+                `REVIEWING` deliberately EXCLUDED — a landed commit is the normal state for
+                a task under review, and the two existing arms cover that side.
+
+> **`_git` now RAISES rather than returning `""` on failure, and the arm prints *"cannot check — treat this
+> as UNKNOWN, not as clean"*.** A helper that returns empty on error makes
+> `not _git("status","--porcelain").strip()` read as a clean tree when the command never ran. **And `agents/`
+> is not a git repository, so every git question here must name `tradingai/` explicitly** — asking from
+> `agents/` returns an error that attempt 1's `except` would have reported as clean.
+
+**The transferable part: all three versions were cheap to write and only one is specific. The two rejected
+ones were caught by asking each for a MUST-MISS case, not by re-reading them** — *attempt 2 was rejected by
+the same class of test it exists to perform.*
 
 
 ### B169 — a criterion keyed on a metric THE GRADED SEAT CAN EDIT, and which the honest work cannot move
