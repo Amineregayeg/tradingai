@@ -29,7 +29,11 @@ from app.services.live.news_context import (
 from app.services.live.shadow import _bars_from_frame
 from app.services.telemetry.ny_time import to_ny
 from app.services.live.strategy_step import evaluate_latest_bar_traced
-from app.services.rules.exit_001_v1_model import DECLARED_SESSION_CLOSE
+from app.services.rules.exit_001_v1_model import (
+    DECLARED_SESSION_CLOSE,
+    DECLARED_SESSION_FLATTEN,
+    SessionClose,
+)
 from app.services.market_data.sources.binance import BinanceSource
 from app.services.ws.manager import ws_manager
 
@@ -248,6 +252,11 @@ class LiveCryptoLoop:
         return {
             "running": self._running,
             "paused": self.paused,
+            # B179's LESSON APPLIED BEFORE IT BITES. `0 flattens at 19:00` means "the flag is
+            # off" and READS AS "the flatten works and there was nothing to close". Whoever
+            # asks "did the daily flatten run?" must be able to tell SUPPRESSED from IDLE from
+            # WORKING without reading the source, so the switch is on the status payload.
+            **DECLARED_SESSION_FLATTEN.as_values(),
             "mode": self.mode,
             "symbols": list(self.symbols),
             "entry_tf": self.entry_tf,
@@ -946,6 +955,38 @@ class LiveCryptoLoop:
             return
         self._last_session_close = now_ny.date()
         positions = await self.paper.get_positions()
+
+        # GATE-022 IS EVALUATED AND RECORDED WHETHER OR NOT IT MAY ACT.
+        #
+        # T-0051 gates the ORDER, never the rule. Suppressing the RECORD too would destroy the
+        # evidence Salim's question 4 will be answered against — how often a runner WOULD have
+        # been cut, and what R it was carrying. That evidence is the entire reason the flatten
+        # was implemented as stated in T-0050.
+        verdict = SessionClose.evaluate(now_ny)
+        would_flatten = len(positions)
+
+        if not DECLARED_SESSION_FLATTEN.enabled:
+            # SUPPRESSED, AND SAID SO. `0 flattens` must never read as "it ran and found
+            # nothing" — B179's trap, built here deliberately and therefore labelled here
+            # deliberately. The count of what WOULD have closed is the load-bearing half.
+            logger.info(
+                "GATE-022 session flatten SUPPRESSED",
+                flag=DECLARED_SESSION_FLATTEN.name,
+                enabled=False,
+                verdict=verdict.verdict,
+                would_have_closed=would_flatten,
+                reason="Salim question 4 unanswered; Malek operating decision 2026-08-19",
+            )
+            if would_flatten:
+                await self._act(
+                    "exit",
+                    f"GATE-022 {DECLARED_SESSION_CLOSE.local_time:%H:%M} NY reached — "
+                    f"{would_flatten} position(s) WOULD have been flattened. SUPPRESSED by "
+                    f"{DECLARED_SESSION_FLATTEN.name}=false ([ENGINEERING], ours): question 4 "
+                    "is unanswered. The runner now terminates on STOP_HIT only.",
+                )
+            return
+
         if not positions:
             return
         for position in positions:
@@ -1287,12 +1328,31 @@ class LiveCryptoLoop:
         self._task = asyncio.create_task(self._loop())
         logger.info("LiveCryptoLoop started", symbols=list(self.symbols),
                     run_id=str(self.run_id))
+        # NAMED AT STARTUP, not only in the record it later fails to produce. A suppression
+        # that announces itself once, at boot, is the difference between "nothing happened at
+        # 19:00 because the flag is off" and "nothing happened at 19:00".
+        logger.info(
+            "GATE-022 session flatten "
+            + ("ENABLED" if DECLARED_SESSION_FLATTEN.enabled else "SUPPRESSED"),
+            flag=DECLARED_SESSION_FLATTEN.name,
+            enabled=DECLARED_SESSION_FLATTEN.enabled,
+            authority=DECLARED_SESSION_FLATTEN.authority,
+            retirement_condition=DECLARED_SESSION_FLATTEN.retirement_condition,
+        )
         await self._act(
             "engine",
             f"Engine started — {self.mode}, {self.entry_tf} entries on "
             f"{', '.join(self.symbols)} @ {self.risk_pct*100:.0f}% risk, "
             f"${self.starting_balance:,.0f} balance",
         )
+        if not DECLARED_SESSION_FLATTEN.enabled:
+            await self._act(
+                "engine",
+                "GATE-022's 19:00 NY flatten is SUPPRESSED ([ENGINEERING], ours) — Salim's "
+                "question 4 on whether a 24/7 instrument flattens daily is unanswered. The rule "
+                "still evaluates and is still recorded; only the ORDER is withheld, so an "
+                "EXIT-001 runner terminates on STOP_HIT alone.",
+            )
         return await self.status()
 
     async def stop(self) -> dict:

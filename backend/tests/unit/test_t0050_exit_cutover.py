@@ -25,6 +25,8 @@ import pytest
 from app.db.enums import DirectionType, OrderType
 from app.services.broker.paper import PaperBroker
 from app.services.execution.service import ExecMode, ExecutionService, Signal
+from dataclasses import replace
+
 from app.services.live import crypto_loop as loop_mod
 from app.services.rules.exit_001_v1_model import (
     DECLARED_SESSION_CLOSE, PARTIAL_AT_R, PARTIAL_FRACTION, RUNNER_FRACTION,
@@ -173,7 +175,7 @@ async def test_the_partial_does_NOT_fire_before_price_reaches_the_2R_level():
 # SESSION_CLOSE — the runner's only other terminal reason
 # ---------------------------------------------------------------------------
 @pytest.mark.asyncio
-async def test_the_runner_terminates_at_the_declared_session_close_and_only_once_a_day():
+async def test_the_runner_terminates_at_the_declared_session_close_and_only_once_a_day(monkeypatch):
     """Built in T-0050 because **without it the runner has no termination but the stop.**
 
     Before the cutover every position carried a 2R take-profit; after it the remainder has no
@@ -183,6 +185,16 @@ async def test_the_runner_terminates_at_the_declared_session_close_and_only_once
     broker = PaperBroker(starting_balance=10_000.0)
     await _open(broker, entry=100.0, sl=95.0, units=10.0)
     loop = _Loop(broker)
+
+    # T-0051 GATED THE ACTION BEHIND A FLAG THAT DEFAULTS OFF, so this test now enables it
+    # explicitly. **It is testing EXIT-001's terminal condition, not the operating switch** —
+    # without the flag on it would silently become a test of the suppression, pass for the wrong
+    # reason, and stop saying anything about the behaviour it is named for.
+    # T-0051's ARM 1/ARM 2 pair is what tests the switch itself.
+    monkeypatch.setattr(
+        loop_mod, "DECLARED_SESSION_FLATTEN",
+        replace(loop_mod.DECLARED_SESSION_FLATTEN, enabled=True),
+    )
 
     before_close = datetime.combine(date(2026, 8, 18), time(18, 59), tzinfo=NY)
     await loop._close_at_session_end(before_close)

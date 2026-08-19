@@ -175,6 +175,56 @@ DECLARED_SESSION_CLOSE = DeclaredSessionClose(
 )
 
 
+@dataclass(frozen=True)
+class DeclaredFlattenSwitch:
+    """OURS. Gates the ACTION only; `GATE-022` keeps evaluating and keeps being recorded."""
+
+    name: str
+    enabled: bool
+    authority: str
+    source: str
+    retirement_condition: str
+    ratified: bool = False
+
+    def as_values(self) -> dict[str, Any]:
+        return {
+            self.name: self.enabled,
+            f"{self.name}_ratified": self.ratified,
+            f"{self.name}_authority": self.authority,
+            f"{self.name}_source": self.source,
+            f"{self.name}_retirement_condition": self.retirement_condition,
+        }
+
+
+#: OFF BY DEFAULT, and the default is Malek's operating decision rather than a doctrine claim.
+#:
+#: **The 19:00 flatten is HIS for the EURUSD / algo HT v2.0 strand. THIS FLAG IS OURS.** Salim's
+#: question 4 — does a 24/7 instrument flatten daily? — is UNANSWERED, and starting the engine
+#: with the flatten live would apply an unratified default to a live paper balance.
+#:
+#: **AND THE CONSEQUENCE OF TURNING IT OFF IS STATED HERE RATHER THAN DISCOVERED:** `T-0050` built
+#: `SESSION_CLOSE` precisely because the 30% runner has NO final target (`TARGET-001` cannot select
+#: one). With this flag off, a runner's only terminal condition is `STOP_HIT` — it rides until the
+#: stop or until the engine is stopped. *That is the trade Malek chose: an unratified daily flatten
+#: on one side, an indefinitely-riding remainder on the other.* Both are recorded; neither is safe
+#: in the sense of being obviously right.
+DECLARED_SESSION_FLATTEN = DeclaredFlattenSwitch(
+    name="session_flatten_enabled",
+    enabled=False,
+    authority=(
+        "[ENGINEERING] OURS. GATE-022's 19:00 flatten is Salim's for EURUSD; whether it applies to "
+        "a 24/7 instrument is his question 4 and is UNANSWERED. This switch gates the ORDER, never "
+        "the rule: GATE-022 still evaluates, still reaches a verdict, and still lands on the trace."
+    ),
+    source="Malek's operating decision 2026-08-19, taken so the engine could be STARTED at all",
+    retirement_condition=(
+        "A CONDITION, NOT A DATE: when Salim rules on whether a 24/7 instrument flattens daily, "
+        "THIS FLAG IS DELETED and the ruling decides. The flag must not become the answer — a "
+        "default that outlives the question it was waiting on has silently become doctrine."
+    ),
+)
+
+
 class SessionClose(RuleImplementation):
     """GATE-022: any position still open at 19:00 New York time is closed.
 
