@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-19 (B186 — the platform has NO working news warning to the user: `generate_risk_warning` has exactly ONE call site, engine.py:208, inside `if candle.get("news_blackout")` — a key with ZERO writes anywhere in app/ (B125) — and the production `alerts` table has 0 rows EVER, so no alert of any type has been created. AlertType.RISK_WARNING is declared, constructible and unreachable. It shares its edit with B125's trap, which is why it cannot be fixed casually: populating the key is the obvious first step and is exactly the half that ships 'trading suspended' while the engine takes every trade — gate_012_news_blackout.py:289 states the invariant as one change or neither. Malek's decision, genuinely three-way: do nothing, warn AND enforce, or route the warning off NewsContext and leave the block staged. Inert twice over today per B178 and B179.)
+Last updated: 2026-08-19 (B186 — the platform has NO working news warning to the user: `generate_risk_warning` has exactly ONE call site, engine.py:208, inside `if candle.get("news_blackout")` — a key with ZERO writes anywhere in app/ (B125) — and the production `alerts` table has 0 rows EVER. It shares its edit with B125's trap, so populating the key is the obvious first step and is exactly the half that ships 'trading suspended' while the engine takes every trade; gate_012_news_blackout.py:289 states the invariant as one change or neither. Malek's decision, three-way. — AND B178 IS RESOLVED at 13:16 UTC the same day: the live engine is RUNNING and the deployed rules are deciding. running:true with session_flatten_enabled false per Malek's decision and T-0051's gate; decision_records 685->687 with the newest row at 2026-08-19 13:16:52 against a previous newest of 2026-08-14 15:50, nine seconds after started_at. The rows carry OBSERVED entry_rule_comparison 'disagree=1 agree=0 not_comparable=0 rate=1.000 [1 of 6 rules comparable]' and OBSERVED exit_tranche_plan '70% at 1964.25 then a 30% runner to None'. wired/executes/RETAINED/RUNNING satisfied, proved by a row NEWER than the deploy rather than by running:true or the version sha. rate=1.000 is one comparison, its direction is unrecoverable per B177, and the news gate is inert and says so.)
 
 ---
 
@@ -2684,6 +2684,42 @@ returning the new sha was treated as evidence the change was in effect; it is ev
 
 **`wired` / `executes` / `RETAINED` (`B177`) now needs a fourth: `RUNNING`.** **Every future claim that a
 rule affects a live trade must cite `running: true` and a `decision_records` row NEWER than the deploy.**
+
+> ## `[RESOLVED 2026-08-19 13:16 UTC. Malek authorised it, `T-0051` gated the flatten, and the engine is RUNNING.]`
+>
+>         POST /api/engine/start          -> running: TRUE
+>         session_flatten_enabled         false, ratified false, authority + retirement on the endpoint
+>         decision_records                685 -> 686 -> 687
+>         newest row                      2026-08-19 13:16:52   (was 2026-08-14 15:50)
+>         started_at                      2026-08-19 13:16:43   -> the row is 9s LATER
+>         entry_tf 5m · BTC/USD, ETH/USD · balance 5000.0 · open 0
+>
+> **AND THE ROWS CARRY THE RULE ENGINE'S VERDICT, which is the thing this entry said had never happened:**
+>
+>         OBSERVED entry_rule_comparison: entry rules: disagree=1 agree=0 not_comparable=0
+>                                         rate=1.000 [1 of 6 rules comparable]
+>         OBSERVED exit_tranche_plan:     70% at 1964.2546 then a 30% runner to None
+>         PASS history · PASS daily_bias LONG · PASS ltf_bos LONG
+>         NOT-EVALUATED news_blackout: "calendar verdict NOT TAKEN — FINNHUB_API_KEY not
+>                                       configured. This is NOT 'no blackout'."
+>
+> **So the fourth predicate is satisfied: `wired` / `executes` / `RETAINED` / `RUNNING`.** *The step that
+> proved it was a row NEWER than the deploy — not `running: true`, and not the version sha, which is the
+> mistake this entry exists to record.*
+>
+> **THREE THINGS THAT MUST NOT BE READ AS MORE THAN THEY ARE:**
+>
+> **`rate=1.000` IS NOT A RATE.** It is `disagree=1` over one comparison, and `[1 of 6 rules comparable]` is
+> `ENTRY-001` alone as `T-0040` specifies. **The rules and the heuristic disagreed on the very first live
+> bar, and its DIRECTION is not recoverable — `B177`: `Gate.values` is never persisted, so rules-looser and
+> rules-stricter are indistinguishable in the only channel that reaches the database.**
+>
+> **`a 30% runner to None` CONFIRMS THE EXPOSURE.** `FINAL_TARGET` has zero occurrences under
+> `services/live/`, so with the flatten suppressed `STOP_HIT` is the runner's only terminal condition. *That
+> is the trade Malek chose, verified in production rather than argued.*
+>
+> **The news gate is INERT AND SAYS SO** — `B179`. *"This is NOT 'no blackout'"* is the sentence that keeps a
+> `0 blocked` figure from reading as a working gate.
 
 **Not fixed here, and deliberately: starting the engine is a live action and it is Malek's call, not a
 seat's.** Paper mode throughout — `ExecMode` has no `LIVE` member and `execute()` refuses any adapter that
