@@ -2872,6 +2872,32 @@ verified code, and the trailer names the wrong seat as the one who checked.*
 worse trade than an accurate record.** Remedy is forward: the author re-runs the full sequence against the
 landed sha and fixes forward, saying in the message that the code landed unverified here.
 
+> ## `[CORRECTED 2026-08-19 by Execute, and it retires this entry's SEVERITY while leaving its mechanism intact.]`
+>
+> **I wrote that the code landed UNVERIFIED. Wrong on substance, and I verified the correction myself:**
+>
+>         git diff HEAD                                   0 lines
+>         git diff --numstat 97c3db0 HEAD -- backend/      EMPTY — nothing changed after my commit
+>         suite      1801 passed / 1 xfailed / exit 0   (pytest tests, 1802 collected)
+>         prober     TIER 0.2 PASSED, exit 0, its own command with its exit code read
+>         coverage   PASSED exit 0 — 79/118 ids, 69/105 distinct, effective 54/80, UNMOVED
+>         sweep      exit 0
+>
+> > ***A VERIFICATION IS A CLAIM ABOUT A TREE, NOT ABOUT A COMMIT OBJECT.*** **My commit's TIMESTAMP precedes
+> > Execute's sequence; its CONTENT does not differ from what was verified.** *I read a temporal ordering as an
+> > evidentiary gap* — **the same substitution as reading `/api/system/version`'s sha as proof a deploy was in
+> > effect (`B178`). Twice in one session, on two different artefacts.**
+>
+> **What was genuinely lost: Execute's trailer check, its commit message, and the seat attribution.** Smaller
+> than I claimed. **The `git commit -o <path>` remedy stands unchanged — it fixes the MECHANISM regardless of
+> how this instance happened to turn out, and an instance that ended well is not evidence the mechanism is
+> safe.**
+>
+> **See `B181`, Execute's correction of my FIX, which is worth more than this correction of my severity:** my
+> prescription was *"stage BY PATH, never `git add -A`"* — **and I HAD staged by path.** `git add <paths>`
+> still leaves the INDEX shared. *A remedy that matches the story rather than the mechanism reads as solved to
+> everyone downstream.*
+
 **Procedure changed, in `PROMPT_MANAGER.md`:** register commits use an explicit pathspec —
 `git commit -o KNOWN_ISSUES.md` — **which commits ONLY the named path regardless of what else the index
 holds.** *`git add` + `git commit` is two statements about different objects; `commit -o` is one.*
