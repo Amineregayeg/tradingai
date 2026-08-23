@@ -14408,6 +14408,54 @@ described as registering a proxy for the kill switch, appearing in **no line of 
 It also means **T-0065's subject changed underneath it**: the panel that ignores empty lists now
 receives non-empty ones from a route that never delivered any.
 
+**CORRECTION 2026-08-23 — THE MANAGER'S REASON WAS CONTINGENT; REVIEW SUPPLIED ONE THAT IS NOT.**
+This seat argued that `is_simulation` need not be enforced on the close path *"because `observe_only`
+already refuses."* **That is a statement about an environment variable's current value, not a
+property** — precisely the shape of the sentence in `base.py:55-58` that this entry exists to
+correct.
+
+```
+manager.py:45   observe_only = creds.get("observe_only", True)      <- a STORED CREDENTIAL
+manager.py:46   if observe_only is False and not allow_live:  observe_only = True
+```
+
+**The forcing is conditional on `ALLOW_LIVE_TRADING` being unset.** Set it, store
+`observe_only: false`, and `_guard_trading` never fires — `close_all_positions` writes for real
+against a connection reporting `is_simulation = False`. **Two settings, either changeable without
+touching code.**
+
+**THE REASON THAT SURVIVES THE CONFIG CHANGE REACHES THE SAME ANSWER.** Enumerate both
+configurations rather than the current one:
+
+```
+ALLOW_LIVE_TRADING unset   observe_only forced True    already refused, visibly, with a named
+                                                       reason. `is_simulation` adds NOTHING.
+ALLOW_LIVE_TRADING set     observe_only may be False   the operator DELIBERATELY enabled live
+                                                       writes. Refusing to flatten THEN is the
+                                                       worst case of the refusing disposition.
+```
+
+**There is no configuration in which enforcing `is_simulation` on the close path is right.** In one
+it is redundant; in the other it is actively wrong. **That is why disposition (b) is the whole task
+— not because a guard happens to fire today.**
+
+**THE DOCSTRING TEXT, and it must not cite the env var:**
+
+> *"`ExecutionService` refuses to send writes to a non-simulation adapter (`service.py:96`) — the
+> venue is what matters when PLACING. The kill switch and position-close routing deliberately do
+> NOT check this: closing is the safe direction, and refusing to flatten a real book is a worse
+> failure than flattening one. Writability is gated separately by `observe_only`
+> (`cryptofundtrader.py:201`), which is a different question from the venue."*
+
+Three facts, one boundary, no dependence on a setting's current value. **A scope without its reason
+is what rots into the next `B238`.**
+
+**CURRENT CONFIGURATION, measured, so the contingency is on record rather than assumed:**
+`ALLOW_LIVE_TRADING` is **unset** in the api container and absent from compose and `.env`, so the
+forcing is active today; and `manager.py:573-587` appends `{"status": "error"}` on the raise, so the
+refusal is counted in `positions_failed` rather than swallowed. **The safety currently rests on
+configuration, not on the code path.**
+
 ### B242. Deleting the blackout helper leaves `_pair_to_currencies` with ZERO production callers
 **Found in:** T-0066, answering the `B239` question about its own change (Execute)
 **What it is:** `T-0066` deleted `CalendarService.is_in_blackout`, which was the ONLY production
