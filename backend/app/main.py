@@ -233,7 +233,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from app.services.live.crypto_loop import LiveCryptoLoop
 
     live_loop = LiveCryptoLoop()
-    broker_manager.register_adapter("paper", live_loop.paper)
+    # T-0062/B221: register a PROXY that resolves `live_loop.paper` at call time, never the
+    # broker object itself. `_reset_broker_state` rebinds `paper` on every engine start —
+    # and in PROP_FIRM_SIM to a different CLASS — so registering the object left the manager
+    # holding an orphan, and the kill switch closed nothing while reporting success.
+    from app.services.broker.live_loop_proxy import LiveLoopBrokerProxy
+
+    broker_manager.register_adapter("paper", LiveLoopBrokerProxy(live_loop))
     app.state.live_loop = live_loop
     app.state.live_task = None
     logger.info(

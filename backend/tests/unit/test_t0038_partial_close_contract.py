@@ -85,7 +85,13 @@ def test_there_are_adapters_to_check():
     """MUST-HIT. A contract arm over an empty set passes and guards nothing."""
     names = {c.__name__ for c in _all_adapters()}
     assert names == {
-        "PaperBroker", "SimPropFirmBroker", "OANDAAdapter", "CryptoFundTraderAdapter"
+        "PaperBroker", "SimPropFirmBroker", "OANDAAdapter", "CryptoFundTraderAdapter",
+        # T-0062/B221. A forwarding proxy, and it belongs in the guarded set precisely
+        # BECAUSE it forwards: `close_position` passes `lot_size` straight through, so a
+        # proxy that dropped it would complete a partial request in full and return success
+        # — this contract's exact defect, reintroduced at a layer the original arms could
+        # not see. Verified: `_reads_lot_size` is True for it.
+        "LiveLoopBrokerProxy",
     }, (
         f"the production adapter set changed: {sorted(names)}. A new adapter must be added here "
         "deliberately — joining the guarded set silently is how a member goes unwatched."
