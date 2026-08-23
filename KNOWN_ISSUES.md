@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-23 (B236 — `"NONE"` is the rendering of UNGRADED for `box_grade` (gate_032:283, and BoxGrade's Literal has no NONE member) and a REAL GRADE for `disturbance_grade` (gate_002:53), side by side in one `risk_assessment` dict. Documented and safe today because gate_032:274-280 says the two "are never compared" — and T-0054's deliverable IS a comparison. A box pair of NONE vs STANDARD is NOT_COMPARABLE, not a disagreement, and counting it inflates the rate in the direction that argues the grades disagree. The plan names two buckets and needs three, which is B177's lesson missed by the task written to apply B177's lesson. A third meaning is arriving too: T-0054 needs the grade to survive a try/except that swallows everything, so a crashed grader recording "NONE" would make one token mean ungraded, graded-zero and failed.)
+Last updated: 2026-08-23 (B236 — `"NONE"` is an ABSENCE for the box grade and a VALUE for the disturbance grade, in the same dict, and MEASURED the box has never been graded: 0 of 4338 setup_evaluation rows, so for that pair NOT_COMPARABLE is the entire population and T-0054's half (a) cannot compute a rate at all. Also B217 MEASURED and upgraded from footnote to hazard: `scan_context.engine_policy` is a complete census because T-0010 put the shadow above the gate, and 2143 of 4340 bars — 49.38% — sit in `already in a position`, a state B217 does not cover. Control pair: 358 decision_records DO show LIVE_NOT_REACHED from in-trace blocks, and 0 mention any loop-level reason, so the zero is a measurement of absence rather than a dead instrument. The conditional is load-bearing: today those bars produce no trace, so B217 affects nothing — IF a restructure creates traces there, ~49% of the comparison corpus is affected.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -13284,6 +13284,48 @@ proxy for it, and `blocked_by` is a proxy that covers three of seven block sourc
 
 **Not fixed here — and it is a REASON, not a blocker, for the B198 remedy that would trip it.**
 Related: **B177**, **B213**, **B199**, **B190**.
+
+**MANAGER MEASUREMENT, 2026-08-23 — B217 IS A HAZARD, NOT A FOOTNOTE, AND THE NUMBER IS ~49%.**
+Review's baseline stated the state itself is unmeasurable, and that stands: a loop-blocked bar
+hard-returns at `crypto_loop.py:1218` before any trace exists. But `engine_policy` **is** the
+return of `_entry_block_reason` for that bar, and `T-0010` put the shadow ABOVE the gate, so it is
+recorded on **every** bar including every blocked one — `scan_context.engine_policy` in the
+`setup_evaluation` payload. That is a complete census, not a sample:
+
+```
+C   engine_policy over ALL 4340 setup_evaluation rows, prefix-matched
+      2197   50.62%   (null — nothing blocked)
+      2143   49.38%   already in a position      <- a state B217 does not cover
+```
+
+**With a CONTROL PAIR, so the zero below means something:**
+
+```
+A   decision_records with an IN-TRACE block AND not_comparable > 0     358   (expect non-zero)
+B   decision_records mentioning ANY loop-level reason string             0   (expect zero)
+    decision_records carrying reasons                                 1056 of 1060
+```
+
+`A` non-zero proves the instrument **can** see `LIVE_NOT_REACHED`; `B`'s zero is therefore a
+measurement of absence rather than an absence of measurement — the dead-instrument case this
+register has filed against four times.
+
+**THE HONEST SENTENCE, and the conditional is not decoration.** This is **not** *"B217 affects
+2143 bars"*. Today those bars produce no trace, no `decision_record` and no comparison row, so
+B217 affects nothing at all. It is: ***if a restructure creates traces on these bars, ~49% of the
+comparison corpus is affected.*** Dropping the conditional turns a latent hazard into a claimed
+active one — which is exactly how `B219` was got wrong and had to be amended.
+
+**AND IT SIZES A RETRACTED PROPOSAL.** The manager's withdrawn `B198` remedy — writing the
+decision record above the entry gate — *was* that restructure. It would have poisoned roughly half
+the recovered corpus, asymmetrically, in the direction that argues for the cutover. The retraction
+was correct on the mechanism before this number existed; the number says how much it was worth.
+
+**One query detail that would have hidden the answer:** two of the four loop-level reasons are
+f-strings with embedded values (`KILL SWITCH ARMED ({reason})`, `max concurrent {n} reached`), so
+a plain `GROUP BY` scatters them across as many distinct strings as there were reasons and
+undercounts to near-invisibility while looking like a clean grouping. **Match by prefix.**
+
 ### B214. The only existing "has this a target" test merges NO TARGET with A DEGENERATE RISK LEG
 **Found in:** T-0057, reaching for the single-site rule before writing a second one (Execute)
 **What it is:** `T-0057` needed exactly one site deciding whether an open position has a target,
