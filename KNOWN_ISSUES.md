@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-23 (B235 — `rule_says_entry` is computed at TWO sites in `entry_comparison.py`: `:435` decides AGREE vs DISAGREE and `:171`, inside the function whose docstring says "The ONE site that decides this", decides which way. Measured by mutation: loosen `:171` to `!= "FAIL"` and the T-0053 suite reports 22 passed — no arm notices. Latent, because both read the same literal and NOT_APPLICABLE short-circuits before either runs, so they agree on the reachable population and can only diverge if someone edits one — which is the edit the mutation shows passing. `direction_unknown` would not catch it: both paths still return a direction, just different ones. B184's shape, one field over, in the code written to close an instance of it.)
+Last updated: 2026-08-23 (B236 — `"NONE"` is the rendering of UNGRADED for `box_grade` (gate_032:283, and BoxGrade's Literal has no NONE member) and a REAL GRADE for `disturbance_grade` (gate_002:53), side by side in one `risk_assessment` dict. Documented and safe today because gate_032:274-280 says the two "are never compared" — and T-0054's deliverable IS a comparison. A box pair of NONE vs STANDARD is NOT_COMPARABLE, not a disagreement, and counting it inflates the rate in the direction that argues the grades disagree. The plan names two buckets and needs three, which is B177's lesson missed by the task written to apply B177's lesson. A third meaning is arriving too: T-0054 needs the grade to survive a try/except that swallows everything, so a crashed grader recording "NONE" would make one token mean ungraded, graded-zero and failed.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -14143,6 +14143,84 @@ this instance.
 **Not fixed here, and it does not block T-0053's PASS** — the behaviour is correct, every direction
 arm is mutation-verified, and the label-inversion mutation the `isinstance` guard cannot see IS
 caught by seven tests. Related: **B177**, **B184**, **B213**, **B218**.
+
+### B236. `"NONE"` is an ABSENCE for the box grade and a VALUE for the disturbance grade, in the same dict
+**Found in:** 2026-08-23, baselining T-0054 (Review) — before the code exists
+**What it is:** the two grades in `setup_evaluation.risk_assessment` use the same token for opposite
+things:
+
+```
+grade_002_box_grade.py:52   BoxGrade         = Literal["STANDARD", "SUPER", "MANIPULATED"]
+gate_032_risk_matrix.py:283 "box_grade": self.box_grade if self.box_grade is not None else "NONE"
+                            -> "NONE" is the RENDERING OF UNGRADED. Not a grade.
+
+gate_002_disturbance.py:53  DisturbanceGrade = Literal["NONE", "LIGHT", "HEAVY"]
+                            -> "NONE" is a REAL GRADE. Zero panels disturbed.
+```
+
+**This is documented and currently safe.** `gate_032:274-280` says so outright — *"that enum member
+exists for exactly this state and is NOT the disturbance grade of the same name, **which is why the
+two are never compared**."* The mitigation is a prohibition, and it holds today because nothing
+compares grades at all.
+
+**`T-0054`'s deliverable is a disagreement rate per grade pair.** That is a comparison, and it walks
+straight into the half the prohibition was protecting:
+
+```
+disturbance pair   NONE vs LIGHT      a genuine DISAGREEMENT
+box pair           NONE vs STANDARD   NOT a disagreement — one side was never graded
+```
+
+**Counted as a disagreement it inflates the rate**, in the direction that argues the order path and
+the shadow disagree about grading. **The plan names two buckets — stricter/looser by analogy to
+`B177` — and it needs three.** `EntryComparison` already carries `agree / disagree /
+not_comparable` for exactly this reason: `LIVE_NOT_REACHED` is not agreement, and UNGRADED is not
+disagreement.
+
+> **`B177`'s lesson, missed by the task written to apply `B177`'s lesson.** The shape recurs because
+> the absence is spelled like a value, and it is spelled that way in one of the two fields only —
+> which is what makes a generic comparison get exactly one of them wrong.
+
+**And a third source of the same token is arriving.** `T-0054` requires the shadow's grade to survive
+a `try/except` that swallows everything (`crypto_loop.py:715`, `_shadow_evaluate -> None`). If a
+shadow failure records `"NONE"`, then one token would mean *ungraded*, *graded-zero*, and *the
+grader crashed* — three states, one rendering, on a field a cutover decision reads.
+
+**Fix:** the rate carries `not_comparable` as a first-class bucket with the totality asserted, and the
+box grade's ungraded state is rendered as something that is not a grade token — `null`, or an
+explicit `UNGRADED` — so the comparison cannot silently treat it as one. **Renaming the rendering is
+a schema change and may not be in scope; carrying the third bucket is not, and it is sufficient.**
+
+**Not fixed here — T-0054 is unstarted and this is a pre-registration.**
+Related: **B177**, **B190**, **B161**, **B225**.
+
+**MANAGER VERIFICATION — MEASURED, AND THE THIRD BUCKET IS 100% OF ONE POPULATION.** Review
+established the ambiguity from source and could not reach the database. I queried it. Across the
+**entire** `setup_evaluation` corpus:
+
+```
+4338 rows total
+  both grades on the same row : 4338   (100.0%)
+  box_grade                   : {"NONE": 4338}
+  disturbance_grade           : {"NONE": 1763, "HEAVY": 1979, "LIGHT": 596}
+  rows with a GRADED box      : 0
+```
+
+**THE BOX HAS NEVER BEEN GRADED. Not once, in 4338 rows, across every run.** So for the box grade
+the `NOT_COMPARABLE` bucket is not an edge case to be handled — **it is the whole population.**
+A two-bucket rate over this pair does not merely inflate; it reports a confident number about a
+comparison that has never had two sides. Meanwhile the disturbance grade varies healthily and its
+pair *is* computable.
+
+**This splits T-0054's deliverable in two, and the halves are not equally possible.** Half (b),
+the disturbance grade, can produce a real disagreement rate today. **Half (a), the box grade,
+cannot produce one at all** — and that is a finding to report, not a rate to compute. A task that
+returns "box grade: 100% disagreement" or "100% agreement" would be reporting the encoding of an
+absence either way.
+
+**It also retires part of Q2's join worry.** Both grades already co-occur on the same telemetry
+row, 4338 of 4338 — so the *shadow-side* pair needs no join. The B225 keylessness applies to the
+order-path grade versus its shadow counterpart, which is a different comparison and remains real.
 
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
