@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-23 (B217 — `LIVE_NOT_REACHED` is keyed on `blocked_by`, which `trace.gate()` sets for the 3 IN-TRACE gates only; the 4 LOOP-LEVEL blocks (kill switch, paused, already-in-a-position, max-concurrent) never touch it, so a trace produced on a loop-blocked bar falls through to `bool(trace.took_trade)` and records `live_verdict=False` — "the live heuristic DECLINED" — for a bar the live heuristic never evaluated. Asymmetric and both ways argue FOR the cutover: rules-FAIL scores AGREE, rules-PASS scores DISAGREE labelled RULES-LOOSER. Latent and armed for any future restructure. It killed the manager's proposed B198 remedy before it reached production. Also B216: T-0057's doctrinal predicate separates nothing — every position this run has tp NULL, so the term is true of 5 of 5 blocks; the discriminator is REMAINDER OUTSTANDING (2 whole closes cleared, 2 partial 70% closes did not). B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine reports two open positions.)
+Last updated: 2026-08-23 (B220 — an entry with NO trade rows is indistinguishable from one whose whole position is still outstanding, so `SUM(closed) < sized_units` cannot tell "never traded" from "open, nothing closed yet" from "partial remainder riding". It killed the manager's second and third statements of T-0057's predicate: unscoped it is TRUE on 7 of 33 entries and permanently TRUE for both symbols; run-scoped it still fires on a freshly opened position. The load-bearing term is `0 < SUM(closed) < sized_units` — a remainder EXISTS only if something was closed — which gives exactly 2 positives across the full corpus with no scope term, both at ratio 0.70 to six places. Also B218: `remaining_units` is computed on every settle expressly so a partial cannot look whole, and its only consumer is a log string at crypto_loop.py:934 — the third instance today of a value computed deliberately and discarded before it persists (B177, B199, B218). B219: five decision records carry sized_units with no trade row within ten minutes and nothing reconciles them.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -13375,6 +13375,120 @@ to justify.
 green and make the arm unfalsifiable, which is the move the plan forbids twice. The floor ships
 BELOW the longest legitimate block ever observed and the arms assert that fact rather than hide it.
 Related: **B198**, **B199**, **B93**, **B46**.
+
+
+### B218. `remaining_units` is computed on every settle expressly so a partial cannot look whole — and it dies in a log string
+**Found in:** 2026-08-23, attacking T-0057's replacement discriminator (Review)
+**What it is:** both brokers emit the discriminating value on every close, whole or partial:
+
+```
+paper.py:124-138     closed = pos.units if units is None else min(units, pos.units)
+                     remaining = round(pos.units - closed, 10)
+                     ... "units": closed, "remaining_units": remaining
+cft_sim.py:274,293   the same pair, with `partial` alongside
+```
+
+and `paper.py:119-122` states why it exists: *"**A PARTIAL LEAVES THE POSITION OPEN WITH THE
+REMAINDER, and the event says so.** Both `units` and `remaining_units` are emitted on every settle,
+whole or partial, because a record in which a partial and a full close look alike is the defect this
+method was changed to fix."*
+
+**It has exactly one consumer.** `crypto_loop.py:934` formats it into an activity string —
+`f"{event.get('remaining_units', 0):.3f} units run on, stop UNCHANGED"`. The `trades` table has
+`lot_size` (`models/trade.py:64`) and no remainder column. **The value is computed, is emitted, is
+rendered into a sentence, and is not retained.**
+
+**Why it matters right now.** `T-0057`'s replacement discriminator has to RECONSTRUCT this by
+joining `trades` to `decision_records.sized_units` on a `±1 second` entry-time window and comparing
+a SUM. That reconstruction is only necessary because the answer was thrown away — and it inherits
+two failure modes the stored field would not have: a join tolerance that can miss, and
+`SUM(closed) < sized_units` being true both for *"a remainder is outstanding"* and for *"no trade
+row joined at all"* (`B219`). The plan for that task forbids re-deriving a stored value — *"Do not
+compute the runner's target by re-deriving it. Read the stored position."* **The predicate re-derives
+a value the broker already computed.**
+
+**This is `B177`'s shape in a third corpus.** `B177`: the disagreement direction exists in memory and
+dies at `reasons()`. `B199`: the order path's own recency exists and is not watched. Here: the
+partial/whole distinction is computed deliberately and dies at a log line. **Three times in one day,
+the discriminating value existed and the retained artefact could not answer the question.**
+
+**Fix:** persist it. One column on `trades` — `remaining_units`, or a `closed_whole` boolean — makes
+`T-0057`'s predicate a field read with no join, no tolerance window, no SUM and no scope term. That
+is smaller than the query it replaces.
+
+**Not fixed here.** Related: **B177**, **B199**, **B216**, **B219**.
+
+### B219. Five decision records carry `sized_units` and have no trade row within ten minutes
+**Found in:** 2026-08-23, auditing T-0057's ARM 1 fixture (Review)
+**What it is:** in `agents/tasks/T-0057/_runs/arm1_remainder.txt`, 33 sized entries join to the
+`trades` table. Five return `closed_lots = 0`, and Execute's own follow-up (`q_zero_join.sql`,
+`arm1_zero_join.txt`) shows it is not a join tolerance problem — `exact_join = 0` **and**
+`loose_join = 0` at `±10 minutes`:
+
+```
+BTC/USD  2026-07-27 23:00:07   sized 0.482089    trades: 0 exact, 0 within 10 min
+ETH/USD  2026-07-28 18:00:05   sized 9.653641    trades: 0 exact, 0 within 10 min
+ETH/USD  2026-08-08 06:00:07   sized 18.355966   trades: 0 exact, 0 within 10 min
+ETH/USD  2026-08-09 09:00:06   sized 2.031151    trades: 0 exact, 0 within 10 min
+ETH/USD  2026-08-09 19:00:07   sized 4.875120    trades: 0 exact, 0 within 10 min
+```
+
+**The engine sized a position, wrote the decision record, and no trade exists.** Five times, across
+both symbols, all before the current run started (`2026-08-19 18:50:22`). Whether the fill was lost,
+the insert failed, or the run died between the two writes is not established here and cannot be from
+these artefacts.
+
+**Why it matters beyond the five rows.** Any predicate of the form *"compare what was sized against
+what was closed"* reads these as **a remainder outstanding**, because `0 < sized_units`. That is a
+different fact wearing the same representation — *"could not find the trade"* and *"the trade is
+partly open"* must not share an answer, which is `examined_nothing`'s rule at
+`entry_comparison.py:226` applied to a different corpus. `T-0057`'s discriminator has 7 positives in
+this fixture, of which 2 are real and 5 are these.
+
+**And it is a silent inconsistency between two corpora that are supposed to agree.** Nothing today
+reconciles `decision_records` with `sized_units` against `trades`. The five were found only because
+a monitoring task happened to join them.
+
+**Fix:** a reconciliation check — every `decision_record` with `sized_units` set has a trade, or an
+explicit recorded reason it does not. Until then, any join-based signal must EXCLUDE zero-join rows
+rather than counting them, and say in its own message that it is doing so.
+
+**Not fixed here.** Related: **B218**, **B216**, **B34**.
+### B220. An entry with NO trade rows is indistinguishable from one whose whole position is still outstanding
+**Found in:** T-0057, building the remainder-outstanding predicate `B216` called for (Execute)
+**What it is:** the predicate is `SUM(trades.lot_size closed against an entry) < decision_records.sized_units`.
+There is **no link column** between the two tables, so they are matched on `pair` and a
+one-second window around `created_at`. Where a trade row exists the match is exact — the four
+entries of the current run match at 4-6 ms, and no unrelated trade lies within ten minutes of any
+of them. **Where no trade row exists at all, `closed_lots` is 0 and the entry folds to "the whole
+position is outstanding".**
+
+Five such entries exist, and they are genuinely trade-less rather than join failures — verified by
+widening the window from one second to ten minutes and still finding nothing:
+
+```
+BTC/USD  2026-07-27 23:00:07   sized 0.482089    trades within +/-1s: 0   within +/-10min: 0
+ETH/USD  2026-07-28 18:00:05   sized 9.653641                        0                    0
+ETH/USD  2026-08-08 06:00:07   sized 18.355966                       0                    0
+ETH/USD  2026-08-09 09:00:06   sized 2.031151                        0                    0
+ETH/USD  2026-08-09 19:00:07   sized 4.875120                        0                    0
+```
+
+**One of them is the position the 2026-08-08 container recreate destroyed** — the incident
+`PROMPT_EXECUTE.md` opens its production section with, where recreating the api killed the engine
+mid-run and a live ETH trade's stop was never checked again. So the trade-less entry is not a
+hypothetical data shape; it is the residue of a known outage.
+
+**Why it matters:** a zero here means *"no trade row was found"* and is being read as *"nothing has
+been closed"*. Those are different claims and the register's recurring failure is exactly this —
+one output for two states. **Today it is contained**: `order_path_health` scopes every query to the
+ACTIVE RUN, and all five predate it. Across runs, or after any future outage that drops a trade
+row, such an entry would read as a remainder that no close can ever clear, and the signal would
+alarm permanently on a symbol that is in fact free.
+
+**Not fixed.** The honest fix is a link column from `trades` to the `decision_record` that opened
+them, which is a migration and belongs to whoever owns that schema. Recorded so the run-scoping is
+understood as load-bearing rather than incidental. Related: **B216**, **B199**, **B161**.
 
 
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
