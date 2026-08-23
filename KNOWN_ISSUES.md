@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-19 (B194 — the live entry-comparison corpus is 97% UNUSABLE and the field that says why is discarded on every bar. First read after the engine started 13:16:43 UTC: of 34 rows, 33 carry 'disagree=0 agree=0 not_comparable=1 rate=undefined (0 comparable)' and ONE carries 'disagree=1 rate=1.000' — so the rate I reported to Malek as the first live disagreement rests on a denominator of 1. The harness is behaving as designed: entry_comparison.py:317 excludes the bar when the rule examined nothing, because calling that an AGREEMENT with a live decline would manufacture agreement. But the content is the news: on 33 of 34 live bars ENTRY-001 EXAMINES NO INPUTS — B190's shape at the top of the order path, the rule called and not fed. And B177 bites exactly here: not_comparable_reason and inventory_size live in values(), which never reaches the database, so the corpus records THAT it is unusable and never WHY. Comparable bars accrue at ~3%, roughly 24/day over two symbols, so T-0040's criterion needs DAYS of running unless the 97% is fixed first — which is the better trade.)
+Last updated: 2026-08-23 (B195 — the seat registry addresses a seat by a NAME, which is a per-restart lease and is not unique across live sessions: at the loop restart two live sessions both carried 'tradingai-8e', one of them the probable EXECUTE seat and one a session holding no seat at all, so registry.json's stored address resolves ambiguously between a writer and a non-writer. It had already produced a false conclusion — the restarting MANAGER read the stale names, found no matching pids and inferred all three seats were gone, when every sessionId was alive under a new pid. Filed by Malek's own no-seat session 6801bd71; committed by the manager seat because agents/ tooling is the manager's to keep.)
 
 ---
 
@@ -12583,6 +12583,50 @@ excluded from `thin` by the condition itself** — not partially covered, invisi
 of the check silently, which is how the gap survived.
 
 **Same residue as B35: nothing reads the field.** Related: **B35**, **B27**, **B32**.
+
+### B195. The seat registry addresses a seat by a name that is a LEASE, and two live sessions hold the same one right now
+**Found in:** 2026-08-23, the loop restart roll call (Malek's session, 6801bd71 — no seat)
+**What it is:** `agents/registry.json` stores each seat as `{"session": "<name>", ...}`, and
+`bus.py:165` hands that string straight to the sender as the address:
+
+```
+bus.py:148   reg[a.role] = {"session": a.name, "registered_at": _now()}
+bus.py:165   return e["session"] if e else None
+```
+
+`name` is not an identity. It is a two-hex lease reissued on every restart, and it is **not
+unique across live sessions**. At 15:39 on 2026-08-23, `~/.claude/sessions/*.json` showed pid
+2019 (the probable EXECUTE seat) and pid 1095 (Malek's own **no-seat** session) both carrying
+`"name": "tradingai-8e"`, both `status: busy`, both in the TradingAI cwd. Verified live, not
+reconstructed.
+
+**Why it matters:** register EXECUTE under that name and `_address()` resolves it ambiguously
+between the seat and a session that holds no seat and is not a writer in this repo. The failure
+is silent in both directions — the sender gets a success, and the wrong recipient gets an
+assignment it has no mandate to run.
+
+**It has already produced one false conclusion.** The restarting MANAGER read the stale registry
+(`tradingai-1e` / `-78` / `-8c`), found no such pids, and inferred the seats were gone. They were
+not: all three sessions were alive under new pids. `sessionId` had not changed — `54aec8d6`
+(manager), `2063b6da` (execute), `8eefa041` (review) — only the pid and the lease had. **The
+register stored the one field that always changes and none of the fields that do not.** This is
+the register's own default failure at the top of this file: an artefact that cannot discriminate
+between "this seat is gone" and "this seat was renamed."
+
+**Fix, and the second half is not cosmetic:** key the registry on `sessionId` and resolve `name`
+at send time. **And rename the field** — a populated key called `session` reads as though the
+durable id is already stored, which is why nobody looked at it for a week. `"name"` for the
+lease, `"sessionId"` for the identity.
+
+**One correction to an instrument this register carries.** The liveness check written on
+2026-08-18 compared a row's write time against `/proc/<pid>` start time with a tunable tolerance,
+to catch recycled pids. That heuristic is now unnecessary and should not be copied: the session
+files carry a `procStart` field holding the process start time in ticks, and it matches
+`/proc/<pid>/stat` field 22 **exactly** for all five live sessions checked. Use equality on
+`procStart`, not a delta with slack — a threshold that can be tuned to pass is not a test.
+
+**Not fixed here.** Filed by a session that holds no seat and is not a writer in this tree.
+Related: **B150**.
 
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
