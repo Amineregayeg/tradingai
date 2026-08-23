@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 
 import httpx
@@ -67,9 +67,13 @@ _IMPACT_MAP: dict[str, str] = {
 #: test with a two-number rule. So there is no longer any code for which the old sentence is
 #: true — which is why it is replaced here rather than left standing.
 #:
-#: **What decides is `GATE-015`, and it BLOCKS on UNKNOWN** —
-#: `IMPACT_TREATED_AS_RED = ("RED_FOLDER", "UNKNOWN")`, reason token
-#: `UNKNOWN_IMPACT_BLOCKED_DECLARED_POLICY`. That is `T-0047`'s deliberate split: a
+#: **What decides is `GATE-015`, where UNKNOWN is treated exactly as `RED_FOLDER` for the
+#: IMPACT CONJUNCT** — `IMPACT_TREATED_AS_RED = ("RED_FOLDER", "UNKNOWN")`, reason token
+#: `UNKNOWN_IMPACT_BLOCKED_DECLARED_POLICY`. *Not "it blocks on UNKNOWN": that is an
+#: absolute where the code is a conjunction.* The conjunct is reached only after the
+#: currency-scope check, the unclassified branch and the excluded-type check, each of which
+#: can exit NON-blocking first — and all three of those exits are correct. That is
+#: `T-0047`'s deliberate split: a
 #: known-but-out-of-scope event does not block, by Salim's ruling, while a CLASSIFIER MISS
 #: is an ENGINEERING default set to BLOCK. *The two fail in opposite directions and one
 #: state could not carry both.* Whether that default is right remains Malek's call, and it

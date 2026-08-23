@@ -8,11 +8,27 @@
 **A fix that handled only the second would pass three of the four fixtures this task names**, so the
 two branches are asserted SEPARATELY here rather than through their shared outcome.
 
-**The safety property is the one that made this landable on live code:** the blackout helper skipped
-anything that is not `"high"`, so `UNKNOWN_IMPACT` skips exactly as `"low"` did.
-`test_the_gate_decision_is_identical_to_the_legacy_coercion` asserts that against a REIMPLEMENTATION
-of the old line rather than describing it, so the claim is re-runnable by a later seat instead of
-being taken on trust.
+**THE SAFETY PROPERTY THAT MADE THIS LANDABLE HAS RETIRED WITH THE CODE IT WAS ABOUT — REPLACED
+HERE, NOT ANNOTATED.** This paragraph used to say that the blackout helper skipped anything not
+`"high"`, so `UNKNOWN_IMPACT` skipped exactly as `"low"` did, and it cited
+`test_the_gate_decision_is_identical_to_the_legacy_coercion` as proof *"re-runnable by a later seat
+instead of being taken on trust."* `T-0066` deleted both the helper and that test. **So the sentence
+promising verifiability pointed at nothing, and was itself the thing being taken on trust** — a
+reader doing the right thing found no such test and could not tell whether it was deleted, renamed,
+or never written (`B245`).
+
+**It survived T-0066's own acceptance arm for a reason worth keeping.** That arm was
+`grep -rn is_in_blackout backend -> 0`, and the rewrite that removed the identifier from this
+paragraph satisfied it while leaving the assertion standing. *The grep hit was the thing that
+moved; prose is not searchable by identifier.*
+
+**What this module tests now:** that `_resolve_impact` reports UNKNOWN with a REASON, that the two
+fail-open defaults are asserted separately, and that `resolution_stats()` counts them apart.
+**What decides impact on the order path is `GATE-015`**, where UNKNOWN is treated exactly as
+`RED_FOLDER` for the impact conjunct — a conjunct reached only after the currency-scope check, the
+unclassified branch and the excluded-type check, each of which can exit non-blocking first.
+`test_t0047_news_classifier.py` covers that. The retirement is recorded in full at the point where
+the deleted tests stood.
 """
 from __future__ import annotations
 
