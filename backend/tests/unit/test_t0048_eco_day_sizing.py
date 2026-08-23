@@ -168,27 +168,149 @@ def test_the_eco_day_trio_is_emitted_on_BOTH_record_types():
         assert key in values, f"{key} missing from GATE-032's evaluation values"
 
 
+# ======================================================================================
+# B188's tripwire — WIDENED by T-0055 (`B191`) from ONE SYNTACTIC SHAPE to THE CLASS
+# ======================================================================================
+
+
+def _size_call_sites(source: str, label: str) -> list[str]:
+    """Every ``<anything>.size(...)`` call in `source`, rendered as ``label:line  expr``.
+
+    **The call's base is deliberately UNCONSTRAINED (`B191`).** The first version of this
+    predicate required ``ast.Name(id="RiskMatrix")`` as the base, so of the three shapes a
+    sizer cutover can be written in it caught ONE:
+
+        RiskMatrix.size(...)        base Name('RiskMatrix')    -> caught
+        RM.size(...)                base Name('RM')            -> MISSED   (aliased import)
+        g32.RiskMatrix.size(...)    base Attribute(...)        -> MISSED   (module path)
+
+    *"It uses AST" was never the property.* The narrow version was an AST-based ENUMERATION —
+    of syntactic shapes rather than of strings, which is `B184`'s error one layer up.
+
+    **Matching the attribute `size` on ANY base OVER-FIRES** if some unrelated object grows a
+    ``.size()`` method. That is the trade, it was chosen deliberately, and it is stated in the
+    failure message: an over-fire is a VISIBLE failure that gets read, where the narrow version
+    was a SILENT PASS on the one day the guard exists for.
+
+    **Still not covered, and recorded rather than fixed (`B196`):** a value-bound reference
+    (``sizer = RiskMatrix.size`` then ``sizer(...)``) and ``getattr(RiskMatrix, "size")(...)``
+    both stay silent, because both stop being an attribute call at the call site.
+    """
+    return [
+        f"{label}:{node.lineno}  {ast.unparse(node.func)}"
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "size"
+    ]
+
+
+def _tripwire_failure(callers: list[str]) -> str:
+    """The message. **Two readings, and the reader must be able to tell them apart here.**"""
+    return (
+        f"A `.size(...)` call now exists in production code at {callers}.\n\n"
+        "READING 1 — GATE-032's sizer reached the order path. Every live trade's size changes "
+        "with it: MANIPULATED/NONE risks 1.50x base, SUPER/HEAVY skips entirely, an UNGRADED "
+        "setup takes the refusal path. SOME TRADES GET BIGGER. That is a live behaviour change "
+        "needing Malek's authorisation (T-0050's precedent), not a green test.\n\n"
+        "READING 2 — an UNRELATED object grew a `.size()` method. This guard matches the "
+        "attribute `size` on ANY base BY DESIGN (`B191`/T-0055). Keying it on the base name "
+        "`RiskMatrix` missed `RM.size()` and `g32.RiskMatrix.size()` — two of the three shapes "
+        "it existed to catch. The over-fire is the deliberate price of covering the class.\n\n"
+        "IF IT IS READING 2: rename the unrelated method, or narrow by MODULE. Do NOT narrow by "
+        "the call's base name — that restores `B191` exactly, and it restores it silently."
+    )
+
+
 def test_the_rung_down_cannot_reach_a_live_trade_and_this_test_says_why():
     """**B188, armed rather than only recorded.**
 
-    `RiskMatrix.size(` has ZERO production call sites — live trades are sized from
-    `fixed.RISK_PCT`. So this whole file is fixture-only, and a `0 rung-downs applied` production
-    figure is consistent with no red-folder days, no calendar (`B179`), AND no sizer.
+    No `.size(...)` call of ANY form exists under `app/` — live trades are sized from
+    `fixed.RISK_PCT`. So this whole file is fixture-only, and a `0 rung-downs applied`
+    production figure is consistent with no red-folder days, no calendar (`B179`), AND no sizer.
 
-    *If this test ever fails, the matrix reached the order path — which changes the size of every
-    live trade and is Malek's decision, not a refactor.*
+    *If this test ever fails, read the message before you touch it: one of the two readings is a
+    live behaviour change that is Malek's decision, and the other is a rename.*
     """
     app_dir = pathlib.Path(__file__).resolve().parents[2] / "app"
     callers: list[str] = []
-    for path in app_dir.rglob("*.py"):
-        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-                    and node.func.attr == "size"
-                    and isinstance(node.func.value, ast.Name)
-                    and node.func.value.id == "RiskMatrix"):
-                callers.append(f"{path.name}:{node.lineno}")
-    assert not callers, (
-        f"RiskMatrix.size() is now called from production at {callers}. GATE-032 sizing has "
-        "reached the order path — every live trade's size changes with it. That is a live "
-        "behaviour change and needs Malek's authorisation (T-0050's precedent), not a green test."
+    for path in sorted(app_dir.rglob("*.py")):
+        callers += _size_call_sites(path.read_text(encoding="utf-8"), path.name)
+    assert not callers, _tripwire_failure(callers)
+
+
+#: The three ways a sizer cutover can be WRITTEN. `B191`: the narrow guard caught the first only.
+B191_CALL_SHAPES = {
+    "1_direct_name": "RiskMatrix.size(box_grade='SUPER', disturbance_grade='NONE')",
+    "2_aliased_import": "RM.size(box_grade='SUPER', disturbance_grade='NONE')",
+    "3_module_path": "g32.RiskMatrix.size(box_grade='SUPER', disturbance_grade='NONE')",
+}
+
+
+@pytest.mark.parametrize("shape", sorted(B191_CALL_SHAPES))
+def test_t0055_the_tripwire_catches_ALL_THREE_call_shapes_and_not_just_the_named_one(shape):
+    """**MUST-FIRE, all three.** Review added these to `strategy_step.py`: 1 failed, 2 passed.
+
+    This is the arm that makes the fix DURABLE rather than one-time. Narrowing the predicate
+    back to a base-name match — the tidy-looking edit that removes the over-fire — turns two of
+    these three red, which is `B191` announcing itself instead of sitting silent.
+    """
+    assert _size_call_sites(B191_CALL_SHAPES[shape], shape), (
+        f"the {shape} shape is invisible to the tripwire. If someone narrowed the predicate to "
+        "avoid the over-fire, this is B191 restored — see _size_call_sites' docstring."
+    )
+
+
+def test_t0055_the_OVER_FIRE_is_real_deliberate_and_stated_in_the_message():
+    """**The cost, demonstrated rather than described.** `some_queue.size()` DOES trip it.
+
+    Recording it as an arm means nobody later "discovers" the over-fire and quietly narrows the
+    guard to remove it. The failure message is where the choice is written down, so the message
+    carrying BOTH readings is part of the fix, not decoration around it.
+    """
+    assert _size_call_sites("some_queue.size()", "unrelated"), (
+        "the over-fire is the deliberate price of covering the class; if it stopped firing, the "
+        "predicate was narrowed"
+    )
+
+    message = _tripwire_failure(["strategy_step.py:42  RiskMatrix.size"])
+    assert "READING 1" in message and "READING 2" in message
+    assert "SOME TRADES GET BIGGER" in message, "reading 1 must state the live consequence"
+    assert "narrow by the call's base name" in message.lower(), (
+        "the message must name the wrong fix, because the wrong fix is the tempting one"
+    )
+
+
+def test_t0055_the_predicate_is_SILENT_on_what_is_not_a_size_call():
+    """**MUST-MISS.** A guard that fires on everything proves nothing when it fires."""
+    for source, why in (
+        ("RiskMatrix.evaluate(sizing)", "a different method"),
+        ("sizer = RiskMatrix.size", "an attribute READ, with no call"),
+        ("size(box_grade='SUPER')", "a bare function named size, not an attribute call"),
+        ('"RiskMatrix.size(...)"', "the call written inside a STRING — B161's class"),
+    ):
+        assert not _size_call_sites(source, "miss"), f"the predicate over-fires on {why}"
+
+
+def test_t0055_the_guard_is_SILENT_ON_APP_WHILE_LOUD_ON_THIS_FILE():
+    """**The control pair. The instrument, not the answer.**
+
+    `0 production callers` and `the predicate is broken` produce the SAME green. So run the same
+    predicate over a population that is known non-empty: THIS FILE calls `RiskMatrix.size(...)`
+    seven times. Loud here, silent under `app/` — the silence is about the WALK ROOT, which is
+    what makes this guard about production rather than about the repository.
+
+    *If this ever fails because t0048's fixture arms stopped calling `size()` directly, the
+    control lost its subject — repoint it, do not delete it.*
+    """
+    own = _size_call_sites(pathlib.Path(__file__).read_text(encoding="utf-8"), "self")
+    assert len(own) >= 3, (
+        f"this file was the non-empty control and now has {len(own)} .size() calls — the control "
+        "no longer proves the predicate can see anything"
+    )
+
+    app_dir = pathlib.Path(__file__).resolve().parents[2] / "app"
+    assert app_dir.is_dir(), f"the walk root does not exist: {app_dir}"
+    assert pathlib.Path(__file__).resolve() not in set(app_dir.rglob("*.py")), (
+        "tests/ must be OUTSIDE the walk root by construction, not by exclusion"
     )
