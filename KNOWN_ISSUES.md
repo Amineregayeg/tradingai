@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-23 (B244 — `shadow_health` attests `liveness_only` and disclaims correctness, panel freshness and bar-closedness; outcome VARIETY is neither attested nor disclaimed. A corpus of 4358 identical and individually CORRECT records is not a correctness problem, so the nearest disclaimer does not cover it — and on a component whose scope block exists to enumerate its own limits, an unlisted limit is worse than on one making no such promise. B240 on the shadow's own surface: the answer is published and the denominator is not. Fix is one line of `does_not_attest` as the honest minimum, or better, emit `distinct_outcomes` as VALUES and never as a status — the shadow is not broken and a non-healthy status would flip `ok` for a component doing its job. NO THRESHOLD: a quiet regime produces one branch too, and choosing N is B93. Separate from B231/B234 — those are rendering, this is payload, and it would survive a perfect T-0065.)
+Last updated: 2026-08-24 (B246 — `gap_r` is still NULL after T-0063, so the feedback loop still cannot learn, now with a correct realized_r beside it. Execute DECLINED the plan's instruction to let gap_r exist for the leg that has a target, and was right to: a per-leg gap written into a column whose readers treat it as whole-trade repeats B223's own shape one field over. Deviation FILED rather than buried in a commit body. Also B245: the T-0066 deletion rewrote the false claim in finnhub.py and left the SAME fact standing in test_t0035_impact_unknown.py:11-15, which cites a test the same commit deleted — grep returns two hits and both are prose, so a sentence promising re-runnable evidence points at nothing. ADDING A NOTE DOES NOT RETIRE THE CLAIM IT SUPERSEDES. And the docstring changed the identifier to 'the blackout helper', removing it from the very grep the deletion's acceptance arm used — the arm passed because the NAME was gone while the claim survived.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -14661,6 +14661,122 @@ component doing its job, which is `B229` arriving from the other side.
 regime produces one branch too — and picking N is `B93`'s tuned number. **Publish the count and let
 a human read it**, which is `order_path_health`'s own rule: *"THE VALUES, not a colour. A signal that
 returns only a verdict cannot be argued with."*
+
+### B245. The deletion updated the grep hit and left the claim: a retired safety property still stated as live, citing a deleted test
+**Found in:** 2026-08-24, T-0066's review (Review) — the exact check Execute asked me to run
+**What it is:** `T-0066` deleted `is_in_blackout` and rewrote the two places that named it. **One
+rewrite fixed the sentence. The other fixed only the grep hit.**
+
+`tests/unit/test_t0035_impact_unknown.py:11-15`, the module docstring, AFTER the commit:
+
+> *"**The safety property is the one that made this landable on live code:** the blackout helper
+> skipped anything that is not `"high"`, so `UNKNOWN_IMPACT` skips exactly as `"low"` did.
+> `test_the_gate_decision_is_identical_to_the_legacy_coercion` asserts that against a
+> REIMPLEMENTATION of the old line rather than describing it, **so the claim is re-runnable by a
+> later seat instead of being taken on trust.**"*
+
+**Two things wrong, and the second is worse than the first.**
+
+1. **The claim is false now.** `UNKNOWN_IMPACT` does not skip. `GATE-015` puts it in
+   `IMPACT_TREATED_AS_RED = ("RED_FOLDER", "UNKNOWN")` and the blocking path returns
+   `UNKNOWN_IMPACT_BLOCKED_DECLARED_POLICY`. The helper that made it skip is gone.
+2. **The sentence promising verifiability cites a test this same commit DELETED.**
+   `test_the_gate_decision_is_identical_to_the_legacy_coercion` and its control arm were both
+   removed at `ba1388a` — correctly, they were moot. **So the phrase "re-runnable by a later seat
+   instead of being taken on trust" now points at nothing, and is itself the thing being taken on
+   trust.**
+
+**`is_in_blackout` -> "the blackout helper" is a grep-clean edit that left the assertion standing.**
+The identical rewrite in `finnhub.py:60-72` was done properly — it replaces the claim, states what
+decides now, and names the reason token. **Same commit, same fact, two files, one updated and one
+made invisible to grep.**
+
+**And the file already contains the correct treatment**, twenty lines further down: the `RETIRED AS
+MOOT BY T-0066` note explaining that the property is moot rather than lost. **So one file now carries
+the retirement note and the live claim it retires** — the reader who starts at the top gets the stale
+one, because that is where module docstrings are read.
+
+**This is `B184`'s shape inside the deletion that closed a `B184`-shaped defect**, and Execute
+predicted the class precisely — *"worth checking that what I replaced it with is actually TRUE and not
+just grep-clean"* — while applying the check to one of the two files.
+
+**Fix:** rewrite the docstring paragraph the way `finnhub.py:60-72` was rewritten — state what the
+module tested, that the gate-decision property retired with the helper, and what decides impact now.
+**One paragraph, and the model for it is already in the same commit.**
+
+**Not fixed here.** Related: **B184**, **B232**, **B210**, **B243**.
+
+**MANAGER VERIFICATION — AND THE DEFECT IS SHARPER THAN "A FALSE CLAIM".** Verified against source
+at `981bc16`. The module docstring of `test_t0035_impact_unknown.py` reads:
+
+> *"the blackout helper skipped anything that is not `high`, so `UNKNOWN_IMPACT` skips exactly as
+> `low` did. `test_the_gate_decision_is_identical_to_the_legacy_coercion` asserts that against a
+> REIMPLEMENTATION of the old line rather than describing it, **so the claim is re-runnable by a
+> later seat instead of being taken on trust.**"*
+
+**`grep` for that test name returns exactly two hits, and BOTH are prose:**
+
+```
+:13    the docstring citing it as evidence
+:139   "Two tests stood here: `test_the_gate_decision_is_identical_to_the_legacy_coercion` and its …"
+```
+
+**So the file holds the retirement AND the live claim that depends on it, twelve lines apart.** The
+sentence does not merely assert something no longer true — **it promises verifiability and points at
+nothing.** A reader who does the recommended thing, re-running the cited assertion rather than
+trusting the prose, finds no such test and cannot tell whether it was deleted, renamed, or never
+existed.
+
+**THE LESSON, and it is Execute's own framing accepted without softening: ADDING A NOTE DOES NOT
+RETIRE THE CLAIM IT SUPERSEDES.** The `RETIRED AS MOOT` block at `:139` was correct and was written
+deliberately — and it still left the same file stating the property as live. **A note is an
+addition; a rewrite is a replacement.** The same commit rewrote the equivalent claim in `finnhub.py`
+properly, so this is one fact in two files with two different treatments.
+
+**AND THE GREP HIT WAS THE THING THAT MOVED.** The docstring changed `is_in_blackout` to *"the
+blackout helper"* — which removes it from `grep -rn is_in_blackout`, the exact check the deletion's
+own acceptance arm used. **The arm passed because the identifier was gone; the claim survived
+because prose is not searchable by identifier.** That is why Review's proposed arm is right here and
+would be over-testing anywhere else: **the NAME is the hazard surface.** A future seat needing a
+blackout check greps, finds nothing, and writes the second implementation — which is how the first
+one arrived.
+
+**Also measured:** `finnhub.py:7` still imports `timedelta`, now with **one occurrence in the file
+and no use** — the single measurable consequence of the no-linter gap.
+
+### B246. `gap_r` is still NULL after T-0063, so the feedback loop still cannot learn — now with a correct number beside it
+**Found in:** T-0063, closing it — a DEVIATION from the plan, filed rather than left in a commit body (Execute)
+**What it is:** `T-0063` fixed `realized_r`, which was truncated at the 70% tranche on every winner.
+It did **not** give `gap_r` a value, and the plan's own Q4 predicted exactly this: *"Fix
+`realized_r` alone and `gap_r` stays NULL forever, `feedback.py:456`'s comparison still has
+nothing, and the loop stays exactly as unable to learn as it is today — now with a correct number
+in it."*
+
+**Why it was not fixed here, and this is a real constraint rather than a shortfall.** `expected_r`
+is one numeric column and `EXIT-001`'s plan has TWO legs:
+
+```
+0.70 @ 2.0R                    ratified (PARTIAL_AT_R)
+0.30 @ UNDEFINED               EXIT-003 is OPEN; the runner is passive by contract
+```
+
+**Any scalar in that column blends a ratified number with one the registry deliberately leaves
+open** — a fabrication arriving inside a field the feedback loop treats as doctrine. So `T-0063`
+records the PLAN in `reasons` (both legs, the runner explicitly `UNDEFINED`) and leaves
+`expected_r` NULL, which is what `tp is None` already produced.
+
+**What the plan asked for that is NOT done:** *"let `gap_r` exist for the leg that has a target."*
+That means a PER-LEG gap — the 70% leg's realized R against 2.0R — which is a different measurement
+from the whole-trade `gap_r` the column holds and whose consumers in `feedback.py` (`:456-465`,
+`:614`) read as whole-trade. **Writing a per-leg figure into a whole-trade column would repeat
+`B223`'s own shape**: a field describing part of a trade while its readers believe it describes all
+of one.
+
+**What it could break:** nothing new — this is the state before `T-0063` as well. The risk is that
+`realized_r` now being CORRECT makes the loop look repaired when its comparison input is still
+absent. `B226` measured that the loop used to work and the exit cutover zeroed it; this closes one
+of the two halves. Related: **B223**, **B226**, **B227**, **B218**.
+
 
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
