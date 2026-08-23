@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-23 (B236 — `"NONE"` is an ABSENCE for the box grade and a VALUE for the disturbance grade, in the same dict, and MEASURED the box has never been graded: 0 of 4338 setup_evaluation rows, so for that pair NOT_COMPARABLE is the entire population and T-0054's half (a) cannot compute a rate at all. Also B217 MEASURED and upgraded from footnote to hazard: `scan_context.engine_policy` is a complete census because T-0010 put the shadow above the gate, and 2143 of 4340 bars — 49.38% — sit in `already in a position`, a state B217 does not cover. Control pair: 358 decision_records DO show LIVE_NOT_REACHED from in-trace blocks, and 0 mention any loop-level reason, so the zero is a measurement of absence rather than a dead instrument. The conditional is load-bearing: today those bars produce no trace, so B217 affects nothing — IF a restructure creates traces there, ~49% of the comparison corpus is affected.)
+Last updated: 2026-08-23 (B237 — the fix for B217 would have REPRODUCED B217, on 80.1% of the corpus. T-0059 replaces a negative field with a positive flag and the baseline said set it 'before the candidate loop'; two of the three in-trace gates fire AFTER detection (:116 daily_bias and :133 ltf_bos, against :95-97), so the flag would read TRUE on bars those gates stopped, making them COMPARABLE with live_verdict=False — 'the live heuristic DECLINED' for a bar blocked before the entry decision ran. Measured: ltf_bos blocks 849 of 1060 rows carrying reasons, 358 of 375 since 08-19. Correct landmark is PAST EVERY GATE THAT CAN STOP THE BAR, not 'detection has run'. Caught before implementation by asking whether the differential arm could FAIL — and the answer is yes, on the baseline's own specification. The arm also needs a ZERO-CANDIDATE bar, the single input separating the two remaining wrong placements from the right one.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -14753,4 +14753,66 @@ what the helper's docstring refuses, and it is refused for a good reason — URL
 proxied and kept in history. **The code is right and the documentation is wrong**, which is the
 direction that makes this cheap to fix and easy to leave. Related: **B184**, **B215**, **B199**,
 `GATE-011`.
+
+### B237. The fix for `B217` would have reproduced `B217`, on 80% of the corpus, because "before the candidate loop" is the wrong landmark
+**Found in:** 2026-08-23, by asking Review whether `T-0059`'s differential arm could be made to
+FAIL — a question about the TEST that found the defect in the FIX
+**Caught before implementation. Nothing shipped.** Recorded because the landmark is the lesson and
+the next implementer needs it.
+
+**What it is:** `T-0059` closes `B217` by replacing a negative field (*"record why we blocked"*)
+with a positive flag, `reached_entry_decision`. The baseline specified setting it **"before the
+candidate loop, not inside it"** — the polarity reasoning is right, and **the landmark is wrong**:
+
+```
+:86      trace.gate("history")     -> return       BEFORE detection
+:95-97   _compute_swing · detect_fvg · detect_bos_choch      DETECTION
+:116     trace.gate("daily_bias")  -> return       AFTER detection
+:133     trace.gate("ltf_bos")     -> return :140  AFTER detection
+:142+    the entry evaluation proper
+```
+
+**Two of the three in-trace gates fire AFTER the detection.** So a flag set before `:95` reads
+TRUE on bars stopped by `daily_bias` or `ltf_bos`. Those bars stop being `LIVE_NOT_REACHED` and
+become **COMPARABLE** with `live_verdict = took_trade = False` — *"the live heuristic DECLINED"* —
+for a bar blocked before the entry decision ever ran. **That is `B217` exactly, inside the fix
+written to close `B217`.**
+
+**AND IT IS NOT A CORNER — MEASURED:**
+
+```
+decision_records since 2026-08-19    FAIL/WOULD-BLOCK ltf_bos   358 of 375    95.5%
+whole corpus (rows carrying reasons) FAIL/WOULD-BLOCK ltf_bos   849 of 1060   80.1%
+```
+
+`history` and `daily_bias` never appear; the corpus is dominated by `ltf_bos`, which is one of the
+two that fire late. **The misplacement would have mislabelled four bars in five.**
+
+**THE CORRECT LANDMARK, and it is a sentence rather than a line number:** immediately after `:140`
+— **past every gate that can stop the bar**, not *"detection has run"*. `_live_entry_verdict`'s own
+docstring already says which it means: *"A bar stopped by history, daily_bias or ltf_bos never
+reached the candidate loop."*
+
+**IT ALSO ANSWERS THE QUESTION IT CAME FROM.** Under the corrected placement the two predicates
+**cannot** disagree on today's code — `:133` is the last `trace.gate` and nothing sets `blocked_by`
+after the flag — so the differential returns zero differences by construction. **That does not make
+the arm untestable.** It fails on a wrong implementation, and the wrong implementation is not
+hypothetical: it is the one the baseline specified, and it goes red on two whole gate classes
+immediately. **A differential arm does not need two predicates that legitimately disagree; it needs
+to fail when the new predicate is built wrongly.** *"Zero differences"* is the PASS of subsumption,
+not the absence of a test — the same distinction as `B191`'s `0 callers`, which is a result rather
+than a silence **only once a control shows the instrument can see.** Third time today that shape
+has decided something.
+
+**AND THE QUESTION EXPOSED A SECOND GAP IN THE SAME ARM.** The specified corpus — three in-trace
+gates plus taken/declined — catches the `:95` misplacement, because two gate classes flip. It does
+**NOT** catch a flag set INSIDE the detection loop, the other wrong placement, which fails only on
+a bar that reached detection and found **zero candidates**. **The differential's corpus MUST include
+a zero-candidate bar** (flag True, `candidates == []`, `took_trade` False, `blocked_by` None →
+COMPARABLE, `live_verdict` False). It is the single input separating the two remaining wrong
+placements from the right one, and without it the differential passes a fix that collapses *"looked
+and found nothing"* into *"could not look"* — `examined_nothing`'s own rule, inverted.
+
+Related: **B217**, **B191**, **B213**, `T-0059`, `T-0040`.
+
 
