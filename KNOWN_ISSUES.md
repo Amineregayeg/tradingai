@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-23 (B231 — `DataHealthPanel` renders TWO of the five components that set `ok`. `shadow`, `correlate_panels` and `order_path` have no row, so with the order path withdrawn the panel shows a red box reading "Data health — 1 problem" above two rows that both say HEALTHY, and the green branch hardcodes "Collector and backups healthy" for a five-component check. B199's finding was that the order path went dark while every visible signal stayed green; T-0057 built the signal that catches it and the signal cannot reach the panel. It also bounds what a B229 fix is worth: whichever meaning `ok` is given, the answer reaches Malek through a panel that cannot show the component that set it. Fix is to DERIVE the rows from the payload — adding three more hardcoded rows is B184's shape with a longer list.)
+Last updated: 2026-08-23 (B232 — `is_in_blackout`, the pre-contract news gate with zero production callers, is RECOMMENDED by its own module: `CalendarService`'s class docstring shows it under "Typical lifecycle" with the divergent 30-minute window as the worked example, twenty lines above the sixty-line warning that is buried inside the function's for-loop. Twelve test references across two files pass and PIN the contradictory doctrine, so the suite is an active endorsement rather than neutral coverage. The function's own docstring is neutral, so a reader who opens the file the normal way still gets no warning, and only the NAME appears in every grep hit — a marking that reaches that reader means renaming, which is the same edit surface as deletion. And no parameter repairs it: `blackout_minutes` is one number and the ratified window is two.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -13927,6 +13927,55 @@ longer list** — `B184`'s shape on the frontend.
 
 **Not fixed here — frontend, and T-0064 is a scoping task with no code.**
 Related: **B229**, **B199**, **B228**, **B215**.
+
+### B232. The module's "Typical lifecycle" recommends the pre-contract news gate, and twelve green tests validate it
+**Found in:** 2026-08-23, T-0043's diagnosis (Review)
+**What it is:** `is_in_blackout` is a second statement of the news doctrine with zero production
+callers, already carrying a sixty-line warning inside its own body (`finnhub.py:284-336`). **Two
+things that warning does not reach, and both put the wrong doctrine in the reader's path.**
+
+**One — the class docstring advertises it.** `finnhub.py:165-177`:
+
+```
+"""Fetch and cache economic calendar events from Finnhub.
+
+Typical lifecycle::
+
+    calendar_service.init(...)
+    events = await calendar_service.get_today_events()
+    in_blackout, next_event = await calendar_service.is_in_blackout("EURUSD", 30)
+                                                                              ^^
+... it is non-blocking by construction; see `is_in_blackout` and `resolution_stats`.
+"""
+```
+
+**"Typical lifecycle" is the section a reader opens to learn the normal way to use the service**, and
+it shows the divergent function with the divergent window as the worked example. `:176` sends them
+there a second time. This is twenty lines above the warning and is not qualified by it.
+
+**Two — twelve test references, all passing.** Seven in `test_calendar_service.py` across seven test
+functions, five in `test_t0035_impact_unknown.py`. `test_blackout_true_for_past_event_within_window`
+pins the symmetric post-window; `test_blackout_false_for_low_impact_event` pins the impact test.
+**The suite is not neutral coverage — it is an active endorsement.** A seat who greps `blackout`,
+finds the function and sees green concludes the behaviour is validated. **The contradictory doctrine
+has passing tests; the ratified one lives in a different module.**
+
+**Why the existing marking cannot fix this.** The warning is inside the `for` loop, thirty lines
+below the function's own docstring — which describes the behaviour neutrally. So a reader who opens
+the file and reads the docstring, the normal thing, still gets no warning; and `grep -rn
+is_in_blackout` shows the def, the lifecycle line and the test lines, none of which carry it.
+**Only the NAME appears in every hit**, so a marking that reaches the grep reader means renaming —
+which touches the class docstring and twelve test references, **the same edit surface as deleting it,
+without the benefit.**
+
+**And it cannot be repaired by parameter.** `blackout_minutes` is the caller's argument, so the
+"30 against the declared 15" is not a property of the code; the irreducible divergence is the
+SYMMETRY. Ratified is `[event-15, event)` then `[event, event+30)` — two numbers. The function is
+`abs(now - event) <= blackout_minutes` — one. **No value makes it agree.** T-0043 recommends
+deletion on that basis.
+
+**Not fixed here — T-0043 is a diagnosis task with no code, and deleting live code is a decision
+rather than a tidy-up.** Related: **B184**, **B231**, **B228**.
 
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
