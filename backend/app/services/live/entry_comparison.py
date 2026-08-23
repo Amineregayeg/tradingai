@@ -131,6 +131,51 @@ class RuleComparison:
         return out
 
 
+#: The two populations `disagree` merges, and they carry OPPOSITE risk (`B177`).
+#:
+#:     RULE_STRICTER   live entered, the rule would not   -> missed opportunity
+#:     RULE_LOOSER     live declined, the rule would      -> NEW LIVE EXPOSURE
+#:
+#: `T-0040`'s criterion turns on exactly this split — *"rules stricter is not the same risk as
+#: rules looser"* — and `disagree=3` cannot answer it, because three looser and three stricter
+#: render identically.
+Direction = Literal["RULE_STRICTER", "RULE_LOOSER"]
+
+
+def disagreement_direction(c: "RuleComparison") -> Direction | None:
+    """Which way a DISAGREE went. **The ONE site that decides this.**
+
+    Keyed on BOTH members of the pair, deliberately. Direction is derivable from
+    `live_verdict` alone today — a DISAGREE means `rule_says_entry != live_verdict`, so the
+    rule's side is the negation — but keying it on one field would make the must-fail arm
+    (swap the two and the buckets must move) pass for the wrong reason: swapping puts a
+    *string* in `live_verdict`, and every non-empty string is truthy, so a one-field classifier
+    would report every disagreement as one direction and never notice.
+
+    **RECORDED AT EMISSION, never reconstructed after the fact.** `B213`: in the live corpus
+    the single disagreement's direction IS recoverable by joining `signal_dir`/`outcome`/
+    `sized_units` — but only because `disagree == 1` and `agree == 0`. That join breaks on
+    `disagree > 1`, on rows where agree and disagree are both non-zero, and on any bar where
+    live declined and there is no signal row to join against. **It works on exactly the rows
+    nobody needs it for**, so a reconstruction would be validated against the one row that
+    cannot falsify it and ship green while being silently wrong on the first interesting bar.
+
+    `None` for anything that is not a DISAGREE, and — defensively — for a DISAGREE whose
+    `live_verdict` is not a bool. That second case is unreachable today (a `None` verdict is
+    `LIVE_NOT_REACHED` and short-circuits to `NOT_COMPARABLE` before this point), and it is
+    still not folded into a bucket: an unknown direction counted as either one would be a
+    wrong answer where `direction_unknown` is a visible one.
+    """
+    if c.outcome != "DISAGREE" or not isinstance(c.live_verdict, bool):
+        return None
+    rule_says_entry = c.rule_verdict == "PASS"
+    if c.live_verdict and not rule_says_entry:
+        return "RULE_STRICTER"
+    if rule_says_entry and not c.live_verdict:
+        return "RULE_LOOSER"
+    return None
+
+
 @dataclass(frozen=True)
 class ProducerRecord:
     """A rule that emits objects rather than a verdict. COVERAGE, never the denominator."""
@@ -172,6 +217,34 @@ class EntryComparison:
     def not_comparable(self) -> int:
         return sum(1 for c in self.comparisons if c.outcome == "NOT_COMPARABLE")
 
+    def _directions(self) -> list[Direction | None]:
+        """Only DISAGREE rows have a direction. A `NOT_COMPARABLE` outcome has none, and an
+        AGREE has nothing to point at — so the split is defined on the DISAGREEING population
+        and `rule_stricter + rule_looser + direction_unknown == disagree` is total."""
+        return [
+            disagreement_direction(c) for c in self.comparisons if c.outcome == "DISAGREE"
+        ]
+
+    @property
+    def rule_stricter(self) -> int:
+        """Live entered, the rule would not. **Missed opportunity.**"""
+        return sum(1 for d in self._directions() if d == "RULE_STRICTER")
+
+    @property
+    def rule_looser(self) -> int:
+        """Live declined, the rule would have entered. **NEW LIVE EXPOSURE.**"""
+        return sum(1 for d in self._directions() if d == "RULE_LOOSER")
+
+    @property
+    def direction_unknown(self) -> int:
+        """A DISAGREE whose direction could not be read. Zero on every path that exists.
+
+        It is here so the invariant is TOTAL rather than true-by-luck: without it a future
+        DISAGREE with a non-bool verdict would silently make `stricter + looser < disagree`,
+        and a count that quietly stops adding up is the failure this whole harness is about.
+        """
+        return sum(1 for d in self._directions() if d is None)
+
     @property
     def detail(self) -> str:
         """One line for `DecisionTrace.reasons`. Always all three terms, never a bare rate."""
@@ -181,8 +254,21 @@ class EntryComparison:
             if comparable == 0
             else f"{self.disagree / comparable:.3f}"
         )
+        # THE SPLIT RIDES ON `detail` BECAUSE `detail` IS THE ONLY THING THAT REACHES THE
+        # DATABASE. `values()` was always right and has never been persisted: `Gate.values`
+        # is read only by `Gate.as_dict()`, whose only caller is `DecisionTrace.as_dict()`,
+        # which has ZERO callers in `app/`. `record_on` passes `self.detail` as the third
+        # positional argument to `trace.observe` and the kwargs alongside it — the third
+        # argument survives into `DecisionRecord.reasons`, the kwargs do not.
+        unknown = (
+            f" direction_unknown={self.direction_unknown}"
+            if self.direction_unknown
+            else ""
+        )
         return (
-            f"entry rules: disagree={self.disagree} agree={self.agree} "
+            f"entry rules: disagree={self.disagree} "
+            f"(rule_stricter={self.rule_stricter} rule_looser={self.rule_looser}{unknown}) "
+            f"agree={self.agree} "
             f"not_comparable={self.not_comparable} rate={rate} "
             f"[{len(COMPARABLE_RULE_IDS)} of 6 rules comparable]"
         )
@@ -194,6 +280,11 @@ class EntryComparison:
             "producers": [p.as_dict() for p in self.producers],
             "agree": self.agree,
             "disagree": self.disagree,
+            # The same two integers the string carries, so the in-memory path and any future
+            # `.gates` consumer cannot disagree with what reached the database.
+            "rule_stricter": self.rule_stricter,
+            "rule_looser": self.rule_looser,
+            "direction_unknown": self.direction_unknown,
             "not_comparable": self.not_comparable,
             # THE DENOMINATOR IS PUBLISHED, ALWAYS. A rate whose denominator can be zero must
             # publish its denominator: a ratio hides exactly one number and it is always the
