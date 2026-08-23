@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-23 (B210 — the sizer tripwire's own docstring claims "No `.size(...)` call of ANY form exists under `app/`" 33 lines below the SAME FILE's admission (B196) that a value-bound reference and `getattr` both stay silent. `:228` is what a reader consults to learn what a green guard means; `:195` is a helper docstring they may never open. The overstatement runs in the dangerous direction — it invites "the sizer is unreachable from production" when what was established is "no `.size` ATTRIBUTE CALL under `app/`", and T-0056's acceptance turns on that flip meaning something exact. B184's own shape, in the file written to close B191. The guard is CORRECT — all three call shapes and the over-fire were verified to turn it red end-to-end; only its self-description is wrong. Also B208: the control pair is split across two tests and only one carries the name.)
+Last updated: 2026-08-23 (B211 — T-0055's acceptance sequence DIED mid-suite and nothing said so. `suite.exit`, `prober.log`, `prober.exit`, `porcelain.after` and `SEQ_DONE` are all ABSENT; `suite.log` ends mid-progress at [ 70%] with no summary line, and a truncated pytest log ends in dots exactly like a running one. Three of the plan's four acceptance artefacts were never produced. The environment kills a ~12-minute suite reproducibly — Review's own T-0052 run died twice at the same point — so the defect is not that a run died, it is that a dead run is indistinguishable from a green one at every layer. Review re-ran the whole suite at 82e982c in six resumable chunks: 1847 passed, 1 xfailed, 0 failed, every chunk EXIT=0. Also B210: the tripwire's docstring claims "ANY form" 33 lines below the same file's admission that it does not.)
 
 ---
 
@@ -13028,11 +13028,36 @@ safely on the remote. The available responses are all wrong —
   the loop before `ls-remote` corrected it;
 * worst, `git reset` or re-commit to "recover" work that was never lost.
 
-**It has already produced a wrong claim inside a verification.** Execute's T-0055 close states
-`82e982c … contained in remote head 3d444f2  (git merge-base --is-ancestor -> YES)`. The containment
-is true, but `3d444f2` was NOT the remote head when that was written — it was local-only, and the
-label "remote head" came from a stale tracking ref. **The check passed for the wrong reason**, which
-is the same defect shape as B202: evidence that predates what it claims to establish.
+**It has already produced a wrong claim inside a verification — and the FIRST VERSION OF THIS
+ENTRY GOT THE MECHANISM WRONG.** Corrected 2026-08-23 by Review, who was asked to falsify it and did.
+Source, since this names a peer's work: Execute's session transcript at `15:16:03.699Z`, which states
+`82e982c … contained in remote head 3d444f2  (git merge-base --is-ancestor -> YES)`.
+
+This entry originally said the label "remote head" came from a stale tracking ref. **It did not, and
+the reflog of `refs/remotes/origin/main` settles it:**
+
+```
+a6b2aef  @{2026-08-19 17:13:19 +0100}     4885589  @{2026-08-23 15:49:58 +0100}
+3d444f2  @{2026-08-23 18:48:28 +0100}  <- the FIRST time the ref ever held 3d444f2: a force-fetch
+```
+
+At `15:16:03Z` the tracking ref held **`4885589`**. It was stale, but stale at a DIFFERENT value —
+`3d444f2` could not have been read out of it. `3d444f2` was committed at `15:12:59Z`, fifty-one
+seconds after `82e982c`, and at the moment of the claim it was **the LOCAL HEAD**.
+
+So the defect is not a stale cache read. It is **a local sha given a remote label** — and that
+distinction is the entry's whole value, because *a stale ref is cured by a fetch and a mislabelled
+local sha is not.* The original wording told the next reader "fetch first and `origin/main` is fine",
+which is false for the form actually used.
+
+**And the quoted command could not do the job under ANY ref state.** `git merge-base --is-ancestor`
+resolves both operands in the LOCAL object store and walks the LOCAL graph. It never touches the
+network. With `origin/main` as the second operand, freshness makes it sound; with a **hardcoded sha**
+it is unsound at every level of freshness. This is why the remedy is `ls-remote` and not "fetch more
+often": the failure is a category error about what the instrument reads, not a staleness window.
+
+**The check passed for the wrong reason** — B202's shape, evidence that predates what it claims to
+establish.
 
 **Why the obvious fix is wrong.** "Just set the remote URL to include the token" writes the PAT into
 `.git/config` in plaintext, inside the product repo, where `git config --get remote.origin.url` and
@@ -13088,6 +13113,52 @@ sentence from the predicate the way `T-0052` derived `SPEECH_TOKENS` from the ta
 prose and behaviour cannot diverge.
 
 **Not fixed here.** Related: **B196**, **B197**, **B184**, **B208**, **B191**.
+
+### B211. The acceptance sequence dies mid-run and leaves no failure signal, so a dead run reads as a green one
+**Found in:** 2026-08-23, T-0055's review (Review) — found by auditing the artefacts, not the claims
+**What it is:** `agents/tasks/T-0055/_runs/run_seq.sh` runs the suite, the prober, and a
+before/after porcelain capture, then `touch SEQ_DONE`. On T-0055 it died partway. What it left:
+
+```
+suite.log          present   1464 bytes, ends mid-progress at [ 70%] with NO summary line
+suite.exit         ABSENT
+prober.log         ABSENT
+prober.exit        ABSENT
+porcelain.before   present
+porcelain.after    ABSENT
+SEQ_DONE           ABSENT
+heartbeat          present   last write 15:18:37 UTC — the watchdog loop stopped too
+```
+
+**So for T-0055 there is no suite exit code, no prober run, and no after-state.** The plan's
+acceptance names all of them: *"suite with its SELECTION named · prober as its own command with its
+exit code read · sweep · trailer."* Three of the four produced no artefact.
+
+**Why it matters, and it is not about this one task.** Nothing reads `SEQ_DONE`'s absence. There is
+no marker in `suite.log` that says "this run was cut short" — a truncated pytest log ends in dots
+exactly like a running one, and `grep passed` on it returns nothing, which a script reading for
+failures also treats as clean. **Silence is indistinguishable from success at every layer here**,
+and the seat that launched it reports from what it remembers rather than from what the file says.
+
+**The environment kills these runs and it is reproducible.** My own T-0052 full-suite run was killed
+twice, at ~72% and ~70%, both with `setsid` and a non-`/tmp` output path. T-0055's log stopped at the
+same place and is the same length; the two are not byte-identical (they diverge at byte 797, an
+xfail marker), so this is a consistent kill point rather than one duplicated file. **A ~12-minute
+suite does not survive here.**
+
+**The finding is not that a run died — it is that nothing said so.** The register's own rule at the
+top of this file is that an artefact must discriminate between "this passed" and "this never
+finished". `run_seq.sh` cannot.
+
+**Fix, in the order that pays:** (a) write `suite.exit` even on the failure path — `set -o pipefail`
+and a `trap 'echo "KILLED phase=$PHASE" >> "$RUNS/SEQ_ABORTED"' EXIT INT TERM` so an aborted
+sequence is a FILE, not an absence; (b) have whatever reads these runs treat a missing `SEQ_DONE` as
+a FAILED acceptance rather than an unread one; (c) split the suite into chunks that each finish well
+inside the kill window and write their own exit codes — Review ran T-0055's acceptance suite this
+way in six chunks, resumable, and got **1847 passed / 1 xfailed / 0 failed, every chunk `EXIT=0`**,
+which is the figure T-0055 and T-0052 were both missing.
+
+**Not fixed here.** Related: **B179**, **B155**, **B202**.
 
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
