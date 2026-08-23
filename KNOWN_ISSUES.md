@@ -13729,27 +13729,40 @@ defect (`B93`). The value that needs no tolerance already exists and is being di
 **Not fixed here. `T-0057` is landing with this predicate now.**
 Related: **B218**, **B213**, **B216**, **B224**.
 
-**MANAGER VERIFICATION, and it reconciles two different numbers rather than picking one.** All
-four rounding sites confirmed independently, plus a fifth Review did not list:
-`execution/service.py:170` — `res["sized_units"] = round(units, 8)` — so the order carries an
-**8dp** value while `decision_records` stores a **separately rounded 6dp** copy.
+**MANAGER VERIFICATION — AND THE MANAGER'S OWN NUMBER WAS WRONG.** I reported 21.12% against
+Review's 12.92% and claimed the gap was "6dp-clean versus true-8dp underlying units". **That was
+an artefact of my simulation, not a property of the system**, and Review was right to refuse to
+let two numbers stand with a story that did not hold.
 
-Simulating the true chain, the rate depends on a detail neither seat can observe:
+The error: I summed the two 6dp lots as **Python floats**, which introduces binary representation
+error the database does not have. Identical draws, identical rounding chain, differing only in the
+final comparison:
 
 ```
-underlying position units 6dp-clean    FALSE "remainder"  12.99%    exact 74.04%
-underlying position units true 8dp     FALSE "remainder"  21.12%    exact 57.77%
+python float sum    false-remainder 20.964%    exact 57.992%    <- the artefact
+decimal sum         false-remainder 12.893%    exact 74.091%    <- the real system
 ```
 
-Review's 12.92% is exactly the 6dp-clean case; the 8dp case is twice as bad. **Which one applies
-cannot be determined from stored data, because the 8dp value the position actually holds is never
-persisted — we store `round(…, 6)`.** *The inability to measure the defect is the same defect:*
-the number that would settle it is computed and discarded, which is **B218**.
+`trades.lot_size` and `decision_records.sized_units` are both **`numeric(18,6)`** (confirmed
+against `information_schema`, and `Numeric(18, 6)` in the models), so `SUM` is exact decimal.
+**Review's ~12.9% stands and the band does not move.**
 
-**All five real `sized_units` round-trip exactly (0 of 5 false positives), and that is NOT
-reassurance.** `n` for the completed two-tranche case is **one**, and at a 74% exact rate a single
-exact observation is unremarkable. Reporting it as evidence of health would be `B213`'s error a
-second time in the same entry.
+**Why it cannot move, which is the part worth keeping.** `service.py:162` is
+`OrderRequest(lot_size=round(units, 8))` and `paper.place_order` opens
+`PaperPosition(units=request.lot_size)` — so `pos.units` is **8dp-clean by construction, for every
+position**. The partial lot, the remainder and `sized_units` therefore all derive from the *same*
+8dp value, and the only roundings that survive are the two independent 6dp writes. That is why
+every model spanning the code path lands at ~12.9% regardless of how the input is drawn, and it is
+a better proof than the implied-units inference that suggested otherwise.
+
+**What the live capture does establish** (`T-0060/_runs/live-remainders-capture.txt`): the
+underlying units genuinely carry non-zero 7th/8th digits — BTC's implied `0.08023387`, ETH's
+`1.58392977`, both reconstructing their stored 6dp values exactly. True, and it does not change
+the rate.
+
+**Both captured pairs round-trip exactly**, consistent with the ~74% exact band. `n` for the
+completed two-tranche case remains **one**: the population is 12.9% wrong and the one observation
+is right, which is why 0-of-5 must not be read as health.
 
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
