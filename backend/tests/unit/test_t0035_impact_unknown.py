@@ -8,7 +8,7 @@
 **A fix that handled only the second would pass three of the four fixtures this task names**, so the
 two branches are asserted SEPARATELY here rather than through their shared outcome.
 
-**The safety property is the one that made this landable on live code:** `is_in_blackout` skips
+**The safety property is the one that made this landable on live code:** the blackout helper skipped
 anything that is not `"high"`, so `UNKNOWN_IMPACT` skips exactly as `"low"` did.
 `test_the_gate_decision_is_identical_to_the_legacy_coercion` asserts that against a REIMPLEMENTATION
 of the old line rather than describing it, so the claim is re-runnable by a later seat instead of
@@ -17,7 +17,7 @@ being taken on trust.
 from __future__ import annotations
 
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -133,64 +133,27 @@ def test_importance_is_still_consulted_when_impact_is_absent():
 
 
 # ---------------------------------------------------------------------------
-# Criterion 1's boundary — the gate decision MUST NOT move
+# RETIRED AS MOOT BY T-0066, NOT DROPPED — read this before concluding coverage was lost
 # ---------------------------------------------------------------------------
-
-
-def _async_return(value):
-    async def _inner():
-        return value
-
-    return _inner()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("item,_reason,_raw", UNRESOLVABLE)
-async def test_the_gate_decision_is_identical_to_the_legacy_coercion(item, _reason, _raw):
-    """IF THIS FAILS, CRITERION 1 HAS BEEN EXCEEDED and the change is no longer shadow.
-
-    Making an unclassifiable event BLOCK is a live safety-versus-availability trade. It needs
-    the count `resolution_stats()` starts accruing, and it is Malek's decision — not a seat's,
-    and not something to arrive at as a side effect of a recording change.
-    """
-    now = datetime.now(tz=timezone.utc)
-    when = now + timedelta(minutes=5)
-
-    new_impact, _, _ = _resolve_impact(item)
-    old_impact = _legacy_impact(item)
-    assert new_impact != old_impact, "this fixture is supposed to be one the change affects"
-
-    async def verdict(impact: str) -> bool:
-        svc = CalendarService()
-        svc.get_today_events = lambda: _async_return(  # type: ignore[method-assign]
-            [CalendarEvent(time=when, event="X", currency="USD", impact=impact)]
-        )
-        blocked, _ = await svc.is_in_blackout("EUR/USD", blackout_minutes=30)
-        return blocked
-
-    assert await verdict(new_impact) == await verdict(old_impact), (
-        f"{item!r}: the blackout verdict MOVED, {old_impact!r} -> {new_impact!r}"
-    )
-
-
-@pytest.mark.asyncio
-async def test_the_identical_decision_arm_can_actually_detect_a_change():
-    """The test above compares two verdicts. If `is_in_blackout` ignored impact entirely it
-    would pass vacuously, so this pins that the comparison has a failing case at all."""
-    now = datetime.now(tz=timezone.utc)
-    when = now + timedelta(minutes=5)
-
-    async def verdict(impact: str) -> bool:
-        svc = CalendarService()
-        svc.get_today_events = lambda: _async_return(  # type: ignore[method-assign]
-            [CalendarEvent(time=when, event="X", currency="USD", impact=impact)]
-        )
-        blocked, _ = await svc.is_in_blackout("EUR/USD", blackout_minutes=30)
-        return blocked
-
-    assert await verdict("high") is True
-    assert await verdict(UNKNOWN_IMPACT) is False
-    assert await verdict("low") is False
+#
+# Two tests stood here: `test_the_gate_decision_is_identical_to_the_legacy_coercion` and its
+# own control arm, `test_the_identical_decision_arm_can_actually_detect_a_change`. They
+# asserted CRITERION 1 — that T-0035's recording change moved no verdict — by driving this
+# module's blackout helper with the old and the new impact and comparing the two answers.
+#
+# **T-0066 DELETED that helper.** Its window was SYMMETRIC, `abs(now - event) <= n`, against a
+# ratified window that is asymmetric and carries TWO numbers, so no value of `n` could make it
+# agree: 30 over-blocks before the event, 15 under-blocks after it. The defect was the SHAPE,
+# so rewriting it to match would have produced a THIRD statement of the news doctrine.
+#
+# The property those tests asserted was ABOUT that helper's verdict. With no helper there is
+# no verdict, so the property has nothing left to be about — it is MOOT, which is not the same
+# as unproven and not the same as abandoned. Nothing that decides today has lost an assertion:
+# GATE-015 is what reads impact on the order path, it treats UNKNOWN as blocking by declared
+# policy, and `test_t0047_news_classifier.py` covers that.
+#
+# **If a future change gives this module a decision path again, this property comes back with
+# it.** That is the reason this note is here rather than only in a commit message.
 
 
 def test_unknown_is_not_a_member_of_the_impact_map():
@@ -261,7 +224,7 @@ def test_stats_are_per_instance_so_one_service_cannot_inherit_another_s_count():
 def test_the_api_payload_says_unknown_and_carries_the_provider_s_own_string():
     """`GET /calendar/today` returns `e.to_dict()` verbatim, so this IS the API contract.
 
-    It is also the ONLY live reader of a parsed impact today: `is_in_blackout` has zero
+    It is also the ONLY live reader of a parsed impact today: the blackout helper had zero
     production callers. **If this dict kept saying `"low"`, the fix would have reached the
     rule and not the platform.**
     """

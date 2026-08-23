@@ -59,12 +59,21 @@ _IMPACT_MAP: dict[str, str] = {
 
 #: The third state. An impact we could not resolve is NOT "low" (T-0035, B126 1a).
 #:
-#: **THIS IS DELIBERATELY NON-BLOCKING.** `is_in_blackout` skips anything that is not
-#: "high", so an UNKNOWN event is treated exactly as a "low" one was — the recording
-#: changes and the decision does not. Whether an unclassifiable event should BLOCK is a
-#: safety-versus-availability trade on live trading; it is Malek's call, it needs the
-#: count `resolution_stats()` starts accruing here, and `B126` criterion 1b is explicit
-#: that the operational cost is unknowable without it.
+#: **THIS CONSTANT RECORDS; IT DOES NOT DECIDE — and after `T-0066` that is the whole of
+#: what can be said here.** This comment used to read *"deliberately non-blocking"* and
+#: justified it with this module's own blackout helper, which skipped anything that was not
+#: "high". **That helper is DELETED** (`T-0066`): its SYMMETRIC window contradicted the
+#: ratified asymmetric one, and no value of its window argument could reconcile a one-number
+#: test with a two-number rule. So there is no longer any code for which the old sentence is
+#: true — which is why it is replaced here rather than left standing.
+#:
+#: **What decides is `GATE-015`, and it BLOCKS on UNKNOWN** —
+#: `IMPACT_TREATED_AS_RED = ("RED_FOLDER", "UNKNOWN")`, reason token
+#: `UNKNOWN_IMPACT_BLOCKED_DECLARED_POLICY`. That is `T-0047`'s deliberate split: a
+#: known-but-out-of-scope event does not block, by Salim's ruling, while a CLASSIFIER MISS
+#: is an ENGINEERING default set to BLOCK. *The two fail in opposite directions and one
+#: state could not carry both.* Whether that default is right remains Malek's call, and it
+#: still needs the count `resolution_stats()` accrues here — `B126` criterion 1b.
 UNKNOWN_IMPACT = "unknown"
 
 #: Why an impact resolved the way it did. The three are NOT interchangeable:
@@ -169,11 +178,10 @@ class CalendarService:
 
         calendar_service.init(api_key=settings.finnhub_api_key, redis_client=redis)
         events = await calendar_service.get_today_events()
-        in_blackout, next_event = await calendar_service.is_in_blackout("EURUSD", 30)
 
     An event's `impact` is one of "high", "medium", "low" or `UNKNOWN_IMPACT`. **The
     fourth is not a severity — it is the absence of one**, and it is non-blocking by
-    construction; see `is_in_blackout` and `resolution_stats`.
+    construction; see `resolution_stats`.
     """
 
     def __init__(self) -> None:
@@ -253,97 +261,6 @@ class CalendarService:
         events = self._parse_events(raw)
         await self._set_cache(cache_key, [e.to_dict() for e in events], force=True)
         logger.info(f"Calendar refreshed: {len(events)} events for {today_str}")
-
-    async def is_in_blackout(
-        self,
-        pair: str,
-        blackout_minutes: int,
-    ) -> tuple[bool, datetime | None]:
-        """Check whether *pair* is in a news blackout window.
-
-        A blackout occurs when any HIGH-impact event for either currency in
-        *pair* is within *blackout_minutes* minutes in the past **or** future.
-
-        Args:
-            pair: Instrument symbol, e.g. ``"EURUSD"`` or ``"EUR/USD"``.
-            blackout_minutes: Number of minutes before/after event to block.
-
-        Returns:
-            ``(True, next_event_time)`` if in blackout, else ``(False, None)``.
-        """
-        currencies = _pair_to_currencies(pair)
-        if not currencies:
-            logger.warning(f"Could not parse currencies from pair '{pair}'")
-            return False, None
-
-        events = await self.get_today_events()
-        now = datetime.now(tz=timezone.utc)
-        window = timedelta(minutes=blackout_minutes)
-
-        for event in events:
-            # T-0035 CRITERION 1, AND IT IS THE LINE THAT MAKES THE CHANGE SAFE.
-            #
-            # `!= "high"` is UNCHANGED, so UNKNOWN_IMPACT skips here exactly as "low" did
-            # and this function's verdict is identical for every input, before and after.
-            # `test_t0035_impact_unknown.py` asserts that pairwise rather than describing
-            # it -- the assertion is what a later seat can re-run.
-            #
-            # STATED SO IT CANNOT EXPIRE QUIETLY: today NOTHING IN PRODUCTION CALLS THIS.
-            # `grep -rn is_in_blackout backend --include=*.py` returns this def, the class
-            # docstring above, and seven test lines. The control arm is `get_today_events`,
-            # which the same command finds at `api/routers/calendar.py:26`. So the live
-            # blast radius of the old fail-open was `GET /calendar/today` and the UI it
-            # feeds -- NOT the engine, whose `decision/engine.py` reads a `news_blackout`
-            # boolean that nothing writes (B125).
-            #
-            # T-0035 SAID "T-0036 IS WHAT MAKES THIS LINE MATTER". IT DID NOT, AND THE
-            # REASON IS WORTH MORE THAN THE PREDICTION WAS.
-            #
-            # T-0036 wired the news subsystem onto the order path and DELIBERATELY BYPASSED
-            # this function: `live/news_context.py` calls `get_today_events()` and then the
-            # RULE modules directly. Measured after that task landed, `is_in_blackout` still
-            # has ZERO production callers -- its only hits in `app/` are this def, the class
-            # docstring, and these comments.
-            #
-            # IT WAS BYPASSED BECAUSE IT IMPLEMENTS A DIFFERENT, PRE-CONTRACT DOCTRINE.
-            # Three measurable disagreements with the ratified rules:
-            #
-            #   window     here `abs(now - event) <= blackout_minutes`, SYMMETRIC
-            #              GATE-012 blocks [event-15, event); GATE-013 blocks [event,
-            #              first M15 close at or after event+30) -- ASYMMETRIC, and the
-            #              M15 term is a ratchet the symmetric form has no expression for
-            #   pre-window at the caller's `blackout_minutes` (30 in the docstring example)
-            #              versus the rule's declared 15
-            #   impact     `!= "high"` reads the NORMALISED value, so UNKNOWN_IMPACT never
-            #              blocks here. That is the fail-open T-0035 closed at the source,
-            #              still live INSIDE this function -- harmless only because nothing
-            #              calls it
-            #
-            # SO THIS IS A SECOND STATEMENT OF THE NEWS DOCTRINE THAT DISAGREES WITH THE
-            # RATIFIED ONE, in live code, now shadowed by a correct implementation. It is
-            # not dead-and-marked like `decision/engine.py`'s branch -- it reads as the
-            # platform's news gate, and a seat reaching for "the blackout function" gets the
-            # wrong doctrine with no warning. Recorded rather than deleted or rewritten:
-            # deleting live code is not this task's scope, and rewriting it to match the
-            # rules would create a THIRD implementation of them.
-            #
-            # `!= "high"` is therefore still UNCHANGED, and the identical-verdict assertion
-            # in `test_t0035_impact_unknown.py` still holds. Whether UNKNOWN should BLOCK
-            # anywhere is a live safety-versus-availability decision that needs the count
-            # `resolution_stats()` accrues, and it belongs to Malek.
-            if event.impact != "high":
-                continue
-            if event.currency not in currencies:
-                continue
-
-            event_time = event.time
-            if event_time.tzinfo is None:
-                event_time = event_time.replace(tzinfo=timezone.utc)
-
-            if abs(now - event_time) <= window:
-                return True, event_time
-
-        return False, None
 
     # ------------------------------------------------------------------
     # Private helpers

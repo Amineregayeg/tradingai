@@ -1,13 +1,16 @@
-"""Tests for the Finnhub calendar service — country mapping, parsing, blackout calc."""
+"""Tests for the Finnhub calendar service — country mapping and parsing.
+
+The blackout section was DELETED by `T-0066` along with the helper it exercised: its
+window was symmetric where the ratified one is asymmetric and carries two numbers, so no
+value of its argument could reconcile them and rewriting it would have made a third
+statement of the news doctrine. Nothing in production called it.
+"""
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-
-import pytest
+from datetime import timezone
 
 from app.services.calendar.finnhub import (
     CURRENCIES,
-    CalendarEvent,
     CalendarService,
     _COUNTRY_TO_CURRENCY,
     _pair_to_currencies,
@@ -139,82 +142,6 @@ def test_parse_time_invalid_returns_none():
     assert CalendarService._parse_time("") is None
 
 
-# ---------------------------------------------------------------------------
-# Blackout window
-# ---------------------------------------------------------------------------
-
-
-def _ev(currency, impact, dt):
-    return CalendarEvent(time=dt, event="X", currency=currency, impact=impact)
-
-
-@pytest.mark.asyncio
-async def test_blackout_true_when_high_event_imminent_for_quote_currency():
-    svc = CalendarService()
-    now = datetime.now(tz=timezone.utc)
-    svc.get_today_events = lambda: _async_return([_ev("USD", "high", now + timedelta(minutes=15))])
-    in_blackout, next_event = await svc.is_in_blackout("EUR/USD", blackout_minutes=30)
-    assert in_blackout is True
-    assert next_event is not None
-
-
-@pytest.mark.asyncio
-async def test_blackout_false_when_event_outside_window():
-    svc = CalendarService()
-    now = datetime.now(tz=timezone.utc)
-    svc.get_today_events = lambda: _async_return([_ev("USD", "high", now + timedelta(minutes=60))])
-    in_blackout, next_event = await svc.is_in_blackout("EUR/USD", blackout_minutes=30)
-    assert in_blackout is False
-    assert next_event is None
-
-
-@pytest.mark.asyncio
-async def test_blackout_false_for_low_impact_event():
-    svc = CalendarService()
-    now = datetime.now(tz=timezone.utc)
-    svc.get_today_events = lambda: _async_return([_ev("USD", "low", now + timedelta(minutes=5))])
-    in_blackout, _ = await svc.is_in_blackout("EUR/USD", blackout_minutes=30)
-    assert in_blackout is False
-
-
-@pytest.mark.asyncio
-async def test_blackout_false_for_unrelated_currency():
-    """USD/JPY high event must not blacken EUR/GBP."""
-    svc = CalendarService()
-    now = datetime.now(tz=timezone.utc)
-    svc.get_today_events = lambda: _async_return([_ev("USD", "high", now + timedelta(minutes=5))])
-    in_blackout, _ = await svc.is_in_blackout("EUR/GBP", blackout_minutes=30)
-    assert in_blackout is False
-
-
-@pytest.mark.asyncio
-async def test_blackout_true_for_base_currency_match():
-    """EUR high event blackens EUR/USD via the base side."""
-    svc = CalendarService()
-    now = datetime.now(tz=timezone.utc)
-    svc.get_today_events = lambda: _async_return([_ev("EUR", "high", now + timedelta(minutes=5))])
-    in_blackout, _ = await svc.is_in_blackout("EUR/USD", blackout_minutes=30)
-    assert in_blackout is True
-
-
-@pytest.mark.asyncio
-async def test_blackout_true_for_past_event_within_window():
-    """Window is past **or** future — high event 10 min ago still blacks out."""
-    svc = CalendarService()
-    now = datetime.now(tz=timezone.utc)
-    svc.get_today_events = lambda: _async_return([_ev("USD", "high", now - timedelta(minutes=10))])
-    in_blackout, _ = await svc.is_in_blackout("EUR/USD", blackout_minutes=30)
-    assert in_blackout is True
-
-
-@pytest.mark.asyncio
-async def test_blackout_false_for_unparseable_pair():
-    svc = CalendarService()
-    svc.get_today_events = lambda: _async_return([])
-    in_blackout, next_event = await svc.is_in_blackout("XYZ", blackout_minutes=30)
-    assert in_blackout is False
-    assert next_event is None
-
 
 # ---------------------------------------------------------------------------
 # Currencies whitelist sanity
@@ -224,12 +151,3 @@ async def test_blackout_false_for_unparseable_pair():
 def test_supported_currencies_cover_majors():
     for c in ["USD", "EUR", "GBP", "JPY", "AUD", "NZD", "CAD", "CHF"]:
         assert c in CURRENCIES
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-async def _async_return(value):
-    return value
