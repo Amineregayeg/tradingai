@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-23 (B227 — T-0057's `SUM(lot_size) < sized_units` remainder test is a FLOAT EQUALITY across three independent rounding steps: the partial lot at 8 dp, the runner's remainder at 10 dp, and both written to the DB at 6 dp against a separately-rounded `sized_units`. Measured over 200,000 simulated two-tranche positions at the ratified 0.70: 12.92% of SETTLED trades report SUM < sized, i.e. read as still blocked, and 13.01% the other way. It was not caught because the live corpus contains exactly ONE completed two-tranche trade and its arithmetic lands exact by luck — B213's shape, a rule validated on the only row that could test it. The exact answer already exists: `remaining = round(pos.units - closed, 10)` is computed by the broker and emitted as `remaining_units` on every settle, and dies in a log line (B218). Persisted, the test is `remaining_units > 0` on the latest lot — one table, one field, no tolerance. An epsilon would have to exceed 1e-6 and could then not see a genuine smaller remainder, which is B93's tuned threshold.)
+Last updated: 2026-08-23 (B230 — ws.py:38's endpoint docstring advertises `?token=`, which `_ws_authorized` does not implement: measured, `?token=<valid>` gets HTTP 403 while the same token in the Authorization HEADER connects. The helper's own docstring says the opposite intent in the same file. B184's two-statements-one-fact on the AUTH surface, where the failure is a bare 403 that cannot distinguish wrong token, expired token, not permitted, and this parameter was never read. The code is right and the documentation is wrong. Also B229: a merely STOPPED engine turns `ok` false (:1125 sets 'idle', :737 counts anything != 'healthy' as a problem) while :979 says idle counts 'never as a problem' — and stopping the engine is B198 option 1. And B228, now verified further: the frontend subscribes to ('positions','removed') and NOTHING in the backend ever emits it, while stop() cancels the loop before closing so no update frame is sent either — there is NO path by which the positions panel ever clears.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -13768,6 +13768,115 @@ the rate.
 completed two-tranche case remains **one**: the population is 12.9% wrong and the one observation
 is right, which is why 0-of-5 must not be read as health.
 
+### B229. A merely STOPPED engine turns the production `ok` flag false, and the module says it does not
+**Found in:** 2026-08-23, T-0057's review (Review)
+**What it is:** `order_path_health`'s docstring, `data_health.py:978-979`:
+
+> *"An engine that is not running at all is `B178`'s signal and reports here as `idle` with
+> `watching: False` — **never as a problem**, and never as healthy either."*
+
+`data_health`'s aggregator, unchanged by that task:
+
+```
+problems = [name for name, c in components.items() if c.get("status") != "healthy"]
+ok       = not problems
+```
+
+**`idle` is not `healthy`.** So the component lands in `problems` and `ok` goes `False` whenever the
+engine is merely stopped. The docstring states a property the aggregator contradicts, and it is the
+property `T-0057`'s `ARM 5` separability rests on.
+
+**Why it bites now rather than in principle.** `main.py:229-232` makes idle-after-restart the
+DESIGNED state — *"the engine comes back idle and the run stays ended until someone presses Start"* —
+and **stopping the engine is `B198` option 1**, which Malek is choosing among. If he takes it, the
+dashboard stays red for a different reason than the one he was told about, readable only by opening
+the component rather than the flag he was pointed at.
+
+**This is the first component with a NORMAL non-healthy state.** The other four report `healthy` or
+`unavailable`; nothing before `T-0057` could be legitimately `idle`. So the aggregate consequence is
+new even though the aggregator is not, and it arrived attached to a change whose production-visible
+effect was carefully stated — the STATED effect being the withdrawn case, not this one.
+
+**The labels are right; the CONSEQUENCE is what collapses.** A reader who opens the component can
+tell `idle` from `withdrawn` at a glance — that separation works and is mutation-tested. Both render
+as one `false` at the aggregate, so a consumer reading only `ok` cannot tell *"the engine is
+stopped"* from *"the order path is withdrawn"*. **Publish-the-denominator on the fifth surface: the
+answer is emitted without the count that says what it means.**
+
+**Fix, and the choice is a product decision rather than a code one:** exclude `idle` from `problems`;
+or report `healthy` with `watching: False` carrying the fact; or leave the behaviour and correct the
+docstring. Only the third is free, and only the first two make the flag mean what Malek was told it
+would mean.
+
+**Not fixed here — T-0057 is monitoring-only and this is dashboard behaviour.**
+Related: **B199**, **B178**, **B215**, **B226**.
+
+### B228. The dashboard ignores empty position lists BY DESIGN, so a real close-to-flat never clears the panel
+**Found in:** 2026-08-23, checking whether `B215` reaches the UI (Review) — **bid 20:49, written late; it
+was reported in a message first and that is the failure `record-deferred-problems` names**
+**What it is:** `frontend/src/services/ws.ts:223-230`:
+
+```
+// Position updates (full list). Only overwrite when the broker sends a non-empty
+// list — empty lists from a freshly-reconnected broker would stomp the dashboard
+// fallback of "show open trades as positions".
+service.on('positions', 'update', (data) => {
+  if (Array.isArray(data?.positions) && data.positions.length > 0) {
+    usePositionsStore.getState().setPositions(data.positions)
+  }
+})
+```
+
+**Someone already hit `B215`'s `[]` and worked around it downstream.** The comment is explicit and the
+reasoning is sound as far as it goes: a reconnecting broker that briefly reports nothing should not
+blank the panel.
+
+**The consequence is that a GENUINE transition to flat never clears it.** `setPositions` is only ever
+called with a non-empty list, so once the panel shows two positions it shows them until the next
+non-empty push. Close both and the dashboard keeps rendering them — stale, indefinitely, with no
+indication the data is old. `'positions','removed'` exists and removes by id, so a clean per-position
+close does clear; a bulk `update` to zero does not. **`POST /engine/stop` settles everything and then
+pushes — which is exactly the path `B198` option 1 takes.**
+
+**It is the same defect one layer further out.** The UI cannot tell *"there are no positions"* from
+*"the broker sent nothing"*, so it resolved the ambiguity by permanently choosing one branch — and it
+chose the branch that keeps asserting the stale answer. **Absence and zero rendering alike, on the
+surface a human actually looks at.** Fifth instance: `B199` the health surface, `B215` the positions
+endpoint, `B226` the learning surface, `B229` the aggregate `ok` flag, this one the panel.
+
+**And it is the sharpest of the five, because the collapse here is DELIBERATE and COMMENTED.** The
+other four are omissions. This one is a considered decision taken with the ambiguity in view, and it
+still went the wrong way — which is what makes *"publish the denominator"* worth a rule rather than a
+habit: the fix is not "handle the empty case", it is to send whether the list is AUTHORITATIVE
+alongside the list, so the client never has to guess which kind of empty it is holding.
+
+**Fix:** carry a flag on the push — `{"positions": [...], "authoritative": true}` — set false only on
+the reconnect path the comment describes. Then the client clears on an authoritative empty and
+ignores a non-authoritative one, and neither case is inferred.
+
+**Not fixed here — frontend, and outside every open task.** Related: **B215**, **B199**, **B226**, **B229**.
+
+**MANAGER VERIFICATION — AND THERE IS NO PATH BY WHICH THE PANEL EVER CLEARS.** The guard at
+`ws.ts:223-230` is confirmed verbatim, comment included. But the entry's *"a clean per-position
+close does clear"* is too generous, and two further facts close the gap:
+
+```
+frontend  ws.ts:238   subscribes to ('positions','removed')
+backend   grep across app/ for a positions "removed" broadcast   ->  NOTHING EMITS IT
+```
+
+**The per-id clearing path is a handler for an event the backend never sends.** So the only
+mechanism that could clear a single position does not exist.
+
+And on the `POST /engine/stop` path specifically — `B198` option 1 — `stop()` **cancels the loop
+task first** (`:1373-1379`) and closes positions afterwards (`:1383`). `_push_state` is called from
+the loop body at `:1513`, which is no longer running, so **no `update` frame is emitted at all.**
+The empty-list guard never even gets the chance to reject one.
+
+Net: after stopping the engine the panel keeps rendering both positions until a page reload or a
+new run pushes a non-empty list. Not *"a bulk update to zero does not clear"* — **nothing clears
+it.**
+
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
 **What it is:** `TELEMETRY_SCHEMA.json` hard-pins `engine.rule_registry_version` with
@@ -14215,4 +14324,46 @@ as an absolute: **28 sized rows across 13 runs DID carry targets**, all of them 
 cutover. The narrowed claim is *by construction since `T-0050`*, and the narrowing matters
 because it is what makes the before/after measurable at all. Related: **B223**, **B216**,
 **B199**, **B10**, `T-0050`, `EXIT-003`.
+
+### B230. The WebSocket endpoint's docstring advertises an auth method the code does not implement, and it costs a reader one rejected handshake to find out
+**Found in:** 2026-08-23, capturing the live position remainders for `B218` — the first connection
+attempt was refused
+**What it is:** `ws.py:38`, the endpoint's own docstring, says:
+
+> *"Requires the bearer token (``?token=…``) — it streams live positions, alerts and kill-switch
+> events, so it must not be open."*
+
+`_ws_authorized` (`ws.py:15-34`) implements **neither half of that sentence**. It accepts a
+single-use `?ticket=` minted by `POST /api/auth/ws-ticket`, or a bearer token in the
+**`Authorization` HEADER**. `?token=` appears nowhere in the function, and the helper's *own*
+docstring states the opposite intent — *"WITHOUT putting the master token in the URL … never the
+URL"*. **The two docstrings in the same file contradict each other, and the endpoint's is the one
+a caller reads first.**
+
+**Measured, not argued:**
+
+```
+ws://localhost:8000/ws?token=<valid API_AUTH_TOKEN>     -> HTTP 403, connection refused
+ws://localhost:8000/ws  + Authorization: Bearer <same>  -> CONNECTED, frames flowing
+```
+
+**Why it is an entry and not a note.** This is `B184`'s shape — two statements of one fact, only
+one of them true — on the **auth surface**, where the failure mode is a bare `403` with nothing
+saying *the documented method was never implemented*. A caller cannot distinguish "my token is
+wrong", "my token expired", "I am not permitted" and "this parameter has never been read" — four
+causes, one rendering, which is this register's recurring shape and the reason the
+**publish-the-denominator** rule exists.
+
+**And it is the cheapest possible demonstration of the cost.** It cost a working seat exactly one
+attempt today, on a task whose entire purpose was to capture two values before a restart destroyed
+them. The values survived; the delay was avoidable. A reader with less time, or one who concluded
+from the `403` that the WebSocket was simply closed to them, would have stopped there — and the
+only route to those two remainders would have appeared shut.
+
+**Not fixed here.** The fix is to correct the endpoint docstring to describe `?ticket=` and the
+bearer header, **not** to implement `?token=`: putting the master token in the URL is precisely
+what the helper's docstring refuses, and it is refused for a good reason — URLs are logged,
+proxied and kept in history. **The code is right and the documentation is wrong**, which is the
+direction that makes this cheap to fix and easy to leave. Related: **B184**, **B215**, **B199**,
+`GATE-011`.
 
