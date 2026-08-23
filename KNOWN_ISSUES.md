@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-23 (B226 — the EXIT cutover silently ZEROED the feedback loop's gap measurement. gap_r is called the feedback loop's core input at crypto_loop.py:1065; it needs expected_r, which :514 computes only when signal_tp is not None; EXIT-001's runner carries no target by contract. Measured across the corpus: PRE-cutover 28 sized rows with 28 signal_tp, 28 expected_r and 23 gap_r; POST-cutover 5 sized rows with 0, 0 and 0. Not degraded — ZEROED, on the day T-0050 made EXIT-001 decide the live exit, and nothing said so because feedback.py filters `is not None` so an EMPTY evidence base and a healthy one take the same path and produce the same shape of answer. A consequence of a ratified decision, not a defect in it: the cost was never stated. It also bounds B223's remedy — fixing realized_r's truncation alone leaves gap_r NULL forever. Also B225: Trade.broker_id is the literal 'paper' on all 274 rows, so the reconciler's {broker_id: Trade} map collapses to one key while ev['position_id'] sits unused in the same dict.)
+Last updated: 2026-08-23 (B227 — T-0057's `SUM(lot_size) < sized_units` remainder test is a FLOAT EQUALITY across three independent rounding steps: the partial lot at 8 dp, the runner's remainder at 10 dp, and both written to the DB at 6 dp against a separately-rounded `sized_units`. Measured over 200,000 simulated two-tranche positions at the ratified 0.70: 12.92% of SETTLED trades report SUM < sized, i.e. read as still blocked, and 13.01% the other way. It was not caught because the live corpus contains exactly ONE completed two-tranche trade and its arithmetic lands exact by luck — B213's shape, a rule validated on the only row that could test it. The exact answer already exists: `remaining = round(pos.units - closed, 10)` is computed by the broker and emitted as `remaining_units` on every settle, and dies in a log line (B218). Persisted, the test is `remaining_units > 0` on the latest lot — one table, one field, no tolerance. An epsilon would have to exceed 1e-6 and could then not see a genuine smaller remainder, which is B93's tuned threshold.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -13679,6 +13679,77 @@ apparent result of a fix.
 
 **Fix:** write `ev["position_id"]` into `broker_id`. One line, no migration, and it is what the
 column already means. **Not fixed here.** Related: **B224**, **B223**, **B215**.
+
+### B227. `SUM(lot_size) < sized_units` is a float equality across three rounding steps — 12.92% of SETTLED trades read as still open
+**Found in:** 2026-08-23, baselining `B218` under T-0060 (Review) — measured, not reasoned
+**What it is:** `T-0057`'s remainder discriminator, and `T-0063`'s proposed completeness test, both
+ask whether the lots closed against an entry add up to what was sized. That comparison crosses two
+tables and **three independent rounding steps**:
+
+```
+crypto_loop.py:917    lot       = round(units * plan["fraction"], 8)     the partial lot,    8 dp
+paper.py:125          remaining = round(pos.units - closed, 10)          the runner's lot,  10 dp
+crypto_loop.py:1120   lot_size  = round(float(ev["units"]), 6)           written to trades,  6 dp
+crypto_loop.py:528    sized_units = round(float(sized_units), 6)         written to decisions, 6 dp
+```
+
+The two lots sum to the original **exactly at 10 dp**. Each is then rounded independently to 6 dp on
+write, and `sized_units` is rounded separately. **The three roundings do not commute.** Over 200,000
+simulated two-tranche positions at the ratified 0.70 fraction, `units` uniform on `[0.01, 40]`:
+
+```
+SUM(lot_size) <  sized_units   25,833   12.92%   <- a SETTLED trade reads as REMAINDER OUTSTANDING
+SUM(lot_size) >  sized_units   26,023   13.01%   <- harmless for a `<` test
+exact                         148,144   74.07%
+```
+
+**So roughly one settled two-tranche trade in eight is a false positive**, and it is a false positive
+in the direction that says *the symbol is still blocked* — the exact condition `T-0057` exists to
+detect. `T-0063`'s completeness test inherits it in the opposite direction: a trade that IS finished
+would never resolve.
+
+**WHY IT WAS NOT CAUGHT, and it is `B213` again.** The live corpus
+(`agents/tasks/T-0057/_runs/arm1_remainder.txt`) holds 33 sized entries. 26 show `closed == sized` —
+but 25 of those are WHOLE closes, a single lot, exact by construction with no compounding. **Exactly
+ONE completed two-tranche trade exists in the entire corpus — ETH/USD 2026-08-19 13:17:01 — and its
+arithmetic happens to land exact** (`2.298500 + 0.985072 = 3.283572`). The discriminator was
+validated against the only row that could have tested it, and that row passed by luck.
+
+**Fix, and it is the argument that makes `B218` load-bearing rather than convenient.** The broker
+already computes the exact answer — `remaining = round(pos.units - closed, 10)` — and emits it as
+`remaining_units` on every settle, and it dies in a log line (`B218`). **Persisted on the trade row,
+the test becomes `remaining_units > 0` on the latest lot: one table, one field, no arithmetic, no
+tolerance, exact by construction.** Every reconstruction from `SUM` is a comparison of two numbers
+that were rounded apart on purpose.
+
+**Do not repair this with an epsilon.** A tolerance would have to exceed 1e-6 and would then be
+unable to see a genuine remainder smaller than that — and choosing its size is the tuned-threshold
+defect (`B93`). The value that needs no tolerance already exists and is being discarded.
+
+**Not fixed here. `T-0057` is landing with this predicate now.**
+Related: **B218**, **B213**, **B216**, **B224**.
+
+**MANAGER VERIFICATION, and it reconciles two different numbers rather than picking one.** All
+four rounding sites confirmed independently, plus a fifth Review did not list:
+`execution/service.py:170` — `res["sized_units"] = round(units, 8)` — so the order carries an
+**8dp** value while `decision_records` stores a **separately rounded 6dp** copy.
+
+Simulating the true chain, the rate depends on a detail neither seat can observe:
+
+```
+underlying position units 6dp-clean    FALSE "remainder"  12.99%    exact 74.04%
+underlying position units true 8dp     FALSE "remainder"  21.12%    exact 57.77%
+```
+
+Review's 12.92% is exactly the 6dp-clean case; the 8dp case is twice as bad. **Which one applies
+cannot be determined from stored data, because the 8dp value the position actually holds is never
+persisted — we store `round(…, 6)`.** *The inability to measure the defect is the same defect:*
+the number that would settle it is computed and discarded, which is **B218**.
+
+**All five real `sized_units` round-trip exactly (0 of 5 false positives), and that is NOT
+reassurance.** `n` for the completed two-tranche case is **one**, and at a 74% exact rate a single
+exact observation is unremarkable. Reporting it as evidence of health would be `B213`'s error a
+second time in the same entry.
 
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
