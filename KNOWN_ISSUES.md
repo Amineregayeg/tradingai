@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-23 (B220 — an entry with NO trade rows is indistinguishable from one whose whole position is still outstanding, so `SUM(closed) < sized_units` cannot tell "never traded" from "open, nothing closed yet" from "partial remainder riding". It killed the manager's second and third statements of T-0057's predicate: unscoped it is TRUE on 7 of 33 entries and permanently TRUE for both symbols; run-scoped it still fires on a freshly opened position. The load-bearing term is `0 < SUM(closed) < sized_units` — a remainder EXISTS only if something was closed — which gives exactly 2 positives across the full corpus with no scope term, both at ratio 0.70 to six places. Also B218: `remaining_units` is computed on every settle expressly so a partial cannot look whole, and its only consumer is a log string at crypto_loop.py:934 — the third instance today of a value computed deliberately and discarded before it persists (B177, B199, B218). B219: five decision records carry sized_units with no trade row within ten minutes and nothing reconciles them.)
+Last updated: 2026-08-23 (B221 — the kill switch closes NOTHING and reports SUCCESS. `register_adapter` is called exactly ONCE in the tree (main.py:236) and binds the PaperBroker built at crypto_loop.py:110; every `POST /engine/start` runs `_reset_broker_state`, which REBINDS `self.paper` to a NEW object (:704 SimPropFirmBroker under PROP_FIRM_SIM, :707 PaperBroker) and never re-registers. So `broker_manager._adapters` holds an ORPHAN — stale AND, in this deployment's mode, a different CLASS. `close_all_positions` iterates it, gets [], and the caller records 0 closed / 0 FAILED. Arming still halts new entries (`_entry_block_reason` reads `kill_switch.is_armed` directly), so the switch HALTS but does not FLATTEN — two promises, and the one that fails is the one you reach for when a position IS the problem. Same orphan blinds GET /api/positions (B215) and DELETE /positions/{id}. `POST /engine/stop` is UNAFFECTED: it calls `self.paper.close_all_positions()` on the live object, which is why the 2026-08-19 18:50:11 runner close actually happened. Also B222: the `candles` corpus is stale 5-20 days, nothing monitors it, and T-0049's planned re-run of the 529 setups would silently cover a window ending 14 days before the live run began.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -13491,6 +13491,51 @@ them, which is a migration and belongs to whoever owns that schema. Recorded so 
 understood as load-bearing rather than incidental. Related: **B216**, **B199**, **B161**.
 
 
+### B221. The kill switch closes nothing and reports success, because it holds the pre-reset broker
+**Found in:** 2026-08-23, diagnosing `B215` under T-0058 (Review)
+**What it is:** `kill_switch.trigger()` flattens by calling `broker_manager.close_all_positions()`
+(`kill_switch.py:66`), which iterates `self._adapters` (`manager.py:569`). That dict holds the
+`PaperBroker` registered once at boot — `main.py:236`, the ONLY caller of `register_adapter` in the
+tree. `POST /engine/start` calls `reset_run` (`crypto_loop.py:1324`), which calls
+`_reset_broker_state`, which **rebinds `self.paper` to a new instance** (`crypto_loop.py:707`, or
+`:703` in sim mode) and does not re-register. From that moment the manager holds an orphan with an
+empty `_positions`.
+
+So `close_all_positions()` returns `[]`, and the caller counts:
+
+```
+positions_closed = sum(1 for r in close_results if r.get("status") not in ("error","failed"))
+positions_failed = sum(1 for r in close_results if r.get("status") in ("error","failed"))
+[]  ->  0 closed, 0 FAILED
+```
+
+**Zero failures.** The operator sees a clean trigger, the audit entry records a clean trigger, and
+every real position stays open. There is no path by which this surfaces as an error — the orphan
+does not throw, it is simply empty, and empty is what success looks like here.
+
+**Half the switch still works, and the halves must not be conflated.** Arming DOES stop new entries:
+`_entry_block_reason` reads `kill_switch.is_armed` directly and never touches `broker_manager`. So
+the switch **halts** the engine and fails to **flatten** it. Those are two promises and only one is
+kept; the one that fails is the one you reach for when a position is the problem.
+
+**This is `B215`'s mechanism reaching a safety control.** `B215` reported the visible symptom —
+`GET /api/positions` returns `[]` while `engine/status` says `open_positions: 2`. The same orphan
+serves the aggregate view, the close-routing (`DELETE /positions/{id}` resolves through
+`get_all_positions`), and the kill switch. `register_adapter`'s own docstring names all three as the
+reason it exists: *"so the aggregate position view, the close-routing, and the kill switch all see
+the simulation broker without constructing a second instance."* **The rebind constructs a second
+instance.**
+
+**NOT A REPORT OF A PAST FAILURE.** This says what the switch WOULD do. Whether it has ever been
+triggered against this deployment is not established here and I have no credentials to check.
+
+**Fix:** re-register at the end of `_reset_broker_state` — `register_adapter` is documented
+idempotent (`manager.py:614`). One line at the site that creates the divergence. The durable shape is
+to register an accessor rather than the object, so a stale reference cannot be held at all.
+
+**Not fixed here — this is a diagnosis task and Malek is mid-decision on `B198`.**
+Related: **B215**, **B199**, **B178**.
+
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
 **What it is:** `TELEMETRY_SCHEMA.json` hard-pins `engine.rule_registry_version` with
@@ -13833,3 +13878,55 @@ can mount it into a container running as root. This is inherent to Docker group
 membership, not a misconfiguration.
 **Why it matters:** it makes task I9 (root access) much less urgent, but that
 login should be protected as if it were root — because it is.
+### B222. The `candles` corpus is stale by 5 to 20 days, nothing watches it, and the one planned task that re-runs it would silently measure a window ending before the live run began
+**Found in:** 2026-08-23, while computing the runners' distance to their stops for Malek's `B198` decision
+**What it is:** every pair/timeframe in `candles` stopped days-to-weeks ago. Measured at
+`now() = 2026-08-23 20:12:26 UTC`:
+
+```
+pair       tf     rows   newest                days stale
+BTC/USD    15m    1009   2026-08-05 19:00:00        18.05
+BTC/USD    1H     1324   2026-08-18 21:00:00         4.97
+BTC/USD    1m     1009   2026-08-05 19:17:00        18.04
+BTC/USD    4H      738   2026-08-05 12:00:00        18.34
+BTC/USD    5m     1009   2026-08-05 19:10:00        18.04
+BTC/USD    D       546   2026-08-07 00:00:00        16.84
+ETH/USD    1H     1079   2026-08-08 16:00:00        15.18
+ETH/USD    1m     1009   2026-08-05 19:17:00        18.04
+ETH/USD    D       546   2026-08-07 00:00:00        16.84
+SOL/USD    D       543   2026-08-04 00:00:00        19.84
+```
+
+The repeated `1009` and `546`/`543` are the shape of a **bounded backfill**, not of a feed that
+stopped: several independent series landing on the same count is a fetch cap, not a coincidence.
+
+**THE LIVE PATH IS NOT AFFECTED, and this was checked before the entry was written rather than
+assumed.** `crypto_loop._fetch_bars` pulls from the configured price source (binance/cft) and
+`_mark` reads an in-memory `_marks` dict — neither touches this table. `strategy_step.py:26`
+does import from `ict/detector.py`, which is where the only `select(CandleModel)` lives, but the
+live call sites at `:95-97` pass a normalised DataFrame (`_compute_swing(ndf,…)`,
+`detect_fvg(ndf)`, `detect_bos_choch(ndf, swing)`) and never reach the query. That query sits in
+`on_candle_close_callback` (`:706`), registered at `:74` through `candle_pipeline` — a different
+path. **So no live trading decision reads a stale bar.**
+
+**What it does hit is the REPLAY corpus, and one planned task specifically.** `T-0049`'s
+deliverable is *"re-run the 529 setups and diff the selected-rung distribution: rung 3 should
+stop being the de-facto default."* If that re-run sources from `candles`, its window ends
+**2026-08-05** on the 5m series — **fourteen days before the live run started on 2026-08-19**.
+The re-run would complete, produce a distribution, and report a diff, having silently excluded
+every bar the engine has actually traded. That is `B151`/`B213`'s shape once more: **the
+measurement validates the SYSTEM over a window nobody chose, rather than the CHANGE.**
+
+**And nothing says so.** `data_health()` carries four components — `dominance_collector`,
+`backups`, `shadow`, `correlate_panels` — and **none reads `candles`**. `grep candles` over
+`app/services/monitoring/` returns nothing. So the corpus can rot for a month and every health
+surface stays green, which is `B199`'s pattern on a different artefact: the monitored set was
+chosen before this artefact mattered and was never revisited.
+
+**Not fixed here.** Two separable questions and they must not be merged: (1) whether `candles`
+is *supposed* to be live-fed or is a deliberate backtest fixture — if it is a fixture, the
+defect is that nothing LABELS it so and `T-0049` would trust it; (2) whether a freshness check
+belongs in `data_health`. Answering (2) before (1) would install a monitor on an artefact whose
+intended contract is unknown, and a component that alarms on a fixture behaving exactly as
+designed gets muted, which is worse than absent. Related: **B199**, **B213**, **B151**, `T-0049`.
+
