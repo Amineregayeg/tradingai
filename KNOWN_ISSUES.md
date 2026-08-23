@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-23 (B224 — `trades` is a CLOSED-LOT ledger: `_persist_live_close` (crypto_loop.py:1102) is the only live Trade insert, fires from the settle hook and hard-codes status=CLOSED, and there is NO position model in app/models/ — open positions live only in PaperBroker._positions, a dict in the process. So a run that ends without a clean stop loses its open positions entirely, and main.py:229-232 names container restart as expected. Only POST /engine/stop records everything, because stop() closes first — the same asymmetry as B221, from a third side. It CORRECTS B219, which is amended in place. Also B223, and it is the one that biases a measurement: the EXIT-001 70% partial pops `_open_decision[pair]` at :1045 and writes realized_r/outcome from the TRANCHE, so the 30% runner later finds dec_id None and returns. CONFIRMED EMPIRICALLY — ETH 2026-08-19 13:17:01 records realized_r 1.5276 against tranche pnl +76.38 while the runner added +152.30 for a true +228.68, roughly 3x the recorded figure; both losers record realized_r exactly -1.0000, complete. Under EXIT-001 the partial fires ONLY on a winner, so LOSSES ARE RECORDED IN FULL AND WINS ARE TRUNCATED, and :1065 calls gap_r the feedback loop's core input. Separately, expected_r is NULL on all five rows of this run, so gap_r is NULL throughout and the feedback loop has no gap data at all.)
+Last updated: 2026-08-23 (B226 — the EXIT cutover silently ZEROED the feedback loop's gap measurement. gap_r is called the feedback loop's core input at crypto_loop.py:1065; it needs expected_r, which :514 computes only when signal_tp is not None; EXIT-001's runner carries no target by contract. Measured across the corpus: PRE-cutover 28 sized rows with 28 signal_tp, 28 expected_r and 23 gap_r; POST-cutover 5 sized rows with 0, 0 and 0. Not degraded — ZEROED, on the day T-0050 made EXIT-001 decide the live exit, and nothing said so because feedback.py filters `is not None` so an EMPTY evidence base and a healthy one take the same path and produce the same shape of answer. A consequence of a ratified decision, not a defect in it: the cost was never stated. It also bounds B223's remedy — fixing realized_r's truncation alone leaves gap_r NULL forever. Also B225: Trade.broker_id is the literal 'paper' on all 274 rows, so the reconciler's {broker_id: Trade} map collapses to one key while ev['position_id'] sits unused in the same dict.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -13637,6 +13637,49 @@ required to name four of the five states.
 
 **Not fixed here.** Related: **B219**, **B220**, **B223**, **B177**.
 
+### B225. `Trade.broker_id` is the literal `"paper"`, so the reconciler's id map collapses to one key
+**Found in:** 2026-08-23, scoping the `B223` fix under T-0063 (Review)
+**What it is:** `crypto_loop.py:1116` writes `broker_id="paper"` on every live trade row. The settle
+event in the same dict carries `ev["position_id"]` (`paper.py:136`), a unique
+`paper-<10 hex>` per position, and it is discarded.
+
+**`broker_id` is not a free-text field — the reconciler defines its meaning:**
+
+```
+reconciler.py:75   db_by_broker_id: dict[str, Trade] = {t.broker_id: t for t in open_db_trades}
+reconciler.py:81   if pos.id not in db_by_broker_id and pos.pair not in {...}
+```
+
+It is keyed against `pos.id`, the broker's own position id. **Writing a constant there makes the
+dict a single entry no matter how many trades exist.**
+
+**And it is the missing key everything else has been working around.** There is no
+`decision_record_id` on `trades` and no `trade_id` on `decision_records` (`B224`), so every offline
+join has had to use `entry_time BETWEEN created_at ± 1 second`. `position_id` is a real key, it is
+already in the event, the column already exists, and its intended semantics are exactly this. **No
+migration.** Both tranches of one position share it, which is precisely what `B223`'s fix needs in
+order to accumulate durably instead of in memory.
+
+**THIS IS THE RECONCILER'S THIRD INDEPENDENT BLINDNESS, and the sequencing matters.** Each of these
+alone is sufficient:
+
+```
+1  it is never reached for paper — brokers.py:110/:190 look up by connection UUID and the
+   paper adapter is registered under the literal key "paper" with no broker_connections row
+2  broker_id is a constant, so db_by_broker_id collapses                        (this entry)
+3  no paper trade row is EVER status=OPEN — _persist_live_close hard-codes CLOSED (B224),
+   and reconciler.py:69 filters Trade.status == TradeStatus.OPEN, so the query returns []
+```
+
+**Fixing only 1 would make the reconciler actively wrong rather than merely silent.** With `[]` open
+trades and an empty id map, `:81`'s condition is true for every live position, so it would log
+**every** paper position as *"Live position not tracked in DB — opened outside app"*. A silent
+check becoming a false alarm on every row is worse than the silence, and it would arrive as the
+apparent result of a fix.
+
+**Fix:** write `ev["position_id"]` into `broker_id`. One line, no migration, and it is what the
+column already means. **Not fixed here.** Related: **B224**, **B223**, **B215**.
+
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
 **What it is:** `TELEMETRY_SCHEMA.json` hard-pins `engine.rule_registry_version` with
@@ -14030,4 +14073,58 @@ defect is that nothing LABELS it so and `T-0049` would trust it; (2) whether a f
 belongs in `data_health`. Answering (2) before (1) would install a monitor on an artefact whose
 intended contract is unknown, and a component that alarms on a fixture behaving exactly as
 designed gets muted, which is worse than absent. Related: **B199**, **B213**, **B151**, `T-0049`.
+
+### B226. The EXIT cutover silently ZEROED the feedback loop's gap measurement — it went from 23 of 28 to 0 of 5, and nothing said so
+**Found in:** 2026-08-23, running three queries Review named in `T-0063`'s baseline — one of which
+Review flagged as able to falsify its own claim, and it did
+**What it is:** `gap_r` is called *"the feedback loop's core input"* at `crypto_loop.py:1065`. It
+requires `expected_r`, and `expected_r` is computed at `:514`:
+
+```python
+expected_r = abs(tp - basis) / abs(basis - sl) if (tp is not None and basis != sl) else None
+```
+
+`EXIT-001`'s runner **carries no target by contract** — `FINAL_TARGET` is unreachable on the live
+path and `EXIT-003` is OPEN — so `signal_tp` is `None` on every entry the current engine places,
+`expected_r` is `None`, and `gap_r` is `None`. **The loop cannot learn.**
+
+**IT USED TO. Measured across the whole corpus, split at the cutover:**
+
+```
+era                       sized rows   signal_tp   expected_r   gap_r
+PRE-cutover  (< 08-19)         28          28          28         23
+POST-cutover (>= 08-19)         5           0           0          0
+```
+
+**23 real gap measurements before, zero after.** Not degraded — **zeroed**, on the day `T-0050`
+made `EXIT-001` decide the live exit. The last target-bearing entry is in run `b2c4bab3` at
+`2026-08-14 15:50:25`; runs `be4ceda2` and `a32c3b98` carry none.
+
+**Why nobody saw it.** Nothing asserts that `gap_r` is being produced. `feedback.py:282-284` is
+`if realized_r is None: continue` and the means at `:438`/`:456-465` filter `is not None` — so a
+corpus with **zero** usable rows and a corpus with **many** take the same code path and produce
+the same shape of answer. **An empty evidence base and a healthy one are indistinguishable
+downstream**, which is `B199`'s pattern on the learning surface rather than the monitoring one,
+and `B10`'s "nothing found vs never checked" one layer up.
+
+**This is a CONSEQUENCE of a ratified decision, not a defect in it.** `EXIT-001`'s passive runner
+is correct and must not be changed here; `paper._settle` leaves `sl`/`tp` alone precisely because
+inventing `EXIT-003`'s behaviour is forbidden. **The defect is that the cost was never stated.**
+`T-0050` traded the feedback loop's gap measurement for a doctrinally faithful exit, and that
+trade appears in no plan, no commit body and no register entry until this one.
+
+**It also bounds `B223`'s remedy, which is how it was found.** Fixing `realized_r`'s truncation
+alone leaves `gap_r` `None` forever: the loop would hold a *correct* number it still cannot
+compare to anything. And the honest `expected_r` here is **partly undefined by doctrine** — the
+70% leg has one (`PARTIAL_AT_R` = 2.0R, ratified) and the 30% runner has none while `EXIT-003`
+stays OPEN. **A single scalar `expected_r` for this plan would be inventing the number the
+registry leaves open.** Record the plan (`0.70 @ 2.0R` + `0.30 @ UNDEFINED (EXIT-003 OPEN)`) and
+let `gap_r` exist for the leg that has a target.
+
+**A claim this corrects.** Review's baseline said the missing target is *"EXIT-001 by
+construction, on every trade the engine places."* True of the **current** engine and too strong
+as an absolute: **28 sized rows across 13 runs DID carry targets**, all of them before the
+cutover. The narrowed claim is *by construction since `T-0050`*, and the narrowing matters
+because it is what makes the before/after measurable at all. Related: **B223**, **B216**,
+**B199**, **B10**, `T-0050`, `EXIT-003`.
 
