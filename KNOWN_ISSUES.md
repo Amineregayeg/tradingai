@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-23 (B242 — deleting the blackout helper leaves `_pair_to_currencies` with ZERO production callers, found by Execute answering B239's question on its own deletion. Also B241: `is_simulation` and WRITABILITY have come apart. MEASURED — a `cryptofundtrader` connection is registered on this deployment right now, environment `live`, connected true, and its `is_simulation` is a bare `return False`. But `observe_only` defaults True, manager.py:46-50 forces it True unless ALLOW_LIVE_TRADING, and `_guard_trading` raises on `close_all_positions` — so the write gate holds and a kill-switch close against it is refused and RECORDED AS A FAILURE. That is why disposition (a) is wrong: it would key a safety refusal on `is_simulation`, which is not the write gate, refusing to flatten an adapter already unable to be flattened. And the sharpest B239 instance yet: SIX sites iterate `_adapters` and all six went live in T-0062's one commit — `DELETE /positions/{id}` returned 404 unconditionally before and now closes a real position, from a commit that mentions none of it.)
+Last updated: 2026-08-23 (B243 — `box_grade` is "NONE" on 4338 of 4338 rows because a LITERAL writes it. There is exactly ONE `setup_evaluation` builder in the repository, `shadow.py:721`, and it hardcodes `risk_assessment={box_grade: NONE, risk_pct: 0.0}` and `block_reason=NO_ALIGNMENT` inside the call. `as_risk_assessment()` has ZERO callers and `gate_032` is not referenced on the shadow or evaluator path, so the nine-cell matrix has never run. The figure is real and its reading was one step too far: not "the box has never been graded" but "the field has never been fed by a grader". That changes T-0054(a) from a measurement with one producer to a construction with zero, and T-0056 from blocked-on-a-measurement to blocked-on-a-producer-and-a-consumer that were never wired.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -14482,6 +14482,100 @@ production-module helper with seven green tests and reasonably concludes the pai
 live. `B41`'s shape: a component that is fully built, fully tested and reached by nothing.
 Related: **B41**, **B221**.
 
+
+### B243. `box_grade` is `"NONE"` on 4338 of 4338 rows because a literal writes it, not because the box was graded
+**Found in:** 2026-08-23, answering the T-0056 shape question (Review) — a correction to the reading
+of a measurement I asked for
+**What it is:** the corpus figure is real and its interpretation was one step too far.
+
+```
+shadow.py:721   record = rec.setup_evaluation(          <- THE ONLY CALL IN THE REPOSITORY
+   …
+shadow.py:814       risk_assessment={"box_grade": "NONE", "risk_pct": 0.0},   HARDCODED, in the call
+shadow.py:817       block_reason="NO_ALIGNMENT",                              HARDCODED, in the call
+   …
+shadow.py:820   )
+```
+
+**One builder, and both fields are literals inside it.** So `box_grade == "NONE"` on every row is not
+a measurement of an ungraded box — **it is the measured value of a constant.** The field has never
+been fed by a grader at all, which is a different fact and a stricter one.
+
+**Confirmed by the other end of the chain:**
+
+```
+gate_032_risk_matrix.as_risk_assessment()   ZERO callers in app/
+RiskSizing / gate_032                        not referenced in shadow.py or evaluator.py
+```
+
+**The nine-cell matrix has never run.** The method that would render a real box grade into a record
+has no caller. `evaluator.py:70` does import `grade_box` and `:328-341` computes `graded.grade`, so a
+box grade IS computed somewhere in the rules layer — **and nothing carries it to the record.**
+
+**WHY IT MATTERS: it changes what `T-0054` half (a) and `T-0056` are blocked on.** Read as *"the box
+has never been graded"*, (a) is a measurement waiting for a grader. Read correctly — *"one side of
+the pair is a literal"* — **(a) has ZERO producers, not one**, so a disagreement rate is not merely
+empty, it is undefined: there is no shadow opinion to disagree with. **Its acceptance cannot be a
+rate and must be validation against the RULE itself.**
+
+And `T-0056`, the sizing cutover, is not gated on a measurement that cannot exist. **It is gated on a
+producer and a consumer that have never been wired**, which is a buildable thing rather than a
+permanent block.
+
+**A SECOND CONSEQUENCE THAT NEEDS ITS OWN CHECK.** `block_reason="NO_ALIGNMENT"` is hardcoded in the
+same call, so **every `setup_evaluation` ever written should carry it.** If so, `B199`'s *"the shadow
+corpus wrote 1,512 records in the window the decision corpus wrote 0"* means 1,512 NO_ALIGNMENT
+records, and the shadow's health signal has been green over a corpus reporting one branch. **Named as
+a query rather than a claim:** `SELECT payload->'block_reason', count(*) FROM telemetry_records WHERE
+record_type='setup_evaluation' GROUP BY 1`.
+
+**Fix:** route the computed grade to the record instead of the literal, which is `T-0054` half (a)
+correctly framed. **And until then no figure derived from `risk_assessment` means anything** — it is
+the same shape as `B188`'s coverage number, a field that reports a constant while reading as a
+measurement.
+
+**Not fixed here.** Related: **B236**, **B192**, **B188**, **B199**.
+
+**MANAGER MEASUREMENT — THE QUERY REVIEW NAMED, RUN, AND IT EXTENDS THE FINDING TO THE WHOLE
+RECORD.** Review named `block_reason` as the one query that would change what it had said. Run over
+every `setup_evaluation` ever written:
+
+```
+4358 rows
+  block_reason   'NO_ALIGNMENT'   4358   100.00%
+  decision       'STAND_ASIDE'    4358   100.00%
+  decision_path  two distinct shapes — 97.48% / 2.52%
+```
+
+**And a near-miss worth recording, because it is this entry's own defect committed while writing
+it.** I first read `decision=decision.decision` (`shadow.py:804`) as *computed* — unlike the literal
+`block_reason` at `:817` — and was about to file *"the rules evaluated 4358 bars and returned
+STAND_ASIDE every time"*, which would have been a claim about the market. `:712` says otherwise:
+
+```python
+decision: Decision = StandAside.unreadable(causes, evaluations)
+```
+
+**`decision` is CONSTRUCTED on this path, not computed.** So both fields are constants, and Review's
+reading was right where mine was one step too far — **the same over-read the entry exists to
+correct, made inside it.**
+
+**THE STRICTER AND STRONGER STATEMENT:** `rec.setup_evaluation(` has **exactly one call site in the
+repository** (`shadow.py:721`), and it sits on the path that constructs `StandAside.unreadable`. So
+`NO_ALIGNMENT` / `STAND_ASIDE` at 100% is **a property of there being one path**, not a measurement
+of anything. **The shadow has only ever recorded that it cannot read the layout.**
+
+That is correct behaviour and the code says why at `:700-711`: without the M6 roster panels there is
+no alignment to grade, and *"a shadow that emitted TAKE would be claiming a trade it cannot
+substantiate."* **The defect is not the value. It is that `shadow_health()` is green over a corpus in
+which every record is the same branch** — the signal reports the shadow is RECORDING, and it is,
+recording only that it could not look. `decision_path` varying 97/3 is the one field that shows work
+is happening at all.
+
+**This is `B240` on the shadow's own surface:** the answer is published, and the denominator — *how
+many distinct outcomes has this corpus ever contained* — is not. **Third time today a field
+reporting a constant was read as a measurement** (`B188`'s coverage, `B226`'s zeroed loop, this),
+and the first time it was caught inside the entry recording the pattern.
 
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
