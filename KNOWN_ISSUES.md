@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-23 (B237 — the fix for B217 would have REPRODUCED B217, on 80.1% of the corpus. T-0059 replaces a negative field with a positive flag and the baseline said set it 'before the candidate loop'; two of the three in-trace gates fire AFTER detection (:116 daily_bias and :133 ltf_bos, against :95-97), so the flag would read TRUE on bars those gates stopped, making them COMPARABLE with live_verdict=False — 'the live heuristic DECLINED' for a bar blocked before the entry decision ran. Measured: ltf_bos blocks 849 of 1060 rows carrying reasons, 358 of 375 since 08-19. Correct landmark is PAST EVERY GATE THAT CAN STOP THE BAR, not 'detection has run'. Caught before implementation by asking whether the differential arm could FAIL — and the answer is yes, on the baseline's own specification. The arm also needs a ZERO-CANDIDATE bar, the single input separating the two remaining wrong placements from the right one.)
+Last updated: 2026-08-23 (B238 — `base.py:55-58` says three safety-critical chokepoints read `is_simulation` and refuse writes to a non-simulation broker: ExecutionService, the kill switch, and position-close routing. Measured, only `execution/service.py:96` refuses; `kill_switch.py` and `positions.py` have ZERO references and `close_all_positions` iterates every adapter with no check. It matters now because T-0062's proxy makes the kill switch REACH the live broker — correctly — so a dormant gap became live by repairing the path in front of it: if the loop ever holds a real-money adapter the kill switch closes real positions unchecked. Closing is the safe side, so the danger is the DOCSTRING: a seat deciding how much care `is_simulation` deserves reads it and gets three chokepoints' assurance from one.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -14263,6 +14263,55 @@ absence either way.
 **It also retires part of Q2's join worry.** Both grades already co-occur on the same telemetry
 row, 4338 of 4338 — so the *shadow-side* pair needs no join. The B225 keylessness applies to the
 order-path grade versus its shadow counterpart, which is a different comparison and remains real.
+
+### B238. `is_simulation` names three safety chokepoints and one of them reads it
+**Found in:** 2026-08-23, T-0062's review (Review)
+**What it is:** `base.py:55-58`, above the `is_simulation` abstract property:
+
+> *"so a new real-money adapter can never silently pass as safe. Safety-critical chokepoints
+> (**ExecutionService, the kill switch, position-close routing**) read this and refuse to send
+> writes to a non-simulation broker unless a real, explicit live path is chosen."*
+
+**Measured across `app/`:**
+
+```
+execution/service.py:96   if not getattr(self.broker, "is_simulation", False): raise    REFUSES ✓
+manager.py:484            skips simulation adapters during RECONCILIATION — not a write guard
+manager.py:522, :616      a report field and a log line
+compliance/kill_switch.py     ZERO references
+api/routers/positions.py      ZERO references
+manager.py:566 close_all_positions   iterates every adapter with NO check
+```
+
+**One of the three named chokepoints refuses on it. The kill switch and position-close routing do
+not read it at all.** The sentence is a contract that one implementer honoured and two never
+implemented, stated as a property of the system.
+
+**Why it matters NOW rather than in principle, and it lands on `T-0062`'s own subject.** Until
+`115bf65` the kill switch iterated an orphaned adapter and closed nothing (`B221`), so the missing
+check was unreachable. **The proxy makes `close_all_positions` reach the live broker** — correctly,
+that is the fix — **so if the loop ever holds a real-money adapter, the kill switch will close real
+positions with no `is_simulation` check, because the check the docstring promises was never
+written.** `T-0062` did not introduce this and is not at fault; it made a dormant gap live by
+repairing the path in front of it.
+
+**Direction: closing is the SAFE side**, so this is not an exposure today and the loop holds only
+simulations. **It is the docstring that is dangerous**, because a seat deciding how much care
+`is_simulation` deserves reads that sentence and gets three chokepoints' worth of assurance from
+one.
+
+**And it understates a real risk while overstating coverage** — `T-0062`'s proxy forwards
+`is_simulation` dynamically rather than hard-coding `True`, which is correct and was argued from
+this very docstring. **The argument holds on one chokepoint rather than three, and the fix is right
+either way.**
+
+**Fix:** either implement the check where the docstring claims it — a kill switch that refuses to
+close through a non-simulation adapter unless an explicit live path is chosen — or narrow the
+sentence to the one chokepoint that exists. **Narrowing is free and is the honest minimum; leaving
+it is a safety claim the code does not make.**
+
+**Not fixed here — T-0062 is a review, and this is `base.py`.** Related: **B221**, **B210**, **B232**,
+**B184**.
 
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
