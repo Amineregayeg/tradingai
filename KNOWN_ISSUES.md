@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-23 (B211 — T-0055's acceptance sequence DIED mid-suite and nothing said so. `suite.exit`, `prober.log`, `prober.exit`, `porcelain.after` and `SEQ_DONE` are all ABSENT; `suite.log` ends mid-progress at [ 70%] with no summary line, and a truncated pytest log ends in dots exactly like a running one. Three of the plan's four acceptance artefacts were never produced. The environment kills a ~12-minute suite reproducibly — Review's own T-0052 run died twice at the same point — so the defect is not that a run died, it is that a dead run is indistinguishable from a green one at every layer. Review re-ran the whole suite at 82e982c in six resumable chunks: 1847 passed, 1 xfailed, 0 failed, every chunk EXIT=0. Also B210: the tripwire's docstring claims "ANY form" 33 lines below the same file's admission that it does not.)
+Last updated: 2026-08-23 (B213 — T-0053's lost disagreement DIRECTION is reconstructible on the easy rows and silently not on the hard ones. In the live corpus the single ETH disagreement's direction IS recoverable by joining signal_dir/sized_units/outcome — live took it and won, disagree=1, so ENTRY-001 declined it: rules STRICTER. That join works only because disagree==1 and agree==0, and breaks on every row that matters. Worse than absent: it invites "derive it from existing columns", validated against the only case it works on. Also B212: `rule_verdict` names TWO measurements — the comparison's, which dies unpersisted, and shadow.py:752's, which IS persisted to telemetry — so a DB grep for the field returns thousands of rows and reads as "the direction is retained".)
 
 ---
 
@@ -13159,6 +13159,78 @@ way in six chunks, resumable, and got **1847 passed / 1 xfailed / 0 failed, ever
 which is the figure T-0055 and T-0052 were both missing.
 
 **Not fixed here.** Related: **B179**, **B155**, **B202**.
+
+### B212. `rule_verdict` names TWO different measurements in two corpora, and one of them IS persisted
+**Found in:** 2026-08-23, attacking the Manager's `B177` premise correction for T-0053 (Review)
+**What it is:** the key `rule_verdict` occurs in two unrelated places, carrying two different facts:
+
+```
+entry_comparison.py:113,124   RuleComparison.rule_verdict — what ENTRY-001 said about THIS bar,
+                              paired with live_verdict. Reaches Gate.values and DIES there,
+                              unpersisted (see the T-0053 analysis).
+
+shadow.py:752                 "rule_verdict": decision.decision — the SHADOW's own verdict,
+                              emitted into a telemetry setup_evaluation payload. PERSISTED.
+```
+
+**Why it matters, and it is a trap rather than an untidiness.** The natural way to check whether
+the entry-comparison direction survives to storage is to grep the database for `rule_verdict`. That
+search **returns rows** — thousands of them, since the shadow writes on every bar and wrote 1,512
+records in the window the decision corpus wrote 0 (`B199`). A reader would conclude the direction is
+retained. It is not: those rows are a different corpus answering a different question, and they
+carry no `live_verdict` to pair against.
+
+The two are not even the same shape. The comparison's `rule_verdict` is per-rule and exists only
+beside a `live_verdict`; the shadow's is per-bar and stands alone. `shadow.py:741` explains at
+length why the shadow records both `engine_policy` and `rule_verdict` — that reasoning is sound and
+is about a different pair entirely.
+
+**This is a live falsification hazard for `T-0053`**, whose whole premise is what does and does not
+reach the database. A seat verifying that premise by querying the field name gets a false positive,
+and the false positive points the safe way for the task and the wrong way for the truth.
+
+**Fix:** rename one of them at the emission site — `shadow_rule_verdict` for the shadow's, or
+`entry_rule_verdict` for the comparison's — and say in `T-0053`'s plan which corpus the query must
+target. Renaming the SHADOW's is the cheaper change and the safer one: it is the persisted field, so
+it is the one a query finds, and it is the one whose name is currently doing the misleading.
+
+**Not fixed here.** Related: **B177**, **B199**, **B184**.
+
+### B213. The disagreement direction is reconstructible on the EASY rows and silently not on the hard ones
+**Found in:** 2026-08-23, attacking the Manager's `B177` premise correction for T-0053 (Review)
+**What it is:** `B177`/`T-0053` say the stored `disagree=N` merges rules-stricter with rules-looser,
+so direction is lost. Measured against the live corpus dumped on 2026-08-19
+(`agents/tasks/T-0053/_runs/live-corpus-20260819.txt`), the statement needs to be sharper, and the
+sharper version is worse.
+
+That corpus holds exactly one disagreement — the ETH/USD row — and **its direction IS recoverable
+from what is already stored**, by joining the comparison line to other columns on the same record:
+
+```
+comparison_line   entry rules: disagree=1 agree=0 not_comparable=0 rate=1.000
+same row          signal_dir LONG · sized_units 3.283572 · outcome WIN
+therefore         the live engine TOOK the entry, so live_verdict is True,
+                  and the single disagreement must be ENTRY-001 declining it
+                  -> rules STRICTER, a missed-opportunity disagreement
+```
+
+That join works **because `disagree == 1` and `agree == 0`.** It breaks the moment `disagree > 1`,
+or `agree` and `disagree` are both non-zero, or the live engine declined and there is no signal row
+to join against. In other words it works on the rows nobody needs it for.
+
+**Why that is worse than the direction simply being absent.** An absent field is a visible gap that
+`T-0053` closes. A field that can be reconstructed *sometimes* invites the cheaper answer — *"we can
+derive direction from existing columns, no schema change needed"* — and whoever builds that
+derivation will validate it against exactly the row it works on, because today that is the only
+disagreement in the corpus. It ships green and it is silently wrong on the first bar with two
+disagreements. **A method validated on the only easy case in the population is `B151`'s shape: the
+control validates the SYSTEM rather than the CHANGE.**
+
+**Consequence for `T-0053`:** the plan should state that direction must be RECORDED AT EMISSION and
+that post-hoc reconstruction from `signal_dir`/`outcome` is rejected — with this reason, not as a
+style preference. Otherwise the task can be closed by a query.
+
+**Not fixed here.** Related: **B177**, **B151**, **B212**.
 
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
