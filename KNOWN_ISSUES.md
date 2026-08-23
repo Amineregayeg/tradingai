@@ -6,7 +6,9 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-23 (B213 — T-0053's lost disagreement DIRECTION is reconstructible on the easy rows and silently not on the hard ones. In the live corpus the single ETH disagreement's direction IS recoverable by joining signal_dir/sized_units/outcome — live took it and won, disagree=1, so ENTRY-001 declined it: rules STRICTER. That join works only because disagree==1 and agree==0, and breaks on every row that matters. Worse than absent: it invites "derive it from existing columns", validated against the only case it works on. Also B212: `rule_verdict` names TWO measurements — the comparison's, which dies unpersisted, and shadow.py:752's, which IS persisted to telemetry — so a DB grep for the field returns thousands of rows and reads as "the direction is retained".)
+Last updated: 2026-08-23 (B217 — `LIVE_NOT_REACHED` is keyed on `blocked_by`, which `trace.gate()` sets for the 3 IN-TRACE gates only; the 4 LOOP-LEVEL blocks (kill switch, paused, already-in-a-position, max-concurrent) never touch it, so a trace produced on a loop-blocked bar falls through to `bool(trace.took_trade)` and records `live_verdict=False` — "the live heuristic DECLINED" — for a bar the live heuristic never evaluated. Asymmetric and both ways argue FOR the cutover: rules-FAIL scores AGREE, rules-PASS scores DISAGREE labelled RULES-LOOSER. Latent and armed for any future restructure. It killed the manager's proposed B198 remedy before it reached production. Also B216: T-0057's doctrinal predicate separates nothing — every position this run has tp NULL, so the term is true of 5 of 5 blocks; the discriminator is REMAINDER OUTSTANDING (2 whole closes cleared, 2 partial 70% closes did not). B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine reports two open positions.)
+
+Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
 ---
 
@@ -13231,6 +13233,149 @@ that post-hoc reconstruction from `signal_dir`/`outcome` is rejected — with th
 style preference. Otherwise the task can be closed by a query.
 
 **Not fixed here.** Related: **B177**, **B151**, **B212**.
+
+### B217. `LIVE_NOT_REACHED` is keyed on a field the LOOP-LEVEL block never sets, so a trace on a blocked bar reads as DECLINED
+**Found in:** 2026-08-23, attacking the proposed fifth remedy for `B198` (Review)
+**What it is:** the entry comparison decides comparability from one field:
+
+```
+entry_comparison.py:243   if getattr(trace, "blocked_by", None) is not None:
+                              return None, "LIVE_NOT_REACHED"
+                          return bool(getattr(trace, "took_trade", False)), None
+```
+
+and `blocked_by` is set in exactly one place — `decision_trace.py:97-98`, inside `trace.gate()`,
+when an ENFORCED IN-TRACE gate fails. **The loop-level entry block is not an in-trace gate.**
+`crypto_loop.py:1218` calls `_entry_block_reason` and `return`s on a hit, *before*
+`evaluate_latest_bar_traced` is ever called — so on a bar blocked by *"already in a position"*,
+`"engine paused"`, `"KILL SWITCH ARMED"` or `"max concurrent reached"` **there is no trace at all**.
+
+Harmless today, precisely because there is no trace. **The trap is latent and it is armed for the
+next restructure.** Any change that produces a trace on a loop-blocked bar — recording the decision
+above the gate, replaying blocked bars, backfilling the decision corpus — gets a trace whose
+`blocked_by` is `None`, because nothing in the loop-level path touches it. The comparison then takes
+the second branch and reads `took_trade`, which is `False` (set at only two sites, both in
+`strategy_step.py`, both when an order is actually placed).
+
+**So the bar records `live_verdict = False`, meaning "the live heuristic DECLINED this entry".** The
+truth is that the live heuristic never evaluated it. And the failure is not symmetric:
+
+```
+ENTRY-001 says FAIL  ->  scored AGREE          — false agreement
+ENTRY-001 says PASS  ->  scored DISAGREE, and the direction reads RULES-LOOSER
+                         ("the rules would take a trade live declined") = NEW LIVE EXPOSURE
+```
+
+Both are wrong, and they are wrong in the direction that argues FOR a cutover: inflated agreement,
+plus disagreements mislabelled into the category `T-0040` treats as the risky one. `T-0041` judges
+the cutover on exactly those numbers.
+
+**The code already contains its own refutation, one docstring above the branch:** *"A bar stopped by
+`history`, `daily_bias` or `ltf_bos` never reached the candidate loop, so it has no opinion about
+whether an entry POI existed. That is `LIVE_NOT_REACHED`, and it is not agreement — counting it as
+agreement is the failure this whole triple exists to prevent."* That reasoning is correct and it is
+keyed on a field that only covers the IN-TRACE blocks it names. The four LOOP-LEVEL blocks are
+outside it.
+
+**Fix:** make comparability depend on whether the live path *reached the candidate loop*, not on
+`blocked_by` — an explicit `reached_entry_decision` flag set where the candidate loop runs, so a
+trace that never got there cannot report a verdict at all. Deriving the property beats testing a
+proxy for it, and `blocked_by` is a proxy that covers three of seven block sources.
+
+**Not fixed here — and it is a REASON, not a blocker, for the B198 remedy that would trip it.**
+Related: **B177**, **B213**, **B199**, **B190**.
+### B214. The only existing "has this a target" test merges NO TARGET with A DEGENERATE RISK LEG
+**Found in:** T-0057, reaching for the single-site rule before writing a second one (Execute)
+**What it is:** `T-0057` needed exactly one site deciding whether an open position has a target,
+and the plan named `app/services/evaluation/feedback.py` as the existing one. It is not that
+question. `_expected_r_from_geometry(entry, sl, tp)` is an expected-R calculator whose `None`
+return covers three different causes. Measured, not argued:
+
+```
+_expected_r_from_geometry(100.0,  95.0, 110.0)  -> 2.0     HAS a target
+_expected_r_from_geometry(100.0,  95.0, None )  -> None    NO target
+_expected_r_from_geometry(100.0, 100.0, 110.0)  -> None    HAS a target, degenerate stop
+```
+
+**Why it matters:** routing the has-target question through it would report a position that HAS a
+target as having none whenever `entry == sl`, and `T-0057`'s monitor fires precisely on "no
+target". So the reuse that looks like good hygiene would have made the signal fire on a trade that
+can still close on a win. **A function whose `None` merges causes cannot be borrowed for a
+question that only cares about one of them** — the register's own recurring shape, an output that
+fails to discriminate, in the position of a dependency rather than a report.
+
+**Not fixed.** `T-0057` defines its own single site, `position_has_target`, and an AST arm holds
+`tp is/is not None` to exactly one occurrence in that module. Splitting `_expected_r_from_geometry`
+into "no target" and "degenerate risk" belongs to whoever owns the feedback path. Related: **B161**.
+
+### B215. `GET /api/positions` returns `[]` while the engine reports two open positions
+**Found in:** T-0057, fetching live position targets for the ARM 1 artefact (Execute)
+**What it is:** at 2026-08-23 18:16 UTC, against production:
+
+```
+GET /api/positions          ->  []
+GET /api/engine/status      ->  "open_positions": 2, "unrealized_pl": 269.71
+```
+
+Both positions are real — `trades` shows their entries, and the engine's own activity buffer says
+`already in a position, skipped` for both symbols on every 5m bar. The engine's paper positions
+live in `LiveCryptoLoop.paper`, an in-memory `PaperBroker`, and are never written to a table; the
+positions endpoint does not see them.
+
+**Why it matters:** the endpoint does not report "I cannot see the simulation broker", it reports
+an empty list, and **an empty list is a claim**. Anyone diagnosing `B198` from the API — which is
+what an operator would reach for first — is told there are no open positions at the exact moment
+two target-less runners are withdrawing both symbols from trading. It is `B199`'s shape one layer
+out: a signal whose silence is indistinguishable from the thing it is supposed to report.
+
+**Not fixed.** Recorded while building `T-0057`; the fix is a decision about whether that endpoint
+is meant to cover the simulation broker at all. Related: **B198**, **B199**.
+
+### B216. T-0057's doctrinal predicate separates nothing: EVERY position this engine has opened has NO TARGET
+**Found in:** T-0057 ARM 7, the control pair — **by the control coming back RED, which is the
+outcome a control exists to be capable of** (Execute)
+**What it is:** `T-0057`'s plan states the discriminator is doctrinal rather than temporal — *"a
+position with a target closes on a win; a position without one can only stop out"* — and fires on
+*blocked by `already in a position` AND that position has no target*. Run over the plan's own
+control window (BTC/USD across 2026-08-20, 236 records, engine trading normally) with the doctrinal
+terms pinned at their most-firing values, **the predicate fires twice**, and both fires are real,
+legitimate, RESOLVED blocks. From `trades`, they line up to the minute:
+
+```
+entry 2026-08-20 03:20:12 -> exit 07:06:10     predicate fired 07:10:13,  46 bars
+entry 2026-08-20 14:25:16 -> exit 15:02:39     predicate fired 15:05:16,   8 bars
+```
+
+**The denominator is the finding.** Every position this run has ever opened carries `tp = NULL`,
+and `signal_tp` is NULL on all four entry decisions:
+
+```
+ETH/USD  2026-08-19 19:20:31 -> 20:50:38   tp NULL   resolved ~18 bars
+BTC/USD  2026-08-20 03:20:12 -> 07:06:10   tp NULL   resolved ~45 bars
+BTC/USD  2026-08-20 14:25:16 -> 15:02:39   tp NULL   resolved  ~7 bars
+BTC/USD  2026-08-21 00:05:12 -> 01:18:21   tp NULL   the 70% TRANCHE; the 30% runner rides
+```
+
+**5 of 5 blocks this engine has ever had were caused by a target-less position** — three cleared,
+two are blocking today. *A term true of every member of a population cannot separate any subset of
+it.*
+
+The mechanism is the plan's own sentence turned around. The runner is not
+target-less-and-terminal; it is target-less **and it stops out** — the "can only stop out" half of
+the argument — and stopping out UNBLOCKS the symbol. What is different about the `B198` freeze is
+not the KIND of block but that it has lasted 66.20 h and 94.94 h instead of 46 bars.
+
+**So the separation is carried entirely by `ORDER_PATH_BLOCKED_BARS_FLOOR`**, the constant the plan
+labels ARBITRARY noise suppression whose only stated job is bridging entry to the 70% fill. **The
+label and the load are in different places.** That is `B93`'s shape: the condition that reads as
+doing the work is satisfied by everything, and the real work is done by the number nobody was asked
+to justify.
+
+**Not fixed, and deliberately not tuned.** Raising the floor to 47 bars would turn the control
+green and make the arm unfalsifiable, which is the move the plan forbids twice. The floor ships
+BELOW the longest legitimate block ever observed and the arms assert that fact rather than hide it.
+Related: **B198**, **B199**, **B93**, **B46**.
+
 
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
