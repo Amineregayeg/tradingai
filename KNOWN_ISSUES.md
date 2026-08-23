@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-23 (B195 — the seat registry addresses a seat by a NAME, which is a per-restart lease and is not unique across live sessions: at the loop restart two live sessions both carried 'tradingai-8e', one of them the probable EXECUTE seat and one a session holding no seat at all, so registry.json's stored address resolves ambiguously between a writer and a non-writer. It had already produced a false conclusion — the restarting MANAGER read the stale names, found no matching pids and inferred all three seats were gone, when every sessionId was alive under a new pid. Filed by Malek's own no-seat session 6801bd71; committed by the manager seat because agents/ tooling is the manager's to keep.)
+Last updated: 2026-08-23 (B203 — three seats hand-numbered register entries on one afternoon and collided three ways; renumbered to B200-B202, and note the allocator that would have prevented it ALREADY EXISTS as `bus.py bid`, which two of the three seats used. BUT THE ENTRY THAT MATTERS IN THIS BATCH IS B198: THE ENGINE HAS NOT TRADED SINCE 2026-08-21 AND EVERY HEALTH SIGNAL IS GREEN. EXIT-001's 30% runner has no target, may not move its stop while EXIT-003 is OPEN, and the 19:00 flatten is suppressed — so STOP_HIT is its only terminal condition, and because the entry gate blocks on the SYMBOL holding any position, a persisting remainder withdraws that symbol from trading entirely. ETH/USD: 7 decision records in a four-day run, none since 2026-08-19 19:20:31 UTC. BTC/USD: none since 2026-08-21 00:05:12 UTC. Cost ~1,760 lost decision records against a total corpus of 1,060. B199 is why nobody saw it: shadow_health() watches the telemetry corpus, which T-0010 deliberately moved ABOVE the gates so 'already in a position' would stop suppressing it — the monitored artefact was engineered to be immune to the state that stops the engine, and 1,512 shadow records landed in the window the order path wrote 0.)
 
 ---
 
@@ -943,6 +943,116 @@ doing so shifts the baseline you compare against.
 ---
 
 ## B. Silent failure — things that break without telling anyone
+
+### B198. EXIT-001's passive runner OCCUPIES the symbol, so the engine takes one trade per symbol and then stops trading — ETH has been blocked for 91 hours
+**Found in:** 2026-08-23, the loop restart — first look at the live engine after four days unattended
+**What it is:** the engine reports `running: true`, a positive balance and a rising equity, and it
+has not evaluated an entry on ETH/USD since **2026-08-19 19:20:31 UTC**. Measured in the database's
+own clock at `now() = 2026-08-23 14:50:07 UTC`:
+
+```
+symbol     decision_records THIS RUN    newest                       frozen for
+BTC/USD    300                          2026-08-21 00:05:12 UTC       62.75 h
+ETH/USD    7                            2026-08-19 19:20:31 UTC       91.49 h
+```
+
+**ETH produced SEVEN decision records in a four-day run.** It entered a position thirty minutes in
+and was never free again.
+
+**The mechanism, read rather than inferred.** `crypto_loop._entry_block_reason` returns
+`"already in a position"` from `await self._has_position(pair)` — a **per-symbol** test, not the
+global `max_concurrent`, which is 3 and never binds here. That return happens *before* the ICT path
+decides, so a blocked bar writes **no decision record at all**. The engine is not idle: it wakes on
+every 5m bar for both symbols and skips every one of them.
+
+**Why the position never clears, all three legs verified:**
+1. `FINAL_TARGET` has **zero occurrences under `app/services/live/`** — it exists only in
+   `exit_001_v1_model.py` and the rules `__init__`. The live path cannot reach a final-target exit.
+2. The runner carries **no target**. The last live decision recorded it in its own words:
+   `"OBSERVED exit_tranche_plan: 70% at 74686.39840695067 then a 30% runner to None"`.
+3. `paper._settle` leaves the remainder's `sl`/`tp` **unchanged** and says why —
+   *"THE REMAINDER RIDES. `sl`/`tp` are unchanged: moving them would be EXIT-003's behaviour, which
+   is OPEN in the registry and must not be invented here."* That is correct and must not change.
+
+With GATE-022's 19:00 flatten suppressed by T-0051's flag, **the runner's only terminal condition is
+STOP_HIT.**
+
+**The open positions ARE the runners — proved arithmetically, not assumed:**
+
+```
+BTC   sized_units 0.080234 x 0.70 = 0.0561638    closed lot_size 0.056164   exact
+ETH   sized_units 1.583930 x 0.70 = 1.1087510    closed lot_size 1.108751   exact
+```
+
+70% banked, 30% still open on both symbols. Both symbols therefore blocked.
+
+**The consequence nobody stated when the flag was chosen.** The T-0051 decision was recorded as
+*"expect an open remainder to persist across days"* — a bookkeeping cost. It is not. Because the
+entry gate is keyed on the symbol holding **any** position, a remainder that persists **withdraws
+the symbol from trading entirely**. A benign-sounding remainder is a total halt.
+
+**And the runner cannot win.** Its stop is the original stop, below entry, and it has no target. So
+every runner has exactly one reachable outcome — stop out for a loss of 30% of 1R — or ride forever.
+The $274 of unrealized profit currently in equity is unbankable by any code path that exists.
+
+**What it could break — it already has.** The engine was started on 2026-08-19 to accrue the entry
+cutover evidence base that T-0040's criterion and T-0041 will be judged against. At the observed
+cadence of **11.42 records/hour/symbol** (measured over the 12h before the freeze; a 5m bar would be
+12.00/h), the frozen window has cost roughly **1,760 decision records**. The entire corpus across all
+runs since 2026-07-22 is **1,060 rows.** *The freeze has cost more evidence than the project has ever
+collected.*
+
+**Not fixed here.** The fix is a decision, not a patch, and it belongs to Malek and to Salim's
+question 4 — see B199 for why nobody noticed. Related: **B199**, **B177**, **B194**, **B34**.
+
+### B199. Every liveness signal reads healthy while the order path is frozen — because the one monitor we built was deliberately made blind to this exact state
+**Found in:** 2026-08-23, while measuring B198
+**What it is:** B198 froze the order path for 62–91 hours and **nothing reported it.** Every
+available signal was green throughout:
+
+```
+/api/engine/status     running: true, paused: false
+balance / equity       5060.09 / 5334.10, total_pnl +334.10 (+6.68%)
+telemetry_records      newest 12 SECONDS old, sequence_no advancing
+shadow_health()        green
+activity buffer        40 entries, all "skip", covering 100 minutes
+```
+
+**The shadow corpus wrote 1,512 records in the same window the decision corpus wrote 0.**
+
+**Why the monitor cannot see it, and this is the sharp part.** `data_health.shadow_health()` is B32's
+fix and it watches `TelemetryRecord.record_type == "setup_evaluation"` — the **shadow's** corpus.
+T-0010 then moved `_shadow_evaluate` **above** the entry gates so that `already in a position` would
+stop suppressing shadow records. That was correct and fixed B34. But it means the monitored artefact
+was **specifically engineered to be immune to the condition that is now stopping the engine**, and
+the docstring says so in as many words:
+
+> *"The shadow used to sit BELOW the entry gates, so `already in a position` suppressed it — and
+> since the engine holds a position most of the time, long silences were normal and a naive signal
+> would have screamed all day. ... So `blocked` is no longer a state, and a due bar with no record
+> now means broken, full stop."*
+
+Every clause is true **of the shadow**. Applied to the engine as a whole it is false: `blocked` is
+very much still a state for the ORDER path, and it is the state the engine has been in for four days.
+**We built a liveness signal, pointed it at the half that cannot go quiet, and read its silence as
+health.**
+
+**The activity buffer cannot substitute for it.** It holds 40 entries — 100 minutes at the current
+rate — so a 91-hour condition is invisible in it by capacity alone. It showed 40 skips, which is
+indistinguishable from a healthy engine that happens to hold two positions right now.
+
+**What it could break:** any future run. This is not a one-off — the monitor will be equally green
+the next time the order path stops, and the trading halt is silent by construction until somebody
+queries `max(created_at)` on `decision_records` **per symbol** by hand, which is how it was found.
+
+**Fix, stated but not applied:** a per-symbol recency signal on `decision_records` with a due-bar
+notion of its own, sitting beside `shadow_health()` rather than inside it — the two corpora have
+different legitimate-silence rules and one predicate cannot carry both. The must-not-fire arm is the
+hard half: an engine legitimately holding a position must not scream, so the signal has to
+distinguish *"blocked and that is expected"* from *"blocked and nothing can ever unblock it"* — which
+is B198's question, and is why these are two entries and not one.
+
+**Not fixed here.** Related: **B198**, **B32**, **B34**, **B178**.
 
 ### B41. The detector built to catch B34 was written, documented, schema'd, tested — and never called
 **Found in:** T-0010 verification, 2026-08-14, by the Manager while checking my change.
@@ -3477,6 +3587,66 @@ is the better trade.**
 
 **Not filed as a defect in the harness. Filed as a defect in what we can LEARN from it** — *the exclusion is
 correct and the diagnosis is unrecoverable, and only the second half is broken.*
+### B196 — the widened sizer tripwire still enumerates CALL SYNTAX; a value-bound reference and `getattr` stay silent
+
+**Found by Execute in `T-0055`, while writing the arms for `B191`'s own fix. NOT FIXED — filed as the
+declared LIMIT of what that instrument claims.**
+
+`B191`'s fix widens the guard from `ast.Name(id="RiskMatrix")` as the call base to *any* base, which
+covers every shape a sizer cutover is plausibly written in. It does **not** cover the shapes where the
+call site stops being an attribute access at all. Measured by AST, not supposed:
+
+    FIRES    RiskMatrix.size(...)                      direct
+    FIRES    RM.size(...)                              aliased import
+    FIRES    g32.RiskMatrix.size(...)                  module path
+    FIRES    some_queue.size()                         the deliberate over-fire
+    silent   sizer = RiskMatrix.size ; sizer(...)      value-bound   <- NOT COVERED
+    silent   getattr(RiskMatrix, "size")(...)          getattr       <- NOT COVERED
+
+**Filed rather than fixed, and the reason is not effort.** Covering these means tracking what a name is
+bound to — dataflow — and the guard's purpose does not need it: **it is a tripwire for a DELIBERATE
+wiring commit, not an evasion detector.** A seat wiring GATE-032 to the order path writes the plain
+call; nobody launders a cutover through `getattr`. *And a guard that needs dataflow analysis to be
+trusted is a guard nobody maintains.*
+
+> **Recording the boundary IS the point.** The failure this whole `B188`/`B191` thread is about is a
+> guard whose coverage was believed to be wider than it was — so the fix that narrows the belief to the
+> measurement belongs in the register, not only in the docstring.
+
+**What it could break:** if `T-0054`/`T-0056` reach the sizer through a bound reference, the tripwire
+passes and the cutover lands with no visible signal — `B191`'s outcome exactly, one shape further out.
+Related: **B191**, **B188**, **B197**.
+
+
+### B197 — TWO sizer-reachability tripwires with DIFFERENT roots and DIFFERENT mechanisms, so "the tripwire flips" was never one question
+
+**Found by Execute in `T-0055`, checking for a second statement of the doctrine before widening the
+first. NOT FIXED — deliberately, see below.**
+
+The repo guards *"has GATE-032 reached production"* in two places that do not agree on what production
+is, or on how to look:
+
+    test_t0048_eco_day_sizing.py    the CALL guard     AST    walks app/        (180 files)
+    test_t0024_position_sizing.py   the IMPORT guard   TEXT   walks live/ ONLY
+      ^ test_nothing_under_live_imports_the_sizer
+
+The import guard matches the substring `gate_032_risk_matrix` in a file's text, so it also fires on a
+docstring or comment mention. That is an over-fire — the safe direction — and it is `B161`'s class
+regardless.
+
+**Why it matters NOW rather than eventually:** `T-0056`'s acceptance says *"`B191`'s widened tripwire
+MUST flip when this lands; if it does not, it was never keyed on production reachability."* **That
+sentence assumes there is one tripwire.** A cutover wired from anywhere under `app/services/` outside
+`live/` flips the call guard and leaves the import guard green; one wired as an import inside `live/`
+with no call site does the reverse. **Neither is a contradiction, and both read as "the tripwire
+flipped" to anyone who ran one suite file.**
+
+**Not fixed here, deliberately.** Unifying them edits `T-0024`'s criterion-6 evidence, which is another
+task's ratified arm, and `T-0055`'s plan states that out-of-scope work is a defect rather than a bonus.
+**What is needed instead is that whoever closes `T-0054` names WHICH guard is expected to flip and
+asserts the other's state explicitly** — a task that trips one and silently leaves the other green looks
+identical to a task that tripped the one it meant to. Related: **B188**, **B191**, **B196**, **B161**.
+
 
 
 ### B169 — a criterion keyed on a metric THE GRADED SEAT CAN EDIT, and which the honest work cannot move
@@ -12627,6 +12797,138 @@ files carry a `procStart` field holding the process start time in ticks, and it 
 
 **Not fixed here.** Filed by a session that holds no seat and is not a writer in this tree.
 Related: **B150**.
+
+### B200. The test named for the deduplication passes with the duplication put back
+**Found in:** 2026-08-23, T-0052's review (Review, `tradingai-62`)
+**What it is:** `T-0052` fixed `B184` by deriving `force_include`'s speech vocabulary from the
+taxonomy table instead of retyping it — `SPEECH_TOKENS = tuple(p for p, t in _PATTERNS if t ==
+"SPEECHES")`. **The derivation is real; I proved it with a control pair.** Adding one
+`("fireside chat", "SPEECHES")` row to the taxonomy table and nothing else makes
+`force_include("Fed Chair Powell Fireside Chat")` return `True` on the fixed code and `False` on
+`b5c6f71`. That is not the defect.
+
+The defect is that **the test written to protect that property cannot detect its violation.**
+`test_SPEECH_TOKENS_is_DERIVED_from_the_taxonomy_table_and_not_a_second_literal` asserts value
+equality:
+
+```
+taxonomy_speech = tuple(p for p, t in module._PATTERNS if t == "SPEECHES")
+assert SPEECH_TOKENS == taxonomy_speech
+```
+
+Measured: replace the derivation with `SPEECH_TOKENS = ("speaks", "testifies", "testimony",
+"press conference")` — a hand-typed literal holding the same four tokens, every instance
+behaviour identical — and the file reports **17 passed**. The duplication is back, under a test
+whose name forbids it, and the suite is green.
+
+**Why it matters:** `B184`'s own sentence was *"appending a string fixes this instance and leaves
+the mechanism."* This is that sentence one level up. The production code is correct today and
+nothing in the suite would notice it being made wrong again — which is the entire reason
+`T-0052` was a deduplication task rather than a one-string append. A future seat reverting to two
+lists, for any reason, gets a clean run.
+
+**A copy and a derivation are equal in value and differ only in behaviour under change**, so
+value equality is the wrong instrument whatever shape the fix takes. **Fix:** copy the module
+source to `tmp_path`, insert one `("fireside chat", "SPEECHES")` row, load it through
+`importlib.util.spec_from_file_location`, and assert `force_include("Fed Chair Powell Fireside
+Chat")[0] is True`. If a standalone load is awkward, make the derivation a function —
+`_speech_tokens(patterns)`, with `SPEECH_TOKENS = _speech_tokens(_PATTERNS)` — and call it with
+an extended table.
+
+**Not fixed here.** The implementation passed review; this is its durability, and it is one test.
+Related: **B184**, **B150**.
+
+### B201. GATE-015's Fed-Chair conjunction force-includes FORMER and NOMINEE chairs
+**Found in:** 2026-08-23, T-0052's review (Review, `tradingai-62`)
+**What it is:** `T-0052` narrowed the derived force-include to a conjunction — a Fed-Chair marker
+**and** a speech token — because a speech token alone would have swept in `FOMC Member Bowman
+Speaks`, which the ruling excludes. The narrowing works: FOMC members, ECB, BOE and unrelated
+`…Testimony` are all still `False`. But `FED_CHAIR_MARKERS = ("fed chair",)` is tested by
+`case_insensitive_substring`, so **any qualifier standing in front of the marker survives it**:
+
+```
+'Fed Chair Powell Testimony'           -> True     the ruled event
+'Fed Chairman Powell Testimony'        -> True     DESIRABLE — same substring property
+'Former Fed Chair Yellen Testimony'    -> True     NOT the ruled event
+'Ex-Fed Chair Bernanke Speaks'         -> True     NOT the ruled event
+'Fed Chair Nominee Hearing Testimony'  -> True     NOT the ruled event
+```
+
+**This is a structural property of substring matching, measured on the shipped code. It is NOT a
+claim that Finnhub emits those strings** — that has not been established and cannot be until a
+key lands.
+
+**Why it matters, and in which direction:** it fails toward a **false block** — the engine stands
+aside on a day it was not told to stand aside on. Fewer trades, not more exposure; the same
+conservative direction `_matches_by_name`'s docstring already accepts for the ruled list. So it
+is a fidelity defect, not a risk one, and it is invisible today for `B179`'s reason: no key, no
+events, every news gate inert.
+
+**Why it is an entry and not a one-line tightening:** `Fed Chairman` matches by the *same*
+substring property and is a correct rendering of the ruled event. Any narrowing that kills
+`Former Fed Chair` must be checked against `Fed Chairman`, or the fix trades a false block for a
+real miss — which is `B184` again. A negative-qualifier guard (`former`, `ex-`, `nominee`) is
+enumeration by token and will not hold; the durable shape is a positive test for the sitting
+chair's name alongside the office.
+
+**Not fixed here.** `T-0052`'s plan said to report an over-matching case rather than tune until
+it passes; this is that report. Related: **B184**, **B200**, **B179**.
+
+### B202. A regression parametrisation claims coverage that predates the fix, and it does not
+**Found in:** 2026-08-23, T-0052's review (Review, `tradingai-62`)
+**What it is:** `test_NO_REGRESSION_every_previously_forced_event_still_forces` parametrises
+`("Fed Chair Powell Press Conference", "SPEECHES")` among six genuinely pre-existing cases. That
+name did **not** force-include at the baseline — measured `(False, None, None)` at `b5c6f71` —
+and it is one of the 28 verdicts `T-0052` newly turned `True`.
+
+**Why it matters:** the assertion is correct and should stay. The *label* is what misleads: it
+tells a reader that press-conference force-inclusion predates this task, so a future seat sizing
+`B184`'s blast radius reads six protected cases where there are five, and reads the derived
+branch as smaller than it is. **A no-regression test that contains a new behaviour cannot answer
+"what did this change?" — which is the only question it exists to answer.**
+
+**Fix:** move that one case into the must-fire test beside `Fed Chair Powell Testimony`, where it
+belongs.
+
+**Not fixed here.** Cosmetic in effect, but it is the kind of mislabel that survives to become a
+premise. Related: **B200**.
+
+### B203. The issue register has no number allocator, and three seats collided on the same afternoon
+**Found in:** 2026-08-23, T-0052's review (Review, `tradingai-62`) — found by walking into it
+**What it is:** `KNOWN_ISSUES.md` numbers entries `B<n>` and allocates them by *reading the file
+and adding one*. That is a read-modify-write with no lock, performed by three seats against one
+unstaged working-tree file. Within about twenty minutes on 2026-08-23 it produced a three-way
+collision:
+
+```
+B196   the widened sizer tripwire still enumerates CALL SYNTAX     (T-0055 work)
+B196   the test named for the deduplication passes ...             (T-0052 review)
+B197   TWO sizer-reachability tripwires ...                        (T-0055 work)
+B197   GATE-015's Fed-Chair conjunction ...                        (T-0052 review)
+B198   EXIT-001's passive runner OCCUPIES the symbol ...           (loop restart)
+B198   a regression parametrisation claims coverage ...            (T-0052 review)
+```
+
+I took `B196` as free because I read the file when the highest was `B195`; by the time I wrote,
+two other seats had each taken it. **Renumbered to `B200`–`B202` here.** `B82` is also duplicated
+and predates today, so this has happened before and was absorbed silently.
+
+**Why it matters beyond tidiness:** the number is the *only* handle. Entries cite each other by
+it (`Related: **B150**`), tasks cite it in their titles, verdicts cite it, and the board's task
+list is written in terms of it. A duplicated number makes every one of those references ambiguous
+in a file 13,000 lines long, and the ambiguity is silent — nothing validates it. Worse, the
+read-modify-write can lose content outright: if two seats read the same file and both write, the
+second write erases the first seat's entry with no conflict and no error. **That did not happen
+today, and I can only say so because I checked the diff afterwards — not because anything
+prevented it.**
+
+**Fix:** allocate from `max(existing) + 1` computed at *write* time inside the same command that
+appends, and have the splice refuse when its number already exists — a two-line assertion, which
+is what caught this one. The durable version is to stop hand-numbering: `git log` already orders
+entries, and a slug heading (`### force-include-dedup-untested`) cannot collide.
+
+**Not fixed here.** Three seats are writing this file right now, which is the wrong moment to
+restructure it. Related: **B15**, **B195**.
 
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
