@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-23 (B230 — ws.py:38's endpoint docstring advertises `?token=`, which `_ws_authorized` does not implement: measured, `?token=<valid>` gets HTTP 403 while the same token in the Authorization HEADER connects. The helper's own docstring says the opposite intent in the same file. B184's two-statements-one-fact on the AUTH surface, where the failure is a bare 403 that cannot distinguish wrong token, expired token, not permitted, and this parameter was never read. The code is right and the documentation is wrong. Also B229: a merely STOPPED engine turns `ok` false (:1125 sets 'idle', :737 counts anything != 'healthy' as a problem) while :979 says idle counts 'never as a problem' — and stopping the engine is B198 option 1. And B228, now verified further: the frontend subscribes to ('positions','removed') and NOTHING in the backend ever emits it, while stop() cancels the loop before closing so no update frame is sent either — there is NO path by which the positions panel ever clears.)
+Last updated: 2026-08-23 (B231 — `DataHealthPanel` renders TWO of the five components that set `ok`. `shadow`, `correlate_panels` and `order_path` have no row, so with the order path withdrawn the panel shows a red box reading "Data health — 1 problem" above two rows that both say HEALTHY, and the green branch hardcodes "Collector and backups healthy" for a five-component check. B199's finding was that the order path went dark while every visible signal stayed green; T-0057 built the signal that catches it and the signal cannot reach the panel. It also bounds what a B229 fix is worth: whichever meaning `ok` is given, the answer reaches Malek through a panel that cannot show the component that set it. Fix is to DERIVE the rows from the payload — adding three more hardcoded rows is B184's shape with a longer list.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -13876,6 +13876,57 @@ The empty-list guard never even gets the chance to reject one.
 Net: after stopping the engine the panel keeps rendering both positions until a page reload or a
 new run pushes a non-empty list. Not *"a bulk update to zero does not clear"* — **nothing clears
 it.**
+
+### B231. The health panel renders 2 of the 5 components that set `ok`, so a red box shows only healthy rows
+**Found in:** 2026-08-23, scoping `B229` as a product question under T-0064 (Review)
+**What it is:** `GET /api/system/data-health` returns five components. Its only consumer —
+`api.ts:348` -> `DataHealthPanel.tsx`, rendered once at `RightRail.tsx:164` — renders **two**:
+
+```
+DataHealthPanel.tsx:120   <Component name="Collector" health={health.dominance_collector} />
+DataHealthPanel.tsx:121   <Component name="Backups"   health={health.backups} />
+```
+
+`shadow`, `correlate_panels` and `order_path` have no row. So with the order path withdrawn — the
+state production is in right now — the panel shows:
+
+```
+Data health — 1 problem
+  Collector   HEALTHY
+  Backups     HEALTHY
+```
+
+**A red box declaring a problem, above two rows that both say healthy, and no row for the problem.**
+The count comes from `health.problems.length`, which is computed over all five; the rows are
+hardcoded to two.
+
+**The green branch makes the same error in the other direction.** `:103` is a hardcoded string,
+*"Collector and backups healthy"* — a claim about two components rendered when five were checked. A
+reader who sees it has been told less than was measured, in the voice of a complete answer.
+
+**Why it matters more than it looks.** This is the surface a human reads to answer *"is anything
+wrong"*. `B199`'s whole finding was that the order path went dark for 62-91 hours while every signal
+a human could see stayed green; `T-0057` built the signal that would have caught it — **and the
+signal cannot reach the panel.** The alarm exists, fires correctly, and is rendered as a number with
+no accompanying row.
+
+**It predates `T-0057` and that task is not at fault.** `shadow` and `correlate_panels` have been
+invisible here since they were added. What changed is that a component can now be non-healthy in
+NORMAL operation, so a gap that was theoretical is on screen today.
+
+**It also decides how much a `B229` fix is worth.** Whichever meaning `ok` is given, the answer
+reaches Malek through this panel — and the panel cannot show the component that sets it. **Changing
+the boolean without the panel changes what is true and not what he sees.**
+
+**Fix:** render every key in the response rather than a hardcoded pair — the component rows should be
+derived from the payload, so a sixth component appears without a frontend change. Note `Component`'s
+`detail` line is a two-branch ternary keyed on `name === 'Collector'`, so each component needs to
+carry its own display detail, or the row renders the wrong fields. **Deriving the rows from the
+payload is what stops this recurring; adding three more hardcoded rows is the same defect with a
+longer list** — `B184`'s shape on the frontend.
+
+**Not fixed here — frontend, and T-0064 is a scoping task with no code.**
+Related: **B229**, **B199**, **B228**, **B215**.
 
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
