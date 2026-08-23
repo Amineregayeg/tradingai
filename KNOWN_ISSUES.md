@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-23 (B234 — `ComponentHealth.status` is a CLOSED union of five in the frontend and the backend emits SIX: `withdrawn`, `idle`, `thin` and `not_applicable` are outside it, and `colourFor` falls through to RED for all of them under a comment reading `// down, failing` that asserts a completeness the branch does not have. So `idle` and `withdrawn` — the two states B229 is about — are the SAME COLOUR. T-0057 went to deliberate lengths to keep them separately labelled in the payload and the frontend discards the separation at the last step. Compounds B231 rather than duplicating it: that one is three components with no row, this is that two of the statuses that matter would be indistinguishable if they had one.)
+Last updated: 2026-08-23 (B235 — `rule_says_entry` is computed at TWO sites in `entry_comparison.py`: `:435` decides AGREE vs DISAGREE and `:171`, inside the function whose docstring says "The ONE site that decides this", decides which way. Measured by mutation: loosen `:171` to `!= "FAIL"` and the T-0053 suite reports 22 passed — no arm notices. Latent, because both read the same literal and NOT_APPLICABLE short-circuits before either runs, so they agree on the reachable population and can only diverge if someone edits one — which is the edit the mutation shows passing. `direction_unknown` would not catch it: both paths still return a direction, just different ones. B184's shape, one field over, in the code written to close an instance of it.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -13834,9 +13834,21 @@ blank the panel.
 **The consequence is that a GENUINE transition to flat never clears it.** `setPositions` is only ever
 called with a non-empty list, so once the panel shows two positions it shows them until the next
 non-empty push. Close both and the dashboard keeps rendering them — stale, indefinitely, with no
-indication the data is old. `'positions','removed'` exists and removes by id, so a clean per-position
-close does clear; a bulk `update` to zero does not. **`POST /engine/stop` settles everything and then
-pushes — which is exactly the path `B198` option 1 takes.**
+indication the data is old. **CORRECTED 2026-08-23, same day, by the Manager — my original claim here was wrong and the
+finding is worse without it.** I wrote that `'positions','removed'` removes by id so a clean
+per-position close still clears the panel. **It does not, because the backend never emits that
+event.** Measured — every event broadcast on the `positions` channel:
+
+```
+backend emits    account · close · open · update      (ws/manager.py:346 and crypto_loop)
+frontend listens update · added · removed             (ws.ts:226, :233, :238)
+```
+
+**The two sides use different vocabularies.** `added` and `removed` are never sent, so both handlers
+are dead; `close` and `open` are sent and nothing listens. Combined with the empty-list skip above,
+**there is NO path by which the positions panel ever clears** — not a bulk update to zero, not a
+per-position close. `POST /engine/stop` settles everything and then pushes, which is exactly the path
+`B198` option 1 takes, and the panel would keep rendering both positions afterwards.
 
 **It is the same defect one layer further out.** The UI cannot tell *"there are no positions"* from
 *"the broker sent nothing"*, so it resolved the ambiguity by permanently choosing one branch — and it
@@ -13876,6 +13888,33 @@ The empty-list guard never even gets the chance to reject one.
 Net: after stopping the engine the panel keeps rendering both positions until a page reload or a
 new run pushes a non-empty list. Not *"a bulk update to zero does not clear"* — **nothing clears
 it.**
+
+**MANAGER VERIFICATION OF THE CORRECTION — CONFIRMED, AND THERE IS A FOURTH DEFECT IN THE SAME
+CHANNEL.** The vocabularies are measured, both sides, derived rather than listed:
+
+```
+backend emits    account · close · open · update      ws/manager.py:338,342,346 + crypto_loop.py:458,462
+frontend handles update · added · removed             ws.ts:226, :233, :238
+```
+
+`added` and `removed` are **never sent**, so both handlers are dead. `open`, `close` and `account`
+are **sent and nothing listens**. The vocabularies overlap in exactly one member.
+
+**AND THAT ONE MEMBER CARRIES TWO INCOMPATIBLE PAYLOAD SHAPES:**
+
+```
+ws/manager.py:338    push_position_update(position)  ->  event="update", data=<ONE position dict>
+crypto_loop.py:458   _push_state()                   ->  event="update", data={"positions": [...]}
+```
+
+The frontend handler reads `data?.positions`. For the `manager.py` shape that is `undefined`,
+`Array.isArray(undefined)` is `false`, and **the update is silently discarded by the same guard
+that discards empty lists.** So of five broadcasts on this channel, exactly one — `crypto_loop`'s
+non-empty list — is ever acted on.
+
+**Consequence for the fix:** "make the panel clear" requires **reconciling the vocabularies AND
+the payload shape**, not just handling the empty case. A seat that fixes only the empty-list skip
+ships a panel that still never clears, and the fix looks done.
 
 ### B231. The health panel renders 2 of the 5 components that set `ok`, so a red box shows only healthy rows
 **Found in:** 2026-08-23, scoping `B229` as a product question under T-0064 (Review)
@@ -14064,6 +14103,46 @@ one, because it makes the compiler agree with the error.
 
 **Not fixed here — T-0065 is unstarted and this is a pre-registration.**
 Related: **B231**, **B229**, **B228**, **B150**.
+
+### B235. `rule_says_entry` is computed at two sites, and the second can be changed with the suite green
+**Found in:** 2026-08-23, T-0053's review (Review) — by mutation, and Execute invited it
+**What it is:** `T-0053` split `disagree` by direction and put the decision in one function whose
+docstring says **"The ONE site that decides this."** That is true of the DIRECTION. It is not true of
+the predicate the direction rests on:
+
+```
+entry_comparison.py:435   rule_says_entry = rule_verdict == "PASS"     decides AGREE vs DISAGREE
+entry_comparison.py:171   rule_says_entry = c.rule_verdict == "PASS"   decides WHICH WAY
+```
+
+**Two independent statements of "the rule would have entered", and nothing binds them.** Measured by
+mutation: change `:171` to `!= "FAIL"`, leaving `:435` alone, and
+`test_t0053_disagreement_direction.py` reports **22 passed**. No arm notices.
+
+**Harmless today and the reason is worth stating, because it is what makes it latent rather than
+absent.** Both sites read the same literal, and a `NOT_APPLICABLE` verdict short-circuits to
+`NOT_COMPARABLE` before either runs — so on the reachable population `== "PASS"` and `!= "FAIL"`
+agree. The two can only diverge if someone edits one of them, **and the mutation shows exactly that
+edit passing.**
+
+**What divergence would look like.** The construction would classify a comparison as AGREE while the
+direction function classified the same pair as an entry, or the reverse — so `rule_stricter +
+rule_looser` would stop reconciling against `disagree`. `direction_unknown` catches a non-bool
+`live_verdict`; **it does not catch the two sites disagreeing about the rule's side**, because both
+paths still return a direction, just different ones.
+
+**This is the defect class the task exists inside.** `B177` was a value computed and then lost;
+`B184` was two places encoding one fact and only one kept current. **T-0053's fix is correct and
+introduces a second computation of the neighbouring predicate** — the same shape, one field over,
+in the code written to close an instance of it.
+
+**Fix:** `disagreement_direction` should not recompute it. Either derive both from one helper, or
+have the construction pass the value it already computed. Small, and it removes the class rather than
+this instance.
+
+**Not fixed here, and it does not block T-0053's PASS** — the behaviour is correct, every direction
+arm is mutation-verified, and the label-inversion mutation the `isinstance` guard cannot see IS
+caught by seven tests. Related: **B177**, **B184**, **B213**, **B218**.
 
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
