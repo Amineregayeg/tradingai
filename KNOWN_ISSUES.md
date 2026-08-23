@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-23 (B233 — GATE-027 rung 2 is a MULTI-TIMEFRAME rule by ruling ("any TF", declared at RULE_REGISTRY.json:833 and restated at TELEMETRY_SCHEMA.json:556) and NO corpus in this repository carries more than one timeframe: the 529 setups are a single 5m series from 2026-08, and the only other fixtures are 1h and daily from 2024 on a different instrument — zero overlap. So a rung-2 that silently reads only the exec TF passes every test the repo can write and is indistinguishable from one that honours the ruling. B191's shape reached BEFORE the code exists, and worse than B191: that guard at least had a population to be wrong about, this term has none, so unexercisable and absent produce the same green. Fix is resampling the existing 5m bars to 15m/1H over the same window — derivation, not invention.)
+Last updated: 2026-08-23 (B234 — `ComponentHealth.status` is a CLOSED union of five in the frontend and the backend emits SIX: `withdrawn`, `idle`, `thin` and `not_applicable` are outside it, and `colourFor` falls through to RED for all of them under a comment reading `// down, failing` that asserts a completeness the branch does not have. So `idle` and `withdrawn` — the two states B229 is about — are the SAME COLOUR. T-0057 went to deliberate lengths to keep them separately labelled in the payload and the frontend discards the separation at the last step. Compounds B231 rather than duplicating it: that one is three components with no row, this is that two of the statuses that matter would be indistinguishable if they had one.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -14021,6 +14021,49 @@ shape beside it rather than as *"the 529 setups"*.
 
 **Not fixed here — T-0049 is unstarted and this is a pre-registration.** Related: **B191**, **B222**,
 **B213**, **B150**.
+
+### B234. Three of the six statuses the backend emits are outside the frontend's union, and all fall through to RED
+**Found in:** 2026-08-23, baselining T-0065 (Review)
+**What it is:** `types/api.ts:252` declares `ComponentHealth.status` as a CLOSED union of five:
+
+```
+'healthy' | 'stale' | 'down' | 'failing' | 'unavailable'
+```
+
+The backend emits six, measured across `data_health.py`: `healthy`, `unavailable`, `withdrawn`,
+`idle`, `thin`, `not_applicable`. **`withdrawn`, `idle`, `thin` and `not_applicable` are not in the
+union at all** — and two of them are `T-0057`'s, the newest component's resting states.
+
+`colourFor` (`DataHealthPanel.tsx:29-33`):
+
+```
+if (status === 'healthy') return GREEN
+if (status === 'stale' || status === 'unavailable') return AMBER
+return RED   // down, failing
+```
+
+**Everything unlisted falls through to RED**, and the trailing comment `// down, failing` asserts a
+completeness the branch does not have — it is a two-item list describing a catch-all.
+
+**So `idle` and `withdrawn` are the same colour.** Those are precisely the two states `B229` is
+about: *the engine is off* and *the order path is withdrawn from trading*. `T-0057` went to
+deliberate lengths to keep them separately labelled in the payload — `data_health.py:1125` and the
+comment above it — and the frontend renders both as one red. **The separation exists and is
+discarded at the last step.**
+
+**It compounds `B231` rather than duplicating it.** `B231` is that three components have no row;
+this is that if they did, two of the statuses that matter would be indistinguishable. **Fixing either
+alone leaves the reader unable to tell why the panel is red** — which is why T-0065 and `B229` must
+not be sequenced apart.
+
+**Fix:** map every status explicitly with a derived arm — assert the set the backend can emit is a
+subset of the set the panel maps, **with the backend set read rather than retyped, because a literal
+list of six is `B150` in the test that guards against it.** And the union should either carry all six
+or be `string` with an explicit default colour; a closed union that is wrong is worse than an open
+one, because it makes the compiler agree with the error.
+
+**Not fixed here — T-0065 is unstarted and this is a pre-registration.**
+Related: **B231**, **B229**, **B228**, **B150**.
 
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
