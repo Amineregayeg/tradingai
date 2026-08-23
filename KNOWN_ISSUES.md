@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-23 (B243 — `box_grade` is "NONE" on 4338 of 4338 rows because a LITERAL writes it. There is exactly ONE `setup_evaluation` builder in the repository, `shadow.py:721`, and it hardcodes `risk_assessment={box_grade: NONE, risk_pct: 0.0}` and `block_reason=NO_ALIGNMENT` inside the call. `as_risk_assessment()` has ZERO callers and `gate_032` is not referenced on the shadow or evaluator path, so the nine-cell matrix has never run. The figure is real and its reading was one step too far: not "the box has never been graded" but "the field has never been fed by a grader". That changes T-0054(a) from a measurement with one producer to a construction with zero, and T-0056 from blocked-on-a-measurement to blocked-on-a-producer-and-a-consumer that were never wired.)
+Last updated: 2026-08-23 (B244 — `shadow_health` attests `liveness_only` and disclaims correctness, panel freshness and bar-closedness; outcome VARIETY is neither attested nor disclaimed. A corpus of 4358 identical and individually CORRECT records is not a correctness problem, so the nearest disclaimer does not cover it — and on a component whose scope block exists to enumerate its own limits, an unlisted limit is worse than on one making no such promise. B240 on the shadow's own surface: the answer is published and the denominator is not. Fix is one line of `does_not_attest` as the honest minimum, or better, emit `distinct_outcomes` as VALUES and never as a status — the shadow is not broken and a non-healthy status would flip `ok` for a component doing its job. NO THRESHOLD: a quiet regime produces one branch too, and choosing N is B93. Separate from B231/B234 — those are rendering, this is payload, and it would survive a perfect T-0065.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -14577,6 +14577,91 @@ many distinct outcomes has this corpus ever contained* — is not. **Third time 
 reporting a constant was read as a measurement** (`B188`'s coverage, `B226`'s zeroed loop, this),
 and the first time it was caught inside the entry recording the pattern.
 
+### B244. `shadow_health` neither attests outcome variety nor disclaims it, and the scope block exists to close exactly that gap
+**Found in:** 2026-08-23, answering what the signal should say about a single-branch corpus (Review)
+**What it is:** `shadow_health` publishes a scope block whose whole purpose is to enumerate what the
+signal does not answer:
+
+```
+data_health.py:294   "attests": "liveness_only",
+:295                 "does_not_attest": [
+                         "correctness of the evaluation",
+                         "freshness of the correlate panels",
+                         "whether the grade reflects closed bars",
+                     ],
+```
+
+**Outcome VARIETY is in none of them.** *"Correctness"* is whether an evaluation is right; variety is
+whether the corpus has ever contained more than one answer. **A corpus of 4358 identical and
+individually correct records is not a correctness problem** — so the disclaimer that looks closest
+does not cover it.
+
+**So the gap is not that the signal is wrong. It is that a reader who does the RIGHT thing — reads
+the scope block rather than the colour — still does not learn that every record in the corpus is the
+same branch** (`B243`: `block_reason NO_ALIGNMENT` and `decision STAND_ASIDE` at 4358 of 4358, both
+constants of the single call site). **On a component designed to be explicit about its own limits,
+an unlisted limit is worse than on one that makes no such promise.**
+
+**This is `B240` on the shadow's own surface.** The answer is published — *the shadow is recording* —
+and the denominator, *how many distinct outcomes this corpus has ever contained*, is not. The signal
+is true and uninformative in the same breath.
+
+**Fix, in two parts, and the cheap one is the honest minimum:**
+
+1. **Add variety to `does_not_attest`** — one line, and it closes the honesty gap immediately even if
+   nothing is ever measured. *"whether the corpus contains more than one outcome"*.
+2. **Better: emit it as VALUES** — `distinct_outcomes`, `dominant_branch`, `dominant_share` — beside
+   the existing fields. **Not as a status.** The shadow is not broken; it is recording the only thing
+   it can record, and `:700-711` explains why that is correct. Making it non-healthy would flip
+   `data_health`'s `ok` (`B229`) for a component doing its job.
+
+**AND NO THRESHOLD.** *"Fewer than N distinct outcomes is an alarm"* is unanswerable — a legitimately
+quiet regime produces one branch too — and choosing N is `B93`'s tuned number. **Publish the count
+and let a human read it**, which is `order_path_health`'s own rule: *"THE VALUES, not a colour. A
+signal that returns only a verdict cannot be argued with."*
+
+**Not the same defect as `B231`/`B234`, and the test is clean:** those are RENDERING — the panel
+cannot show what the payload says. This is PAYLOAD — the payload does not say the thing that matters.
+**If `T-0065` landed perfectly, this would still be invisible**, because the panel would faithfully
+render `shadow: healthy`. Same rule, different layer.
+
+**Not fixed here.** Related: **B243**, **B240**, **B199**, **B229**.
+
+**MANAGER VERIFICATION.** The scope block is exactly as Review read it — `data_health.py:294-299`,
+three disclaimers, and **outcome variety is in none of them**:
+
+```
+"attests": "liveness_only"
+"does_not_attest": [ "correctness of the evaluation",
+                     "freshness of the correlate panels",
+                     "whether the grade reflects closed bars" ]
+```
+
+*"Correctness"* is the nearest and it does not cover this: **4358 identical records that are each
+individually CORRECT are not a correctness problem.** So a reader who does the right thing — reads
+the scope block instead of the colour — still does not learn the corpus is single-branch. **On a
+component whose block exists precisely to enumerate its own limits, an unlisted limit is worse than
+on one that promises nothing.**
+
+**SEPARATE FROM `B231`/`B234`, and the test is clean:** those are RENDERING — the panel cannot show
+what the payload says. This is PAYLOAD — it does not say the thing that matters. **If `T-0065`
+landed perfectly, all five components rendered and every status coloured, this would still be
+invisible**, because the panel would faithfully render `shadow: healthy`. Same rule (`B240`),
+different layer — and keeping them apart is practical: `T-0065` has been amended once already for a
+changed subject, and folding a backend measurement into a frontend task is how a task's acceptance
+stops matching its title.
+
+**FIX, in two parts, cheapest first:** one line in `does_not_attest` — *"whether the corpus contains
+more than one outcome"* — closes the honesty gap even if nothing is ever measured, **and if only one
+thing is done it is this.** Better: emit `distinct_outcomes`, `dominant_branch`, `dominant_share` as
+**VALUES beside the existing fields, never as a status** — a non-healthy status would flip `ok` for a
+component doing its job, which is `B229` arriving from the other side.
+
+**AND NO THRESHOLD.** *"Fewer than N outcomes is an alarm"* is unanswerable — a legitimately quiet
+regime produces one branch too — and picking N is `B93`'s tuned number. **Publish the count and let
+a human read it**, which is `order_path_health`'s own rule: *"THE VALUES, not a colour. A signal that
+returns only a verdict cannot be argued with."*
+
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
 **What it is:** `TELEMETRY_SCHEMA.json` hard-pins `engine.rule_registry_version` with
@@ -15209,4 +15294,26 @@ that one was a surprise doing a control's job. **A less surprising wrong answer 
 shipped with the same confidence.** Related: **B199**, **B215**, **B226**, **B228**, **B230**,
 **B231**, **B191**, **B217**, **B236**.
 
+**THE PRECONDITION, added 2026-08-24 by Review, and nobody had stated it.** Publishing the
+denominator has a prerequisite: **first establish that the field CAN vary. A denominator over a
+constant is still a constant.**
 
+**Four times in one day a field reporting a constant was read as a measurement:**
+
+```
+B188   coverage that counted a population of one shape
+B226   a zeroed feedback loop rendering like a healthy one
+B243   box_grade "NONE" on 4338 rows — a literal at the only call site
+B243   (again) decision "STAND_ASIDE" on 4358 — CONSTRUCTED at :712, not computed
+```
+
+The fourth was caught **mid-claim, by the seat writing the entry about the other three**, one step
+from asserting *"the rules evaluated 4358 bars and stood aside every time"* — a claim about the
+MARKET rather than about a code path.
+
+**So the pattern is now specific enough to be a CHECK rather than a lesson:**
+
+> **Before quoting a distribution, confirm the field has more than one writer.**
+
+`grep -c` on the assignment is cheaper than the query that produces the number, **and it would have
+answered all four.**
