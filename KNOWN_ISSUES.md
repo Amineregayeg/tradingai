@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-23 (B238 — `base.py:55-58` says three safety-critical chokepoints read `is_simulation` and refuse writes to a non-simulation broker: ExecutionService, the kill switch, and position-close routing. Measured, only `execution/service.py:96` refuses; `kill_switch.py` and `positions.py` have ZERO references and `close_all_positions` iterates every adapter with no check. It matters now because T-0062's proxy makes the kill switch REACH the live broker — correctly — so a dormant gap became live by repairing the path in front of it: if the loop ever holds a real-money adapter the kill switch closes real positions unchecked. Closing is the safe side, so the danger is the DOCSTRING: a seat deciding how much care `is_simulation` deserves reads it and gets three chokepoints' assurance from one.)
+Last updated: 2026-08-23 (B240 — PUBLISH THE DENOMINATOR, a method entry naming the day's dominant shape: six surfaces render an answer without the count that says whether it means anything (B199 health, B215 positions, B226 learning, B228 dashboard, B230 auth, B231 the health panel), while the codebase STATES the rule in entry_comparison.values() and applies it in exactly one place. The name is the ACTION and was corrected once — 'absence and zero render alike' describes three symptoms; 'publish the denominator' is testable, and an arm can assert a rate is never emitted without its denominator. It is also why every zero here now needs a control: B191's 0 callers, B217's 0 loop-level reasons and B236's 0 graded boxes were each publishable ONLY because a control showed the instrument could see. And B239 — INHERITED REACHABILITY: a fix's blast radius includes every dormant defect on the path it repairs, and none appear in its own diff. B238 is the instance, B221's fix had exactly one answer and nobody asked, and the practical form is a question for a plan: what was unreachable before this change that is reachable after it?)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -14863,5 +14863,86 @@ placements from the right one, and without it the differential passes a fix that
 and found nothing"* into *"could not look"* — `examined_nothing`'s own rule, inverted.
 
 Related: **B217**, **B191**, **B213**, `T-0059`, `T-0040`.
+
+### B239. INHERITED REACHABILITY — a fix's blast radius includes every dormant defect on the path it repairs, and none of them appear in its own diff
+**Found in:** 2026-08-23, by Review, naming the category `B238` belongs to after this seat said it
+had no name for it
+**A METHOD ENTRY, not a defect.** It exists so the question below gets asked by the next plan.
+
+**The observation.** `B238`'s facts admit two readings, and only the second is useful for
+sequencing:
+
+* *Uncovering* — the repair EXPOSED a pre-existing gap. The missing `is_simulation` check on the
+  close path was always absent; `B221`'s orphan was hiding it. The gap is the defect and the repair
+  is blameless.
+* **Inherited reachability** — the repair CREATED reachability for a gap that had none. Before
+  `T-0062`, *"no `is_simulation` check on the close path"* **was not a defect at all**, because the
+  close path did nothing. `close_all_positions` iterated an orphan and returned `[]`.
+
+**Why the second reading is the one that matters.** A fix's blast radius is not its diff. It is the
+diff **plus every dormant defect on the path the fix restores to life** — and those appear in no
+changed line, no test, and no review of the change itself. `T-0062` repaired the kill switch and
+inherited a missing safety check it never touched.
+
+**THE PRACTICAL FORM IS A QUESTION FOR A PLAN, NOT A LABEL:**
+
+> **What was unreachable before this change that is reachable after it?**
+
+**`B221`'s fix had exactly one answer and nobody asked.** It was found afterwards, by a reviewer
+looking at something else. The cost this time was zero — closing is the safe direction and the
+deployment is `PROP_FIRM_SIM` throughout — and the cost is not always zero.
+
+**Why it is worth a name.** The register's dominant failure shape is *a thing that reads as covered
+and is not*: `B191` (one call shape of three), `B211` (a dead run reading as green), `B233` (a term
+no corpus can exercise). **Inherited reachability is the same shape moved in time** — the defect is
+not covered because it was not a defect yet, and the moment it becomes one is a commit that does not
+mention it. Related: **B238**, **B221**, **B233**, **B211**.
+
+### B240. PUBLISH THE DENOMINATOR — six surfaces render an answer without the count that says whether it means anything, and the codebase already states the rule in one place
+**Found in:** 2026-08-23, across the day — named by Review, which corrected this seat's proposed
+name for it
+**A METHOD ENTRY. The name is the action, deliberately.**
+
+**The rule already exists in this codebase, stated by whoever wrote `entry_comparison.values()`:**
+
+> *"THE DENOMINATOR IS PUBLISHED, ALWAYS. A rate whose denominator can be zero must publish its
+> denominator: a ratio hides exactly one number and it is always the one that says whether the ratio
+> means anything."*
+
+**It is applied in exactly one place. Six surfaces violate it, all found today:**
+
+```
+B199   health        a due bar with no record vs no bar due — same silence
+B215   positions     [] = no adapters, adapters with nothing, or every adapter threw
+B226   learning      0 usable rows vs many — same code path, same shaped answer
+B228   dashboard     empty list ignored BY DESIGN, so a real close never clears the panel
+B230   auth          a bare 403: wrong token, expired, not permitted, or never implemented
+B231   health panel  "1 problem" counted over 5, rendered over 2, with no row for the problem
+```
+
+**THE NAME IS THE POINT AND IT WAS CORRECTED ONCE.** This seat proposed naming it for the symptom —
+*"absence and zero render alike"*. Review's correction: that describes three symptoms; **"publish
+the denominator" is the ACTION, and it is testable.** An arm can assert a rate is never emitted
+without its denominator beside it. **A lesson you can write an arm against outlives one you can only
+agree with.**
+
+**AND IT IS WHY EVERY ZERO IN THIS REGISTER NOW NEEDS A CONTROL.** Three findings today turned on
+it, and in all three the control is what made the zero publishable rather than merely true:
+
+```
+B191   0 `.size(` callers under app/   control: 7 hits in the test file, same predicate
+B217   0 loop-level reasons in DRs     control: 358 in-trace LIVE_NOT_REACHED rows
+B236   0 graded boxes in 4338 rows     control: disturbance grade varies over the same rows
+```
+
+**A population of zero is a RESULT when a control shows the instrument can see, and a SILENCE
+otherwise** — and the two are indistinguishable from the number alone.
+
+**One instance today had NO designed control and was caught by luck.** A census read
+`engine_policy` from the wrong payload path and returned a clean `100% null` across 4340 rows. It
+was caught **only because 100% is implausible.** Every other control that day was built on purpose;
+that one was a surprise doing a control's job. **A less surprising wrong answer — 12% — would have
+shipped with the same confidence.** Related: **B199**, **B215**, **B226**, **B228**, **B230**,
+**B231**, **B191**, **B217**, **B236**.
 
 
