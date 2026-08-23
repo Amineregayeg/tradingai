@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-23 (B203 — three seats hand-numbered register entries on one afternoon and collided three ways; renumbered to B200-B202, and note the allocator that would have prevented it ALREADY EXISTS as `bus.py bid`, which two of the three seats used. BUT THE ENTRY THAT MATTERS IN THIS BATCH IS B198: THE ENGINE HAS NOT TRADED SINCE 2026-08-21 AND EVERY HEALTH SIGNAL IS GREEN. EXIT-001's 30% runner has no target, may not move its stop while EXIT-003 is OPEN, and the 19:00 flatten is suppressed — so STOP_HIT is its only terminal condition, and because the entry gate blocks on the SYMBOL holding any position, a persisting remainder withdraws that symbol from trading entirely. ETH/USD: 7 decision records in a four-day run, none since 2026-08-19 19:20:31 UTC. BTC/USD: none since 2026-08-21 00:05:12 UTC. Cost ~1,760 lost decision records against a total corpus of 1,060. B199 is why nobody saw it: shadow_health() watches the telemetry corpus, which T-0010 deliberately moved ABOVE the gates so 'already in a position' would stop suppressing it — the monitored artefact was engineered to be immune to the state that stops the engine, and 1,512 shadow records landed in the window the order path wrote 0.)
+Last updated: 2026-08-23 (B210 — the sizer tripwire's own docstring claims "No `.size(...)` call of ANY form exists under `app/`" 33 lines below the SAME FILE's admission (B196) that a value-bound reference and `getattr` both stay silent. `:228` is what a reader consults to learn what a green guard means; `:195` is a helper docstring they may never open. The overstatement runs in the dangerous direction — it invites "the sizer is unreachable from production" when what was established is "no `.size` ATTRIBUTE CALL under `app/`", and T-0056's acceptance turns on that flip meaning something exact. B184's own shape, in the file written to close B191. The guard is CORRECT — all three call shapes and the over-fire were verified to turn it red end-to-end; only its self-description is wrong. Also B208: the control pair is split across two tests and only one carries the name.)
 
 ---
 
@@ -12893,42 +12893,146 @@ belongs.
 **Not fixed here.** Cosmetic in effect, but it is the kind of mislabel that survives to become a
 premise. Related: **B200**.
 
-### B203. The issue register has no number allocator, and three seats collided on the same afternoon
-**Found in:** 2026-08-23, T-0052's review (Review, `tradingai-62`) — found by walking into it
-**What it is:** `KNOWN_ISSUES.md` numbers entries `B<n>` and allocates them by *reading the file
-and adding one*. That is a read-modify-write with no lock, performed by three seats against one
-unstaged working-tree file. Within about twenty minutes on 2026-08-23 it produced a three-way
-collision:
+### B203. The register id allocator EXISTS and is CORRECT, and using it is OPTIONAL
+**Found in:** 2026-08-23, T-0052's review (Review) — by colliding, then being corrected by the Manager
+**CORRECTED 2026-08-23, same day, by the Manager, and the correction inverts the fix.** The first
+version of this entry said the register "has no number allocator" and proposed allocating
+`max(existing) + 1` at write time. **Both halves were wrong, and the proposed fix would have
+reintroduced the very defect this entry describes.** What follows is the verified version.
+
+**What it is:** `bus.py bid` IS an allocator, with a persistent cross-seat ledger at
+`agents/bid_ledger.json`. `bus.py:384` states its own rule: *"the highest heading in the file
+means 'the highest number COMMITTED or written by me', never 'the highest number CLAIMED'. This
+ledger is the claim, so it sees what the file cannot."* It takes `max(highest_in_file,
+highest_claimed) + 1` and records the claim before returning. **It is correct.**
+
+**Nothing requires a seat to use it.** That is the defect, and today measured it:
 
 ```
-B196   the widened sizer tripwire still enumerates CALL SYNTAX     (T-0055 work)
-B196   the test named for the deduplication passes ...             (T-0052 review)
-B197   TWO sizer-reachability tripwires ...                        (T-0055 work)
-B197   GATE-015's Fed-Chair conjunction ...                        (T-0052 review)
-B198   EXIT-001's passive runner OCCUPIES the symbol ...           (loop restart)
-B198   a regression parametrisation claims coverage ...            (T-0052 review)
+B196  execute  14:44:16  bid          T-0055 sizer tripwire
+B197  execute  14:44:20  bid          T-0055 sizer tripwire
+B198  manager  14:49:12  bid          engine has taken no trade for 62.7h
+B199  manager  14:49:12  bid          every liveness signal reads healthy
+B195  (no seat)          NOT BID      Malek's own session
+B196  review              NOT BID     <- read the file, saw B195 as highest, took B196-B198
+B197  review              NOT BID     <-   and collided with BOTH seats that had bid
+B198  review              NOT BID     <-
 ```
 
-I took `B196` as free because I read the file when the highest was `B195`; by the time I wrote,
-two other seats had each taken it. **Renumbered to `B200`–`B202` here.** `B82` is also duplicated
-and predates today, so this has happened before and was absorbed silently.
+**Three seats wrote six ids in twenty minutes. The two that bid did not collide. The one that
+read the file collided with both of them.** That is the whole finding, and it is a stronger
+statement than "there is no allocator" — a missing tool is a gap, an unenforced correct tool is a
+trap, because it looks like it is working right up until the seat that skipped it writes.
 
-**Why it matters beyond tidiness:** the number is the *only* handle. Entries cite each other by
-it (`Related: **B150**`), tasks cite it in their titles, verdicts cite it, and the board's task
-list is written in terms of it. A duplicated number makes every one of those references ambiguous
-in a file 13,000 lines long, and the ambiguity is silent — nothing validates it. Worse, the
-read-modify-write can lose content outright: if two seats read the same file and both write, the
-second write erases the first seat's entry with no conflict and no error. **That did not happen
-today, and I can only say so because I checked the diff afterwards — not because anything
-prevented it.**
+**Why `max(existing) + 1` — my original proposal — is the wrong fix:** it reads the FILE, and the
+file cannot see another seat's UNCOMMITTED entry sitting in a shared working tree (`B25`). That is
+precisely the mechanism by which I took `B196` while two other seats already held it. `B85` is the
+same class one turn earlier: the ledger's own file scan once required a period after the number,
+silently matched nothing newer than `B60`, and reissued an id when Review filed `B83` without
+bidding — invisible to both halves at once. The regex is `^### B(\d+)\b` today and matches both
+heading styles; that half is fixed.
 
-**Fix:** allocate from `max(existing) + 1` computed at *write* time inside the same command that
-appends, and have the splice refuse when its number already exists — a two-line assertion, which
-is what caught this one. The durable version is to stop hand-numbering: `git log` already orders
-entries, and a slug heading (`### force-include-dedup-untested`) cannot collide.
+**What still stands from the first version, and it is the part that matters most.** Nothing
+validates uniqueness after the fact. `B82` is duplicated and predates today, so a collision has
+already survived into `main` once and was absorbed silently. And the append itself is a
+read-modify-write on an unstaged shared file: **two seats can read the same `KNOWN_ISSUES.md` and
+both write, and the second write erases the first seat's entry with no conflict and no error.**
+That did not happen today, and I can say so only because I checked the diff afterwards — not
+because anything prevented it.
 
-**Not fixed here.** Three seats are writing this file right now, which is the wrong moment to
-restructure it. Related: **B15**, **B195**.
+**The cheap enforcement is a uniqueness assertion, and the place it belongs cannot currently make
+one.** `register_commit_check.py`'s `staged_ids()` collects added ids with
+`list(dict.fromkeys(ADDED.findall(out)))` — *"preserve order, drop duplicates"*. So a commit
+carrying `B196` twice presents as carrying it once, and **the check that guards this file is
+structurally blind to a doubled id.** Today's six entries landed in ONE commit (`3d444f2`); had I
+not renumbered by hand, the duplicate pairs would have collapsed in that very call and the hook
+would have passed. The dedup is also diff-scoped, so a new heading colliding with one already in
+`HEAD` is invisible for a second reason.
+
+**Fix:** (a) make `bus.py bid` the only sanctioned path and say so where seats read their
+instructions, since the tool is already correct; (b) in `register_commit_check.py`, count added
+ids BEFORE deduplicating and fail on a repeat, and additionally reject any added id already
+present in `HEAD`. The durable version is to stop hand-numbering entirely — `git log` already
+orders entries, and a slug heading (`### force-include-dedup-untested`) cannot collide at all.
+
+**Not fixed here.** Three seats are writing this file concurrently, which is the wrong moment to
+restructure it. Related: **B85**, **B25**, **B15**, **B195**.
+
+### B208. The control test's NAME asserts a pair; the test asserts half of it
+**Found in:** 2026-08-23, T-0055's review (Review) — id bid from the ledger, per **B203**
+**What it is:** `T-0055` armed `B188`'s tripwire with the control pair that separates *"zero
+production callers"* from *"the predicate is dead"* — the same trap `T-0052`'s ARM 4 caught. The
+pair is real and I verified it independently: one predicate, **silent over 180 files under `app/`,
+loud with 7 hits on the test file itself.**
+
+But it is split across two tests, and only one of them carries the name.
+`test_t0055_the_guard_is_SILENT_ON_APP_WHILE_LOUD_ON_THIS_FILE` asserts the LOUD half (`own >= 3`),
+that the walk root exists, and that the control file is outside it. **It never runs the predicate
+over `app/`.** The silent half lives in
+`test_the_rung_down_cannot_reach_a_live_trade_and_this_test_says_why`.
+
+**Why it matters:** both run today, so the pair holds today. If the other test is ever skipped,
+xfailed, or deleted, this one still passes — green, under a name asserting a relationship that no
+longer exists. A control that can be separated from its subject is not a control; it is a second
+assertion that happens to sit nearby. And the name is what a future reader trusts, because the name
+is what says *"the instrument was checked"*.
+
+**Same class as `B202`** — a true assertion under a label that overstates it — and the reason it is
+worth an entry rather than a shrug is that this particular label is the one claiming the INSTRUMENT
+is sound. That claim is load-bearing for every `0 production callers` figure the guard produces.
+
+**Fix:** re-run the app walk inside the control and assert both halves in one place, so the pair
+cannot be separated:
+
+```
+own  = _size_call_sites(this_file)            # loud
+app_ = [h for p in app_dir.rglob("*.py") for h in _size_call_sites(p.read_text())]
+assert own and not app_                        # the PAIR, in one assertion
+```
+
+**Not fixed here.** The tripwire itself is correct and was verified end-to-end — all three call
+shapes and the over-fire, each injected into a real file under `app/`, each turning it red.
+Related: **B202**, **B191**, **B188**.
+
+### B210. The tripwire claims "ANY form" 33 lines below the same file's admission that two forms are invisible
+**Found in:** 2026-08-23, T-0055's review (Review) — id bid from the ledger, per **B203**
+**What it is:** one file, `backend/tests/unit/test_t0048_eco_day_sizing.py`, states both of these:
+
+```
+:195  **Still not covered, and recorded rather than fixed (`B196`):** a value-bound reference
+      (`sizer = RiskMatrix.size` then `sizer(...)`) and `getattr(RiskMatrix, "size")(...)`
+      both stay silent, because both stop being an attribute call at the call site.
+
+:228  No `.size(...)` call of ANY form exists under `app/` — live trades are sized from
+      `fixed.RISK_PCT`.
+```
+
+**`:228` is the docstring of the tripwire itself** — the thing a reader consults to learn what a
+green guard means — and *"of ANY form"* is exactly the claim `:195` says is false. I confirmed both
+forms are silent independently, along with `functools.partial(RiskMatrix.size)` and
+`[RiskMatrix.size][0](...)`, which are the same class.
+
+**Why it matters:** the two sentences fail in opposite directions and a reader only meets one of
+them. `:195` lives in a helper's docstring; `:228` is what you read when the guard is green or when
+it goes red. The overstatement runs in the dangerous direction — it invites *"the sizer is
+unreachable from production"* when what was actually established is the narrower *"no `.size`
+ATTRIBUTE CALL appears under `app/`"*. `T-0056`'s acceptance turns on that flip meaning something
+exact, and `B197` already shows that *"the tripwire flips"* is two questions rather than one.
+
+**This is `B184`'s own shape, in the file written to close `B191`.** Two places in one file encode
+the same fact and only one of them is current — which is why the fix there was deduplication rather
+than a longer list, and why a prose restatement of a predicate's coverage will drift from the
+predicate again. **The guard is CORRECT; only its self-description is wrong.** Verified end-to-end
+in the same review: all three call shapes and the deliberate over-fire each turn it red when
+injected into a real file under `app/`.
+
+**Fix:** state the predicate rather than paraphrase its reach — *"no `.size` attribute call appears
+under `app/`; a value-bound or `getattr` reference is invisible to this guard, see `B196`"* — and
+put that sentence where the guard is, not only in the helper. The durable version is to derive the
+sentence from the predicate the way `T-0052` derived `SPEECH_TOKENS` from the taxonomy table, so
+prose and behaviour cannot diverge.
+
+**Not fixed here.** Related: **B196**, **B197**, **B184**, **B208**, **B191**.
 
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
