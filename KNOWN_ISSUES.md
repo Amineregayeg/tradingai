@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-23 (B232 — `is_in_blackout`, the pre-contract news gate with zero production callers, is RECOMMENDED by its own module: `CalendarService`'s class docstring shows it under "Typical lifecycle" with the divergent 30-minute window as the worked example, twenty lines above the sixty-line warning that is buried inside the function's for-loop. Twelve test references across two files pass and PIN the contradictory doctrine, so the suite is an active endorsement rather than neutral coverage. The function's own docstring is neutral, so a reader who opens the file the normal way still gets no warning, and only the NAME appears in every grep hit — a marking that reaches that reader means renaming, which is the same edit surface as deletion. And no parameter repairs it: `blackout_minutes` is one number and the ratified window is two.)
+Last updated: 2026-08-23 (B233 — GATE-027 rung 2 is a MULTI-TIMEFRAME rule by ruling ("any TF", declared at RULE_REGISTRY.json:833 and restated at TELEMETRY_SCHEMA.json:556) and NO corpus in this repository carries more than one timeframe: the 529 setups are a single 5m series from 2026-08, and the only other fixtures are 1h and daily from 2024 on a different instrument — zero overlap. So a rung-2 that silently reads only the exec TF passes every test the repo can write and is indistinguishable from one that honours the ruling. B191's shape reached BEFORE the code exists, and worse than B191: that guard at least had a population to be wrong about, this term has none, so unexercisable and absent produce the same green. Fix is resampling the existing 5m bars to 15m/1H over the same window — derivation, not invention.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -13976,6 +13976,51 @@ deletion on that basis.
 
 **Not fixed here — T-0043 is a diagnosis task with no code, and deleting live code is a decision
 rather than a tidy-up.** Related: **B184**, **B231**, **B228**.
+
+### B233. Rung 2 is a MULTI-TIMEFRAME rule and no corpus in this repository has more than one timeframe
+**Found in:** 2026-08-23, baselining T-0049's design half (Review) — found before the code exists
+**What it is:** `GATE-027` rung 2's timeframes are declared, not ours. `RULE_REGISTRY.json:833`:
+*"declared `rung2_timeframe_set` (any TF per ruling; default exec TF + the analysis TFs the setup was
+drawn from)"*, and `TELEMETRY_SCHEMA.json:556` restates the round-3 ruling — *"half-filled counts,
+**any TF**, no minimum width."*
+
+**Every fixture in the repository, measured:**
+
+```
+btcusdtp_5m_1500.csv   1500   2026-08-09 21:25 -> 2026-08-15 02:20    <- the 529-setup corpus
+btcusdtp_5m_999.csv     999   2026-08-11 13:05 -> 2026-08-15 00:15    <- same series, a subset
+btc_1h.csv              192   2024-02-18 00:00 -> 2024-02-25 23:00    <- 2024, different instrument
+btc_daily.csv            90   2024-01-01 00:00 -> 2024-03-30 00:00    <- 2024, different instrument
+```
+
+**Zero overlap.** The two non-5m fixtures are two years earlier and a different symbol
+(`btc_` against `btcusdtp_`). No combination of what exists produces a single setup carrying
+imbalances on more than one timeframe.
+
+> **So a rung-2 implementation that silently reads only the exec timeframe passes every test this
+> repository can currently write, and is indistinguishable from one that honours the ruling.**
+
+**This is `B191`'s shape reached BEFORE the code exists rather than after.** `B191` was a guard that
+covered one of three call shapes and read as covering the class; this is a rule term that covers one
+of N timeframes and would read the same way — except the guard at least had a population to be wrong
+about. Here the population is empty, so the term cannot be observed to bind or to fail. **An
+unexercisable term and an absent term produce the same green.**
+
+**The fix is cheap and it is not invention.** Resample the existing 5m series to 15m and 1H over the
+SAME window, so one setup carries imbalances on more than one timeframe, and assert a setup whose
+rung 2 is located on a NON-exec timeframe. **Resampling derives from the same bars; it adds no data
+and no assumption.** The alternative that is also honest is to implement the term and state in the
+commit body and here that it is UNEXERCISED. **The only unacceptable outcome is shipping the term
+with a green suite that never reaches it.**
+
+**Related, and it is the same corpus:** the 529 setups are one symbol, 5.2 days, one direction
+(65111.0 -> 63079.2), one regime, in a window ending 4.7 days before the live run began. That does
+not make the re-run invalid — a committed fixture is a BETTER before/after basis than a live table,
+because both arms see identical bars — but any distribution it produces must be reported with that
+shape beside it rather than as *"the 529 setups"*.
+
+**Not fixed here — T-0049 is unstarted and this is a pre-registration.** Related: **B191**, **B222**,
+**B213**, **B150**.
 
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
