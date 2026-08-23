@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-23 (B221 — the kill switch closes NOTHING and reports SUCCESS. `register_adapter` is called exactly ONCE in the tree (main.py:236) and binds the PaperBroker built at crypto_loop.py:110; every `POST /engine/start` runs `_reset_broker_state`, which REBINDS `self.paper` to a NEW object (:704 SimPropFirmBroker under PROP_FIRM_SIM, :707 PaperBroker) and never re-registers. So `broker_manager._adapters` holds an ORPHAN — stale AND, in this deployment's mode, a different CLASS. `close_all_positions` iterates it, gets [], and the caller records 0 closed / 0 FAILED. Arming still halts new entries (`_entry_block_reason` reads `kill_switch.is_armed` directly), so the switch HALTS but does not FLATTEN — two promises, and the one that fails is the one you reach for when a position IS the problem. Same orphan blinds GET /api/positions (B215) and DELETE /positions/{id}. `POST /engine/stop` is UNAFFECTED: it calls `self.paper.close_all_positions()` on the live object, which is why the 2026-08-19 18:50:11 runner close actually happened. Also B222: the `candles` corpus is stale 5-20 days, nothing monitors it, and T-0049's planned re-run of the 529 setups would silently cover a window ending 14 days before the live run began.)
+Last updated: 2026-08-23 (B224 — `trades` is a CLOSED-LOT ledger: `_persist_live_close` (crypto_loop.py:1102) is the only live Trade insert, fires from the settle hook and hard-codes status=CLOSED, and there is NO position model in app/models/ — open positions live only in PaperBroker._positions, a dict in the process. So a run that ends without a clean stop loses its open positions entirely, and main.py:229-232 names container restart as expected. Only POST /engine/stop records everything, because stop() closes first — the same asymmetry as B221, from a third side. It CORRECTS B219, which is amended in place. Also B223, and it is the one that biases a measurement: the EXIT-001 70% partial pops `_open_decision[pair]` at :1045 and writes realized_r/outcome from the TRANCHE, so the 30% runner later finds dec_id None and returns. CONFIRMED EMPIRICALLY — ETH 2026-08-19 13:17:01 records realized_r 1.5276 against tranche pnl +76.38 while the runner added +152.30 for a true +228.68, roughly 3x the recorded figure; both losers record realized_r exactly -1.0000, complete. Under EXIT-001 the partial fires ONLY on a winner, so LOSSES ARE RECORDED IN FULL AND WINS ARE TRUNCATED, and :1065 calls gap_r the feedback loop's core input. Separately, expected_r is NULL on all five rows of this run, so gap_r is NULL throughout and the feedback loop has no gap data at all.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -13418,7 +13418,20 @@ is smaller than the query it replaces.
 
 **Not fixed here.** Related: **B177**, **B199**, **B216**, **B219**.
 
-### B219. Five decision records carry `sized_units` and have no trade row within ten minutes
+### B219. Five decision records carry `sized_units` and have no trade row within ten minutes ~~— no trade exists~~ **CORRECTED: they are LOST POSITIONS**
+
+> **AMENDED 2026-08-23 by Review, who filed it.** As written this entry says *"the engine sized
+> a position, wrote the decision record, and no trade exists"* — which sends the next reader
+> hunting for **failed order placements**. That is the wrong hunt. `_persist_live_close`
+> (`crypto_loop.py:1102`) is the ONLY live `Trade` insert, it fires from the broker's settle
+> hook, and it hard-codes `status=CLOSED`. **There is no positions table** — no position model
+> in `app/models/`, and open positions live only in `PaperBroker._positions`, a dict in the
+> process. **A row appears in `trades` when a LOT CLOSES; an open position has no durable row
+> anywhere.** So `closed_lots = 0` is the EXPECTED state for anything not yet closed, and all
+> five rows predate the active run: they are positions that ended with their process without
+> ever closing. **Lost POSITIONS, not lost fills, and the loss is structural rather than
+> accidental.** See **B224**. The count of five stands; the diagnosis does not.
+
 **Found in:** 2026-08-23, auditing T-0057's ARM 1 fixture (Review)
 **What it is:** in `agents/tasks/T-0057/_runs/arm1_remainder.txt`, 33 sized entries join to the
 `trades` table. Five return `closed_lots = 0`, and Execute's own follow-up (`q_zero_join.sql`,
@@ -13535,6 +13548,94 @@ to register an accessor rather than the object, so a stale reference cannot be h
 
 **Not fixed here — this is a diagnosis task and Malek is mid-decision on `B198`.**
 Related: **B215**, **B199**, **B178**.
+
+### B223. The 70% partial pops the decision key, so every winner's record describes 70% of itself
+**Found in:** 2026-08-23, diagnosing `B219`/`B220` under T-0061 (Review)
+**What it is:** the link from a close event back to its `DecisionRecord` is
+`self._open_decision: dict[str, str]` (`crypto_loop.py:146`), keyed by PAIR, set at `:543`, and
+**popped** at `:1045`. `_on_settle_cb` (`:1086`) fires on **every** close and schedules
+`_persist_and_resolve` (`:1097`) -> `_persist_live_close` then `_resolve_decision`. The settle event
+carries `"partial": remaining > 0` (`paper.py:139`) and **nothing in `crypto_loop.py` branches on
+it.**
+
+So on an `EXIT-001` 70% partial:
+
+```
+_persist_live_close   writes a CLOSED Trade row for the 70% lot           correct
+_resolve_decision     POPS _open_decision[pair], writes realized_r, gap_r
+                      and outcome from the 70% TRANCHE ALONE
+the 30% runner        closes later, dec_id is None at :1045, returns
+```
+
+**`DecisionRecord.realized_r`, `gap_r` and `outcome` on any partialled trade describe 70% of the
+trade, labelled as the trade.** The runner's P&L never reaches the record.
+
+**Why it is not a rounding-scale problem.** `:1062-1066` calls `gap_r` *"the feedback loop's core
+input"*. And under `EXIT-001` the partial fires **only on a winner** — a loser closes whole at its
+stop and is recorded in full. So the truncation is not noise spread across the population: **it
+lands exclusively on winners**, cutting each one off at its 2R partial while every loss is recorded
+complete. Any measurement of expected-versus-realized computed from these rows is biased against the
+strategy by construction, and biased in a way that looks like the strategy underperforming rather
+than like a bug.
+
+**The key is also PER-PAIR**, so it can hold one open decision per symbol; a second entry on the same
+pair would overwrite the first before it resolved. Not reachable today (`already in a position`
+blocks it), but it is the same field and the same line.
+
+**Consistent with the live corpus:** the ETH 19:20 entry shows one trade row of `1.108751` — the 70% —
+with the remainder unrecorded. The ETH 13:17 entry has two rows summing exactly to `sized_units`, so
+its runner did close; under this defect its second close still found no `dec_id`.
+
+**Fix:** resolve on the FINAL close, not the first — branch on `ev["partial"]`, which the broker
+already emits, and accumulate rather than pop. That field exists for exactly this purpose
+(`paper.py:119-122`: *"a record in which a partial and a full close look alike is the defect this
+method was changed to fix"*) and the consumer does not read it. **The same field, unread, is `B218`.**
+
+**Bounded: this is the code path. No `realized_r` value was read from the database.**
+Related: **B218**, **B224**, **B177**.
+
+### B224. `trades` is a closed-lot ledger, so a run that ends without a clean stop loses its open positions entirely
+**Found in:** 2026-08-23, diagnosing `B219`/`B220` under T-0061 (Review)
+**What it is:** `_persist_live_close` (`crypto_loop.py:1102`) is the **only** live `Trade` insert. It
+fires from the broker's settle hook and hard-codes `status=TradeStatus.CLOSED`; its docstring calls
+itself *"a clean closed-trade insert"*. **There is no positions table** — `app/models/` has no
+position model, and open positions exist only in `PaperBroker._positions`, a dict in the process.
+
+**A row appears in `trades` when a LOT CLOSES. An open position has no durable row anywhere.** So if a
+run ends without a clean stop, the in-memory broker goes with the process, no settle fires, and the
+position is gone from the record: sized in `decision_records`, never closed, never written.
+
+**This CORRECTS `B219`, which I filed.** `B219` reads *"the engine sized a position, wrote the decision
+record, and no trade exists"* — inviting a hunt for failed order placements. `closed_lots = 0` is the
+**expected** state for anything that has not closed. The five rows are all from runs that had already
+ended, so they are **lost positions, not lost fills**, and the loss is structural rather than
+accidental.
+
+**What it costs beyond those five.** `POST /engine/stop` closes positions first
+(`crypto_loop.stop():1383` -> `self.paper.close_all_positions()`), so a clean stop records everything.
+Any other ending — container restart, crash, OOM, deploy — silently drops whatever was open. The
+platform's own `main.py:229-232` names the restart case as expected behaviour (*"if the container
+restarts mid-run, the engine comes back idle"*), so this is not a rare path.
+
+**The state IS separable today, with no new column.** Both tables carry `run_id` and
+`engine_runs.ended_at` (`models/engine_run.py:54`) says whether a run can close anything again:
+
+```
+run ENDED   and closed < sized   ->  LOST     (position or remainder)
+run ACTIVE  and closed < sized   ->  OPEN     (nothing closed yet, or a remainder riding)
+closed == sized                  ->  SETTLED
+```
+
+Only *never opened* versus *lost* needs something new, because nothing records that an order was
+PLACED — only that a lot closed.
+
+**Fix:** the reconciliation must EMIT THE STATE NAME rather than a mismatch count. These states have
+opposite remedies — LOST is a durability defect, OPEN is correct behaviour, never-opened is an
+execution failure — and a single "N mismatches" figure is `B177`'s aggregate-rate defect in a third
+place. Persisting an open-position row, or an order-placed record, is the wider fix and is not
+required to name four of the five states.
+
+**Not fixed here.** Related: **B219**, **B220**, **B223**, **B177**.
 
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
