@@ -1,7 +1,7 @@
 """System health and status endpoints."""
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -87,7 +87,7 @@ async def version() -> dict[str, Any]:
 
 
 @router.get("/data-health")
-async def data_health_check(user_id: CurrentUser) -> dict[str, Any]:
+async def data_health_check(request: Request, user_id: CurrentUser) -> dict[str, Any]:
     """Health of the systems that fail silently — the collector and backups.
 
     Authenticated, unlike /health: "backups are failing" is operational detail
@@ -100,7 +100,10 @@ async def data_health_check(user_id: CurrentUser) -> dict[str, Any]:
     """
     from app.services.monitoring.data_health import data_health
 
-    return await data_health()
+    # The live loop is handed in so `order_path_health` can ASK the entry gate
+    # (`_entry_block_reason`) instead of restating it. `getattr` rather than an attribute
+    # access: this route must still answer when no engine has been constructed.
+    return await data_health(loop=getattr(request.app.state, "live_loop", None))
 
 
 @router.get("/readiness")

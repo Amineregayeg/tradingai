@@ -89,9 +89,28 @@ def panels_ok(monkeypatch):
     monkeypatch.setattr(dh, "panel_health", _healthy)
 
 
+@pytest.fixture
+def order_path_ok(monkeypatch):
+    """Pin the order-path component healthy (T-0057).
+
+    Same reasoning as `shadow_ok` and `panels_ok`: `order_path_health` reads the database
+    AND needs the live loop handed to it, so here it would report `unavailable` for reasons
+    that have nothing to do with what the composition tests assert. Its own behaviour is
+    covered in `test_t0057_order_path_liveness.py`.
+
+    *Stubbing it is what keeps these tests about COMPOSITION. The fact that an unstubbed
+    order-path component turns `ok` false is the subject of its own test, not a side effect
+    to be absorbed here.*
+    """
+    async def _healthy(loop=None):
+        return {"status": "healthy", "watching": True}
+
+    monkeypatch.setattr(dh, "order_path_health", _healthy)
+
+
 @pytest.mark.asyncio
 async def test_unavailable_components_make_the_overall_result_not_ok(
-    dirs, shadow_ok, panels_ok
+    dirs, shadow_ok, panels_ok, order_path_ok
 ):
     """Rolling 'cannot see it' into 'ok' would defeat the entire module."""
     r = await dh.data_health()
@@ -322,7 +341,7 @@ def test_backup_staleness_threshold_matches_the_backup_script(dirs):
 # Combined
 # ---------------------------------------------------------------------------
 @pytest.mark.asyncio
-async def test_everything_healthy_reports_ok(dirs, shadow_ok, panels_ok):
+async def test_everything_healthy_reports_ok(dirs, shadow_ok, panels_ok, order_path_ok):
     dom, bak = dirs
     write_samples(dom, list(range(0, 60)))
     _status(bak)
@@ -332,7 +351,9 @@ async def test_everything_healthy_reports_ok(dirs, shadow_ok, panels_ok):
 
 
 @pytest.mark.asyncio
-async def test_one_sick_component_makes_the_whole_thing_not_ok(dirs, shadow_ok, panels_ok):
+async def test_one_sick_component_makes_the_whole_thing_not_ok(
+    dirs, shadow_ok, panels_ok, order_path_ok
+):
     dom, bak = dirs
     write_samples(dom, list(range(0, 60)))      # collector fine
     _status(bak, ok=False)                       # backups failing

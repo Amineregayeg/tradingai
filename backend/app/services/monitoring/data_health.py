@@ -700,16 +700,22 @@ async def panel_health() -> dict:
     }
 
 
-async def data_health() -> dict:
+async def data_health(loop=None) -> dict:
     """Everything that fails silently, in one place.
 
     Async because the shadow's evidence lives in the database rather than on a
     mount. The two file-backed checks stay synchronous.
+
+    `loop` is the live engine loop, needed by `order_path_health` so the ENTRY GATE can
+    be asked rather than re-implemented. Optional, and its absence reports the order-path
+    component as `unavailable` rather than dropping it — a check that silently disappears
+    when its input is missing is the failure this whole module exists to prevent.
     """
     dominance = dominance_health()
     backups = backup_health()
     shadow = await shadow_health()
     panels = await panel_health()
+    order_path = await order_path_health(loop)
 
     # A component we cannot see is NOT ok. Rolling "unavailable" into "ok" here
     # would defeat the entire module.
@@ -717,6 +723,11 @@ async def data_health() -> dict:
         "dominance_collector": dominance,
         "backups": backups,
         "shadow": shadow,
+        # T-0057/B199. BESIDE the shadow, never inside it. `shadow` answers "is the
+        # contract engine still RECORDING", this answers "is the ORDER path still
+        # TRADING", and on 2026-08-21 those two had opposite answers for 62-91 hours
+        # while only the first was being watched.
+        "order_path": order_path,
         # Separate from `shadow` on purpose. Liveness and staleness are orthogonal: the
         # shadow can be alive, writing on every permitted cycle, and grading frozen
         # panels — liveness green, grade garbage — and it can be correctly silent while
@@ -736,4 +747,393 @@ async def data_health() -> dict:
         "checked_at": datetime.now(tz=timezone.utc).isoformat(),
         "problems": problems,
         **components,
+    }
+
+
+# ======================================================================================
+# T-0057 / B199 — is the ORDER path still TRADING?
+#
+# BESIDE `shadow_health()`, never inside it. The two corpora have different
+# legitimate-silence rules and one predicate cannot carry both — merging them is
+# GATE-011's defect. `shadow_health` watches the SHADOW corpus, which T-0010 moved
+# ABOVE the entry gates precisely so that `already in a position` would stop
+# suppressing it. That was correct and it fixed B34. It also means the monitored
+# artefact was engineered to be immune to the condition that stops the engine, and
+# on 2026-08-21 the order path froze for 62-91 h with every signal green.
+# ======================================================================================
+
+#: The gate's own words for the state this signal exists to detect.
+#:
+#: **This is NOT a second statement of the gate.** `_entry_block_reason` is CALLED and
+#: its answer is READ; this constant only names the answer being looked for. The two are
+#: pinned together BEHAVIOURALLY by a test that drives a real loop into the state and
+#: reads the string back — so a reworded gate turns a test red instead of silently making
+#: this monitor unable to fire. A monitor keyed on a string nobody checks is B167's
+#: vocabulary collision waiting to happen.
+BLOCKED_BY_POSITION = "already in a position"
+
+#: **[ENGINEERING] Calibrated against ONE observation, not invented — and no longer the term
+#: carrying the separation.**
+#:
+#: `B216` measured that the first version of this signal put the label and the load in
+#: different places: the doctrinal term was true of 5 of 5 blocks, so a constant advertised as
+#: "arbitrary noise suppression" was silently doing all of the discriminating. It is not any
+#: more. `remainder_outstanding` separates 2/2 structurally, and this floor's only remaining
+#: job is to suppress a SHORT-LIVED legitimate remainder.
+#:
+#: There is exactly one observed: the ETH `2026-08-19 13:17:01` runner, outstanding about four
+#: hours (14:55:19 to 18:50:11) before the engine stop closed it. So the number is answerable
+#: to an observation rather than to taste.
+#:
+#: **Moving it CANNOT flip the control window**, which is the property that makes it safe: the
+#: 2026-08-20 control contains no remainder at any floor value. A floor that could tune ARM 7
+#: green would make ARM 7 unfalsifiable.
+ORDER_PATH_BLOCKED_BARS_FLOOR = 3.0
+
+
+#: How close a `trades.entry_time` must sit to a `decision_records.created_at` to be the
+#: SAME entry. Measured, not guessed: the four entries of the current run match at 4-6 ms
+#: (00:05:12.63111 vs 00:05:12.626072), and no unrelated trade lies within ten minutes of
+#: any of them. One second is three orders of magnitude of slack over the observed skew.
+ENTRY_TRADE_MATCH_SECONDS = 1.0
+
+
+def entry_has_outstanding_remainder(sized_units, closed_lots) -> bool:
+    """**The ONE site that decides whether an entry still has a remainder open.** (`ARM D`.)
+
+    **This replaced a `tp is None` test, and the replacement is `B216`'s remedy.** The
+    no-target term separated NOTHING: every position this engine has ever opened carries
+    `tp = NULL`, so it was true of 5 of 5 blocks — three of which cleared on their own.
+
+    The population is not homogeneous on the axis that matters:
+
+        BTC 2026-08-20 03:20:12   closed 0.064343 of 0.064343   WHOLE     cleared (loss)
+        BTC 2026-08-20 14:25:16   closed 0.103051 of 0.103051   WHOLE     cleared (loss)
+        ETH 2026-08-19 19:20:31   closed 1.108751 of 1.583930   PARTIAL   still blocking
+        BTC 2026-08-21 00:05:12   closed 0.056164 of 0.080234   PARTIAL   still blocking
+
+    **2 of 2 both ways, structural, and no timer.** It is `EXIT-001`'s tranche model read
+    directly: the 70% partial fires only on a WINNER reaching 2R, and what it leaves is a
+    remainder whose stop is the original stop — now far below price — and whose target is
+    `None`, so it can neither take profit nor realistically stop out. A LOSER closes WHOLE
+    at its stop and frees the symbol. *That is why both entries that cleared are losses and
+    both that block are wins.* The plan's sentence — "a position with no target can only
+    stop out" — is true of a whole position and false of a winning remainder, which is the
+    case it never considered.
+
+    **SUM of closed lots, never "a partial row exists".** `ETH 2026-08-19 13:17:01` closed
+    in TWO tranches, 2.298500 + 0.985072 = 3.283572, which is its `sized_units` exactly. A
+    partial that is later completed is not a withdrawal, and an existence test would call
+    it one.
+
+    **AND `closed_lots > 0` IS PART OF THE DEFINITION, NOT A FILTER BOLTED ON.** A remainder
+    only EXISTS if something was closed. Zero closes means either nothing ever traded
+    (`B220`) or the whole position is still open and will stop out and clear — neither is a
+    remainder, and both are ordinary. Over the full 33-entry corpus, measured:
+
+        closed < sized          7 positives   <- includes 5 trade-less rows and open wholes
+        0 < closed < sized      2 positives   <- EXACTLY the two blockers, with no scope term
+
+    **PROVISIONAL PENDING `B218` — see `B227`.** This is a float comparison across three
+    independent roundings that do not commute: the order carries `sized_units` at 8dp,
+    `decision_records` stores it at 6dp, each settle lot is rounded to 8dp then written at
+    6dp. **A fully SETTLED two-tranche trade can therefore read as a remainder**, in the
+    direction that says the symbol is still blocked. It is NOT patched with an epsilon: a
+    tolerance would have to exceed 1e-6 and would then be blind to a genuine remainder
+    smaller than that, and choosing its size is `B93`'s tuned threshold. *The exact value
+    already exists* — `paper.py:125` computes `remaining = round(pos.units - closed, 10)`
+    and it dies in a log string. Once `B218` persists it, this becomes
+    `remaining_units > 0` on the latest lot: one field, no arithmetic, no tolerance.
+
+    *Why neither seat caught it first: the corpus holds 26 rows with `closed == sized` and
+    25 are WHOLE closes — one lot, exact by construction. Exactly ONE completed two-tranche
+    trade exists, and its arithmetic happens to land exact. The discriminator was validated
+    against the only row that could have tested it.*
+    """
+    return 0 < closed_lots < sized_units
+
+
+def outstanding_remainder_by_symbol(entries, trades, *, tolerance_seconds=None) -> dict:
+    """Fold entries and their closed lots into `{symbol: bool | None}`. PURE.
+
+    `entries` is `(symbol, opened_at, sized_units)`; `trades` is `(pair, entry_time,
+    lot_size)`. Matching is by symbol and time because there is NO link column between
+    `decision_records` and `trades` — stated here rather than implied, since a join keyed
+    on a coincidence is a thing a reader must be told about.
+
+    `None` for a symbol with no entries at all: nothing to judge. **NOT `False`** — absence
+    of an entry is not evidence of no remainder, and treating it as such is `B161`'s class.
+
+    **A KNOWN LIMIT, measured (`B220`).** An entry with ZERO matching trade rows folds to
+    "the whole position is outstanding", because `closed_lots` is 0. Five such entries exist
+    in history — 2026-07-27 through 2026-08-09 — and they are genuinely trade-less rather
+    than join failures: no `trades` row lies within TEN MINUTES of any of them, and one of
+    them is the ETH position the 2026-08-08 container recreate destroyed. Scoping every
+    query to the ACTIVE RUN keeps them out; across runs they would read as a permanent
+    remainder that no close can ever clear.
+    """
+    tol = ENTRY_TRADE_MATCH_SECONDS if tolerance_seconds is None else tolerance_seconds
+    out: dict = {}
+    for symbol, opened_at, sized_units in entries:
+        closed = sum(
+            float(lot)
+            for pair, entry_time, lot in trades
+            if pair == symbol and abs((entry_time - opened_at).total_seconds()) <= tol
+        )
+        outstanding = entry_has_outstanding_remainder(float(sized_units), closed)
+        out[symbol] = out.get(symbol) or outstanding
+    return out
+
+
+def order_path_symbol_state(
+    *,
+    symbol: str,
+    last_decision_at: datetime | None,
+    now: datetime,
+    bar_seconds: float,
+    blocked_reason: str | None,
+    remainder_outstanding: bool | None,
+    since: datetime | None = None,
+) -> dict:
+    """The predicate, PURE — values in, values out, no database and no clock of its own.
+
+    Pure so that the CONTROL PAIR is possible at all: the same predicate has to be
+    runnable over a historical window in which the engine WAS trading normally, and a
+    function that reads `now()` and the live broker cannot be. *"It fires on production
+    right now" cannot distinguish a working detector from one that always fires.*
+
+    **The discriminator is structural, not a timer.** An engine legitimately holding a
+    position must not scream, and it holds one most of the time — so a staleness clock
+    either screams all day or is set so loose it misses the incident. This fires only on
+
+        blocked by `already in a position`  AND  a TRANCHE REMAINDER is still outstanding
+
+    A whole position closes at its stop and frees the symbol; a 70% partial leaves a runner
+    that can neither take profit nor realistically stop out. That is `EXIT-001`'s tranche
+    model READ here, never restated — no rule is implemented in this function. **It is NOT
+    keyed on the absence of a target: `B216` measured that every position this engine ever
+    opened has `tp = NULL`, so that term was true of 5 of 5 blocks and separated nothing.**
+
+    `remainder_outstanding` is TRI-STATE and the distinction is load-bearing: `True` a
+    tranche remainder is still open, `False` every lot closed, `None` there was no entry to
+    judge. Only an explicit `True` fires. *Absence of a value is never treated as the
+    property* — that is the `B161` class, and it has already cost this project six
+    instances.
+    """
+    age_seconds = (
+        (now - last_decision_at).total_seconds()
+        if last_decision_at is not None
+        else (now - since).total_seconds() if since is not None else None
+    )
+    bars_blocked = age_seconds / bar_seconds if age_seconds is not None else None
+
+    withdrawn = (
+        blocked_reason == BLOCKED_BY_POSITION
+        and remainder_outstanding is True
+        and bars_blocked is not None
+        and bars_blocked > ORDER_PATH_BLOCKED_BARS_FLOOR
+    )
+
+    return {
+        "symbol": symbol,
+        # THE VALUES, not a colour. A signal that returns only a verdict cannot be
+        # argued with, and every one of these was needed by hand to find B198.
+        "last_decision_at": last_decision_at.isoformat() if last_decision_at else None,
+        "age_seconds": round(age_seconds, 1) if age_seconds is not None else None,
+        "age_hours": round(age_seconds / 3600.0, 2) if age_seconds is not None else None,
+        "bars_blocked": round(bars_blocked, 1) if bars_blocked is not None else None,
+        "blocked_reason": blocked_reason,
+        "remainder_outstanding": remainder_outstanding,
+        "withdrawn_from_trading": withdrawn,
+        # Why it did NOT fire, when it did not. A monitor that reports only its positives
+        # is unfalsifiable from outside — B199 was found by hand precisely because the
+        # green signals said nothing about what they had ruled out.
+        "verdict_reason": (
+            "blocked by an entry whose tranche remainder is still outstanding"
+            if withdrawn
+            else f"not blocked by a position (blocked_reason={blocked_reason!r})"
+            if blocked_reason != BLOCKED_BY_POSITION
+            else "every lot of the blocking entry is closed; nothing is outstanding"
+            if remainder_outstanding is False
+            else "no entry found to measure a remainder against"
+            if remainder_outstanding is None
+            else f"inside the {ORDER_PATH_BLOCKED_BARS_FLOOR}-bar floor "
+            f"(bars_blocked={bars_blocked})"
+        ),
+    }
+
+
+async def order_path_health(loop=None) -> dict:
+    """Is the ORDER path still TRADING? Not: is the engine RUNNING. Not: is the shadow RECORDING.
+
+    WHY THIS EXISTS (`B199`)
+    On 2026-08-21 the order path stopped and stayed stopped for 62-91 hours while
+    `/api/engine/status` said `running: true`, equity rose, telemetry was 12 seconds old,
+    `shadow_health()` was green and the activity buffer showed forty ordinary skips. The
+    shadow corpus wrote 1,512 records in the window the decision corpus wrote 0. It was
+    found by querying `max(created_at)` on `decision_records` PER SYMBOL by hand.
+
+    THIS IS A FIFTH PREDICATE AND IT MUST STAY SEPARABLE FROM THE OTHER FOUR.
+    `wired` / `executes` / `RETAINED` / `RUNNING` were each insufficient alone; this adds
+    `TRADING`. An engine that is not running at all is `B178`'s signal and reports here as
+    `idle` with `watching: False` — never as a problem, and never as healthy either.
+
+    THE LOOP IS A PARAMETER, NOT A REACH-IN. Without it the gate cannot be ASKED, and this
+    function refuses to guess: it reports `unavailable`, which is this module's rule —
+    a component we cannot see is not `ok`.
+    """
+    from sqlalchemy import func, select
+
+    from app.db.session import async_session_maker
+    from app.models.decision_record import DecisionRecord
+    from app.models.engine_run import EngineRun
+    from app.models.trade import Trade
+    from app.services.live.fixed_config import ENTRY_TF, SYMBOLS
+    from app.services.market_data.sources.dominance import _TF_SECONDS
+
+    scope = {
+        # Same discipline as `shadow_health`'s CRITERION 9. This attests that the order
+        # path is still REACHING decisions, and nothing whatever about their quality.
+        "attests": "order_path_is_still_deciding",
+        "does_not_attest": [
+            "correctness of any entry decision",
+            "whether the engine process is alive (that is /engine/status, B178)",
+            "whether the shadow is recording (that is shadow_health, B32)",
+            "whether an open position is profitable",
+        ],
+    }
+
+    bar_seconds = _TF_SECONDS.get(ENTRY_TF)
+    if bar_seconds is None:
+        return {"status": "unavailable", "watching": False,
+                "reason": f"ENTRY_TF {ENTRY_TF!r} has no known duration", **scope}
+
+    if loop is None:
+        # Cannot see is never "fine". Without the loop the GATE cannot be asked, and
+        # inferring the block reason from positions would be a SECOND statement of
+        # `_entry_block_reason` — GATE-011's defect, and the thing this task must not do.
+        return {"status": "unavailable", "watching": False,
+                "reason": "no live loop supplied; the entry gate cannot be asked", **scope}
+
+    try:
+        async with async_session_maker() as db:
+            active = (
+                await db.execute(
+                    select(EngineRun)
+                    .where(EngineRun.ended_at.is_(None))
+                    .order_by(EngineRun.started_at.desc())
+                    .limit(1)
+                )
+            ).scalars().first()
+
+            # ARM E — SEPARABILITY FROM B178. The engine being stopped does NOT suppress the
+            # per-symbol verdict, and this is deliberate: a signal that cannot fire while the
+            # engine is stopped is not the fifth predicate TRADING, it is a sub-condition of
+            # RUNNING. `stopped AND still blocked by a target-less runner` is a real and
+            # reportable state, and the two facts are labelled separately below so a reader
+            # is never asked to infer one from the other.
+            if active is None:
+                active = (
+                    await db.execute(
+                        select(EngineRun).order_by(EngineRun.started_at.desc()).limit(1)
+                    )
+                ).scalars().first()
+                engine_running = False
+            else:
+                engine_running = True
+
+            started = _as_utc(active.started_at) if active is not None else None
+            symbols = list(getattr(loop, "symbols", None) or SYMBOLS)
+
+            # The entries of THIS RUN and the lots closed against them.
+            #
+            # THE RUN SCOPE IS A SECOND, INDEPENDENT GUARD AND IT COVERS A DIFFERENT
+            # FAILURE FROM THE `> 0` TERM. `0 < closed < sized` already excludes the five
+            # trade-less rows (`B220`) and every fully-open position, with no scope at all.
+            # What it does NOT exclude is a partial remainder STRANDED BY A KILLED RUN: it
+            # would satisfy the term forever and fire on a symbol the current engine has
+            # never touched. Not present in the corpus, structurally possible, cheap.
+            # Keyed on `run_id` rather than a timestamp — a timestamp window is a second
+            # way to say "this run" and the two can disagree.
+            entries = [
+                (r.symbol, _as_utc(r.created_at), r.sized_units)
+                for r in (
+                    await db.execute(
+                        select(DecisionRecord).where(
+                            DecisionRecord.sized_units.is_not(None),
+                            *([DecisionRecord.run_id == active.id] if active else []),
+                        )
+                    )
+                ).scalars().all()
+            ]
+            trade_rows = [
+                (t.pair, _as_utc(t.entry_time), t.lot_size)
+                for t in (
+                    await db.execute(
+                        select(Trade).where(
+                            *([Trade.run_id == active.id] if active else []),
+                        )
+                    )
+                ).scalars().all()
+            ]
+
+            last_by_symbol = {}
+            for symbol in symbols:
+                last = (
+                    await db.execute(
+                        select(func.max(DecisionRecord.created_at)).where(
+                            DecisionRecord.symbol == symbol,
+                            *( [DecisionRecord.created_at >= started] if started else [] ),
+                        )
+                    )
+                ).scalar()
+                last_by_symbol[symbol] = _as_utc(last) if last is not None else None
+
+        remainders = outstanding_remainder_by_symbol(entries, trade_rows)
+        # The gate is ASKED, once per symbol, and its answer is used verbatim. Reproducing
+        # its four conditions here would put a second copy of the entry doctrine in a
+        # monitoring module, and the copy would be the one that drifts.
+        blocked = {s: await loop._entry_block_reason(s) for s in symbols}
+    except Exception as exc:  # noqa: BLE001
+        return {"status": "unavailable", "watching": False, "reason": str(exc), **scope}
+
+    now = datetime.now(tz=timezone.utc)
+    by_symbol = []
+    for symbol in symbols:
+        by_symbol.append(
+            order_path_symbol_state(
+                symbol=symbol,
+                last_decision_at=last_by_symbol[symbol],
+                now=now,
+                bar_seconds=bar_seconds,
+                blocked_reason=blocked[symbol],
+                # READ from the stored position, never re-derived. A second site computing
+                # "does this position have a target" would be a second doctrine.
+                remainder_outstanding=remainders.get(symbol),
+                since=started,
+            )
+        )
+
+    withdrawn = [s["symbol"] for s in by_symbol if s["withdrawn_from_trading"]]
+    if withdrawn:
+        logger.warning("Order path withdrawn from trading", symbols=withdrawn)
+
+    return {
+        # Not "down": the engine is up and the shadow is fine. The order path specifically
+        # has been withdrawn, and naming it anything vaguer sends the reader to the wrong
+        # component — which is exactly how 91 hours passed.
+        "status": "withdrawn" if withdrawn else "healthy" if engine_running else "idle",
+        "watching": True,
+        # TWO FACTS, LABELLED SEPARATELY. `engine_running` is B178's question and
+        # `withdrawn_symbols` is this one; a reader must never have to infer either from
+        # the other, and a stopped engine can still be withdrawn.
+        "engine_running": engine_running,
+        "withdrawn_symbols": withdrawn,
+        "entry_tf": ENTRY_TF,
+        "bar_seconds": bar_seconds,
+        "blocked_bars_floor": ORDER_PATH_BLOCKED_BARS_FLOOR,
+        "floor_provenance": "ENGINEERING, arbitrary noise suppression — not a ratified threshold",
+        "run_started_at": started.isoformat() if started else None,
+        "symbols": by_symbol,
+        **scope,
     }
