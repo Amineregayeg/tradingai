@@ -13304,9 +13304,13 @@ can still close on a win. **A function whose `None` merges causes cannot be borr
 question that only cares about one of them** — the register's own recurring shape, an output that
 fails to discriminate, in the position of a dependency rather than a report.
 
-**Not fixed.** `T-0057` defines its own single site, `position_has_target`, and an AST arm holds
-`tp is/is not None` to exactly one occurrence in that module. Splitting `_expected_r_from_geometry`
-into "no target" and "degenerate risk" belongs to whoever owns the feedback path. Related: **B161**.
+**Not fixed, and the question it was blocking has since MOVED.** `T-0057` landed keyed on a
+different term entirely — `B216` measured that "has a target" separates nothing on this engine, so
+the single site is `entry_has_outstanding_remainder` and the AST arm holds `closed_lots <
+sized_units` to one occurrence. **`_expected_r_from_geometry` is therefore no longer anyone's
+dependency, which makes this entry cheaper to fix and easier to forget.** Splitting its `None` into
+"no target" and "degenerate risk" belongs to whoever owns the feedback path. Related: **B161**,
+**B216**.
 
 ### B215. `GET /api/positions` returns `[]` while the engine reports two open positions
 **Found in:** T-0057, fetching live position targets for the ARM 1 artefact (Execute)
