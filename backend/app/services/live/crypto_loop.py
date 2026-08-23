@@ -54,6 +54,58 @@ def _ticker_price(binance_symbol: str) -> float | None:
     return None
 
 
+def _as_decision_id(dec_id):
+    """Coerce a decision id to what the column's type expects.
+
+    `_open_decision` stores `str(rec.id)` while `DecisionRecord.id` is a UUID column.
+    Postgres accepts the string and SQLite does not — `'str' object has no attribute 'hex'`
+    — so the comparison worked in production and raised under the test backend, where
+    `_resolve_decision`'s own `except` would have swallowed it into a log line and returned.
+    **A resolution path that silently does nothing under one backend is the shape this
+    module's `_as_utc` comment already warns about**, one type over.
+    """
+    import uuid
+
+    if isinstance(dec_id, uuid.UUID):
+        return dec_id
+    try:
+        return uuid.UUID(str(dec_id))
+    except (ValueError, AttributeError, TypeError):
+        return dec_id
+
+
+def _with_exit_plan(reasons: list[str] | None) -> list[str]:
+    """Append `EXIT-001`'s two-leg plan to a decision's reasons. **`ARM 5`.**
+
+    **A SINGLE `expected_r` FOR THIS PLAN WOULD BE A FABRICATION, NOT A SIMPLIFICATION.** The
+    70% leg has a ratified target — `PARTIAL_AT_R` = 2.0R. The 30% runner has NONE: `EXIT-003`
+    is OPEN in the registry and the runner is passive by contract until Salim rules. Any scalar
+    blending them invents the number the registry deliberately leaves open, and it would arrive
+    inside a column the feedback loop treats as ratified doctrine.
+
+    So the PLAN is recorded and the scalar is not. It rides on `reasons`, which is the surface
+    that actually reaches the database — a JSON list nothing parses, so this is additive and
+    old rows keep loading. `expected_r` stays NULL, which is what `tp is None` already produced.
+
+    **What this does NOT do, stated so it is not mistaken for done:** `gap_r` remains NULL, so
+    the feedback loop still has no expected-versus-realized comparison to learn from. Giving it
+    one means a PER-LEG gap — the 70% leg against 2.0R — which is a change to `feedback.py`'s
+    consumers, not to what is recorded here.
+    """
+    from app.services.rules.exit_001_v1_model import (
+        PARTIAL_AT_R, PARTIAL_FRACTION, RUNNER_FRACTION,
+    )
+
+    return [
+        *(reasons or []),
+        (
+            f"exit plan: {PARTIAL_FRACTION:.2f} @ {PARTIAL_AT_R:.1f}R "
+            f"+ {RUNNER_FRACTION:.2f} @ UNDEFINED (EXIT-003 OPEN); "
+            "no scalar expected_r — a blended figure would invent the open leg"
+        ),
+    ]
+
+
 class LiveCryptoLoop:
     def __init__(
         self,
@@ -519,7 +571,7 @@ class LiveCryptoLoop:
                 # The reasoning behind a TAKEN trade matters as much as behind a
                 # refusal: it is what lets you check the entry was justified
                 # rather than merely profitable.
-                reasons=(trace.reasons if trace is not None else None),
+                reasons=_with_exit_plan(trace.reasons if trace is not None else None),
                 signal_dir=sig.direction.value,
                 signal_entry=Decimal(str(round(entry, 6))),
                 signal_sl=Decimal(str(round(sl, 6))),
@@ -1035,14 +1087,117 @@ class LiveCryptoLoop:
         except Exception as exc:  # noqa: BLE001 - never let bookkeeping kill the loop
             logger.warning("record abstention failed", pair=pair, error=str(exc))
 
-    async def _resolve_decision(self, ev: dict) -> None:
-        """On close, fill the matching OPEN decision's realized_r / gap_r / outcome.
+    async def _open_decision_id_from_db(self, pair: str) -> str | None:
+        """The still-OPEN decision for `pair`, read from the database rather than memory.
 
-        realized_r is computed from the decision's own stored geometry — pnl over
-        the dollar risk it was sized to (|entry-sl| * units) — so it is comparable
-        to expected_r on the same basis (the feedback loop's core measurement)."""
+        **`ARM 1`.** `_open_decision` is a dict on this object; a restart between the 70%
+        partial and the 30% runner empties it, and the runner's close — the one carrying the
+        larger half of the P&L — would resolve nothing. The decision rows themselves are the
+        durable index: `outcome` is written `OPEN` at creation and only ever leaves that state
+        here, so *"the open decision for this symbol"* is a query, not a cache.
+
+        At most one can match: `_entry_block_reason` refuses a second entry while the symbol
+        holds a position, so a pair has one open decision at a time. `LIMIT 1` on the newest
+        is belt-and-braces rather than a tie-break that could go either way.
+        """
+        try:
+            from sqlalchemy import select
+
+            from app.db.session import async_session_maker
+            from app.models.decision_record import OUTCOME_OPEN, DecisionRecord
+
+            async with async_session_maker() as db:
+                row = (await db.execute(
+                    select(DecisionRecord)
+                    .where(
+                        DecisionRecord.symbol == pair,
+                        DecisionRecord.outcome == OUTCOME_OPEN,
+                        DecisionRecord.sized_units.is_not(None),
+                    )
+                    .order_by(DecisionRecord.created_at.desc())
+                    .limit(1)
+                )).scalars().first()
+            return str(row.id) if row is not None else None
+        except Exception as exc:  # noqa: BLE001 - never let bookkeeping kill the loop
+            logger.warning("open decision lookup failed", pair=pair, error=str(exc))
+            return None
+
+    async def _realised_pnl_for_position(self, ev: dict) -> float:
+        """Every tranche's P&L for this position, summed from the DURABLE rows.
+
+        `_persist_live_close` writes each tranche BEFORE `_resolve_decision` runs, and after
+        `B225` they share `broker_id` — the broker's position id — so the sum is a query over
+        rows that survive a restart rather than a number accumulated in memory.
+
+        **Falls back to this event's own P&L** when the position id is missing or no rows
+        match, which is the pre-`B225` shape and every row written before this change. That
+        fallback is the OLD behaviour, so a failure here degrades to what the system already
+        did rather than to zero — *a bookkeeping path that can report 0.0 profit is worse than
+        one that reports too little.*
+        """
+        own = float(ev.get("pnl", 0) or 0)
+        position_id = ev.get("position_id")
+        if not position_id:
+            return own
+        try:
+            from sqlalchemy import func, select
+
+            from app.db.session import async_session_maker
+            from app.models.trade import Trade
+
+            async with async_session_maker() as db:
+                total = (await db.execute(
+                    select(func.sum(Trade.pnl_dollars)).where(
+                        Trade.broker_id == str(position_id)
+                    )
+                )).scalar()
+            return own if total is None else float(total)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("tranche sum failed", position_id=str(position_id), error=str(exc))
+            return own
+
+    async def _resolve_decision(self, ev: dict) -> None:
+        """On the FINAL close, fill the matching decision's realized_r / gap_r / outcome.
+
+        realized_r is computed from the decision's own stored geometry — pnl over the dollar
+        risk it was sized to (|entry-sl| * units) — so it is comparable to expected_r on the
+        same basis (the feedback loop's core measurement).
+
+        **`B223`: THIS USED TO RUN ON EVERY CLOSE, INCLUDING THE 70% PARTIAL**, popping the
+        decision key and writing `realized_r` from the tranche. The 30% runner then closed,
+        found no key, and returned — so every winner's record described 70% of itself while
+        every loser, closing whole at its stop, was recorded in full. *The bias is not
+        symmetric: losses complete, wins truncated, in the field `:1065` calls the feedback
+        loop's core input.* ETH 2026-08-19 13:17:01 recorded 1.5276 against a true +228.68.
+
+        **THE ACCUMULATOR IS THE `trades` ROWS, NOT A DICT.** Holding the 70%'s P&L in memory
+        until the runner closes is `B224` at smaller scale: if the runner never closes — the
+        state both symbols are in at 66 h and 94 h — the accumulator dies with the process and
+        the 70% is lost too, trading a truncated record for no record. The rows are written by
+        `_persist_live_close` BEFORE this runs, they survive a restart, and after `B225` the
+        tranches of one position share a `broker_id`.
+        """
         pair = str(ev.get("pair"))
+
+        # PART-CLOSED IS NOT RESOLVED, AND `partial` IS THE BROKER'S OWN EXACT ANSWER.
+        # Not `SUM(closed) < sized_units`: that is `B227` — a float comparison across three
+        # roundings that do not commute — and this task inherits it MIRRORED, as a finished
+        # trade that never resolves. `remaining > 0` is computed once at 10dp by the broker
+        # and handed over; no arithmetic here can disagree with it.
+        if ev.get("partial"):
+            # `realized_r` stays NULL. Nothing honest exists for a 70%-closed, 30%-open
+            # position: the closed leg has a realized R, the open leg has an unrealised one
+            # that moves every tick, and no weighting of them is a fact about the trade.
+            # Verified affordable — every consumer either renders "—" or filters
+            # `is not None`; none divides by it or defaults it to zero.
+            return
+
         dec_id = self._open_decision.pop(pair, None)
+        if not dec_id:
+            # THE DURABLE PATH, and it is what makes a restart survivable. `_open_decision`
+            # is in-memory: a process that dies between the partial and the runner loses it,
+            # and this method would then return early on the close that matters most.
+            dec_id = await self._open_decision_id_from_db(pair)
         if not dec_id:
             return
         try:
@@ -1053,10 +1208,12 @@ class LiveCryptoLoop:
             from app.models.decision_record import (
                 OUTCOME_BREAKEVEN, OUTCOME_LOSS, OUTCOME_WIN, DecisionRecord,
             )
-            pnl = float(ev.get("pnl", 0) or 0)
+            pnl = await self._realised_pnl_for_position(ev)
             async with async_session_maker() as db:
                 rec = (await db.execute(
-                    select(DecisionRecord).where(DecisionRecord.id == dec_id))).scalar_one_or_none()
+                    select(DecisionRecord).where(
+                        DecisionRecord.id == _as_decision_id(dec_id)
+                    ))).scalar_one_or_none()
                 if rec is None:
                     return
                 # Measure against the price PAID, not the price asked for. Using
@@ -1113,7 +1270,14 @@ class LiveCryptoLoop:
             pnl = float(ev.get("pnl", 0) or 0)
             is_long = str(ev.get("direction")) == "LONG"
             row = Trade(
-                user_id="system", broker_id="paper", broker="paper", pair=str(ev.get("pair")),
+                # `broker_id` ALREADY MEANS the broker's position id — `reconciler.py:75`
+                # keys `{broker_id: Trade}` against `pos.id`. Writing the literal "paper"
+                # gave one distinct value across all 274 rows while `ev["position_id"]` sat
+                # unused in the same dict (`B225`). It is also what makes T-0063's summing
+                # possible: the tranches of one position now share a key.
+                user_id="system",
+                broker_id=str(ev.get("position_id") or "paper"),
+                broker="paper", pair=str(ev.get("pair")),
                 direction=DirectionType.LONG if is_long else DirectionType.SHORT,
                 entry_price=Decimal(str(round(float(ev.get("entry", 0) or 0), 6))),
                 exit_price=Decimal(str(round(float(ev.get("exit", 0) or 0), 6))),
