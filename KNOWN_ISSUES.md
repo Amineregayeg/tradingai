@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-23 (B240 — PUBLISH THE DENOMINATOR, a method entry naming the day's dominant shape: six surfaces render an answer without the count that says whether it means anything (B199 health, B215 positions, B226 learning, B228 dashboard, B230 auth, B231 the health panel), while the codebase STATES the rule in entry_comparison.values() and applies it in exactly one place. The name is the ACTION and was corrected once — 'absence and zero render alike' describes three symptoms; 'publish the denominator' is testable, and an arm can assert a rate is never emitted without its denominator. It is also why every zero here now needs a control: B191's 0 callers, B217's 0 loop-level reasons and B236's 0 graded boxes were each publishable ONLY because a control showed the instrument could see. And B239 — INHERITED REACHABILITY: a fix's blast radius includes every dormant defect on the path it repairs, and none appear in its own diff. B238 is the instance, B221's fix had exactly one answer and nobody asked, and the practical form is a question for a plan: what was unreachable before this change that is reachable after it?)
+Last updated: 2026-08-23 (B242 — deleting the blackout helper leaves `_pair_to_currencies` with ZERO production callers, found by Execute answering B239's question on its own deletion. Also B241: `is_simulation` and WRITABILITY have come apart. MEASURED — a `cryptofundtrader` connection is registered on this deployment right now, environment `live`, connected true, and its `is_simulation` is a bare `return False`. But `observe_only` defaults True, manager.py:46-50 forces it True unless ALLOW_LIVE_TRADING, and `_guard_trading` raises on `close_all_positions` — so the write gate holds and a kill-switch close against it is refused and RECORDED AS A FAILURE. That is why disposition (a) is wrong: it would key a safety refusal on `is_simulation`, which is not the write gate, refusing to flatten an adapter already unable to be flattened. And the sharpest B239 instance yet: SIX sites iterate `_adapters` and all six went live in T-0062's one commit — `DELETE /positions/{id}` returned 404 unconditionally before and now closes a real position, from a commit that mentions none of it.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -14312,6 +14312,128 @@ it is a safety claim the code does not make.**
 
 **Not fixed here — T-0062 is a review, and this is `base.py`.** Related: **B221**, **B210**, **B232**,
 **B184**.
+
+### B241. `is_simulation` and WRITABILITY have come apart, so a non-simulation adapter that cannot write is registerable today
+**Found in:** 2026-08-23, baselining T-0067 (Review)
+**What it is:** two flags describe two different things and one of them is being treated as the
+other.
+
+```
+cryptofundtrader.py:111-112   @property
+                              def is_simulation(self) -> bool:  return False    UNCONDITIONAL
+manager.py:44-50              allow_live = os.getenv("ALLOW_LIVE_TRADING", "false") == "true"
+                              if observe_only is False and not allow_live:  observe_only = True
+```
+
+**`observe_only` is the WRITE GATE. `is_simulation` describes the VENUE.** The live-trading guard
+forces `observe_only = True` on every construction path when `ALLOW_LIVE_TRADING` is unset — the
+default — and **does not touch `is_simulation`, which is a bare `return False` with no reference to
+the mode.**
+
+So `POST /brokers` with a CFT connection registers, under default config today, **an adapter that
+reports `is_simulation = False` and cannot write.** Both facts are correct: the venue is real, the
+adapter is muzzled. **They are just not the same fact, and `base.py:55-58` reads as though they
+were** — *"refuse to send writes to a non-simulation broker"* treats the venue flag as the write
+predicate.
+
+**Why it matters beyond tidiness, and it is `T-0067`'s deciding fact.** `B238` offers two
+dispositions: enforce `is_simulation` at the kill switch and position-close routing, or narrow the
+docstring. **Enforcing would key a safety refusal on the venue flag rather than the write gate** — so
+its first real effect would be a kill switch refusing to flatten an adapter that was already
+incapable of writing. **A refusal that protects nothing, on the path whose entire job is closing.**
+
+**And the same confusion is already load-bearing one layer up.** `ExecutionService:96` — the one
+chokepoint that DOES enforce — also keys on `is_simulation`. It is right there for a different
+reason: it refuses to PLACE orders, and placing on a real venue is the thing to prevent whatever the
+mode. **The predicate suits the placing path and does not suit the closing path, which is why
+copying it across would be wrong rather than merely redundant.**
+
+**Fix:** do not enforce `is_simulation` on the close path. If a guard is wanted there, the predicate
+is writability — `observe_only`, or an explicit capability the adapter reports — and the honest
+minimum is to stop describing `is_simulation` as a write guard in `base.py`.
+
+**Not fixed here — T-0067 is unstarted and this is a pre-registration.** Related: **B238**, **B221**,
+**B239**.
+
+**MANAGER VERIFICATION — AND THE QUERY SAYS PRESENT, NOT MERELY POSSIBLE.** Review named the one
+query that separates the two and could not run it. Run:
+
+```
+broker_connections   ROW COUNT: 1
+  {'broker': 'cryptofundtrader', 'environment': 'live', 'connected': True}
+```
+
+**A non-simulation broker connection is registered on this deployment right now**, `environment =
+live`, `connected = true`. `cryptofundtrader.is_simulation` is a bare unconditional `return False`
+(`:111-112`). So this is not a hypothetical adapter that *could* be registered — one *is*.
+
+**AND THE WRITE GATE HOLDS, WHICH IS WHAT MAKES B241's ARGUMENT CORRECT RATHER THAN ALARMING:**
+
+```
+cryptofundtrader.py:121   observe_only: bool = True                    default
+manager.py:46-50          forces observe_only=True unless ALLOW_LIVE_TRADING   (default off)
+cryptofundtrader.py:201   _guard_trading raises BrokerError when observe_only
+cryptofundtrader.py:528   close_all_positions calls _guard_trading      -> RAISES
+manager.py:566-580        catches it and records a FAILURE              -> VISIBLE
+```
+
+**A kill-switch close against this adapter today raises and is recorded as a failure.** It is not
+silent, and it is already refused — **by `observe_only`, which is the write gate, and not by
+`is_simulation`, which describes the venue.**
+
+**That is the whole of B241 confirmed by measurement:** the registerable non-simulation adapter is
+one that *cannot write*. Disposition **(a)** would key a safety refusal on the flag that is **not**
+the write gate, and its first real effect would be a kill switch refusing to flatten an adapter
+already incapable of being flattened — **a refusal that protects nothing, on the path whose whole
+job is closing.** The same flag is *right* at `ExecutionService:96` for a different reason: that
+path refuses to **place**, and placing on a real venue is the thing to prevent whatever the mode.
+
+**A SECOND CONSEQUENCE OF T-0062, AND IT IS THE SHARPEST INSTANCE OF B239 YET.** Six sites iterate
+`_adapters` and **all six went live in one commit**; only one was T-0062's subject:
+
+```
+:369  get_all_positions      [] -> real positions        <- closes B215's symptom, unremarked
+:518  get_all_accounts       stale -> real balance
+:569  close_all_positions    [] -> closes                <- the subject
+:596  get_adapter(broker)    orphan -> live
+:480  reconcile_all          skipped either way          inert
+:633  start_price_streaming  swallowed either way        inert, 0 callers
+```
+
+**`DELETE /positions/{id}` NOW WORKS.** It resolves through `get_all_positions()` (`positions.py:90`)
+and calls `close_position` on each adapter (`:107`). **Before T-0062 it returned 404 unconditionally,
+because that list was empty.** A UI close button that was inert is now operative — from a commit
+described as registering a proxy for the kill switch, appearing in **no line of its diff.**
+
+It also means **T-0065's subject changed underneath it**: the panel that ignores empty lists now
+receives non-empty ones from a route that never delivered any.
+
+### B242. Deleting the blackout helper leaves `_pair_to_currencies` with ZERO production callers
+**Found in:** T-0066, answering the `B239` question about its own change (Execute)
+**What it is:** `T-0066` deleted `CalendarService.is_in_blackout`, which was the ONLY production
+caller of `_pair_to_currencies` (`finnhub.py:122`). Measured after the deletion:
+
+```
+grep -rn _pair_to_currencies app/     -> 1 hit, its own def
+grep -rn _pair_to_currencies tests/   -> 7 hits, test_calendar_service.py's pair-parsing section
+```
+
+`get_today_events`, the surviving live path, does not take a pair — `GET /calendar/today` returns
+the whole day and the order path filters currency scope in `GATE-015`, which has its own
+normalisation. So the function is now **test-only code that reads as live code**, sitting in a
+production module with a well-tested five-case parser behind it.
+
+**Why it is filed rather than deleted.** Deleting it is outside `T-0066`'s scope, and it is not
+obviously the right move either: `GATE-015`'s currency-scope check is a second parser of the same
+thing, so the choice is between deleting this one and routing the gate through it. **That is a
+decision about which parser is canonical, not a cleanup** — and picking wrong quietly creates the
+`GATE-011` duplication this repository keeps finding.
+
+**What it could break:** nothing today. The risk is the reverse of a bug — a reader sees a
+production-module helper with seven green tests and reasonably concludes the pair-parsing path is
+live. `B41`'s shape: a component that is fully built, fully tested and reached by nothing.
+Related: **B41**, **B221**.
+
 
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
