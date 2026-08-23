@@ -12994,6 +12994,61 @@ assert own and not app_                        # the PAIR, in one assertion
 shapes and the over-fire, each injected into a real file under `app/`, each turning it red.
 Related: **B202**, **B191**, **B188**.
 
+### B209. A successful push leaves `origin/main` stale, so `git log origin/main..HEAD` reports commits that ARE on the remote as unpushed
+**Found in:** 2026-08-23, the loop restart — while checking whether T-0055 and the B196–B203 register commit had landed
+**What it is:** every push in this repo goes out through an ad-hoc URL carrying the PAT —
+`git push https://Docz2868:<token>@github.com/Amineregayeg/tradingai.git main` — because the stored
+remote has no credential helper and `CLAUDE.md` directs the token to be used "directly with `curl`
+against the API or `git` over HTTPS". A push to a URL is not a push to the NAMED REMOTE, so git has
+no remote-tracking ref to advance. `refs/remotes/origin/main` keeps whatever value it last had.
+
+**Reproduced deterministically, on the very commit that records it:**
+
+```
+$ git push https://…@github.com/Amineregayeg/tradingai.git main
+   3d444f2..3993532  main -> main                      <- the push SUCCEEDED
+
+$ git rev-parse origin/main                            3d444f2…      <- unmoved
+$ git rev-parse HEAD                                   3993532…
+$ git log --oneline origin/main..HEAD | wc -l          1             <- PHANTOM
+```
+
+`git ls-remote` at the same instant returns `3993532 refs/heads/main`. The commit is on the remote.
+The tracking ref says it is not.
+
+**Why this is not cosmetic.** `origin/main..HEAD` is the idiom every seat here reaches for to answer
+"did my work land", and it is the idiom this register's own commits are checked against. It fails in
+the direction that manufactures work rather than hiding it: it reports UNPUSHED for commits that are
+safely on the remote. The available responses are all wrong —
+
+* re-push (harmless, but the ref stays stale, so it never converges and the seat learns the check is
+  noise — which is how a real unpushed commit gets waved through next time);
+* conclude the earlier push failed and go looking for a fault that does not exist — this cost the
+  Manager a full diagnostic pass this session, including a false "2 commits unpushed" reported into
+  the loop before `ls-remote` corrected it;
+* worst, `git reset` or re-commit to "recover" work that was never lost.
+
+**It has already produced a wrong claim inside a verification.** Execute's T-0055 close states
+`82e982c … contained in remote head 3d444f2  (git merge-base --is-ancestor -> YES)`. The containment
+is true, but `3d444f2` was NOT the remote head when that was written — it was local-only, and the
+label "remote head" came from a stale tracking ref. **The check passed for the wrong reason**, which
+is the same defect shape as B202: evidence that predates what it claims to establish.
+
+**Why the obvious fix is wrong.** "Just set the remote URL to include the token" writes the PAT into
+`.git/config` in plaintext, inside the product repo, where `git config --get remote.origin.url` and
+any `git remote -v` in a log or a transcript would print it. The token is a classic PAT with write
+scope. Do not.
+
+**Fix:** after any push, advance the ref explicitly in the same command —
+
+```
+git fetch <url-with-token> main:refs/remotes/origin/main --force
+```
+
+— or stop consulting `origin/*` entirely and answer remote questions with `git ls-remote`, which
+reads the remote rather than a cache of it. **The instrument, not the result:** `origin/main` is a
+LOCAL CACHE whose name reads like a remote observation. Related: **B202**, **B195**, **B179**.
+
 ### B210. The tripwire claims "ANY form" 33 lines below the same file's admission that two forms are invisible
 **Found in:** 2026-08-23, T-0055's review (Review) — id bid from the ledger, per **B203**
 **What it is:** one file, `backend/tests/unit/test_t0048_eco_day_sizing.py`, states both of these:
