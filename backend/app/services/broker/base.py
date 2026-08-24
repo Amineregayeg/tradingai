@@ -52,10 +52,35 @@ class BrokerAdapter(ABC):
     # ------------------------------------------------------------------
     # Every adapter MUST declare whether it is a simulation. There is NO default:
     # a subclass that forgets to implement this cannot be instantiated (abstract),
-    # so a new real-money adapter can never silently pass as safe. Safety-critical
-    # chokepoints (ExecutionService, the kill switch, position-close routing) read
-    # this and refuse to send writes to a non-simulation broker unless a real,
-    # explicit live path is chosen.
+    # so a new real-money adapter can never silently pass as safe.
+    #
+    # `ExecutionService` refuses to send writes to a non-simulation adapter
+    # (`execution/service.py:96`). THE KILL SWITCH AND POSITION-CLOSE ROUTING DO NOT
+    # CHECK THIS — closing is the safe direction and is deliberately unguarded.
+    # See `T-0067`/`B238`.
+    #
+    # THIS SENTENCE USED TO NAME ALL THREE AS ENFORCING, AND TWO OF THEM DO NOT.
+    # `close_all_positions` (`manager.py`) and `DELETE /positions/{id}`
+    # (`api/routers/positions.py`) never read this flag. The claim was load-bearing
+    # in the wrong direction: a reader checking whether the close path was guarded
+    # found a contract saying it was.
+    #
+    # THE SCOPE IS RECORDED WITH ITS REASON, AND THE REASON IS THE LOAD-BEARING HALF.
+    # A scope note without one rots into the next `B238`: the next seat reads
+    # "does not check" as an oversight and closes it. It is not an oversight. A kill
+    # switch that REFUSES to close a real position is `B221` with a different report
+    # — "reports refusal, closes nothing" against "reports success, closes nothing"
+    # — and it would fire exactly when a real book is the thing you most want flat.
+    #
+    # AND A REFUSAL HERE WOULD BE KEYED ON THE WRONG FLAG (`B241`). `is_simulation`
+    # describes the VENUE; `observe_only` (`manager.py:44-50`, forced True unless
+    # `ALLOW_LIVE_TRADING` is set) is the WRITE GATE. They have come apart, so the
+    # registerable non-simulation adapter is one that cannot write anyway.
+    #
+    # NOT HYPOTHETICAL: one such adapter is REGISTERED RIGHT NOW. `broker_connections`
+    # holds a single row — `cryptofundtrader`, `environment: live`, `connected: true`
+    # — and `main.py:216` loads it into `_adapters` at startup, where
+    # `close_all_positions` iterates it. Measured 2026-08-24, not reasoned.
     @property
     @abstractmethod
     def is_simulation(self) -> bool:
