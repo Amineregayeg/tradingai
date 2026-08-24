@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-24 (B276 — GATE-032's two axes both use the token NONE with opposite meanings, and wiring it today would return UNGRADED_BOX on every bar. DISTURBANCE_GRADES = (NONE, LIGHT, HEAVY) so NONE IS a grade meaning no disturbance; BoxGrade = Literal[STANDARD, SUPER, MANIPULATED] so NONE is NOT a grade but the schema's rendering of NO GRADE. One token, two meanings, on the two axes of one lookup — B167's class inside a single rule's inputs, failing silently because ('NONE','NONE') reads as a legitimate cell and is not one. INPUT AUDIT: two of three inputs are literals and the third is shadow-only. disturbance_grade is computed only in shadow.py:439/:484; structure_box_grade is NEVER COMPUTED — grade_002_box_grade/BoxGrade is imported by nothing under live/ or execution/, and the one live mention is shadow.py:814 hardcoding 'NONE'; instrument_class is hardcoded ALIGNED_MAJOR at crypto_loop.py:916 and shadow.py:756. gate_032:352 says no box grade -> UNGRADED_BOX (:383), so a wired matrix fed today's inputs takes NO position rather than a smaller one — the engine stops trading and the sizer behaves exactly as specified. AND THE 1% IT WOULD REPLACE IS ALREADY ONE OF ITS CELLS (:329-331): RISK_PCT is exactly the STANDARD/NONE cell. Wiring does not introduce the matrix, it introduces VARIATION, and the variation needs a grader that does not exist.)
+Last updated: 2026-08-24 (B277 — the fill-basis sizing fix CONFIRMED LIVE and ISOLATED. execution/service.py:108-116 sizes from the FILL rather than the SIGNAL price, and every previous confirmation of the 1% was consistent with EITHER basis because the two agree whenever the fill matches the signal. Today they differed by 29.06 — signal_entry 79697.05, fill_price 79667.99 — so the bases give different answers: fill basis 50.000914 = 1.000018% of 5000, signal basis 50.769929 = 1.015399%. The system produced 50.000914, so sizing is demonstrably on the fill and the 0.0154 points the signal basis would have added is exactly the drift the fix removes; here it would have been an OVER-risk. ALSO records the second leg of B215's close: lot_size and open_time prove the endpoint reports THE position but are fixed at entry so a stale cache would match them, while current_price, unrealized_pnl and r_multiple agreeing on a value that moved after entry proves LIVENESS — identity and liveness, two legs. And a derived stop of 77778.23 is corrected to the read value 77778.524921: r_multiple is published rounded to 3dp and dividing by it amplifies error, so the flagged figure indicted its own arithmetic rather than the system, as its author predicted.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -17380,3 +17380,65 @@ literal nothing checks. **Harmless while `GATE-008` refuses altcoin rosters; the
 changes it sizes an altcoin as a major, silently.**
 
 Related: **B192**, **B188**, **B275**, **B167**, **B252**.
+
+---
+
+### B277. The fill-basis sizing fix is CONFIRMED LIVE and ISOLATED — the signal and the fill differed by 29.06, and the risk came out on the fill
+
+**NOT A DEFECT. Evidence that shipped work behaves as specified**, recorded because the phase
+directive is *everything already done works* and because this is the first measurement that
+**separates** the fill-basis fix from sizing in general.
+
+`execution/service.py:108-116` sizes from the **fill** price rather than the **signal** price.
+Before it, realised risk was `risk_pct × |entry − sl| / |fill − sl|` and drifted either way with the
+market. **Every previous confirmation of the 1% has been consistent with EITHER basis**, because the
+two agree whenever the fill matches the signal — which is most of the time on a paper broker.
+
+**TODAY THEY DIFFERED BY 29.06, so the two bases give different answers and the measurement can tell
+them apart:**
+
+```
+decision row, BTC/USD, open 16:30:16
+  signal_entry  79697.050000     the price the signal named
+  fill_price    79667.990000     what it actually filled at        <- Δ 29.06
+  signal_sl     77778.524921
+  sized_units   0.026463
+
+FILL basis     (79667.99  − 77778.524921) × 0.026463 = 50.000914   ->  1.000018% of 5000
+SIGNAL basis   (79697.050 − 77778.524921) × 0.026463 = 50.769929   ->  1.015399% of 5000
+```
+
+**The system produced `50.000914`.** So the sizing is demonstrably computed on the fill, and the
+0.0154 percentage points the signal basis would have added is exactly the drift the fix exists to
+remove. **On this trade the drift would have been an OVER-risk**, because the fill came in better
+than the signal.
+
+## Two independent legs, and the second is the one that was missing
+
+**Review's point, and it corrects how the `B215` close should be read:** `lot_size` matching
+`sized_units` and `open_time` matching `created_at` prove the endpoint is reporting **THE** position
+rather than **A** position — but **both are fixed at entry, so a stale cache would match them too.**
+What rules that out is the endpoint's own arithmetic on **price-dependent** fields:
+
+```
+79667.99 − 78707.99 = 960.00 exactly ;  960.00 × 0.02646252 = 25.40402  ->  endpoint: −25.404
+```
+
+`current_price`, `unrealized_pnl` and `r_multiple` **cannot agree by accident on a value that moved
+after the position opened.** So `B215`'s close rests on **identity from the entry-time fields and
+liveness from the arithmetic** — two legs, not one.
+
+## A derived figure corrected, and why it was wrong
+
+Review derived the stop at `77778.23` from `implied risk = −25.404 / −0.508` and flagged it as
+derived rather than read. **The real value is `77778.524921`**, confirmed in the decision row and
+matching the endpoint's `sl` exactly. **`r_multiple` is published rounded to three decimals, and
+dividing by a rounded denominator amplifies the error** — which is why the chain landed on
+`1.00016%` where the unrounded arithmetic gives `1.000018%`. **The flagged number indicted the
+arithmetic, exactly as its author predicted it would, rather than the system.**
+
+**BOUNDED:** one trade, one symbol, one venue — the paper broker. A 29.06 gap is not a large
+divergence, and this says nothing about behaviour under a wide or adverse fill. **What it establishes
+is that the basis is the fill, measured rather than read from the source.**
+
+Related: **B215**, **B268**, **B275**, **B261**.
