@@ -16779,9 +16779,16 @@ Related: **B258**, **B257**, **B250**, **B213**.
 
 ---
 
-### B268. `rule_stricter` and `rule_looser` are published side by side and have different denominators — and in the run happening right now, `rule_stricter`'s denominator is ZERO
+### B268. `rule_stricter` and `rule_looser` are published side by side and have different denominators, and the split is far thinner than it reads
 
 **Measured against production, 2026-08-24, both of today's engine runs.** This is the corpus that
+
+> **EVERY FIGURE IN THIS ENTRY IS AS-OF, NOT STANDING — read the correction below before citing
+> one.** The original heading pinned *"`rule_stricter`'s denominator is ZERO in the run happening
+> right now"*, which was true when measured at ~16:10 and false by 16:31. **This entry is about a
+> live system and it has no timestamp on its most quotable sentence**, which is the same class of
+> error it describes: a number whose meaning depends on a denominator nobody published. The
+> heading is rewritten to the claim that does not expire; the measurements are dated in place.
 would justify moving Salim's entry rules onto the ORDER path, so how it reads is not cosmetic.
 
 The published line (`decision_records.reasons`, one per bar):
