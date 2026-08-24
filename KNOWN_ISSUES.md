@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-24 (B247 — two of three filters on the durable decision lookup are unexercised, CORRECTED: their 'production load today' claim is FALSE. Measured, ZERO decision_records carry outcome OPEN, because both runners' decisions were already resolved to WIN by the very defect T-0063 fixed — B223 consumed the state its own fix's filters protect. And T-0063's path is correct, reviewed, mutation-tested and UNRUN: the engine has not restarted since it landed and is frozen under B198. The finding survives, only its urgency changes. Also B239 GAINS ITS MIRROR from T-0059 — the question 'what was unreachable before that is reachable after' has a twin, 'what was VALID before and stops being valid after': a positive flag became a new obligation on every trace producer, and three hand-built fixtures went NOT_COMPARABLE with must-fire arms passing over an empty population. Nothing became reachable; something stopped being comparable — and it announced itself ONLY because production has one producer and the others were tests. And B240 GAINS A SECOND CLAUSE: the precondition applies to a PEER's number too. A borrowed figure is load-bearing the moment you argue from it.)
+Last updated: 2026-08-24 (B248 — NOTHING HAS SHIPPED SINCE 2026-08-19. The box runs 1521e371 = T-0051, committed 08-19 14:10; HEAD is 50 commits ahead and TEN task fixes are in git and not on the box, including T-0062's kill-switch repair and T-0057's order-path signal. Confirmed three ways: /api/system/version and /app/.build-sha agree on the old sha; /api/system/data-health has NO order_path component; /api/positions still returns []. TWO LIVE CONSEQUENCES: the kill switch still closes nothing and reports 0 closed 0 failed, with two open runners on a live paper balance; and data-health returns ok:True problems:[] right now while the order path has been frozen since 08-21, which is B199 unmitigated. Found by Execute obeying an instruction to RE-MEASURE rather than assume — the re-measurement was the finding. And every seat, manager included, has spent a day writing 'this is now fixed' meaning the TREE while reading it as the BOX: B240's precondition applied to the artefact rather than the field. THE DEPLOY QUESTION AND B198 ARE THE SAME QUESTION, because a safe deploy needs /engine/stop first and stop() closes the two runners.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -15548,4 +15548,72 @@ was making, which is the worst reason to skip a check."***
 
 **A borrowed number is load-bearing the moment you argue from it**, and it arrives with the
 authority of the seat that sent it rather than the evidence that produced it.
+
+### B248. NOTHING SHIPPED SINCE 2026-08-19. Fifty commits, ten task fixes, and every "this is now fixed" in this register is true of the tree and false of the box
+**Found in:** 2026-08-24, by Execute, obeying `T-0065` AMENDMENT 1's instruction to **re-measure
+`/api/positions` before treating the old behaviour as the baseline** — the re-measurement is the
+finding
+**Nothing built, nothing committed, nothing deployed.** The task stopped at its first instruction.
+
+**MEASURED, and confirmed three independent ways rather than from the version endpoint alone:**
+
+```
+/api/system/version          1521e371fffc6ceb921e11b1196870ff4f960018
+/app/.build-sha              1521e371fffc…                        same
+1521e37                      T-0051, committed 2026-08-19 14:10 +0100
+git rev-list --count 1521e371..HEAD                               50
+```
+
+```
+/api/system/data-health   components: backups, correlate_panels, dominance_collector, shadow
+                          order_path ABSENT — T-0057 is not running
+                          ok: True    problems: []
+/api/positions            []          the pre-T-0062 behaviour, behaviourally
+```
+
+**Ten task fixes are in git and not on the box:** `T-0048`, `T-0052`, `T-0055`, `T-0057`, `T-0053`,
+`T-0062`, `T-0063`, `T-0066`, `T-0069`, `T-0070`, `T-0059`.
+
+**TWO CONSEQUENCES THAT OUTRANK EVERY OPEN TASK.**
+
+**1. THE KILL SWITCH IS STILL BROKEN IN PRODUCTION, RIGHT NOW, WITH TWO OPEN RUNNERS ON A LIVE PAPER
+BALANCE.** `B221` proved it closes nothing and reports `0 closed, 0 failed`. `T-0062` fixed it and
+`T-0062` is not deployed. **Anyone reaching for the kill switch today gets the lying report** — the
+exact failure the task was taken for, still live, five days later.
+
+**2. `data-health` RETURNS `ok: True, problems: []` AT THIS MOMENT** while the order path has been
+frozen since 2026-08-21. **That is `B199` unchanged and unmitigated.** `T-0057` built the signal that
+would say so and it is not running — and it means `T-0057`'s own commit body, whose mandatory
+sentence was *"Malek has been told his dashboard will go red"*, **describes something that has not
+happened and cannot happen until a deploy.**
+
+**WHAT IT DOES TO `B241` AND `T-0065` AMENDMENT 1, whose premise is now false as written.** *"Six
+sites went live in that one commit"* is true of the **COMMIT** and not of **PRODUCTION**. So:
+`B215`'s symptom is **not** closed as a side effect; `ARM 5`'s non-authoritative-empty case has **no**
+second producer yet; and the UI close button is **not** operative on a real position, because
+`DELETE /{id}` still 404s on the deployed code.
+
+**THE ADMISSION THAT MAKES THIS A METHOD FINDING AND NOT ONLY AN OPERATIONAL ONE**, and it is
+Execute's own, unprompted:
+
+> *"I have been quoting production figures all day — the 66.20h/94.94h ages, the 33-entry corpus, the
+> tranche sums — from a database that is real, while the CODE those figures describe is five days
+> old. The DB numbers are sound because they come from the database. But every 'this is now fixed'
+> I have written since `T-0052` is true of the tree and false of the box, and I never checked which
+> one I meant."*
+
+**Every seat did this, including the manager, and it is `B240`'s precondition at a level none of us
+applied it to.** We verified fields could vary, verified peers' numbers, verified instruments — and
+never verified **which artefact the verb "is" referred to.** The database is live; the code that
+database describes is five days behind; and *"the tripwire now catches all three shapes"* was read as
+a statement about a running system by everyone who wrote or read it.
+
+**THE DEPLOY QUESTION AND `B198` ARE THE SAME QUESTION, which is why this is not a seat's call.**
+`docker compose up -d --force-recreate` kills the engine mid-run, and the runbook's own opening
+incident is a container recreate destroying a live ETH position twelve hours in. A safe deploy needs
+`POST /engine/stop` first — **and `stop()` closes the two runners, which is exactly the decision
+`B198` is waiting on.** So there is one decision here, not two, and it is Malek's.
+
+**Not fixed here. Not deployed here.** Related: **B199**, **B221**, **B241**, **B240**, **B198**.
+
 
