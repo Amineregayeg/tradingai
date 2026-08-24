@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-24 (B263 — THE ENGINE TRADED and six shipped behaviours became observable at once. EXIT-001's 70/30 exact on both symbols (0.700000 and 0.700001). B215 SETTLED and the fix WORKS: /api/positions returns 2 positions where it returned [] for five days, the conclusive test that needed a position. T-0063 WORKING: both decision records read outcome=OPEN with realized_r=None AFTER the 70% close, where B223 would have popped the key and understated a winner ~3x. T-0057 FIRING for the first time: order_path=withdrawn, remainder_outstanding=True on both symbols, bars_blocked 69.3 and 112.2. Malek's ok ruling behaving as ruled — red for a real reason, not because the engine is off. AND B198 HAS RECURRED, same mechanism, both symbols withdrawn by target-less runners — but last time it ran 62-94 hours with every signal green and was found by hand, and this time the signal built for it names both symbols and turns the dashboard red. Still unmet: rule_stricter 0 against rule_looser 12 over 83 rows, so T-0040's non-vacuity gate fails on ONE bound now rather than both.)
+Last updated: 2026-08-24 (B264 — the retrospective sweep read task ids out of other tasks' TITLES. Its state map came from an UNANCHORED regex over `bus.py tasks`, so it took the first T-NNNN anywhere and the next word as its status: T-0032 -> 'shipped', T-0059 -> 'is', T-0066 -> 'follow', T-0072 -> 'landed'. The consumer is `landed = {t for t,s in states.items() if s == "DONE"}`, so EVERY task whose id appeared in another task's prose was missing from the DONE set and a dangling reference could never be raised. It DEGRADED AS THE LOOP IMPROVED — the more history a title cited, the more ids it swallowed. Anchored to line start: DONE count 64 of 76, and the next run raised FOUR violations that had been invisible. B250's shape in the checker rather than in a test. Second defect fixed in the same pass: the WHOEVER-CLOSES reminder fired for tasks closed hours earlier, which trains a reader to skip the block. And the occasion was a seat REFUSING to delete a true sentence to silence an alarm.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -16518,4 +16518,63 @@ across 83 rows — so `T-0040`'s non-vacuity gate is **still unmet**, but now fo
 predicted reason (one bound unexercised) rather than the stronger one (neither). And `rule_looser` is
 the **risk** bound: *the rules would have taken a trade the live heuristic declined.* Related:
 **B198**, **B215**, **B223**, **B199**, **B229**, **B251**.
+
+### B264. The retrospective sweep read task ids out of other tasks' TITLES, so its DONE set was silently narrowed and four real violations were invisible
+**Found in:** 2026-08-24, while classifying a discharge Execute had correctly refused to silence
+**Fixed. And the fix immediately surfaced four violations the tool was built to catch and had been
+missing.**
+
+**`landed_sweep.py` builds its state map by parsing `bus.py tasks`:**
+
+```python
+states = {m.group(1): m.group(2) for m in re.finditer(r"(T-\d{4})\s+(\w+)", out.stdout)}
+```
+
+**Unanchored.** `cmd_tasks` prints `T-NNNN  STATUS  cycle …` per line — **but task TITLES quote other
+task ids constantly**, because this loop cites its own history. So the scan took the **first**
+`T-NNNN` anywhere in the output and **the next word** as its status:
+
+```
+T-0032 -> "shipped"      T-0059 -> "is"
+T-0066 -> "follow"       T-0072 -> "landed"
+```
+
+**None of those is a status.** And the consumer is the line that decides what the whole retrospective
+check ranges over:
+
+```python
+landed = {t for t, s in states.items() if s == "DONE"}
+```
+
+> **So every task whose id appeared in another task's prose was MISSING from the DONE set, and a
+> reference left dangling after that task closed could never be raised.** The tool reported success
+> over a population it had silently narrowed.
+
+**IT DEGRADED AS THE LOOP GOT BETTER AT ITS JOB.** Titles here are long and deliberately cite prior
+tasks — the practice this register encourages. **The more history a title carried, the more task ids
+it swallowed**, so the check weakened exactly as the documentation improved.
+
+**MEASURED, BEFORE AND AFTER.** Anchoring to line start (`^(T-\d{4})\s+(\w+)` with `re.M`) took the
+parsed DONE count to **64 of 76**, and the very next run raised **four violations that had been
+invisible**:
+
+```
+T-0032  agents/tasks/T-0048/plan.md:11
+T-0059  agents/tasks/T-0074/behaviour-census-01.md:38
+T-0066  backend/tests/unit/test_t0069_no_second_blackout.py:37
+T-0072  KNOWN_ISSUES.md:15804
+```
+
+**`B250`'s shape in the checker rather than in a test** — an instrument that **under-reports** makes
+its own guard agree with it, and the direction that ships is the quiet one. **A second defect fixed
+in the same pass:** the *"WHOEVER CLOSES T-NNNN MUST DISCHARGE"* reminder fired for every task key in
+the scan, so it named tasks closed hours earlier. **A reminder that fires on finished work trains a
+reader to skip the block, which is how a real one gets missed.** It is now keyed on the board, and a
+task whose state cannot be read is treated as OPEN and says so.
+
+**AND THE OCCASION FOR ALL OF IT WAS A SEAT REFUSING TO SILENCE AN ALARM.** Execute hit a violation
+on a sentence that was true — the only written record of a seven-site consequence — and **asked for a
+classification rather than deleting the sentence.** *Deleting a correct sentence to quiet a tool is
+tuning until the alarm stops.* The discharge is recorded with its reason and still printed. Related:
+**B250**, **B93**, **B240**.
 
