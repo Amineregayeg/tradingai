@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-24 (B274 — gate consumer census. DENOMINATOR PUBLISHED: SIX gates, derived by AST over every Call whose func is an Attribute named gate/observe, argument 0 resolved through module constants and import-as aliases, no <unresolved> remaining. THE INSTRUMENT FAILED ITS CONTROL FIRST: my scanner searched the gate NAME as a token, and a planted canary — a module importing GATE_NAME from exit_shadow and counting traces carrying it — DID NOT APPEAR. A real consumer references the CONSTANT, not the string. B150 inside the instrument built to find B150. Rebuilt to follow the literal AND every importer of the owning module, the canary appeared; only then was a zero worth reporting. RESULT: history/daily_bias/ltf_bos are CONSUMED because they ENFORCE — trace.gate() returns a verdict the caller acts on, so the gate's job is to stop the trade and it does; nobody promised a count and filing them would be tuning until the alarm stops. news_blackout and exit_tranche_plan are WRITTEN-ONLY WITH A COUNT PROMISED — B273's defect. news_blackout's two derivations (bars_where_news_would_block, trades_news_would_have_stopped) appear ONLY in two docstrings, and gate_012:289 made enforcement conditional on populating it. entry_rule_comparison is the subtler case: values() declares THE DENOMINATOR IS PUBLISHED ALWAYS, into a dict that never reaches the database — kept in memory, broken in storage, surviving only because the detail string happens to carry the figures, which is why B268 could parse them from prose.)
+Last updated: 2026-08-24 (B275 — sizing is a PRODUCER with no contract arm, and 'pre-registered' defends the fixed 1% against a threat that is NOT GATE-032. Explicitly NOT a re-filing of B188/B191/B192, which already record the zero-production-callers fact. THE 1% IS A DEFAULT: fixed_config.py:35-39 defends it against being a TUNING KNOB (ROI = risk_pct x n x avg_R, 'cannot make a strategy better, only louder') — true, and not about GATE-032, which does not tune risk_pct but SELECTS it per trade from a ratified nine-cell table. Optimisation and doctrine are different operations. And service.py:115's 'pre-registered and fixed precisely so that risk is a constant' sits inside an argument about sizing off the FILL rather than the SIGNAL price: it leans on constancy as a description of today, and wiring GATE-032 evaporates its stated rationale while leaving its actual argument intact. 'Pre-registered' is doing ratification-shaped work for a claim nobody ratified. A RULING depends on the unwired mechanism — gate_012:505-514, Salim's round-3 ruling (b). THE MT5 CONSEQUENCE B188 PREDATES: on demo the number size_position returns reaches a real venue, so sizing is a PRODUCER, and the contract arms that transfer cover close_position's lot_size, not sizing. Compounded by B261 — size_position returns UNITS while MT5 sizes in instrument-defined LOTS with broker-set volume_min/volume_step. This is the seam where a unit error is a money error. Also: test_engine_lifecycle.py:263-264 would stay green after wiring while no longer being about sizing.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -17235,3 +17235,56 @@ does not survive in the tree and nothing re-runs it.** Raw passthrough is not co
 instruction (`engine.py:39`). No query run.
 
 Related: **B273**, **B150**, **B240**, **B268**, **B270**.
+
+### B275. Sizing is a PRODUCER with no contract arm, and "pre-registered" defends the 1% against a threat that is not `GATE-032`
+
+**`T-0089`. NOT a re-filing of `B188`** — the zero-production-callers fact is recorded there, refined
+by `B191` and `B192`, and a fourth copy would be `B184`'s shape. **This is the part not recorded.**
+
+**1 — THE 1% IS A DEFAULT, AND BOTH SENTENCES THAT APPEAR TO RATIFY IT REFUTE A DIFFERENT CLAIM.**
+
+`fixed_config.py:35-39` defends it against being a **tuning knob** — *"ROI ≈ risk_pct × n × avg_R is
+an exact identity… it cannot make a strategy better, only louder."* **True, and not about
+`GATE-032`**, which does not *tune* `risk_pct`: it **selects** it per trade from a ratified nine-cell
+table. **Optimisation and doctrine are different operations and the argument refutes only the first.**
+
+`service.py:115` — *"`risk_pct` is pre-registered and fixed precisely so that risk is a constant"* —
+sits inside a paragraph arguing that sizing must use the **fill** rather than the **signal** price.
+**It leans on constancy as a description of today, not as a ruling.** Wire `GATE-032` and that
+sentence's stated rationale evaporates **while its actual argument survives untouched.**
+
+> **"Pre-registered" is doing ratification-shaped work for a claim nobody ratified.** What was
+> pre-registered is that it is **not a tunable**; what `GATE-032` ratifies is that it should be a
+> **lookup**. **Both can be true at once, and today's code satisfies the first only** — which is why
+> the seam reads as settled to anyone who checks only the word.
+
+**And a RULING depends on the unwired mechanism**, not just a docstring:
+`gate_012_news_blackout.py:505-514`, Salim's round-3 ruling (b), *"a red-folder day sizes ONE RUNG
+DOWN the disturbance axis"* — implemented by `GATE-032`. **The rule's own `COVERAGE_NOTE` states this
+honestly and already publishes the denominator** (*"a '0 rung-downs' figure is consistent with no
+red-folder days, no calendar, AND no sizer"*). **That note needs nothing.**
+
+**2 — THE MT5 CONSEQUENCE, WHICH `B188` PREDATES.** On a demo account the number `size_position`
+returns **reaches a real venue**, making sizing a PRODUCER in `T-0078`'s sense. **The
+producer-agnostic contract arms that transfer cover `close_position`'s `lot_size` — not sizing.**
+Two things compound:
+
+* **No contract arm covers `size_position` across adapters.** `test_execution_fill_sizing.py` tests
+  the predicate against `FakeBroker`, the double `B258` noted accepts `lot_size` and discards it.
+* **`B261`: a "lot" is a different quantity on MT5.** `size_position` returns *units*; MT5 sizes in
+  instrument-defined lots with broker-set `volume_min`/`volume_step`. **The producer emits one
+  vocabulary into a venue that reads another, with no arm over the conversion.**
+
+**This is the seam where a unit error is a money error rather than a reporting one.**
+
+**3 — ONE ARM WOULD SURVIVE THE WIRING AND STOP MEANING WHAT IT SAYS.**
+`test_execution_fill_sizing.py:87` is **parameterised on `RISK_PCT`** and is safe. But
+`test_engine_lifecycle.py:263-264` asserts `LiveCryptoLoop().risk_pct == 0.01`; **wire `GATE-032` and
+the per-trade value comes from the matrix, the loop field goes vestigial, and this arm stays green
+while no longer being about sizing.** Not a defect today — **a note for whoever wires it**, because a
+green arm that quietly changes subject makes a wiring change look safer than it is.
+
+**BOUNDED:** no query run; `T-0063`'s implied-risk figures are the manager's measurement, not
+re-derived by me.
+
+Related: **B188**, **B191**, **B192**, **B261**, **B258**, **B273**.
