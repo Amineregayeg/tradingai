@@ -15780,6 +15780,34 @@ in this register: **assert the derived set against something that must contain a
 absence is exactly the failure, named rather than counted. Related: **B240**, **B234**, **B229**,
 **B191**, **B213**.
 
+**SECOND CLAUSE, added 2026-08-24 — THE FIXTURE, NOT ONLY THE SCANNER.** Found by Execute in
+`T-0072`'s own arms, one level above the defect this entry was filed for, and caught only because
+the manager had just warned that *emitting is not working*.
+
+Its first `PROBLEM_STATUSES` was:
+
+```python
+tuple(s for s in EXPECTED_STATUSES if s not in dh.OK_STATUSES)
+```
+
+**Derived from the very constant under test.** So the requirement-4 mutation — admit `unavailable`
+to the allow-list — **did not fail the per-member arm. It REMOVED the parametrisation.** The test
+did not go red; **it vanished.** The mutation reported `1 failed` where it should report `3`, and a
+plausible-looking failure count is exactly what makes that survivable.
+
+**Fixed by subtracting the named literals rather than the constant.** The same mutation now gives
+`3 failed`, including the per-member arm.
+
+> **A guard is only as wide as its scanner — and only as FALSIFIABLE as the independence of its
+> fixture from its subject.**
+
+**Same asymmetry, one level up.** An over-coupled fixture does not announce itself: it passes
+quietly, and the failure count it produces is smaller rather than absent, which reads as *a narrower
+blast radius* instead of *a test that disappeared*. **Deriving a test's subjects from the thing it
+tests makes the guard agree with it by construction**, exactly as an under-reporting scanner does —
+and the count of failures is the only visible symptom, so it must be predicted before the mutation
+is run, not read after.
+
 ### B251. FIVE of forty-three implemented rules are ever evaluated in production, and ONE decides a trade
 **Found in:** 2026-08-24, answering Malek's phase directive — *"all the strategies that are
 implemented are used in the trades"* — before the MetaTrader 5 phase
