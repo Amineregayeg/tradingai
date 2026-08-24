@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-24 (B256 — a differential over SYNTHETIC inputs tests the PREDICATE and cannot test the PRODUCER. Review measured its own T-0059 claim instead of restating it: moving the flag above the two late gates fails exactly ONE arm, the structural one, because DIFFERENTIAL_CORPUS is built from hand-made traces and never runs the code that BUILDS a trace. The counter-example is already in this register — T-0063's ARM 1 discarded the accumulator and RE-RAN THE REAL PATH, which is why it caught what eight arms missed and the accumulator-only fix passed 8 of 9. Not unguarded: an AST arm pins statement ORDER not a line number, which is B255's fusion rule and B240's citation clause reached independently. But single-threaded, and the error it guards mislabels four bars in five. Also one probe went VOID and was reported as void: the zero-candidate arm exists and has NOT been demonstrated to fire, because the mutation found no site to target — B155 applied by the seat that would have benefited from the softer reading.)
+Last updated: 2026-08-24 (B258 — MT5 readiness of the SUITE, and one genuinely good result: TWO of six adapter properties transfer automatically, THREE will read as covered without being, and ONE cannot transfer at all. The binary in the task was wrong — there are three categories, and MT5 poses a narrower question than either, because MT5 REPLACES THE ADAPTER so what matters is whether an arm's subject is AN adapter or OUR adapter. Category 3 already exists: test_t0038_partial_close_contract.py:31 derives its population with pkgutil ('DERIVED, not enumerated: a new adapter is covered on the day it is added'), runs AST over close_position's BODY because a signature proves nothing, and asserts the discovered set equals a NAMED LITERAL — so an MT5 adapter is AUTO-DISCOVERED, has lot_size asserted on its body, and FAILS the membership arm until a human names it. Producer-bound and therefore silent after MT5: close_all_positions (B221 was exactly this), place_order, get_positions, and _settle's remaining_units — the last cannot transfer at all because it is OUR simulator's arithmetic and a real venue reports FILLS, not remainders. And the sweep's own first instrument was wrong and was discarded rather than published: it counted pure functions as producers.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -16095,3 +16095,72 @@ fire.** A probe that could not run is not a probe that passed — `B155`'s rule,
 that would have benefited from the softer reading. Related: **B237**, **B155**, **B250**, `T-0063`,
 `T-0059`.
 
+### B258. MT5 readiness of the suite: two of six adapter properties transfer automatically, three will read as covered without being, and one cannot transfer at all
+**Found in:** 2026-08-24, by Review, sweeping `B256` across the suite before the MetaTrader 5 phase
+**A MEASUREMENT with one genuinely good result**, which is rare enough here to say plainly.
+
+**THE BINARY IN THE TASK WAS WRONG AND THE THIRD CATEGORY IS THE USEFUL ONE.** I asked for
+reader-side versus producer-side. There are three, and MT5 poses a narrower question than either:
+**MT5 replaces THE ADAPTER**, so what matters is whether an arm's subject is *an* adapter or *our*
+adapter.
+
+```
+1 READER-SIDE        hand-built input, tests a CONSUMER.        MT5 changes nothing.
+2 PRODUCER-BOUND     calls a REAL adapter — OURS. After MT5 these still pass, against the
+                     same paper broker, saying nothing about the new one.   <- THE DANGEROUS ONE
+3 PRODUCER-AGNOSTIC  a CONTRACT derived over EVERY adapter.     Covered on day one.
+```
+
+**CATEGORY 3 ALREADY EXISTS AND IS BETTER BUILT THAN EXPECTED — VERIFIED BY THIS SEAT.**
+`test_t0038_partial_close_contract.py:31` derives its population by importing the package with
+`pkgutil`, and says why: *"DERIVED, not enumerated: a new adapter is covered on the day it is added
+… a hand-written population excludes by construction exactly the member it most needs to catch."*
+Restricted to the production package **because `__subclasses__()` saw four adapters under `-k paper`
+and five under the full suite** — documented as a fix, not a convenience. `_reads_lot_size` runs AST
+over `close_position`'s **body**, because *"a signature that accepts the parameter proves nothing —
+that is exactly what both simulators had."* And `:86-88` asserts the discovered set equals a **named
+literal**.
+
+> **So on the day an MT5 adapter lands it is AUTO-DISCOVERED, has `lot_size` asserted on its BODY,
+> and FAILS the membership arm until a human names it deliberately.** That is the best MT5-readiness
+> fact in this repository and nobody had said it out loud.
+
+**RANKED BY WHAT A PRODUCER DEFECT WOULD COST:**
+
+```
+1  close_position honours lot_size      COVERED — category 3, auto-extends          transfers
+2  is_simulation declared at all        COVERED — base.py abstract, structural      transfers
+3  close_all_positions actually closes  PRODUCER-BOUND — and B221 WAS exactly this
+4  place_order fills / rejects          PRODUCER-BOUND
+5  get_positions shape and identity     PRODUCER-BOUND
+6  _settle's partial / remaining_units  PRODUCER-BOUND
+```
+
+**Rows three to six will read as covered and will not be.**
+
+**AND THE DISCARD-AND-RE-RUN QUESTION HAS A GENERAL ANSWER.** For adapter behaviour the equivalent of
+`T-0063`'s ARM 1 is not discarding state — **it is running the same arm against a DIFFERENT producer
+and requiring the same contract.** So *discard-and-re-run* and *category 3* are one technique, already
+proven here, currently applied to exactly one property.
+
+```
+row 3  POSSIBLE — contract arm over _all_adapters(); the hard half is that a real adapter needs a
+       live account, so it must be assertable against a RECORDED TRANSCRIPT
+row 4  POSSIBLE but weakest — fills are venue behaviour, not contract. What IS contractual: a
+       rejection is reported as a rejection and never as a fill
+row 5  POSSIBLE and cheap — shape, id stability, opened-is-listed. Pure contract.
+row 6  NOT POSSIBLE — remaining_units is OUR simulator's arithmetic; a real venue reports FILLS,
+       not remainders. MT5 does not re-open that question, it CHANGES it, and B218's column would
+       be filled by a different mechanism entirely.
+```
+
+**THE INSTRUMENT'S FIRST ANSWER WAS WRONG AND WAS DISCARDED RATHER THAN PUBLISHED.** A first pass
+classified files by *"does it call a production builder?"* and produced a tidy table marking sixteen
+READER-ONLY. It counted pure functions as producers and marked a source scanner READER-ONLY for
+calling nothing when there is no producer for it to exercise. **A zero from that instrument is not
+evidence** — `B240` applied to a classifier rather than a query.
+
+**BOUNDED:** no arm was run against a non-paper adapter, because none exists. Day-one behaviour is
+read from the derivation and from `base.py`'s abstract mechanism — **structural, checkable now, not
+observed.** The cost ranking is a judgement: rows 3 and 6 from `B221`'s and `B223`'s actual
+histories, rows 4 and 5 reasoned. Related: **B256**, **B221**, **B223**, **B218**, **B240**.
