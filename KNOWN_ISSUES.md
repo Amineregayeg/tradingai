@@ -14912,6 +14912,29 @@ firing for a reason the code cannot currently distinguish from the one it names.
 
 **Not fixed here.** Related: **B240**, **B215**, **B199**.
 
+**MANAGER MEASUREMENT — THE DISCRIMINATOR RAN AND IT COMES DOWN ON THE HARMLESS SIDE.** Review
+named the test that separates *writes-during-the-window* from *genuine loss*: **which tables
+differ.** Writes can only touch actively-written tables, so a static table differing would mean
+something else entirely. The per-table lines the alarm cannot carry are in the log:
+
+```
+02:15:26   VERIFY FAILED  decision_records live=1076 restored=1074
+02:15:26   verified       trades 276 rows
+02:15:26   verified       broker_connections 1 rows
+```
+
+**`broker_connections` — one row, static, not written during the backup — VERIFIED. `trades` —
+276 rows — VERIFIED.** Only the table the engine writes continuously mismatched, and it mismatched
+by two in the direction `live > restored`.
+
+**That is the window, not loss.** The dump is sound. Both hypotheses predicted the same sign on
+`decision_records`; only one predicted a clean `broker_connections`, and that is what the log shows.
+
+**AND IT CONFIRMS THE `:152` DEFECT IN THE SAME BREATH.** The alarm reported only
+`decision_records` because it was last to fail — the two tables that PASSED are invisible to it. The
+information that settles the question exists in the log and **cannot reach the operator through the
+message**, which is why *"backups failing"* read as data at risk for several hours.
+
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
 **What it is:** `TELEMETRY_SCHEMA.json` hard-pins `engine.rule_registry_version` with
