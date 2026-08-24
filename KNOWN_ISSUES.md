@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-24 (B261 — `Position` cannot carry an MT5 position, and it has never been wrong before because of WHICH venues it has normalised from. Account transfers cleanly; Position does not. (1) NO FIELD FOR FINANCING COST: MT5 reports profit, swap and commission separately and we have one unrealized_pnl. Both venues we have ever normalised from are swap-free — paper by construction, CFT because it is crypto — so the gap has cost nothing yet. An MT5 demo holding FX or metals overnight accrues swap, tripled on Wednesdays; folded in silently or dropped, and if dropped then r_multiple and every R-based rule read a P&L missing its carrying cost, with the error growing with holding time. (2) lot_size IS B167's CLASS IN A FIELD RATHER THAN AN ENDPOINT NAME: in MT5 a lot is instrument-defined (100,000 units FX, 100oz gold) with broker-set volume_min/volume_step. The word survives the venue change and the quantity does not. T-0075 caught this exact collision for mtr/MetaTrader and did not apply it to the field it listed as reusable. WORSE THAN AN ORDINARY MAPPING GAP: lot_size is what the T-0038 contract arm AST-checks every close_position for, so the arm goes GREEN on an adapter reading it in the wrong unit — the guard proves the value is READ, never that it means the same thing.)
+Last updated: 2026-08-24 (B262 — the new task-set fuse is correct as shipped (HANDOFF covers exactly the seven statuses cmd_task_set accepts; set-difference empty BOTH directions, measured) but has three residuals. (1) IT FAILS TOWARD SILENCE: the state write commits inside the lock, _deliver runs after the lock releases and unguarded, so a delivery failure leaves the task advanced with no message — the original defect, now rarer and silent. Two files cannot be atomic without a journal, but ORDER can change: deliver first and commit state second fails toward a SPURIOUS notification, which anyone who looks can recover from, instead of toward silence. A fuse whose own failure mode is the defect it fixes should fail toward noise. (2) B184, the status list is written twice — a literal `valid` tuple in cmd_task_set and the HANDOFF dict. They agree today, measured; but HANDOFF.get() returns None for an UNMAPPED status and None is also the DELIBERATE value for PLANNING/AWAITING_APPROVAL, so a forgotten status notifies nobody and looks identical to one meant to. `valid = tuple(HANDOFF)` removes the second copy. (3) the fuse is gated on caller-supplied --by. STRUCTURAL LIMIT: bus.py cannot ring the doorbell — it is a script and SendMessage is an agent tool — but the unrung doorbell HAS an observable trace, a non-empty inbox, and cmd_tasks does not show it. Per-seat unread on the board is the fusable half.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -16121,6 +16121,16 @@ over `close_position`'s **body**, because *"a signature that accepts the paramet
 that is exactly what both simulators had."* And `:86-88` asserts the discovered set equals a **named
 literal**.
 
+
+**AMENDED 2026-08-24 — ROW 1 WAS OVERSTATED AND THE CORRECTION IS `B261`.** I wrote that this
+property *"transfers automatically"*. **It transfers as a SYNTACTIC check and not as a SEMANTIC one.**
+`_reads_lot_size` proves an adapter's `close_position` body READS the parameter. **It cannot prove the
+parameter MEANS the same quantity.** In MT5 a lot is instrument-defined — 100,000 units for FX, 100oz
+for gold, with broker-set `volume_min`/`volume_step` — so **the arm goes GREEN on an adapter that reads
+`lot_size` and interprets it in the wrong unit**, and a partial close of `0.5` closes half a lot or half
+a unit depending on a convention nothing declares. **This is `B167`'s class arriving in the field the
+guard is built on**, and it means row 1 belongs with the partial transfers, not the clean ones.
+
 > **So on the day an MT5 adapter lands it is AUTO-DISCOVERED, has `lot_size` asserted on its BODY,
 > and FAILS the membership arm until a human names it deliberately.** That is the best MT5-readiness
 > fact in this repository and nobody had said it out loud.
@@ -16128,7 +16138,7 @@ literal**.
 **RANKED BY WHAT A PRODUCER DEFECT WOULD COST:**
 
 ```
-1  close_position honours lot_size      COVERED — category 3, auto-extends          transfers
+1  close_position honours lot_size      COVERED *SYNTACTICALLY ONLY* — see below      partial
 2  is_simulation declared at all        COVERED — base.py abstract, structural      transfers
 3  close_all_positions actually closes  PRODUCER-BOUND — and B221 WAS exactly this
 4  place_order fills / rejects          PRODUCER-BOUND
@@ -16164,6 +16174,22 @@ evidence** — `B240` applied to a classifier rather than a query.
 read from the derivation and from `base.py`'s abstract mechanism — **structural, checkable now, not
 observed.** The cost ranking is a judgement: rows 3 and 6 from `B221`'s and `B223`'s actual
 histories, rows 4 and 5 reasoned. Related: **B256**, **B221**, **B223**, **B218**, **B240**.
+
+**ROW 1 AMENDED 2026-08-24 — IT TRANSFERS SYNTACTICALLY, NOT SEMANTICALLY.** This entry lists
+*"close_position honours lot_size"* as **COVERED, transfers automatically**, on the strength of an
+arm that AST-checks the method **body** for a read of the parameter — stronger than a signature
+check, *"because a signature that accepts the parameter proves nothing."*
+
+**True, and it does not reach far enough for a venue change.** `B261`: an MT5 lot is
+instrument-defined — 100,000 units of FX, 100oz of gold — with broker-set `volume_min` and
+`volume_step`.
+
+> **The arm proves the value is READ. It cannot prove it MEANS the same thing.** An MT5 adapter
+> reading `lot_size` as 100,000 FX units **passes** while trading a quantity nobody intended.
+
+**So row 1 transfers as a SYNTACTIC guarantee and not as a semantic one**, and the correction lands
+on this sweep before it lands on `B261` — the row was written here. `B167` in a field rather than an
+endpoint name: **the word survives the venue change and the quantity does not.**
 
 ### B259. `/mtr-api/` is MATCH-Trader, not MetaTrader — and the bridge service we already run is invisible to `data_health`
 **Found in:** 2026-08-24, scoping the MetaTrader 5 phase. **The manager raised the reuse hypothesis;
@@ -16315,3 +16341,84 @@ crypto. Overnight FX or metals accrues swap, tripled on Wednesdays. Folded into
 `unrealized_pnl` it is silent; dropped, **`r_multiple` and every R-based rule read a P&L missing its
 carrying cost — an error that GROWS WITH HOLDING TIME, so the longest-held positions are the most
 wrong.** `EXIT-001`'s runner is the longest-held position this system produces.
+
+### B262. The `task-set` fuse fails toward SILENCE, and the status list is encoded twice
+
+**The fuse itself is correct as shipped and I verified it rather than reading the claim:** `HANDOFF`
+covers exactly the seven statuses `cmd_task_set` accepts — set-difference **empty in both
+directions**, measured, not eyeballed. Three residuals remain.
+
+**1 — THE FUSE IS SEQUENTIAL, NOT ATOMIC, AND IT FAILS IN THE UNSAFE DIRECTION.** The state write
+commits inside `with _Lock():`; `_deliver(...)` runs **after the lock releases**, unguarded. If
+delivery raises — inbox dir missing, disk full, permission — **the task has already advanced and no
+message exists. That is the original defect, now rarer and silent**, which is worse to diagnose than
+the loud version it replaced.
+
+Two files cannot be made atomic without a journal, so atomicity is not the ask. **Ordering is.**
+Deliver **first**, commit state **second**:
+
+```
+deliver ok, state write fails  ->  a spurious notification. A seat looks, sees the OLD state, asks.
+state write ok, deliver fails  ->  SILENCE. A seat is waiting and nothing is waiting on it.  <- today
+```
+
+**The first is recoverable by anyone who looks; the second is the failure the fuse was built to
+prevent.** A fuse whose own failure mode is the defect it fixes should fail toward noise.
+
+**2 — `B184`: the status list is written twice.** `valid = ("PLANNING", ... )` is a literal inside
+`cmd_task_set`; `HANDOFF` is a module-level dict. **They agree today — measured.** But
+`HANDOFF.get(status)` returns `None` for an *unmapped* status, and `None` is also the **deliberate**
+value for `PLANNING`/`AWAITING_APPROVAL`. **So a status added to `valid` and forgotten in `HANDOFF`
+notifies nobody and looks exactly like a status that is meant to notify nobody.** One line removes
+the second copy: `valid = tuple(HANDOFF)` — then a status that can be SET is a status with a routing
+decision, by construction, and the two cannot drift.
+
+**3 — the fuse is gated on caller-supplied `--by`.** `if dest and dest != a.by` suppresses
+self-notification, which is right, but `--by` is a free string. A seat passing the wrong one
+suppresses its own handoff. Low severity, no guard.
+
+**AND THE HONEST LIMIT IS STRUCTURAL, NOT LAZINESS: `bus.py` cannot ring the doorbell.** It is a
+Python script; cross-session `SendMessage` is a tool only an agent can call. So the bus fuse cannot
+be extended to the wake-up, and printing the exact doorbell fields is the most a script can do.
+
+**BUT THE UNRUNG DOORBELL HAS AN OBSERVABLE TRACE — a non-empty inbox — AND THE BOARD DOES NOT SHOW
+IT.** `cmd_tasks` prints id, status, cycle and title only. **Per-seat unread counts on the board
+would make an unrung doorbell visible to anyone who looks, derived rather than remembered** — which
+is the fusable half of a residual currently recorded as wholly unfusable.
+
+Related: **B255**, **B260**, **B184**, **B191**.
+
+**ALL THREE FIXED IN `bus.py`, 2026-08-24, and verified rather than asserted.**
+
+**1 — THE FUSE NOW DELIVERS BEFORE IT COMMITS.** Two files cannot be atomic without a journal, so
+the question was never atomicity — it is **which way the pair fails**:
+
+```
+deliver ok, state fails  ->  a spurious notification. A seat looks, sees the OLD state, asks.
+state ok, deliver fails  ->  SILENCE. A seat waits and nothing waits on it.      <- the old order
+```
+
+`_deliver(...)` now runs **inside** the lock, before `_write_atomic`. **A fuse whose own failure mode
+is the defect it fixes must fail toward NOISE**, and the old order reproduced the original defect —
+rarer, and silent, which is harder to diagnose than the loud version it replaced.
+
+**2 — THE STATUS LIST IS DERIVED: `valid = tuple(HANDOFF)`.** It was a literal tuple beside
+`HANDOFF`'s keys, agreeing only by inspection. **And the failure was invisible by construction:**
+`HANDOFF.get()` returns `None` for an **unmapped** status, and `None` is also the deliberate value
+for `PLANNING`/`AWAITING_APPROVAL` — so a status added to one and forgotten in the other **notifies
+nobody and is indistinguishable from one meant to notify nobody.** Now a settable status is a status
+with a routing decision, by construction.
+
+**3 — THE FUSE IS NO LONGER GATED ON `--by`.** It carried `dest != a.by`, so a wrong `--by`
+suppressed the caller's own handoff — **the defect wearing the fix's clothes.** A seat notifying
+itself is harmless noise; a suppressed handoff is the thing the fuse exists to prevent. **Verified:
+`task-set --status REVIEWING --by review` took review's inbox 1 → 2, where it would previously have
+been silent.**
+
+**AND THE DOORBELL'S CHEAP HALF NOW EXISTS.** The bus fuse cannot be extended to `SendMessage` —
+that is a tool only an agent can call and `bus.py` is a script, so the limit is structural. **But an
+unrung doorbell has an observable trace — a non-empty inbox — and the board printed id, status,
+cycle and title and nothing else.** `cmd_tasks` now prints per-seat unread counts with each seat's
+address. It wakes nobody; it is the same cheap half the idle-loop arm already is, **and that arm has
+caught three real lapses today.** It fired on its first run: ten unread for the manager, and a
+verdict filed on `T-0075` that nobody had closed.
