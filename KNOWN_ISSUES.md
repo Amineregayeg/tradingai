@@ -15060,6 +15060,39 @@ entirely. **If it does not, there is no safe automatic discriminator and demo-ve
 deliberate human act with a loud confirmation rather than a field** — a materially different design,
 and one that must not be discovered after the adapter is written. Related: **B241**, **B238**.
 
+**MANAGER OVERSTATEMENT, CORRECTED BY REVIEW ON REQUEST.** I offered a weighting: *"the split is the
+only option that does not make MT5 the first venue we connect with reconciliation off."* **That is
+too strong and it made a third option invisible.** The accurate form is narrower:
+
+> **The split is the only option that lets MT5 both TRADE and RECONCILE.**
+
+**Read-only connection also reconciles** — it keeps `reconcile_all` reaching the adapter and gives up
+execution instead. My phrasing ruled out a **staged path** by describing it as a rejected choice:
+connect MT5 read-only, reconcile positions placed by hand in the terminal, **produce the first
+cross-venue reconciliation evidence before we place a single order**, then split the flag when
+execution is wanted. **It is the only option adoptable without touching a safety contract at all** —
+the split changes five adapter classes and two chokepoints; marking a demo as simulated changes a
+flag's meaning by using it wrongly; read-only changes nothing and buys evidence. Not free: a
+read-only connection cannot run the AI, which is the point of the phase. **A first step, not a
+destination.**
+
+**AND A FOURTH CONSEQUENCE, ORTHOGONAL TO ALL THREE OPTIONS AND LIVE UNDER EVERY ONE OF THEM.**
+Verified by this seat at `manager.py:566-570` — `close_all_positions`, whose docstring reads *"Kill
+switch: close ALL positions across ALL adapters"*, iterates `self._adapters.items()` and calls
+`adapter.close_all_positions()` with **ZERO `is_simulation` checks in the function.**
+
+`B238` recorded that the kill switch is one of two named chokepoints that never implemented the guard
+the contract promises. **Today that is harmless because every registered adapter is ours or cannot
+write. The moment an MT5 adapter is registered it stops being harmless:**
+
+> **If a human places a position in the MT5 terminal and the kill switch is armed, we close it — on a
+> real broker connection, with no guard, because the guard the docstring promises was never
+> written.**
+
+**`B239`'s shape again, forward instead of backward:** connecting a venue makes a dormant gap
+reachable, and it appears in **no option's diff**. **`T-0067` is currently scoped as a docstring
+task. Under MT5 it is not one.**
+
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
 **What it is:** `TELEMETRY_SCHEMA.json` hard-pins `engine.rule_registry_version` with
