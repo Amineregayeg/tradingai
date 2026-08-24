@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-24 (B269 — WITHDRAWN after investigation: the `of 6` literal in the entry comparison line is correct and enumerated in the module docstring; recorded rather than dropped because an unused id is a ledger gap. The substantive entry beside it is B268 — `rule_stricter` and `rule_looser` are printed adjacently and have DIFFERENT denominators: disagreement_direction returns RULE_STRICTER only when live ENTERED and RULE_LOOSER only when live DECLINED, and `live_verdict` resolves to `took_trade`. Measured across both of today's runs: stricter was offered 2 opportunities and looser 26, the only two bars where live entered BOTH scored AGREE, and in the run happening now stricter's denominator is ZERO — the value is published on every bar and cannot be non-zero. A reader concludes the rule is uniformly looser; the evidence does not support it. B240's shape on a live corpus, and it is the corpus that would justify the entry cutover.)
+Last updated: 2026-08-24 (B270 — review's T-0082 attack on B268. B268's CONCLUSION SURVIVES and its MECHANISM was wrong: `took_trade` is set at strategy_step.py:217/:244 immediately before `return Signal(...)`, so it means A SIGNAL WAS PRODUCED, not that a position opened — five rejection returns in execution/service.py sit between, three of them ordinary market conditions. And the population is FILTERED: _record_signal_decision runs only inside `if status == FILLED`, _record_abstention only on the no-signal path, and the else branch writes NO decision row — so every bar where the strategy decided to enter and the order did not fill is ABSENT, and those are exactly the live_verdict=True bars. B240's shape at the population rather than the counter, and the direction favours the conclusion: the real denominator is thinner than published. ALSO CORRECTED: the claim that the current run's stricter denominator is ZERO went stale within the hour — the engine entered BTC/USD LONG at 16:30:16, so there are now THREE live-entered bars today and ALL THREE scored AGREE. And the missing denominator is NOT recoverable: _act rejects live in a deque(maxlen=80) cleared on start, orders is empty, trades is a close-only insert.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -15111,6 +15111,32 @@ write. The moment an MT5 adapter is registered it stops being harmless:**
 reachable, and it appears in **no option's diff**. **`T-0067` is currently scoped as a docstring
 task. Under MT5 it is not one.**
 
+---
+
+**AMENDMENT, `T-0081`, MEASURED 2026-08-24 — WHAT THE SAFETY ARGUMENT ACTUALLY RESTS ON.**
+`base.py:53-58` says a subclass that forgets `is_simulation` cannot be instantiated, *"so a new
+real-money adapter can never silently pass as safe."* **The first clause is true and I observed it.
+The second is the overreach, and it is this entry's seam:**
+
+```
+ABSTRACT MEMBERS: 11, and is_simulation IS one of them
+  omits is_simulation ................................. TypeError -- the lever FIRES
+  is_simulation = True as a PLAIN CLASS ATTRIBUTE ..... instantiates fine
+```
+
+**The lever forces a DECLARATION. It cannot force a TRUE one.** ABC is satisfied by a bare class
+attribute — no property, no logic, **nothing that can be wrong in a way a reviewer or a test can
+see.**
+
+**THIS CHANGES WHAT `ExecutionService:96` MEANS.** Its refusal to write to a non-simulation adapter
+is the entire argument for letting the engine trade at all — and **it consumes a value the adapter
+declares about ITSELF, with nothing anywhere checking that declaration against the venue.** The risk
+was framed as *a config value someone sets wrongly*. **It is worse than that: a literal someone typed
+once, indistinguishable from a correct implementation by every instrument we have.**
+
+**So an MT5-demo adapter declaring `is_simulation = True` is not merely answering this entry's two
+questions with one word — it is supplying, by assertion, the only fact the write gate consults.**
+
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
 **What it is:** `TELEMETRY_SCHEMA.json` hard-pins `engine.rule_registry_version` with
@@ -16824,7 +16850,77 @@ decides direction, and its `direction_unknown` bucket exists precisely so the sp
 way to tell.** The fix is to publish both denominators, exactly as the module already does for the
 rate.
 
-Related: **B240**, **B217**, **B213**, **B251**, **B269**.
+
+---
+
+## CORRECTION, 2026-08-24, from `T-0082` (review) plus a re-measurement by the manager. **THE CONCLUSION SURVIVES. THE MECHANISM ABOVE IS WRONG, AND ONE FIGURE IS STALE.**
+
+**WRONG TWICE, in one sentence:** *"`rule_stricter` can only be non-zero on a bar where the live
+path actually opened a position."*
+
+**(a) `took_trade` does not mean a position opened.** It is set at `strategy_step.py:217` and
+`:244`, immediately before `return Signal(...)` — it means **`strategy_step` produced a signal.**
+Between that flag and an open position sit five rejection returns in `execution/service.py`
+(`:126, :130, :135, :146, :153`), **three of which are ordinary market conditions**: no reference
+price, drift beyond threshold, market already through the stop.
+
+**(b) THE POPULATION IS FILTERED, AND FILTERED BY SOMETHING CORRELATED WITH THE MEASURED THING.**
+`crypto_loop.py:1441` calls `_record_signal_decision` **only inside `if status == "FILLED"`**;
+`:1420` calls `_record_abstention` only on the no-signal path; and the `else` at `:1455` logs,
+emits `_act("reject", ...)`, and **writes no decision row at all.** So the corpus is *abstained
+plus filled* — **every bar where the strategy decided to enter and the order did not fill is simply
+absent, and those are exactly the `live_verdict=True` bars.** `B240`'s shape one level up: at the
+population rather than at the counter.
+
+**THE DIRECTION IS TOWARD THE CONCLUSION, NOT AGAINST IT.** The missing bars are removed from
+`rule_stricter`'s denominator specifically, so the real opportunity was even thinner than published.
+**The finding holds a fortiori.**
+
+### The figure that went stale, and it went stale within the hour
+
+**The claim *"in the current run `rule_stricter`'s denominator is ZERO"* was true when measured at
+~16:10 and is FALSE now.** The engine entered `BTC/USD LONG` at **16:30:16**. Re-measured:
+
+```
+run fe837dd1, now   20 decision rows   19 ABSTAINED + 1 OPEN
+                    comparable 20   agree 13   disagree 7
+                    rule_stricter 0   rule_looser 7
+```
+
+**So across today there are now THREE bars on which live entered, and ALL THREE scored AGREE.**
+Stricter's denominator is 3, not 2; the current run's is 1, not 0. **The shape of the finding is
+unchanged and the ratio is barely moved — but a register entry that pins a live number must be
+re-read before it is cited, and this one aged in forty minutes.**
+
+### Weakness 2 is CLOSED, and by evidence rather than by argument
+
+`reasons` is documented in `_with_exit_plan` as *"a JSON list nothing parses"* — and I parse it, so
+there is no format test protecting me. **Checked by count equality on every run measured:
+83 matched of 83 rows, 14 of 14, 20 of 20 — no row was silently skipped.** And the regex was
+re-run with a capture group for any extra term inside the parentheses (`direction_unknown` appends
+there): **it fired on nothing.** The parse is sound on this corpus; it remains unprotected for the
+next one.
+
+### Weakness 1's denominator is NOT recoverable from the database, which review's suggestion did not account for
+
+The suggestion was to count `_act("reject", ...)` events, since every dropped bar emits one.
+**They are not persisted.** `self.activity` is `deque(maxlen=80)` at `:230`, exposed 40 at a time,
+and **cleared on start at `:730`** — so it covers only the live run, lossily, and the previous run's
+rejections are already gone. `orders` is **empty** (the live loop never writes it) and `trades` is a
+**close-only insert** (`_persist_live_close`, *"a clean closed-trade insert"*). **There is no
+durable record anywhere of a signal that was produced and not filled.** Counting rejects live is
+possible; recovering today's is not.
+
+### One alternative explanation checked and killed
+
+4 trade rows against 2 signal decision rows in the previous run looked like two missing decisions.
+**It is tranching, confirmed by exact sums:** ETH `1.401618 + 0.600693 = 2.002311` and BTC
+`0.090627 + 0.038840 = 0.129467`, each matching its decision row's `sized_units` at an identical
+entry time and price. **Two positions, four rows.** And zero open `trades` rows against an OPEN
+decision is likewise correct, not a gap — the insert happens at close.
+
+
+Related: **B240**, **B217**, **B213**, **B251**, **B269**, **B270**.
 
 ---
 
@@ -16854,3 +16950,56 @@ traceable rather than silent — **not worth a change, and stated here so the ne
 re-open it.**
 
 Related: **B268**.
+
+### B270. A bar that DECIDED to enter and did not fill writes no decision row — so `rule_stricter`'s denominator is filtered, not merely small
+
+**`T-0082`, attacking `B268`. Source-derived; I ran no query.** `B268`'s conclusion survives and its
+stated mechanism does not.
+
+**`took_trade` does not mean "a position opened". It means `strategy_step` produced a Signal:**
+
+```
+strategy_step.py:217 / :244   trace.took_trade = True    <- immediately before `return Signal(...)`
+crypto_loop.py:1429           res = await self.execution.execute(sig)      <- the order, later
+crypto_loop.py:1441           _record_signal_decision()  ONLY inside `if res["status"] == "FILLED"`
+crypto_loop.py:1420           _record_abstention()       ONLY on the no-signal path
+crypto_loop.py:1455           else:  logs, _act("reject", ...) -- NO DECISION ROW IS WRITTEN
+```
+
+Between the flag and a position sit **five** rejection returns in `execution/service.py`
+(`:126, :130, :135, :146, :153`) — **three of them ordinary market conditions**: no reference price,
+drift beyond threshold, market already through the stop.
+
+> **EVERY BAR WHERE THE STRATEGY DECIDED TO ENTER AND THE ORDER DID NOT FILL IS ABSENT FROM THE
+> CORPUS — AND THOSE ARE EXACTLY THE BARS WHERE `live_verdict` IS TRUE.**
+
+**So the population is not "bars", nor even "decision rows": it is bars that ABSTAINED plus bars that
+FILLED, with a third category silently absent.** `rule_stricter`'s denominator is **filtered by a
+condition correlated with the quantity being measured** — a stronger defect than the small-sample one
+`B268` reports, and `B240`'s shape at the population level rather than the counter level.
+
+**DIRECTION: IT STRENGTHENS `B268`.** True live-entered ≤ 2, so the real denominator is thinner than
+published. **The conclusion holds a fortiori; the sentence *"can only be non-zero on a bar where the
+live path actually opened a position"* is wrong twice** — `took_trade` means *decided*, and decided-
+but-unfilled bars are not in the corpus.
+
+**COUNTABLE TODAY, FROM A SOURCE NOT YET USED.** The `else` branch emits
+`_act("reject", "… setup NOT taken — {reason}")`, so **every dropped bar is already in the activity
+feed with its reason.** No instrumentation, no deploy, no schema change: the count of `reject`
+activity events per run IS the missing denominator.
+
+**AND THE PARSED FIELD'S OWN CONTRACT SAYS NOTHING PARSES IT.** `_with_exit_plan`'s docstring calls
+`reasons` *"a JSON list nothing parses"*. **`B268` parses it**, so no format test protects it and a
+producer change can break the parse silently. `_with_exit_plan` is additive — checked — but appends
+an element carrying numerals (`2.0R`, `70%`, `30%`) that abstention rows lack, **and the rows that
+differ are the two FILLED rows that constitute `rule_stricter`'s entire denominator.**
+
+**WHAT I ATTACKED AND COULD NOT FAULT:** I expected `LIVE_NOT_REACHED` bars (`live_verdict is None`)
+to fall through `if rule_says_entry and not c.live_verdict` and inflate `RULE_LOOSER`. **Closed by
+`isinstance(c.live_verdict, bool)` at `:169`**, with the docstring explaining why the case is not
+folded into a bucket.
+
+**BOUNDED:** I did not measure how often the reject path fired — only that it exists, writes no
+decision row, and is reachable through five ordinary conditions.
+
+Related: **B268**, **B240**, **B215**, **B213**, **B198**.
