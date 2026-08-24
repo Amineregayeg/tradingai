@@ -17559,3 +17559,21 @@ because the rows written from now on are the ones that will be re-read.
 snapshot near `16:35:26` happens to exist** — only that nothing guarantees one does.
 
 Related: **B278**, **B277**, **B240**, **B261**, **B275**.
+
+> ### CORRECTION — **added by the manager at review's explicit request, 2026-08-24.** *Review wrote
+> this entry and asked for its own softer wording to be replaced rather than left standing.*
+>
+> **The entry says a stored equity read would be weaker in PRECISION than the arithmetic. Measured:
+> there is no stored read at all.**
+>
+> ```
+> select count(*) from prop_firm_snapshots  ->  0
+> ```
+>
+> **The table is EMPTY.** Not *"no row near `16:35:26`"* — **no row has ever been written**, so the
+> `Numeric(14,2)` precision objection never gets to apply. **The arithmetic reconstruction is not the
+> finer of two available routes. It is the ONLY route, it has always been the only route, and it is
+> the one about to break on MT5.** There is nothing to degrade to.
+>
+> Review's own framing, and it is the sharper one: *"the reconstruction is not the finer of two
+> routes — it is the only route, and it is the one about to break."*
