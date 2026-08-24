@@ -16599,7 +16599,25 @@ tuning until the alarm stops.* The discharge is recorded with its reason and sti
 
 ### B265. The `idle` branch — the whole subject of Malek's ruling — has no arm on it, and the arm that claims to demonstrate it replaces the producer
 
-> **RENUMBERED from `B263` by the manager, 2026-08-24.** Filed as `B263` from a **pinned detached worktree at `0620f48`** — correct practice for measurement, and its register predated the real `B263`, so reading the file there showed `B262` as the highest. **The id was taken from a stale file rather than bid from the ledger.** See the collision note in `B203`: *the file cannot see another seat's uncommitted entry; this ledger can* — and a pinned worktree cannot see a COMMITTED one either. The finding below is unaffected.
+> **RENUMBERED from `B263` by the manager, 2026-08-24. The finding below is unaffected.**
+>
+> **THE CAUSE IS NOT THE WORKTREE, AND THE MANAGER'S FIRST NOTE HERE SAID IT WAS.** Review
+> corrected it against itself and the ledger settles it: Review bid **38 ids today and its last
+> bid was `B257` at 14:15:12.** `B260`, `B261`, `B262` and `B263` have **no `review` rows at
+> all** — four entries filed back-to-back during a fast exchange, **the rule simply stopped
+> being applied.** Three got away with it and the fourth collided. *"The rule did not fail me;
+> I stopped applying it, and only the collision made that visible."*
+>
+> **The pinned worktree is a REAL SECOND MECHANISM and it is the interesting half, because it
+> bites the CORRECT practice.** Pinning at `0620f48` is what made the review trustworthy and
+> what made a file-read id stale. `B203` said the file cannot see another seat's **uncommitted**
+> entry; this adds that a pinned worktree cannot see a **committed** one. **The lesson is not
+> "pin less" — it is that NO FILE, shared or pinned, is ever the source for an id.**
+>
+> **AND THE TELL IS AUDITABLE AFTER THE FACT: a gap in your own rows in `bus.py bids` means you
+> reverted to reading the file.** The fix that actually addresses tempo is **bid at the moment
+> the finding exists, before the write-up starts** — not as a step in the filing routine, which
+> is the step that gets skipped when the turnaround is quick.
 
 **`B256`'s next instance, one day after it was filed.** `T-0077` ships
 `test_the_cost_is_REAL_and_this_arm_demonstrates_it`, whose docstring says *"drive the order path to
