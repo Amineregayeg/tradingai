@@ -336,3 +336,126 @@ async def test_a_settle_event_with_NO_position_id_degrades_to_the_OLD_behaviour(
 
     rec = await _read(bound, dec_id)
     assert float(rec.realized_r) == pytest.approx(110.0 / RISK_DOLLARS, abs=1e-4)
+
+
+# ======================================================================================
+# T-0071 / `B247` — THE FIXTURE HAD ONE ROW WHERE PRODUCTION HAS MANY
+#
+# `_open_decision_id_from_db`'s WHERE has three terms, and TWO of them could be deleted with
+# all nine arms above still green. **This is not `B216`'s shape and the difference is the
+# point:** B216 was a term that separated NOTHING, true of 5 of 5. These separate correctly
+# and completely — the corpus the tests built just had one row where production has many.
+# **The defect was in the fixture, not the predicate**, which makes it cheaper to fix and
+# easier to leave.
+#
+# Same gap that produced `B233` and `B213`: *in a population of one every term looks equally
+# load-bearing, because none of them can be shown to bind.*
+# ======================================================================================
+
+OTHER_PAIR = "ETH/USD"
+OTHER_POSITION_ID = "cftsim-eth999"
+
+
+async def _seed_open_decision(maker, *, pair: str, minutes_ago: float, units=UNITS) -> str:
+    """One OPEN, sized decision for `pair`. No trades — nothing has closed against it."""
+    from decimal import Decimal as _D
+
+    rec = DecisionRecord(
+        created_at=datetime.now(tz=timezone.utc) - timedelta(minutes=minutes_ago),
+        symbol=pair, timeframe="5m", inputs_hash="i", code_path_hash="c",
+        signal_dir="LONG", signal_entry=_D(str(ENTRY)), signal_sl=_D(str(STOP)),
+        fill_price=_D(str(ENTRY)), sized_units=_D(str(units)),
+        outcome=OUTCOME_OPEN, cohort="paper",
+    )
+    async with maker() as db:
+        db.add(rec)
+        await db.commit()
+        await db.refresh(rec)
+    return str(rec.id)
+
+
+async def test_armA_two_symbols_the_close_resolves_ITS_OWN_symbols_record(bound):
+    """**`B247`, the symbol filter.** Two symbols each holding an open decision — the state
+    both live symbols were in for four days under `B198`.
+
+    BTC's decision is seeded NEWER, then ETH's runner closes. Without `symbol == pair` the
+    query returns *the newest open decision for ANY pair*, so **ETH's close would write its
+    realized R onto BTC's record** — one trade's outcome on another's row, in the field the
+    feedback loop calls its core input.
+    """
+    eth_id = await _seed_open_decision(bound, pair=OTHER_PAIR, minutes_ago=120)
+    btc_id = await _seed_open_decision(bound, pair=PAIR, minutes_ago=10)
+
+    loop = LiveCryptoLoop()
+    assert loop._open_decision == {}, "the durable path is only reached with the dict empty"
+
+    ev = _settle(pnl=228.68, units=UNITS, partial=False, position_id=OTHER_POSITION_ID)
+    ev["pair"] = OTHER_PAIR
+    await loop._persist_and_resolve(ev)
+
+    eth, btc = await _read(bound, eth_id), await _read(bound, btc_id)
+    assert eth.realized_r is not None, (
+        "ETH's own record was not resolved — the close resolved some other symbol's row"
+    )
+    assert btc.realized_r is None and btc.outcome == OUTCOME_OPEN, (
+        f"BTC's record was written by an ETH close: realized_r={btc.realized_r}. That is one "
+        "trade's outcome on another trade's row."
+    )
+
+
+async def test_armB_a_RESOLVED_decision_is_not_resolved_a_SECOND_time(bound):
+    """**`B247`, the outcome filter.** A resolved decision and an open one on the same symbol.
+
+    The resolved row is seeded NEWER. Without `outcome == OPEN`,
+    `order_by(created_at desc).limit(1)` returns it, so **the open trade never resolves and the
+    finished one is overwritten** by a later close's figures.
+    """
+    open_id = await _seed_open_decision(bound, pair=PAIR, minutes_ago=120)
+    resolved_id = await _seed_open_decision(bound, pair=PAIR, minutes_ago=10)
+
+    async with bound() as db:
+        done = await db.get(DecisionRecord, _as_decision_id(resolved_id))
+        done.outcome, done.realized_r = OUTCOME_WIN, Decimal("2.5000")
+        db.add(done)
+        await db.commit()
+
+    loop = LiveCryptoLoop()
+    await loop._persist_and_resolve(_settle(pnl=228.68, units=UNITS, partial=False))
+
+    still_open, already_done = await _read(bound, open_id), await _read(bound, resolved_id)
+    assert still_open.realized_r is not None, (
+        "the OPEN decision was not resolved — the query picked the newest row regardless of "
+        "state, so the trade that actually closed has no record of it"
+    )
+    assert float(already_done.realized_r) == pytest.approx(2.5, abs=1e-9), (
+        f"a finished trade's realized R was overwritten: {already_done.realized_r}"
+    )
+
+
+async def test_the_third_term_is_also_load_bearing_and_was_ALREADY_exercised(bound):
+    """`sized_units.is_not(None)` — the term `B247` did NOT flag, kept honest here.
+
+    An ABSTAINED decision carries no size and must never be resolved by a close. Included so
+    all three terms have an arm rather than the two that happened to be found by mutation.
+    """
+    abstained = DecisionRecord(
+        created_at=datetime.now(tz=timezone.utc) - timedelta(minutes=5),
+        symbol=PAIR, timeframe="5m", inputs_hash="i", code_path_hash="c",
+        abstained=True, outcome=OUTCOME_OPEN, cohort="paper",
+    )
+    async with bound() as db:
+        db.add(abstained)
+        await db.commit()
+        await db.refresh(abstained)
+    abstained_id = str(abstained.id)
+
+    sized_id = await _seed_open_decision(bound, pair=PAIR, minutes_ago=120)
+
+    loop = LiveCryptoLoop()
+    await loop._persist_and_resolve(_settle(pnl=228.68, units=UNITS, partial=False))
+
+    assert (await _read(bound, sized_id)).realized_r is not None
+    unsized = await _read(bound, abstained_id)
+    assert unsized.realized_r is None and unsized.outcome == OUTCOME_OPEN, (
+        "an abstained decision — no size, no trade — was resolved by a close"
+    )
