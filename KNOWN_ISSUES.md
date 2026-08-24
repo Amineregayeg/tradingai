@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-24 (B265 — the `idle` branch, the WHOLE SUBJECT of Malek's ruling, has no arm on it, and the arm that claims to demonstrate it REPLACES THE PRODUCER: it monkeypatches order_path_health to return a hand-written `idle` literal, so it proves the aggregator keeps ok True given a component saying idle — which two arms above it already prove — and NOT that a stopped engine produces idle. Measured by mutation at the real producer (data_health.py:1328, `else "idle"` -> `else "healthy"`): a stopped engine reports itself HEALTHY and 128 tests across a DERIVED seven-file population pass. The only arm calling the producer directly asserts the OTHER branch, `unavailable`, which the ruling treats as a problem — so the branch the ruling is entirely about is the branch with no coverage. The manager's production observation ([backups,shadow,order_path] -> [backups] and back within an hour) IS the producer link and is counted as such, but it is an OBSERVATION, not a GUARD: it does not re-run tomorrow. Code is correct; do not delete the arm, rename it to what it proves. RENUMBERED from B263 — filed from a pinned worktree whose register predated the real B263, so the id came from a stale FILE rather than from the ledger.)
+Last updated: 2026-08-24 (B266 — `order_path_health`'s docstring says a stopped engine reports `idle` with `watching: False`; it reports `idle` with `watching: True` and the DOCSTRING is the wrong half. `watching: False` occurs in exactly three places and all three are `unavailable` returns; the convention is stated by an arm — test_data_health.py:54, "a check that cannot see its data claimed to be watching" — so `watching` answers COULD THIS CHECK LOOK, not IS THE ENGINE LIVE. The code is correct and deliberately so: ARM E exists to keep a stopped engine reporting its per-symbol verdict, so it WAS watching. Documentation-only, no production consumer — but it is B238's shape, a false contract sentence load-bearing in the wrong direction, three lines from the property B265 says has no arm and describing the SAME branch, the stopped engine, which is the whole subject of Malek's ruling. T-0080's new producer arm asserts on that payload and must assert `watching is True`, or an arm written from the docstring would fail and invite a seat to 'fix' the production line — turning a documentation error into a behavioural one.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -16668,3 +16668,45 @@ the health payload without naming `data_health`, `order_path` or `engine_running
 (`B240` — a zero from a scanner is not evidence of absence).
 
 Related: **B256**, **B215**, **B229**, **B253**, **B240**.
+
+---
+
+### B266
+
+`order_path_health`'s docstring tells the reader that a stopped engine reports **`idle` with
+`watching: False`**. It reports `idle` with **`watching: True`**, and the docstring is the part
+that is wrong.
+
+```
+data_health.py:1182   "...reports here as `idle` with `watching: False`"      <- the claim
+data_health.py:1329   "watching": True,                                        <- unconditional
+```
+
+**`watching: False` occurs in exactly three places and all three are `unavailable` returns**
+(`:1211`, `:1218`, `:1301`). The module's own convention is stated by an arm rather than by me —
+`test_data_health.py:54`: *"a check that cannot see its data claimed to be watching"*. `watching`
+answers **could this check look**, not **is the engine live**.
+
+**So the code is CORRECT and correct deliberately.** `ARM E` in the same function
+(`:1231-1236`) exists to say a stopped engine does **not** suppress the per-symbol verdict — the
+function still queries, still evaluates, still reports. It *was* watching. Returning `False` there
+would be the actual defect, and would collapse `B215`'s could-not-ask against asked-and-fine for
+the fifth predicate.
+
+**NO BEHAVIOURAL DEFECT AND NO PRODUCTION CONSUMER.** `watching` is read by no application code
+outside this module; every other reference is a test. **This is a documentation defect only** — but
+it is `B238`'s shape, a contract sentence that is false and *load-bearing in the wrong direction*:
+a reader checking what a stopped engine looks like finds a specific, confident, wrong pair.
+
+**WHY IT SURFACES NOW AND WHY IT GOES WITH `B265`.** It is the same docstring, three lines from
+the property `B265` says has no arm, and it describes **the same branch** — the stopped engine,
+which is the entire subject of Malek's ruling. **`T-0080`'s new producer arm asserts on the
+stopped-engine payload, so it will meet `watching` on its way past.** An arm written from the
+docstring rather than from the code would assert `False`, fail, and invite the seat to "fix" the
+production line — turning a documentation error into a behavioural one. **The arm must assert
+`watching is True` and the docstring must be corrected in the same change**, or the two stay in
+contradiction with a test now pointing at the wrong one.
+
+**Found by reading, not by a scan** — while measuring the producer for `T-0080`'s plan.
+
+Related: **B265**, **B238**, **B215**, **B229**, **B199**, **B178**.
