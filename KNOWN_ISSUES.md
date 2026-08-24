@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-24 (B252 — `is_simulation` asks TWO DIFFERENT QUESTIONS at its two enforcing readers: `service.py:96` asks "is real money at risk" and `manager.py:484` asks "are these records a third party's". They coincide only because every adapter today is our own paper broker or a real venue. An MT5 DEMO answers them differently — no real money, but genuinely a third party's records — so NO VALUE of the flag is correct for it: True lets the engine trade and SILENTLY SKIPS RECONCILIATION, the exact check a demo exists to provide; False keeps reconciliation and makes execute() raise so the demo cannot place an order. B241's finding one layer in — not two flags disagreeing, one flag answering two questions. And whichever way it is resolved, the demo/real distinction must be read FROM THE VENUE, never from config: a demo and a live account differ by a server address, so a class constant cannot tell and a config field can be wrong.)
+Last updated: 2026-08-24 (B255 — FUSE, DO NOT REMEMBER, with the discriminator that makes it usable: fuse when two things must ALWAYS agree and NOTHING can observe them disagreeing (board-state and notification; allow-list and status set), and do NOT fuse where a disagreement WOULD be observable, because there fusing removes the CHECK rather than the failure mode — T-0072's source arm and behavioural arms can disagree and that disagreement IS the signal. Three instances in one day, none of which resembled the others. Also B240 gains a third clause: a plan's LINE CITATION is an assertion nobody re-runs. T-0072's plan cited data_health.py:294-299 for a disclaimer about `ok`; that range is inside backup_health(). And the drift explanation I offered is FALSE — measured at 19e6c30~1 the range pointed at backup_health() then too, so the citation was wrong WHEN WRITTEN. No test, no reviewer and no hook ever re-runs a plan's line reference.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -15801,6 +15801,28 @@ under-reports **the guard agrees with it.** Agreement between an instrument and 
 input is indistinguishable from correctness. **So derived inputs need a control naming a member
 whose absence would be the failure** — not a count.
 
+**A THIRD CLAUSE, 2026-08-24 — A PLAN'S LINE CITATION IS AN ASSERTION NOBODY RE-RUNS.** `T-0072`'s
+plan told the implementer to add a disclaimer at `data_health.py:294-299`. That range belongs to
+`backup_health()` and **has no bearing on `ok` at all** — so the criterion was unsatisfiable as
+written.
+
+**The obvious explanation is wrong, and I offered it before checking.** I said the numbers had
+*moved* when the change landed. Measured in both trees:
+
+```
+current tree      enclosing def at :294  ->  :268 def backup_health()
+at 19e6c30~1      enclosing def at :294  ->  :268 def backup_health()
+```
+
+**Identical. The citation was wrong WHEN WRITTEN, not made wrong by drift.**
+
+**That is stricter than the drift story and the difference matters.** Drift would argue *prefer names
+because numbers move.* This argues: **the citation was never checked against what it pointed at, and
+nothing between authoring and execution re-runs it.** A plan asserting `file.py:294-299` is making a
+claim about a file — and it is the one class of claim in a plan that no test, no reviewer and no hook
+ever verifies. **Same precondition as every other clause here: establish what you are pointing at
+before you point at it.**
+
 ### B248. NOTHING SHIPPED SINCE 2026-08-19. Fifty commits, ten task fixes, and every "this is now fixed" in this register is true of the tree and false of the box
 **Found in:** 2026-08-24, by Execute, obeying `T-0065` AMENDMENT 1's instruction to **re-measure
 `/api/positions` before treating the old behaviour as the baseline** — the re-measurement is the
@@ -15994,4 +16016,43 @@ plus `EXIT-001`** — not the ratified strategy set. Whether entry and sizing ar
 therefore a decision about what the real test actually tests. Related: **B243**, **B188**, **B177**,
 `T-0041`, `T-0054`, `T-0056`.
 
+### B255. FUSE, DO NOT REMEMBER — and the discriminator for when fusing is the wrong fix
+**Found in:** 2026-08-24, after the same answer arrived three times in one day from three unrelated
+failures
+**A METHOD ENTRY.** Named for the action, per `B240`'s own rule.
+
+**The three instances, none of which looked like the others when it happened:**
+
+```
+MALEK'S `ok` RULING     an allow-list, not a deny-list on `withdrawn` — because a status
+                        added later is a problem BY DEFAULT under one and silently fine
+                        under the other
+THE NOTIFICATION LAPSE  six tasks sat REVIEWING with no verdict because the manager set a
+                        board state and did not send the message. Fix: send WORK in the
+                        SAME ACT as setting REVIEWING, or do not set REVIEWING
+T-0072's TWO ARM KINDS  a source-level arm and behavioural arms. Either alone is weaker —
+                        the source arm cannot see a semantic collapse, the behavioural
+                        arms cannot see a refactor that preserves today's outputs
+```
+
+**In every case the failure was TWO THINGS THAT SHOULD HAVE BEEN ONE, and in every case the fix was
+to make them one ACT rather than one HABIT.** *"Remember to also…"* is not a fix; it is the defect
+with a person attached.
+
+**THE DISCRIMINATOR, which is Review's and is what makes this usable rather than a slogan:**
+
+> **Fuse when the two things must ALWAYS agree and NOTHING CAN OBSERVE them disagreeing.**
+
+Board-state and notification: must always agree, nothing watches for drift → **fuse**. Allow-list and
+status set: must always agree, nothing watches → **fuse**.
+
+**And the opposite mistake, which matters more because it looks like the same move:** where a
+disagreement *would* be observable, **fusing removes the CHECK rather than the FAILURE MODE.** The
+two arm kinds on `T-0072` are exactly that case — they can disagree, and their disagreement is the
+signal. Merging them into one arm would delete the only thing that can catch a refactor preserving
+current output.
+
+**`B254` is the shape to hold against this:** a check that EXISTS and is SILENT is not the same
+problem as a check that is MISSING, and fusion cures only the second. Related: **B240**, **B250**,
+**B254**, **B229**.
 
