@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-24 (B246 — `gap_r` is still NULL after T-0063, so the feedback loop still cannot learn, now with a correct realized_r beside it. Execute DECLINED the plan's instruction to let gap_r exist for the leg that has a target, and was right to: a per-leg gap written into a column whose readers treat it as whole-trade repeats B223's own shape one field over. Deviation FILED rather than buried in a commit body. Also B245: the T-0066 deletion rewrote the false claim in finnhub.py and left the SAME fact standing in test_t0035_impact_unknown.py:11-15, which cites a test the same commit deleted — grep returns two hits and both are prose, so a sentence promising re-runnable evidence points at nothing. ADDING A NOTE DOES NOT RETIRE THE CLAIM IT SUPERSEDES. And the docstring changed the identifier to 'the blackout helper', removing it from the very grep the deletion's acceptance arm used — the arm passed because the NAME was gone while the claim survived.)
+Last updated: 2026-08-24 (B247 — two of three filters on the durable decision lookup are unexercised, CORRECTED: their 'production load today' claim is FALSE. Measured, ZERO decision_records carry outcome OPEN, because both runners' decisions were already resolved to WIN by the very defect T-0063 fixed — B223 consumed the state its own fix's filters protect. And T-0063's path is correct, reviewed, mutation-tested and UNRUN: the engine has not restarted since it landed and is frozen under B198. The finding survives, only its urgency changes. Also B239 GAINS ITS MIRROR from T-0059 — the question 'what was unreachable before that is reachable after' has a twin, 'what was VALID before and stops being valid after': a positive flag became a new obligation on every trace producer, and three hand-built fixtures went NOT_COMPARABLE with must-fire arms passing over an empty population. Nothing became reachable; something stopped being comparable — and it announced itself ONLY because production has one producer and the others were tests. And B240 GAINS A SECOND CLAUSE: the precondition applies to a PEER's number too. A borrowed figure is load-bearing the moment you argue from it.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -14778,6 +14778,83 @@ absent. `B226` measured that the loop used to work and the exit cutover zeroed i
 of the two halves. Related: **B223**, **B226**, **B227**, **B218**.
 
 
+### B247. Two of the three filters on the durable decision lookup are unexercised ~~and both carry production load today~~ — **CORRECTED: the load claim is FALSE today**
+**Found in:** 2026-08-24, T-0063's review (Review) — by mutation
+**What it is:** `T-0063`'s `_open_decision_id_from_db` is the durable path that makes a restart
+survivable. Its `WHERE` has three terms:
+
+```
+crypto_loop.py:1113   DecisionRecord.symbol == pair,
+:1114                 DecisionRecord.outcome == OUTCOME_OPEN,
+:1115                 DecisionRecord.sized_units.is_not(None),
+      .order_by(DecisionRecord.created_at.desc()).limit(1)
+```
+
+**Drop the symbol filter: 9 passed. Drop the outcome filter: 9 passed.** Neither is held by any arm.
+
+**Both carry real load right now, which is what separates this from a style note.**
+
+* **`symbol == pair`** — two symbols each hold an open, blocked decision as of this run (ETH from
+  2026-08-19, BTC from 2026-08-21, `B198`). Without the filter the query returns *the newest open
+  decision for any pair*, so **the ETH runner's close would resolve against BTC's record** — writing
+  one trade's realized R onto another's. The tests use one symbol, so the term is invisible to them
+  and decisive in production.
+* **`outcome == OPEN`** — without it, `order_by(created_at desc).limit(1)` returns the newest
+  decision for the symbol whatever its state, so **an already-resolved record could be resolved a
+  second time** from a later close. Again single-decision fixtures cannot reach it.
+
+**This is not `B216`'s shape and it is worth saying why.** `B216` was a term that *separated nothing*
+— true of 5 of 5. These separate correctly and completely; **the corpus the tests build just has one
+row where production has two.** The defect is in the fixture, not the predicate — which makes it
+cheaper to fix and easier to leave.
+
+**And it is the same fixture gap that produced `B233` and `B213`:** a population of one, in which
+every term looks equally load-bearing because none of them can be shown to bind.
+
+**Fix, both fixture-only:** one arm with two symbols each holding an open decision, asserting the
+close resolves its own; one arm with a resolved and an open decision on the same symbol, asserting
+the resolved one is not touched. **Neither needs a database beyond what the existing arms already
+stand up.**
+
+**A third, smaller one in the same family:** replacing the finality test `ev.get("partial")` with an
+epsilon comparison on `remaining_units` also passes 9/9. `ARM 6` asserts finality is not a
+cross-table SUM — and does not stop a local epsilon on the broker's own field. The hazard is small
+(a remainder below 1e-9 is not reachable) but the arm reads as forbidding epsilons and forbids only
+one of them.
+
+**Not fixed here. `T-0063`'s implementation is correct — this is what holds it.**
+Related: **B233**, **B213**, **B216**, **B227**.
+
+**MANAGER CORRECTION — THE LOAD CLAIM DOES NOT HOLD TODAY, AND ITS FAILURE IS AN IRONY.** The entry
+argues both filters carry production load because *"two symbols hold an open blocked decision right
+now."* **Measured across the whole corpus:**
+
+```
+decision_records with outcome = 'OPEN'    ZERO
+outcome distribution   ABSTAINED 1027 · LOSS 15 · WIN 13 · ABANDONED 5
+```
+
+`OUTCOME_OPEN` is the literal `"OPEN"` (`models/decision_record.py:43`), so the query names the
+right value. **There are no open decision records at all** — and the reason is that **both runners'
+decisions were already resolved to `WIN` by the very defect `T-0063` fixed.** The 70% tranche popped
+the key and wrote the outcome, so the state these filters protect cannot exist in the corpus,
+because `B223` consumed it.
+
+**AND THE FIXED PATH HAS NEVER EXECUTED.** It writes `OPEN` at creation and resolves at final close,
+but the engine has not restarted since `T-0063` landed and is frozen under `B198` regardless.
+**`T-0063` is correct, reviewed, mutation-tested, and UNRUN in production.**
+
+**The finding survives; only its urgency changes.** The predicate is right, the terms are genuinely
+unexercised, and the cause is exact: **the fixture seeds ONE decision where the real path has many,
+and in a population of one every term looks load-bearing because none can be shown to bind** — the
+same gap as `B233` and `B213`. Queued as `T-0071` rather than expedited, because nothing in the tree
+is false and no reader is misled, which is the distinction that expedited `T-0069` and `T-0070`.
+
+**HOW THE WRONG PREMISE TRAVELLED, recorded because it is the reusable part.** Execute did not
+measure it — it took the figure from a peer's message and repeated it as its own, **inside an
+argument for scheduling.** Its own account: *"I passed it on because it supported the case I was
+making, which is the worst reason to skip a check."* See `B240`.
+
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
 **What it is:** `TELEMETRY_SCHEMA.json` hard-pins `engine.rule_registry_version` with
@@ -15363,6 +15440,27 @@ no corpus can exercise). **Inherited reachability is the same shape moved in tim
 not covered because it was not a defect yet, and the moment it becomes one is a commit that does not
 mention it. Related: **B238**, **B221**, **B233**, **B211**.
 
+**THE MIRROR, added 2026-08-24 from `T-0059`, and it is the half this entry did not have.** The
+question *"what was unreachable before this change that is reachable after it?"* has a twin:
+
+> **What was VALID before this change and stops being valid after it?**
+
+`T-0059` added a positive flag that every trace producer must now set. In production the reachability
+answer was genuinely *nothing* — `compare_entry` has exactly one trace producer
+(`evaluate_latest_bar_traced`, called once from `crypto_loop.py:1394`), and that is where the flag is
+set. **But three arms in two other files build traces by hand.** They went `NOT_COMPARABLE`, and
+their must-fire arms began passing over an empty population — *"11 windows of real bars produced ZERO
+comparable decisions."*
+
+**So nothing new became reachable, and a previously-comparable state stopped being comparable for
+every caller relying on the old default.** Those callers were fixtures rather than production **only
+because production has one producer.** A second producer would have shipped the same defect
+**silently, because it would not have had a failing test to announce it.**
+
+That is this entry's shape from the other side, and it is the argument for positive polarity stated
+as a measurement rather than a principle: **the new obligation announced itself in the only places
+that had already written the code twice.**
+
 ### B240. PUBLISH THE DENOMINATOR — six surfaces render an answer without the count that says whether it means anything, and the codebase already states the rule in one place
 **Found in:** 2026-08-23, across the day — named by Review, which corrected this seat's proposed
 name for it
@@ -15433,3 +15531,21 @@ MARKET rather than about a code path.
 
 `grep -c` on the assignment is cheaper than the query that produces the number, **and it would have
 answered all four.**
+
+**AND THE CHECK APPLIES TO A PEER'S NUMBER, NOT ONLY YOUR OWN — added 2026-08-24.** A figure quoted
+from another seat is still a figure you are asserting the moment you build on it.
+
+`B247` is the instance: the claim *"two symbols hold an open blocked decision right now"* travelled
+from one seat's message into another's scheduling argument **without either measuring it**, and it
+was false — there are zero such rows, because the defect being fixed had already consumed that state.
+The seat that repeated it named the cause itself: ***"I passed it on because it supported the case I
+was making, which is the worst reason to skip a check."***
+
+**So the check has a second clause:**
+
+> **Before quoting a distribution, confirm the field has more than one writer — and if the figure
+> came from a peer, confirm it before using it as a premise, exactly as you would your own.**
+
+**A borrowed number is load-bearing the moment you argue from it**, and it arrives with the
+authority of the seat that sent it rather than the evidence that produced it.
+
