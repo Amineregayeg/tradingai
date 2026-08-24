@@ -333,9 +333,28 @@ class WSManager:
         """Broadcast alerts.resolved event."""
         await self.broadcast(channel="alerts", event="resolved", data=alert)
 
-    async def push_position_update(self, position: dict) -> None:
-        """Broadcast positions.update event."""
-        await self.broadcast(channel="positions", event="update", data=position)
+    async def push_position_update(
+        self, positions: list[dict], *, authoritative: bool
+    ) -> None:
+        """Broadcast `positions.update` — THE FULL LIST, and only ever the full list.
+
+        **`B228`: this event used to carry TWO INCOMPATIBLE SHAPES.** Here it sent a single
+        position dict; `crypto_loop._push_state` sent `{"positions": [...]}`. The client reads
+        `data.positions`, so the single-dict form arrived as `undefined` and was discarded by
+        the same guard that drops empty lists — *of five broadcasts on this channel, exactly
+        one was ever acted on.* A single position is now `open`/`close`, which have their own
+        shape and their own handlers.
+
+        **`authoritative` is CARRIED, NEVER INFERRED.** The client ignored every empty list by
+        design, to stop a freshly-reconnected broker stomping the panel — which also meant
+        **there was no path by which the panel could ever clear.** The sender knows which case
+        it is in and the receiver cannot; so the sender says.
+        """
+        await self.broadcast(
+            channel="positions",
+            event="update",
+            data={"positions": positions, "authoritative": authoritative},
+        )
 
     async def push_position_open(self, position: dict) -> None:
         """Broadcast positions.open event."""

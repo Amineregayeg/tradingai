@@ -506,9 +506,12 @@ class LiveCryptoLoop:
     async def _push_state(self) -> None:
         positions = await self.paper.get_positions()
         acct = await self.paper.get_account()
-        await ws_manager.broadcast(
-            channel="positions", event="update",
-            data={"positions": [p.model_dump(mode="json") for p in positions]},
+        # THROUGH THE ONE PRODUCER, so `positions.update` has one shape by construction
+        # rather than by two call sites agreeing. AUTHORITATIVE: this reads the live broker's
+        # own list, so an empty list here MEANS there are no positions — which is exactly the
+        # case the client must act on and previously could not distinguish from a reconnect.
+        await ws_manager.push_position_update(
+            [p.model_dump(mode="json") for p in positions], authoritative=True
         )
         await ws_manager.broadcast(
             channel="positions", event="account",

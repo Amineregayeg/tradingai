@@ -26,20 +26,40 @@ const RED = '#ff3b5c'
 const AMBER = '#e3b341'
 const MUTED = '#55556a'
 
+/**
+ * Every status the backend actually emits, and what it means for a reader.
+ *
+ * `B234`: the catch-all used to be commented `// down, failing` — NEITHER of which the
+ * backend emits — while silently absorbing four that do: `withdrawn`, `idle`, `thin` and
+ * `not_applicable`. A comment naming the cases it does not handle, over a branch swallowing
+ * the ones it does.
+ *
+ * `B229`/`B234`: **`idle` and `withdrawn` must not be the same colour.** They are precisely
+ * the two states the `ok` question is about — an engine deliberately stopped, versus an
+ * engine running and unable to trade — and folding them together makes the flag unreadable
+ * whichever way that question is answered.
+ */
+const STATUS_COLOUR: Record<string, string> = {
+  healthy: GREEN,
+  idle: MUTED,            // nothing is DUE. Not a problem, and not health either.
+  not_applicable: MUTED,  // this check does not apply here
+  stale: AMBER,
+  thin: AMBER,
+  unavailable: AMBER,     // we cannot SEE it — never styled as an absence of news
+  withdrawn: RED,         // running, and unable to trade
+  down: RED,
+  failing: RED,
+}
+
 function colourFor(status: string): string {
-  if (status === 'healthy') return GREEN
-  if (status === 'stale' || status === 'unavailable') return AMBER
-  return RED // down, failing
+  // An unknown status is AMBER, never green: a status this panel has not been taught is a
+  // thing it cannot vouch for, and defaulting to green is how a screen reassures about
+  // something it stopped understanding.
+  return STATUS_COLOUR[status] ?? AMBER
 }
 
 function Component({ name, health }: { name: string; health: ComponentHealth }) {
   const colour = colourFor(health.status)
-  const detail =
-    health.status === 'unavailable'
-      ? 'not being watched'
-      : name === 'Collector'
-        ? `${health.age_minutes?.toFixed(0)}m ago · ${health.recent_density_pct?.toFixed(0)}% of last hour`
-        : `${health.age_hours?.toFixed(0)}h ago · ${health.backup_count ?? '—'} kept`
 
   return (
     <div style={{ padding: '5px 0', borderTop: '1px solid #1a1a26' }}>
@@ -50,7 +70,14 @@ function Component({ name, health }: { name: string; health: ComponentHealth }) 
           {health.status}
         </span>
       </div>
-      <div style={{ fontSize: 10, color: MUTED, marginLeft: 14, marginTop: 1 }}>{detail}</div>
+      {/* THE COMPONENT'S OWN SENTENCE. This used to be built here, by branching on the
+          component's NAME — `name === 'Collector' ? age_minutes... : age_hours...` — which
+          is why a third component could not be rendered at all. */}
+      {health.summary && (
+        <div style={{ fontSize: 10, color: MUTED, marginLeft: 14, marginTop: 1 }}>
+          {health.summary}
+        </div>
+      )}
       {/* The warning says WHY it is urgent, not just that it happened — for the
           collector, that the loss is permanent. */}
       {health.warning && (
@@ -58,13 +85,14 @@ function Component({ name, health }: { name: string; health: ComponentHealth }) 
           {health.warning}
         </div>
       )}
-      {health.reason && !health.warning && (
-        <div style={{ fontSize: 10, color: MUTED, marginLeft: 14, marginTop: 3, lineHeight: 1.45 }}>
-          {health.reason}
-        </div>
-      )}
     </div>
   )
+}
+
+/** `dominance_collector` -> `Dominance collector`. The key is the name; nothing is hardcoded. */
+function labelFor(key: string): string {
+  const spaced = key.replace(/_/g, ' ')
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1)
 }
 
 export function DataHealthPanel() {
@@ -94,13 +122,19 @@ export function DataHealthPanel() {
   }
   if (!health) return null
 
+  const components = Object.entries(health.components ?? {})
+
   // Healthy: one quiet line. Anything louder trains people to ignore it.
+  //
+  // COUNTED, NOT NAMED. This said "Collector and backups healthy" while five components had
+  // been checked — a claim narrower than the check that produced it, which reads as a
+  // reassurance about the two it names and silently covers three it does not.
   if (health.ok) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 12 }}>
         <div style={{ width: 7, height: 7, borderRadius: '50%', background: GREEN }} />
         <span style={{ fontSize: 11, color: MUTED }}>
-          Collector and backups healthy
+          {components.length} component{components.length === 1 ? '' : 's'} healthy
         </span>
       </div>
     )
@@ -117,8 +151,11 @@ export function DataHealthPanel() {
       }}>
         Data health — {health.problems.length} problem{health.problems.length === 1 ? '' : 's'}
       </div>
-      <Component name="Collector" health={health.dominance_collector} />
-      <Component name="Backups" health={health.backups} />
+      {/* EVERY component, derived from the payload. A sixth appears here with ZERO change
+          to this file — which is the whole of B231's fix. */}
+      {components.map(([key, component]) => (
+        <Component key={key} name={labelFor(key)} health={component} />
+      ))}
     </div>
   )
 }

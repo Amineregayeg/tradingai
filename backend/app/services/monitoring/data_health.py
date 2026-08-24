@@ -30,6 +30,63 @@ from pathlib import Path
 
 from app.core.logging import logger
 
+
+def with_summary(formatter):
+    """Attach a one-line `summary` to EVERY dict a health function returns.
+
+    **`B231`: the frontend's `DataHealth` type ENUMERATED its components**, so a renderer
+    faithful to its type rendered two rows while `problems.length` counted five. The obvious
+    repair — add three more fields — is the same defect, *and worse, because a type that
+    enumerates looks like documentation.*
+
+    The fix has to make the frontend able to render a component it has never heard of, and
+    the thing that blocks that is not the nesting: **the five components share no vocabulary.**
+    `age_minutes` / `age_bars` / `age_hours` / `withdrawn_symbols` / `absent_panels` — no field
+    set a generic row can format. Derive the row and the hardcoded list merely MOVES into the
+    formatter, harder to see.
+
+    So each component emits its own summary, **computed where its fields are known**, and the
+    frontend renders `{name, status, summary}` knowing nothing about any of them.
+
+    **A DECORATOR RATHER THAN A LINE AT EACH RETURN.** These functions have 18 return sites
+    between them; a summary added by hand at each is a summary that can be FORGOTTEN at one,
+    and the one it is forgotten at is an error path — the exact case the panel most needs to
+    show. Here no return site can miss it.
+    """
+    import functools
+    import inspect as _inspect
+
+    def decorate(fn):
+        if _inspect.iscoroutinefunction(fn):
+            @functools.wraps(fn)
+            async def awrapper(*a, **k):
+                out = await fn(*a, **k)
+                return {**out, "summary": formatter(out)} if isinstance(out, dict) else out
+            return awrapper
+
+        @functools.wraps(fn)
+        def wrapper(*a, **k):
+            out = fn(*a, **k)
+            return {**out, "summary": formatter(out)} if isinstance(out, dict) else out
+        return wrapper
+
+    return decorate
+
+
+def _fallback_summary(c: dict) -> str | None:
+    """What every component says when it cannot say anything specific.
+
+    `reason` first because an unavailable or idle component has already written the one
+    sentence that matters, and re-deriving it would be a second statement of it.
+    """
+    reason = c.get("reason")
+    if reason:
+        return str(reason)
+    if c.get("watching") is False:
+        return "not being watched"
+    return None
+
+
 #: Read-only mounts into the api container. Defaults match compose.vps.yaml.
 DOMINANCE_DIR = Path(os.getenv("DOMINANCE_DATA_DIR", "/data/dominance"))
 BACKUP_DIR = Path(os.getenv("BACKUP_STATUS_DIR", "/data/backups"))
@@ -102,6 +159,20 @@ def _read_tail(path: Path, nbytes: int = TAIL_BYTES) -> list[str]:
         return f.read().decode("utf-8", errors="replace").splitlines()
 
 
+def _dominance_summary(c: dict) -> str:
+    """The collector's line. Its data is UNRECOVERABLE, so age leads."""
+    if (fb := _fallback_summary(c)) is not None:
+        return fb
+    age = c.get("age_minutes")
+    density = c.get("recent_density_pct")
+    return (
+        f"{age:.0f}m since the last sample · {density:.0f}% of the last hour"
+        if age is not None and density is not None
+        else "collector state unreadable"
+    )
+
+
+@with_summary(_dominance_summary)
 def dominance_health() -> dict:
     """Freshness and continuity of the intraday dominance series."""
     path = DOMINANCE_DIR / "dominance_intraday_raw.csv"
@@ -181,6 +252,19 @@ def dominance_health() -> dict:
     return out
 
 
+def _backup_summary(c: dict) -> str:
+    if (fb := _fallback_summary(c)) is not None:
+        return fb
+    age = c.get("age_hours")
+    kept = c.get("backup_count")
+    return (
+        f"{age:.0f}h since the last backup · {kept} kept"
+        if age is not None
+        else f"{kept} backup(s) kept, age unknown"
+    )
+
+
+@with_summary(_backup_summary)
 def backup_health() -> dict:
     """Whether backups are running and verifying."""
     status_file = BACKUP_DIR / "status.json"
@@ -242,6 +326,22 @@ SHADOW_STALE_BARS = 2.0
 SHADOW_DOWN_BARS = 4.0
 
 
+def _shadow_summary(c: dict) -> str:
+    """LIVENESS ONLY — the payload says so itself and this line must not overclaim."""
+    if (fb := _fallback_summary(c)) is not None:
+        return fb
+    bars = c.get("age_bars")
+    state = c.get("evaluation_state", "unknown")
+    observed, expected = c.get("observed_in_window"), c.get("expected_in_window")
+    head = f"{bars:.1f} bars since the last record ({state})" if bars is not None else state
+    return (
+        f"{head} · {observed} of ~{expected:.0f} expected in the window"
+        if observed is not None and expected is not None
+        else head
+    )
+
+
+@with_summary(_shadow_summary)
 async def shadow_health() -> dict:
     """Is the contract engine's shadow still RECORDING? Not: is it right.
 
@@ -474,6 +574,20 @@ PANEL_STALE_BARS = 2.0
 PANEL_DOWN_BARS = 4.0
 
 
+def _panel_summary(c: dict) -> str:
+    """Three lists, and they stay THREE — an operator needs to know which axis failed."""
+    if (fb := _fallback_summary(c)) is not None:
+        return fb
+    stale = len(c.get("stale_panels") or [])
+    thin = len(c.get("thin_panels") or [])
+    absent = len(c.get("absent_panels") or [])
+    total = len(c.get("panels") or [])
+    if not (stale or thin or absent):
+        return f"{total} panel(s), none stale, thin or absent"
+    return f"{total} panel(s) · {stale} stale · {thin} thin · {absent} absent"
+
+
+@with_summary(_panel_summary)
 async def panel_health() -> dict:
     """Are the GATE-008 roster panels RECENT, and are they THICK? Two answers, never one.
 
@@ -746,6 +860,15 @@ async def data_health(loop=None) -> dict:
         "ok": not problems,
         "checked_at": datetime.now(tz=timezone.utc).isoformat(),
         "problems": problems,
+        # NESTED, and it is not cosmetic. This used to end `**components`, so the top level
+        # was `ok · checked_at · problems` PLUS the component keys — and a frontend deriving
+        # its rows with `Object.entries` would render the first three AS COMPONENTS. Under
+        # `components` the renderer can iterate everything it is given without a list of
+        # names to keep in step, which is `B231`'s actual fix.
+        "components": components,
+        # KEPT AT THE TOP LEVEL FOR ONE RELEASE. Nesting alone would break any reader of
+        # `health.shadow` the moment it deploys, and nothing here is deployed — so the
+        # compatible order is: ship both, move the only reader, then drop these.
         **components,
     }
 
@@ -963,6 +1086,33 @@ def order_path_symbol_state(
     }
 
 
+def _order_path_summary(c: dict) -> str:
+    """`B234`/`B229`: `idle` and `withdrawn` MUST be distinguishable without opening the
+    component. They are the two states the `ok` question is actually about, and the panel
+    rendered them the same colour — so the sentence has to carry the difference."""
+    if (fb := _fallback_summary(c)) is not None:
+        return fb
+    withdrawn = c.get("withdrawn_symbols") or []
+    running = c.get("engine_running")
+    if withdrawn:
+        ages = {
+            s["symbol"]: s.get("age_hours")
+            for s in (c.get("symbols") or [])
+            if s.get("withdrawn_from_trading")
+        }
+        detail = ", ".join(
+            f"{sym} {age:.0f}h" if age is not None else sym for sym, age in ages.items()
+        )
+        return (
+            f"WITHDRAWN FROM TRADING: {detail}"
+            + ("" if running else " · and the engine is STOPPED")
+        )
+    if not running:
+        return "the engine is not running — nothing is due, and nothing is withdrawn"
+    return f"{len(c.get('symbols') or [])} symbol(s) still reaching decisions"
+
+
+@with_summary(_order_path_summary)
 async def order_path_health(loop=None) -> dict:
     """Is the ORDER path still TRADING? Not: is the engine RUNNING. Not: is the shadow RECORDING.
 

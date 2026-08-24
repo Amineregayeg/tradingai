@@ -247,9 +247,26 @@ export interface BrokerAccount {
   }
 }
 
-/** One monitored component. `unavailable` means nothing is watching it. */
+/**
+ * One monitored component. `unavailable` means nothing is watching it.
+ *
+ * `status` is a STRING, not a union (`B234`). The union used to list
+ * 'healthy' | 'stale' | 'down' | 'failing' | 'unavailable' — of which the backend emits
+ * exactly two: `stale`, `down` and `failing` are emitted NOWHERE, while `withdrawn`, `idle`,
+ * `thin` and `not_applicable` are emitted and were outside it. A union that is wrong in both
+ * directions is worse than no union: it type-checks the four real states as errors and
+ * documents three that cannot occur.
+ */
 export interface ComponentHealth {
-  status: 'healthy' | 'stale' | 'down' | 'failing' | 'unavailable'
+  status: string
+  /**
+   * One line the component wrote about ITSELF, computed where its fields are known.
+   *
+   * The five components share no vocabulary — `age_minutes` / `age_bars` / `age_hours` /
+   * `withdrawn_symbols` / `absent_panels` — so no generic row can format them. This is what
+   * lets the panel render a component it has never heard of.
+   */
+  summary?: string
   /** False when the backend could not read this component's data at all. */
   watching?: boolean
   reason?: string
@@ -268,8 +285,19 @@ export interface DataHealth {
   ok: boolean
   checked_at: string
   problems: string[]
-  dominance_collector: ComponentHealth
-  backups: ComponentHealth
+  /**
+   * Every monitored component, KEYED RATHER THAN NAMED (`B231`).
+   *
+   * This interface used to declare `dominance_collector` and `backups` as fields, and the
+   * panel was FAITHFUL to it: it counted `problems.length` over five components and rendered
+   * two rows, then said "Collector and backups healthy" after five had been checked.
+   *
+   * **Adding three more fields would be the same defect, and worse** — a type that enumerates
+   * looks like documentation, so the next component to arrive is silently unrendered while
+   * the type appears to describe the payload. A `Record` has no names in it and cannot go
+   * stale.
+   */
+  components: Record<string, ComponentHealth>
 }
 
 export interface BrokerConnectRequest {

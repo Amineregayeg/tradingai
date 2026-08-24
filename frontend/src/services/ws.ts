@@ -220,23 +220,33 @@ function registerDefaultHandlers(service: WebSocketService): void {
     usePricesStore.getState().updateTick(data)
   })
 
-  // Position updates (full list). Only overwrite when the broker sends a non-empty
-  // list — empty lists from a freshly-reconnected broker would stomp the dashboard
-  // fallback of "show open trades as positions".
+  // Position updates (full list).
+  //
+  // `B228`: this used to ignore EVERY empty list, so there was no path by which the panel
+  // could clear — a closed position stayed on screen until a reload. The guard was right
+  // about the hazard (a reconnecting broker stomping the dashboard) and wrong to infer it
+  // from emptiness, because both cases look identical from here. The SENDER knows.
+  //
+  // A non-authoritative empty is still ignored, which keeps the protection the original
+  // comment was written for. An absent flag counts as non-authoritative, so an older server
+  // keeps the old behaviour rather than gaining a new one.
   service.on<import('@/types/ws').PositionUpdateData>('positions', 'update', (data) => {
-    if (Array.isArray(data?.positions) && data.positions.length > 0) {
+    if (!Array.isArray(data?.positions)) return
+    if (data.positions.length > 0 || data.authoritative === true) {
       usePositionsStore.getState().setPositions(data.positions)
     }
   })
 
-  // Position added
-  service.on<import('@/types/ws').PositionEventData>('positions', 'added', (data) => {
-    usePositionsStore.getState().updatePosition(data.position)
+  // A position opened. `B228`: the handlers here used to be 'added' and 'removed', which the
+  // backend HAS NEVER SENT — dead handlers — while 'open', 'close' and 'account' were sent
+  // with nothing listening. The overlap between the two vocabularies was one member.
+  service.on<import('@/types/ws').PositionEventData>('positions', 'open', (data) => {
+    if (data?.position) usePositionsStore.getState().updatePosition(data.position)
   })
 
-  // Position removed
-  service.on<import('@/types/ws').PositionEventData>('positions', 'removed', (data) => {
-    usePositionsStore.getState().removePosition(data.position.id)
+  // A position closed.
+  service.on<import('@/types/ws').PositionEventData>('positions', 'close', (data) => {
+    if (data?.position?.id) usePositionsStore.getState().removePosition(data.position.id)
   })
 
   // New alert

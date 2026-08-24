@@ -24,9 +24,19 @@ export interface TickData {
 /** positions / update — full position snapshot */
 export interface PositionUpdateData {
   positions: import('./api').Position[]
+  /**
+   * Does this empty list MEAN "there are no positions"? (`B228`.)
+   *
+   * The client used to ignore every empty list, by design, so a freshly-reconnected broker
+   * could not stomp the panel — **which also meant there was no path by which the panel
+   * could ever clear.** The sender knows which case it is in and the receiver cannot, so the
+   * sender says. Absent is treated as NOT authoritative: an older server that does not send
+   * it keeps the old, safe behaviour.
+   */
+  authoritative?: boolean
 }
 
-/** positions / added or removed — single position */
+/** positions / open or close — a single position */
 export interface PositionEventData {
   position: import('./api').Position
 }
