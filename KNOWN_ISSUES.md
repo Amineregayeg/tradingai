@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-24 (B262 — the new task-set fuse is correct as shipped (HANDOFF covers exactly the seven statuses cmd_task_set accepts; set-difference empty BOTH directions, measured) but has three residuals. (1) IT FAILS TOWARD SILENCE: the state write commits inside the lock, _deliver runs after the lock releases and unguarded, so a delivery failure leaves the task advanced with no message — the original defect, now rarer and silent. Two files cannot be atomic without a journal, but ORDER can change: deliver first and commit state second fails toward a SPURIOUS notification, which anyone who looks can recover from, instead of toward silence. A fuse whose own failure mode is the defect it fixes should fail toward noise. (2) B184, the status list is written twice — a literal `valid` tuple in cmd_task_set and the HANDOFF dict. They agree today, measured; but HANDOFF.get() returns None for an UNMAPPED status and None is also the DELIBERATE value for PLANNING/AWAITING_APPROVAL, so a forgotten status notifies nobody and looks identical to one meant to. `valid = tuple(HANDOFF)` removes the second copy. (3) the fuse is gated on caller-supplied --by. STRUCTURAL LIMIT: bus.py cannot ring the doorbell — it is a script and SendMessage is an agent tool — but the unrung doorbell HAS an observable trace, a non-empty inbox, and cmd_tasks does not show it. Per-seat unread on the board is the fusable half.)
+Last updated: 2026-08-24 (B263 — THE ENGINE TRADED and six shipped behaviours became observable at once. EXIT-001's 70/30 exact on both symbols (0.700000 and 0.700001). B215 SETTLED and the fix WORKS: /api/positions returns 2 positions where it returned [] for five days, the conclusive test that needed a position. T-0063 WORKING: both decision records read outcome=OPEN with realized_r=None AFTER the 70% close, where B223 would have popped the key and understated a winner ~3x. T-0057 FIRING for the first time: order_path=withdrawn, remainder_outstanding=True on both symbols, bars_blocked 69.3 and 112.2. Malek's ok ruling behaving as ruled — red for a real reason, not because the engine is off. AND B198 HAS RECURRED, same mechanism, both symbols withdrawn by target-less runners — but last time it ran 62-94 hours with every signal green and was found by hand, and this time the signal built for it names both symbols and turns the dashboard red. Still unmet: rule_stricter 0 against rule_looser 12 over 83 rows, so T-0040's non-vacuity gate fails on ONE bound now rather than both.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -16422,3 +16422,68 @@ cycle and title and nothing else.** `cmd_tasks` now prints per-seat unread count
 address. It wakes nobody; it is the same cheap half the idle-loop arm already is, **and that arm has
 caught three real lapses today.** It fired on its first run: ten unread for the manager, and a
 verdict filed on `T-0075` that nobody had closed.
+
+### B263. The engine traded, and SIX shipped behaviours became observable at once — five work, and `B198` has RECURRED
+**Found in:** 2026-08-24 ~14:45, checking the engine under Malek's standing directive that *what is
+already done WORKS*. **This is the first production evidence for most of today's work**, and the
+behaviour census predicted exactly this: *"take a trade" unblocks three of fourteen.*
+
+**THE RUN, started 03:50:25:** 2 closed, 2 open, balance 5000.00 → **5150.23**, equity **5291.62**.
+
+```
+ETH/USD  in 05:25:28  out 11:43:29  lot 1.401618  pnl +78.38  WIN
+BTC/USD  in 09:00:20  out 10:13:58  lot 0.090627  pnl +71.85  WIN
+```
+
+**1 — `EXIT-001`'s 70/30 IS EXACT, on both symbols:**
+
+```
+ETH  1.401618 / 2.002311 = 0.700000    remainder 0.600693
+BTC  0.090627 / 0.129467 = 0.700001    remainder 0.038840
+```
+
+**2 — `B215` IS SETTLED AND THE FIX WORKS.** This is the conclusive test that needed a position, and
+it could not be run for five days:
+
+```
+/api/positions  ->  2 positions
+   ETH/USD LONG lot=0.60069335 id=cftsim-278be9e
+   BTC/USD LONG lot=0.0388401  id=cftsim-ad0e571
+```
+
+**Before `T-0062` this returned `[]` with positions open.** With zero positions a working proxy and
+an orphan were indistinguishable — that ambiguity is now resolved in the fix's favour, **by
+observation rather than by reading.**
+
+**3 — `T-0063` IS WORKING, and this is the subtle one.** Both decision records read
+`outcome=OPEN, realized_r=None` **after the 70% close.** Before `T-0063`, that close popped the
+decision key and wrote `realized_r` from the tranche alone — `B223`, measured at ~3× understatement
+on a winner. **The record now survives the partial and waits for the final close.**
+
+**4 — `T-0057` IS FIRING, correctly, for the first time:**
+
+```
+order_path: withdrawn        ok: False   problems: ['backups', 'order_path']
+  BTC/USD  blocked_reason="already in a position"  remainder_outstanding=True  bars_blocked=69.3
+  ETH/USD  blocked_reason="already in a position"  remainder_outstanding=True  bars_blocked=112.2
+```
+
+**5 — MALEK'S `ok` RULING IS BEHAVING AS RULED.** `withdrawn` is a problem; the flag is red for a
+real reason and not because the engine is off.
+
+**6 — AND `B198` HAS RECURRED.** Both symbols are withdrawn by target-less 30% runners, blocked
+**69.3 and 112.2 bars.** Same mechanism, same doctrine, same consequence: `EXIT-001`'s runner has no
+target, `EXIT-003` is OPEN, so `STOP_HIT` is its only terminal condition and the symbol is out of
+service until then.
+
+> **The difference is the only one that matters: last time this ran 62–94 hours with every signal
+> green and was found by hand. This time the signal built for it says `withdrawn`, names both
+> symbols, gives the bar counts, and turns the dashboard red.** `T-0057` was built for exactly this
+> event and this is the event.
+
+**What is still NOT demonstrated:** `rule_stricter` remains **0** while `rule_looser` is now **12**
+across 83 rows — so `T-0040`'s non-vacuity gate is **still unmet**, but now for Review's originally
+predicted reason (one bound unexercised) rather than the stronger one (neither). And `rule_looser` is
+the **risk** bound: *the rules would have taken a trade the live heuristic declined.* Related:
+**B198**, **B215**, **B223**, **B199**, **B229**, **B251**.
+
