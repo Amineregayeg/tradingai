@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-24 (B273 — the exit seam's Stage-A count was NEVER BUILT and Stage B shipped anyway. exit_shadow.py's contract says the count must exist before the behaviour and that Stage B enforces only once a human has read the record. Measured repo-wide across .py/.ts/.tsx/.sql/.md: `exit_tranche_plan` has ONE hit, its own definition at :45. No consumer aggregates, renders or queries it — yet the live branch returns executed:True, 'T-0050 made the loop execute this plan'. The precondition was written down, the record created, the counting step never built, and the gate crossed; nobody can tell BECAUSE THE RECORD EXISTS. NOT a claim that EXIT-001 is unverified — T-0063's realized_r verifies the behaviour by another route; what failed is the seam's purpose. AND THE ONE FIELD THAT PERSISTS IS MISLEADING, verified by RUNNING the recorder: 'OBSERVED exit_tranche_plan: 70% at 102000.0 then a 30% runner to None'. record_on renders one detail for both branches interpolating final_target, None by design on the live path, while the correct answer — runner_terminates_on [STOP_HIT, SESSION_CLOSE] — is computed and discarded because values never persist (decision_trace.py:215 renders detail only; one JSON column, reasons). Also: the module docstring still describes the pre-B162 world (tp=None unconditionally at strategy_step:223/:247), so its headline degenerate-runner finding is now unrecordable.)
+Last updated: 2026-08-24 (B274 — gate consumer census. DENOMINATOR PUBLISHED: SIX gates, derived by AST over every Call whose func is an Attribute named gate/observe, argument 0 resolved through module constants and import-as aliases, no <unresolved> remaining. THE INSTRUMENT FAILED ITS CONTROL FIRST: my scanner searched the gate NAME as a token, and a planted canary — a module importing GATE_NAME from exit_shadow and counting traces carrying it — DID NOT APPEAR. A real consumer references the CONSTANT, not the string. B150 inside the instrument built to find B150. Rebuilt to follow the literal AND every importer of the owning module, the canary appeared; only then was a zero worth reporting. RESULT: history/daily_bias/ltf_bos are CONSUMED because they ENFORCE — trace.gate() returns a verdict the caller acts on, so the gate's job is to stop the trade and it does; nobody promised a count and filing them would be tuning until the alarm stops. news_blackout and exit_tranche_plan are WRITTEN-ONLY WITH A COUNT PROMISED — B273's defect. news_blackout's two derivations (bars_where_news_would_block, trades_news_would_have_stopped) appear ONLY in two docstrings, and gate_012:289 made enforcement conditional on populating it. entry_rule_comparison is the subtler case: values() declares THE DENOMINATOR IS PUBLISHED ALWAYS, into a dict that never reaches the database — kept in memory, broken in storage, surviving only because the detail string happens to carry the figures, which is why B268 could parse them from prose.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -17176,3 +17176,62 @@ because nothing consumes the population at all.**
 than by the constant would be outside the scan.
 
 Related: **B270**, **B245**, **B240**, **B162**, **B215**.
+
+### B274. Gate consumer census: 6 gates, and 2 of them promised a count that was never built
+
+**`T-0087`, generalising `B273`'s mechanism. Denominator published: SIX.** Population derived by AST
+— every `Call` whose func is an `Attribute` named `gate`/`observe`, argument 0 resolved through
+module-level constants and `import ... as` aliases. **No `<unresolved>` remained.**
+
+**THE INSTRUMENT FAILED ITS CONTROL FIRST.** My initial scanner searched the gate NAME as a token. A
+planted canary — a module importing `GATE_NAME` from `exit_shadow` and counting traces carrying it —
+**did not appear in the results.** A real consumer references the **constant**, not the string, so a
+token scan is blind to precisely the consumers that matter. **`B150` inside the instrument built to
+find `B150`.** Rebuilt to follow the literal AND every importer of the owning module, the canary
+appeared. **Only then was a zero worth reporting.**
+
+```
+CONSUMED (they ENFORCE)              history, daily_bias, ltf_bos          -- NOT findings
+WRITTEN-ONLY, no promise made        entry_rule_comparison (see below)
+WRITTEN-ONLY, COUNT PROMISED         news_blackout, exit_tranche_plan      -- B273's defect
+```
+
+**THE THREE ENFORCING GATES ARE CORRECT AND ARE NOT FINDINGS.** `trace.gate()` returns a verdict the
+caller acts on (`if not trace.gate(...): return`) — **the gate's job is to stop the trade, and it
+does.** Its record exists for a human reading one decision row. **Nobody promised a count; nobody
+owes one.** Filing them would be tuning until the alarm stops.
+
+**`news_blackout` — the promise is written in TWO places and implemented in none:**
+
+```
+decision_trace.py:165  +  news_context.py:30
+    bars_where_news_would_block      GATE_NAME in trace.would_block_by
+    trades_news_would_have_stopped   ... and trace.took_trade
+```
+
+> *"they must be published together because they differ by a large factor… Derived from the record
+> rather than tallied beside it, so neither figure can drift."*
+
+**Measured: both names appear ONLY in those docstrings.** The design decision — derive later rather
+than tally now — was right, and **the later never came.** **And enforcement was explicitly gated on
+it**: `gate_012_news_blackout.py:289`, *"populating `news_blackout` and enforcing the block are one
+change or neither."*
+
+**`entry_rule_comparison` — a promise defeated by a mechanism, the subtler case.** `values()`
+declares *"THE DENOMINATOR IS PUBLISHED, ALWAYS"* — **into a dict that never reaches the database.**
+`trace.observe(GATE_NAME, False, self.detail, **self.values())`, and `decision_trace.py:215` renders
+`detail` only. **Kept in memory, broken in storage.** It survives by accident: the `detail` string
+carries the figures, **which is the only reason `B268` could parse them — from prose, because the
+structured field was discarded.**
+
+**FALSE POSITIVES, recorded so they are not re-opened:** `decision/engine.py:206`'s
+`candle.get("news_blackout")` is a **different** `news_blackout` — a backtest candle field, a
+vocabulary collision, not a consumer. `history` also matches trade history, browser history and bar
+history across four unrelated modules.
+
+**BOUNDED:** `app/` and `frontend/src` only. **`B268` proves ad-hoc consumers exist** — a seat
+regex-parsed `entry_rule_comparison` out of `reasons` — **but that is a READER, not a consumer: it
+does not survive in the tree and nothing re-runs it.** Raw passthrough is not consumption per
+instruction (`engine.py:39`). No query run.
+
+Related: **B273**, **B150**, **B240**, **B268**, **B270**.
