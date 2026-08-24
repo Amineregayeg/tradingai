@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-24 (B255 — FUSE, DO NOT REMEMBER, with the discriminator that makes it usable: fuse when two things must ALWAYS agree and NOTHING can observe them disagreeing (board-state and notification; allow-list and status set), and do NOT fuse where a disagreement WOULD be observable, because there fusing removes the CHECK rather than the failure mode — T-0072's source arm and behavioural arms can disagree and that disagreement IS the signal. Three instances in one day, none of which resembled the others. Also B240 gains a third clause: a plan's LINE CITATION is an assertion nobody re-runs. T-0072's plan cited data_health.py:294-299 for a disclaimer about `ok`; that range is inside backup_health(). And the drift explanation I offered is FALSE — measured at 19e6c30~1 the range pointed at backup_health() then too, so the citation was wrong WHEN WRITTEN. No test, no reviewer and no hook ever re-runs a plan's line reference.)
+Last updated: 2026-08-24 (B256 — a differential over SYNTHETIC inputs tests the PREDICATE and cannot test the PRODUCER. Review measured its own T-0059 claim instead of restating it: moving the flag above the two late gates fails exactly ONE arm, the structural one, because DIFFERENTIAL_CORPUS is built from hand-made traces and never runs the code that BUILDS a trace. The counter-example is already in this register — T-0063's ARM 1 discarded the accumulator and RE-RAN THE REAL PATH, which is why it caught what eight arms missed and the accumulator-only fix passed 8 of 9. Not unguarded: an AST arm pins statement ORDER not a line number, which is B255's fusion rule and B240's citation clause reached independently. But single-threaded, and the error it guards mislabels four bars in five. Also one probe went VOID and was reported as void: the zero-candidate arm exists and has NOT been demonstrated to fire, because the mutation found no site to target — B155 applied by the seat that would have benefited from the softer reading.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -16055,4 +16055,43 @@ current output.
 **`B254` is the shape to hold against this:** a check that EXISTS and is SILENT is not the same
 problem as a check that is MISSING, and fusion cures only the second. Related: **B240**, **B250**,
 **B254**, **B229**.
+
+### B256. A differential over SYNTHETIC inputs tests the PREDICATE and cannot test the PRODUCER
+**Found in:** 2026-08-24, by Review, correcting its own `T-0059` amendment after measuring the claim
+rather than restating it
+**Caught before it mattered. Nothing shipped wrong.** Recorded because the distinction generalises
+and this register has been relying on the weaker form.
+
+**The claim, which was Review's own:** the differential arm would catch a `reached_entry_decision`
+flag placed before detection instead of after the last enforced gate — the misplacement `B237`
+measured as mislabelling **four bars in five**.
+
+**Measured: it does not.** Moving the flag above the two late gates fails **exactly one** arm — the
+structural one. `DIFFERENTIAL_CORPUS` is built from **hand-made traces**, so it compares the two
+PREDICATES against each other and **never runs the code that BUILDS a trace.**
+
+> **A differential over synthetic inputs can only ever test the thing that READS the input. The
+> thing that PRODUCES it is not in the loop.**
+
+**And this register already contains the counter-example, which is why the distinction is usable
+rather than abstract.** `T-0063`'s ARM 1 discarded the in-memory accumulator entirely — new loop
+object, cleared state — **and re-ran the real path.** That is why it caught what eight other arms
+missed: the accumulator-only fix passed **8 of 9** and failed only the arm that refused to accept a
+synthetic starting state.
+
+```
+synthetic-input differential   tests the READER.  Cheap. Cannot see a producer defect.
+discard-and-re-run             tests the PRODUCER. Costlier. Sees both.
+```
+
+**The placement is not unguarded** — an AST arm asserts statement ORDER rather than a line number,
+which is `B255`'s fusion rule and `B240`'s citation clause reached independently by the seat that
+would have been bitten by either. **But it is single-threaded**, and the error it guards is the one
+that mislabels 80% of the corpus.
+
+**AND ONE PROBE WENT VOID AND WAS REPORTED AS VOID.** Review's second placement mutation found no
+`candidate` site to target, so the zero-candidate arm **exists and has not been demonstrated to
+fire.** A probe that could not run is not a probe that passed — `B155`'s rule, applied by the seat
+that would have benefited from the softer reading. Related: **B237**, **B155**, **B250**, `T-0063`,
+`T-0059`.
 
