@@ -14935,6 +14935,33 @@ by two in the direction `live > restored`.
 information that settles the question exists in the log and **cannot reach the operator through the
 message**, which is why *"backups failing"* read as data at risk for several hours.
 
+**AND A CORRECTION TO A CLAIM MADE IN THIS SAME COMMIT MESSAGE, 2026-08-24.** The entry above says
+*"T-0053's DIRECTION SPLIT IS OBSERVED WORKING IN PRODUCTION — 10 decision_records carry
+`rule_stricter`."* **That was matched on the TOKEN, not the VALUE.** Parsed rather than pattern-matched:
+
+```
+rows carrying the split fields   12      window 03:50:34 .. 04:15:27
+  rule_stricter TOTAL             0
+  rule_looser   TOTAL             0
+  agree / comparable              0
+  not_comparable                  1 per row
+newest line   disagree=0 (rule_stricter=0 rule_looser=0) agree=0 not_comparable=1 rate=undefined
+```
+
+**The mechanism is DEPLOYED and EMITTING — the fields exist in the rows, which they did not before —
+and it has never recorded a non-zero direction.** Every bar so far is blocked at `ltf_bos` before the
+entry decision runs, so `live_verdict` is absent and every comparison is `NOT_COMPARABLE`. **That is
+correct behaviour producing zero signal.**
+
+**So the honest status is EMITTING, not WORKING**, and the two are not the same claim. `B240`'s
+precondition — *confirm the field can vary before quoting a distribution over it* — applied to a
+field that is present and constant. **Fourth instance today and the second by this seat.**
+
+**It also corrects the reading that prompted the check.** The concern was that the corpus exercised
+only the harmless bound. It exercises **neither**: `rule_stricter` is zero too. The non-vacuity gate
+is NOT MET on both bounds, not one, and the criterion is unpublishable for a stronger reason than
+single-direction exposure.
+
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
 **What it is:** `TELEMETRY_SCHEMA.json` hard-pins `engine.rule_registry_version` with
