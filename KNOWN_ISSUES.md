@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-24 (B278 — sizing is EQUITY-based, not balance-based, measured and stated nowhere in the codebase. B277's BTC trade could not settle it because BTC was the FIRST position of the run, so equity trivially equalled balance; ETH opened at 16:35:26 while BTC was open and unrealised, so its row discriminates: fill 2499.040000, sl 2473.872543, units 1.987058, implied account = units x distance / 0.01 = 5000.9197 where a balance basis requires 5000.0000. One 6dp unit-tick moves that by ~0.0025, so the 0.92 gap is far outside rounding. Corroborated by the realised loss of -50.01, which is 1% of 5000.92 and not of 5000.00 — two routes, one from size at entry and one from money at exit — and it back-fills BTC's unrealised at that instant as approx +0.92. WHY IT MATTERS: equity-based sizing SHRINKS risk into a drawdown and balance-based does not; that compounds, and GATE-032's wiring would multiply it by applying a per-cell percentage to a moving base. ALSO CLOSES B277's stated bound: ETH filled 3.38 WORSE than signal on a LONG, and sizing off the worse fill produced FEWER units — the fix behaving as intended in the adverse direction, where B277 had only a favourable fill.)
+Last updated: 2026-08-24 (B279 — the equity a trade was sized against is NEVER RECORDED, so every risk figure must be inferred, and the inference stops working on a real venue. Answering B278's open bound: DecisionRecord has NO equity/balance/account column — it records sized_units and the prices but not the number those units were computed FROM. PropFirmSnapshot does hold equity and balance, at Numeric(14,2) — TWO decimal places — written by observe_sync.py:80 and compliance/engine.py:74, neither of which is the trading loop at decision time. So a direct read would be stronger in KIND and WEAKER IN PRECISION: the column holds 5000.92 where the arithmetic gave 5000.9197, and equity moves continuously with unrealised P&L so a snapshot seconds away is a different number. THE SOURCE ALSO SETTLES B278 DIRECTLY: execution/service.py:151 is `units = size_position(acct.equity, ...)`. B278 inferred the equity basis from live arithmetic; the source says it outright, and the two routes together close a gap neither closes alone — the source says what the code does, the arithmetic says what the RUNNING BOX did. B240's shape at the sizing layer: the denominator of every risk figure is absent from the row that used it. AND THE RECONSTRUCTION IS ABOUT TO BREAK — it works only because the paper broker's equity moves solely from our own positions; on an MT5 demo it also moves from swap, commission and financing, which B261 established we have no field for. Cheapest to fix before MT5, because the rows written from now on are the ones that will be re-read.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -17508,3 +17508,54 @@ and a direct read of the account snapshot at 16:35:26 would be a stronger form o
 one is retained anywhere.
 
 Related: **B277**, **B275**, **B268**, **B215**.
+
+### B279. The equity a trade was sized against is never recorded, so every risk figure must be inferred — and the inference stops working on a real venue
+
+**Answering the bound `B278` left open: is a direct read of the account at decision time available
+anywhere? No — and the arithmetic inference is FINER than the only stored value.**
+
+**FIRST, THE SOURCE SETTLES `B278`'s QUESTION DIRECTLY**, which is worth recording beside the
+inference: `execution/service.py:151` is
+
+```python
+units = size_position(acct.equity, sig.risk_pct, sizing_price, sig.sl)
+```
+
+**`acct.equity`, named in the source.** `B278` inferred equity-basis from live arithmetic; the source
+says it outright. **Two independent routes agreeing — and together they close a gap neither closes
+alone: the source says what the code does, the arithmetic says what the RUNNING BOX did.**
+
+**WHAT IS NOT RECORDED:**
+
+```
+DecisionRecord      NO equity, balance or account column. The row records sized_units and the
+                    prices, and NOT the number those units were computed FROM.
+PropFirmSnapshot    HAS equity and balance -- at Numeric(14,2), TWO decimal places -- written by
+                    observe_sync.py:80 and compliance/engine.py:74, neither of which is the
+                    trading loop at decision time.
+```
+
+**So a "direct read" would be stronger in KIND and WEAKER IN PRECISION.** The stored column holds
+`5000.92`; the arithmetic gave `5000.9197`. **And equity moves continuously with unrealised P&L, so a
+snapshot even seconds away from the decision is a different number** — there is no reason to expect
+one at `16:35:26` at all.
+
+**`B240`'S SHAPE AT THE SIZING LAYER: the denominator of every risk figure is absent from the row
+that used it.** `sized_units` is recorded, the prices are recorded, and the account value the
+percentage was applied to is not. **Every claim about how much was risked — including `B277`'s and
+`B278`'s — is a reconstruction.**
+
+**AND THE RECONSTRUCTION IS ABOUT TO BREAK.** It works today only because the paper broker's equity
+moves **solely from our own positions**, so `units × distance / risk_pct` recovers it exactly. **On
+an MT5 demo, equity also moves from swap, commission and financing** — quantities `B261` established
+we have no field for. **The moment equity has a second author, back-inferring it from our own units
+stops being arithmetic and starts being an estimate**, and nothing will announce the change.
+
+**NOT A DEFECT IN ANYTHING SHIPPED.** Sizing is correct and `B277`/`B278` verified it live. **This is
+about what a future reader can reconstruct**, and it is cheapest to fix before MT5 rather than after,
+because the rows written from now on are the ones that will be re-read.
+
+**BOUNDED:** I read the models and the call site. **I ran no query, and I did not check whether a
+snapshot near `16:35:26` happens to exist** — only that nothing guarantees one does.
+
+Related: **B278**, **B277**, **B240**, **B261**, **B275**.
