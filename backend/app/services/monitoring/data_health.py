@@ -1179,7 +1179,16 @@ async def order_path_health(loop=None) -> dict:
     THIS IS A FIFTH PREDICATE AND IT MUST STAY SEPARABLE FROM THE OTHER FOUR.
     `wired` / `executes` / `RETAINED` / `RUNNING` were each insufficient alone; this adds
     `TRADING`. An engine that is not running at all is `B178`'s signal and reports here as
-    `idle` with `watching: False` — never as a problem, and never as healthy either.
+    `idle` with `watching: True` — never as a problem, and never as healthy either.
+
+    **`B266`: that line said `watching: False` and the CODE was right.** `watching` answers
+    *could this check LOOK*, not *is the engine live* — `test_data_health.py:54` states the
+    convention as *"a check that cannot see its data claimed to be watching"*, and every
+    `watching: False` in this module is an `unavailable` return. A stopped engine is one this
+    check CAN see; `ARM E` exists precisely so it still reports its per-symbol verdict.
+    *An arm written from the old sentence would have asserted `False`, failed, and invited the
+    next seat to "fix" the production line — turning a documentation error into a behavioural
+    one.*
 
     THE LOOP IS A PARAMETER, NOT A REACH-IN. Without it the gate cannot be ASKED, and this
     function refuses to guess: it reports `unavailable`, which is this module's rule —

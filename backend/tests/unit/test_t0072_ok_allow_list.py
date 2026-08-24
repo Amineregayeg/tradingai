@@ -219,11 +219,21 @@ async def test_the_ACCEPTED_COST_is_stated_in_the_payload_not_only_the_source(al
 
 
 @pytest.mark.asyncio
-async def test_the_cost_is_REAL_and_this_arm_demonstrates_it(all_healthy):
-    """Not a claim about a hypothetical: drive the order path to `idle` — a stopped engine —
-    and `ok` really does stay True with `problems` empty.
+async def test_the_AGGREGATOR_keeps_ok_true_for_a_component_reporting_idle(all_healthy):
+    """**RENAMED by `T-0080`/`B265`. It proved less than its name claimed.**
 
-    *A scope note describing behaviour the system does not have would be worse than none.*
+    It was `test_the_cost_is_REAL_and_this_arm_demonstrates_it`, and it monkeypatches
+    `order_path_health` to return a hand-written `{"status": "idle"}` literal. So it proves
+    the AGGREGATOR keeps `ok` True given a component that SAYS `idle` — which is true, and
+    worth holding — and **nothing whatever about whether a stopped engine PRODUCES `idle`.**
+
+    Measured by Review at the real producer: `data_health.py` `else "idle"` -> `else
+    "healthy"` makes **a stopped engine report itself healthy and 128 tests pass.** The
+    producer arm now lives in `test_t0057_order_path_liveness.py`, where it can reach the
+    branch through `order_path_health` rather than around it.
+
+    *Not deleted: it asserts a property that is TRUE. Renamed, because the word
+    "demonstrates" attached it to a claim about the producer that it cannot make.*
     """
     async def _idle(*a, **k):
         return {

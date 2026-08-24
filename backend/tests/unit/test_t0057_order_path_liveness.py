@@ -847,3 +847,92 @@ def test_B227_the_SUM_form_is_PROVISIONAL_and_the_module_says_so():
         f"{len(two_tranche_completed)}. More rows means the rate can finally be measured — "
         "re-open B227 rather than reading this test's silence as reassurance."
     )
+
+
+# ======================================================================================
+# T-0080 / `B265` — THE `idle` BRANCH HAD NO PRODUCER ARM
+#
+# The only arm calling this producer directly asserted the OTHER branch — `unavailable` —
+# which the ruling treats as a problem. **So the branch Malek's ruling is entirely about was
+# the branch with no coverage.** `idle`-versus-`unavailable` IS the ruling.
+#
+# Measured by Review at the producer: `else "idle"` -> `else "healthy"` makes A STOPPED
+# ENGINE REPORT ITSELF HEALTHY and 128 tests pass. Nothing noticed.
+#
+# **THE TRAP, and it is why this arm seeds a row rather than a stub.** `engine_running` is
+# NOT read from the loop. Inside `order_path_health` the loop is touched in exactly two
+# places — `getattr(loop, "symbols", ...)` and `loop._entry_block_reason(s)`. `engine_running`
+# comes from a DATABASE query: an `EngineRun` with `ended_at IS NULL` means running, its
+# absence means stopped. **A stub loop carrying `running = False` changes nothing**, and the
+# arm would pass for a reason unrelated to what it claims.
+# *The loop makes the gate ASKABLE; the DB decides RUNNING.*
+# ======================================================================================
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "scenario", ["a run that ENDED", "no run has ever existed"],
+)
+async def test_t0080_a_STOPPED_engine_makes_the_PRODUCER_report_idle(bound, scenario):
+    """**The producer arm.** Reaches the branch through `order_path_health` with a loop that
+    EXISTS and is NOT RUNNING — a different input from `order_path_health(None)`, which is
+    already covered and returns `unavailable`. *Confusing those two is how this branch went
+    uncovered in the first place.*
+
+    Both parametrisations produce `idle` and they are **different scenarios taking different
+    paths**: an ended run gives `started` a real value; an empty table leaves it `None` and
+    exercises the `active is None` fallback. The ruling's scenario is **an engine that RAN and
+    was STOPPED**, so that one is first and the empty table is an addition, not a substitute.
+    """
+    if scenario == "a run that ENDED":
+        # closed_fraction 1.0 — a WHOLE close, so no remainder is outstanding and the symbol
+        # is not withdrawn. `withdrawn` would win the status expression over `engine_running`,
+        # and this arm is about the engine, not the runner.
+        await _seed(bound, ended=True, decision_minutes_ago=600.0, closed_fraction=1.0)
+
+    loop = _FakeLoop(
+        symbols=["BTC/USD"], positions=[], block_reason=None,
+    )
+    health = await dh.order_path_health(loop)
+
+    assert health["status"] == "idle", (
+        f"a stopped engine reported {health['status']!r}. If this says 'healthy', the branch "
+        "that carries Malek's ruling has been inverted and the flag now says the platform is "
+        "fine while nothing is running."
+    )
+    assert health["engine_running"] is False
+    assert health["withdrawn_symbols"] == [], "the engine is the subject here, not a runner"
+
+    # `B266`. The docstring said `watching: False` and the CODE is right: `watching` answers
+    # COULD THIS CHECK LOOK, not IS THE ENGINE LIVE. Every `watching: False` in the module is
+    # an `unavailable` return. An arm written from the old sentence would have failed and
+    # invited the next seat to "fix" the production line.
+    assert health["watching"] is True, (
+        "a stopped engine is one this check CAN see — it was watching, and it reported a "
+        "per-symbol verdict while stopped (ARM E)"
+    )
+
+
+@pytest.mark.asyncio
+async def test_t0080_idle_and_unavailable_are_DIFFERENT_INPUTS_to_the_same_producer(bound):
+    """The pair, because the ruling is precisely the difference between them.
+
+    `idle` — the engine is stopped, and that is not a problem.
+    `unavailable` — we cannot ASK the gate, and that IS a problem.
+
+    Asserting either alone leaves the other free to collapse into it, which is `B215`'s
+    could-not-ask versus asked-and-fine, one predicate over.
+    """
+    await _seed(bound, ended=True, decision_minutes_ago=600.0, closed_fraction=1.0)
+
+    stopped = await dh.order_path_health(
+        _FakeLoop(symbols=["BTC/USD"], positions=[], block_reason=None)
+    )
+    cannot_ask = await dh.order_path_health(None)
+
+    assert stopped["status"] == "idle" and cannot_ask["status"] == "unavailable"
+    assert stopped["watching"] is True and cannot_ask["watching"] is False
+    assert stopped["status"] != cannot_ask["status"], (
+        "the two states must not share a status — one is allow-listed by the ruling and the "
+        "other is a problem, and folding them would make the flag unreadable either way"
+    )
