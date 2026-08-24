@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-24 (B271 — crypto_loop.py:1455's reject branch says NEVER DROP A GENERATED SIGNAL SILENTLY and does exactly that in durable terms: logger.info plus _act into a deque(maxlen=80) that is cleared on start, with orders never written and trades a close-only insert, so a signal the strategy generated and the venue refused leaves NO durable record anywhere. This is the SAME defect the abstention fix at :1412 was written to cure — its own comment says rows appeared only when an order filled, so the engine's refusals left no trace at all — fixed for `sig is None` and still live for `sig produced, order not filled`. It is the worst branch to lose: these are the bars where the entry logic COMMITTED and something downstream refused, three of the five refusals being ordinary market conditions, and they are exactly the bars that could carry RULE_STRICTER — the only direction in which Salim's rules could be shown SAFER than the heuristic rather than merely different. And the missingness is not random: rejections correlate with volatility and spread, so the corpus is thinned where its information density is highest while publishing a denominator that looks complete.)
+Last updated: 2026-08-24 (B272 — an assertion carrying a test's entire stated purpose that can NEVER fail. T-0070's lesson, third instance. test_t0080_idle_and_unavailable_are_DIFFERENT_INPUTS_to_the_same_producer ends with `assert stopped['status'] != cannot_ask['status']` and its B215 explanation, but assertion 1 above it pins both statuses to two DIFFERENT literals joined by `and`. PROVABLE WITHOUT A MUTATION: assertion 3 fails only when the statuses are EQUAL; if they are equal at least one differs from its pinned literal, so assertion 1 has already failed. No state exists where 3 fails and 1 passes. OBSERVED TOO: mutating data_health.py:1337's `else "idle"` to `else "healthy"` failed the arm on assertion 1 with a bare `assert 'healthy' == 'idle'` and no message, while assertion 3 would have PASSED since 'healthy' != 'unavailable'. THE GUARD IS NOT LOST, THE DIAGNOSIS IS: a future seat folding unavailable into idle gets a bare assertion while the sentence explaining B215 sits one line below, never printed. GENERAL FORM: an assertion placed after a strictly stronger one is decorative, and a decorative assertion whose message explains the finding reads to a coverage audit like the property is guarded by name. T-0080 still PASSED.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -17080,3 +17080,42 @@ entry is about does not exist. The claim that no durable record exists was check
 `telemetry_records` (zero rows carrying the gate).
 
 Related: **B270**, **B268**, **B240**, **B238**, **B198**, **B215**.
+
+### B272. An assertion that carries a test's entire stated purpose and can never fail — `T-0070`'s lesson, third instance
+
+`test_t0080_idle_and_unavailable_are_DIFFERENT_INPUTS_to_the_same_producer` ends with the assertion
+the test is named for:
+
+```python
+assert stopped["status"] == "idle" and cannot_ask["status"] == "unavailable"      # <- no message
+assert stopped["watching"] is True and cannot_ask["watching"] is False
+assert stopped["status"] != cannot_ask["status"], "...folding them would make the flag unreadable"
+```
+
+**PROVABLE WITHOUT A MUTATION:** assertion 3 fails only when the two statuses are **equal**.
+Assertion 1 pins them to two **different** literals joined by `and`. **If they are equal, at least
+one differs from its literal and assertion 1 has already failed.** No state of the system exists in
+which assertion 3 fails and assertion 1 passes.
+
+**Observed as well as proven.** Mutating `data_health.py:1337`'s `else "idle"` to `else "healthy"`
+failed this arm on assertion 1 — `assert 'healthy' == 'idle'`, no message — **while assertion 3
+would have passed**, because `'healthy' != 'unavailable'` is true.
+
+**THE GUARD IS NOT LOST; THE DIAGNOSIS IS.** Assertion 1 is strictly stronger and does catch the
+collapse. But a future seat that folds `unavailable` into `idle` gets a bare
+`assert 'idle' == 'unavailable'` — **while a sentence explaining `B215`'s could-not-ask versus
+asked-and-fine sits one line below, never to be printed.**
+
+**THIRD INSTANCE OF A RECORDED LESSON.** `T-0070` found it and stated the fix: *"the must-miss makes
+two assertions and the second restates arm 1, so it fails for arm 1's reason and cannot fail for its
+own — move it to a constructed source so a real definition reports its own message."* **The general
+form: an assertion placed AFTER a strictly stronger one is decorative, and a decorative assertion
+whose message explains the finding is worse than none — it reads, to anyone auditing coverage, like
+the property is guarded by name.**
+
+**Fix is either direction:** give assertion 3 inputs that assertion 1 does not already pin, or move
+the `B215` sentence onto assertion 1, which is the assertion that actually fires.
+
+**NOT BLOCKING.** `T-0080` passed review; the ruling is guarded twice over.
+
+Related: **B070**, **B215**, **B265**, **B213**.
