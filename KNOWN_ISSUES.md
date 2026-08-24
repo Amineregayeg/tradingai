@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-24 (B272 — an assertion carrying a test's entire stated purpose that can NEVER fail. T-0070's lesson, third instance. test_t0080_idle_and_unavailable_are_DIFFERENT_INPUTS_to_the_same_producer ends with `assert stopped['status'] != cannot_ask['status']` and its B215 explanation, but assertion 1 above it pins both statuses to two DIFFERENT literals joined by `and`. PROVABLE WITHOUT A MUTATION: assertion 3 fails only when the statuses are EQUAL; if they are equal at least one differs from its pinned literal, so assertion 1 has already failed. No state exists where 3 fails and 1 passes. OBSERVED TOO: mutating data_health.py:1337's `else "idle"` to `else "healthy"` failed the arm on assertion 1 with a bare `assert 'healthy' == 'idle'` and no message, while assertion 3 would have PASSED since 'healthy' != 'unavailable'. THE GUARD IS NOT LOST, THE DIAGNOSIS IS: a future seat folding unavailable into idle gets a bare assertion while the sentence explaining B215 sits one line below, never printed. GENERAL FORM: an assertion placed after a strictly stronger one is decorative, and a decorative assertion whose message explains the finding reads to a coverage audit like the property is guarded by name. T-0080 still PASSED.)
+Last updated: 2026-08-24 (B273 — the exit seam's Stage-A count was NEVER BUILT and Stage B shipped anyway. exit_shadow.py's contract says the count must exist before the behaviour and that Stage B enforces only once a human has read the record. Measured repo-wide across .py/.ts/.tsx/.sql/.md: `exit_tranche_plan` has ONE hit, its own definition at :45. No consumer aggregates, renders or queries it — yet the live branch returns executed:True, 'T-0050 made the loop execute this plan'. The precondition was written down, the record created, the counting step never built, and the gate crossed; nobody can tell BECAUSE THE RECORD EXISTS. NOT a claim that EXIT-001 is unverified — T-0063's realized_r verifies the behaviour by another route; what failed is the seam's purpose. AND THE ONE FIELD THAT PERSISTS IS MISLEADING, verified by RUNNING the recorder: 'OBSERVED exit_tranche_plan: 70% at 102000.0 then a 30% runner to None'. record_on renders one detail for both branches interpolating final_target, None by design on the live path, while the correct answer — runner_terminates_on [STOP_HIT, SESSION_CLOSE] — is computed and discarded because values never persist (decision_trace.py:215 renders detail only; one JSON column, reasons). Also: the module docstring still describes the pre-B162 world (tp=None unconditionally at strategy_step:223/:247), so its headline degenerate-runner finding is now unrecordable.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -17119,3 +17119,60 @@ the `B215` sentence onto assertion 1, which is the assertion that actually fires
 **NOT BLOCKING.** `T-0080` passed review; the ruling is guarded twice over.
 
 Related: **B070**, **B215**, **B265**, **B213**.
+
+### B273. The exit seam's Stage-A count was never built, Stage B shipped anyway, and the one field that persists reads "runner to None"
+
+**`T-0085`.** `exit_shadow.py`'s contract, in its own words: *"so the count exists before the
+behaviour does… Stage B enforces, and only once the record is non-empty and **a human has read
+it**."*
+
+**MEASURED, repo-wide across `.py`/`.ts`/`.tsx`/`.sql`/`.md`:**
+
+```
+grep -rn "exit_tranche_plan"  ->  ONE hit, its own definition at exit_shadow.py:45
+```
+
+**No consumer exists.** Nothing aggregates it, renders it, or queries it. **The count Stage A exists
+to produce does not exist** — and Stage B shipped regardless: the live branch returns
+`"executed": True`, *"T-0050 made the loop execute this plan."*
+
+> **The precondition was written down, the record was created, the counting step was never built, and
+> the gate it guarded was crossed. Nobody can tell BECAUSE THE RECORD EXISTS** — a record that is
+> never aggregated reads exactly like coverage.
+
+**NOT a claim that `EXIT-001` is unverified.** `T-0063`'s `realized_r` evidence verifies the
+behaviour by a different route. **What failed is the seam's purpose, not the rule.**
+
+**AND THE ONE FIELD THAT PERSISTS IS THE MISLEADING ONE — verified by RUNNING the recorder** on a
+signal shaped as `strategy_step` returns it (`tp=None`, `partial_*` set):
+
+```
+OBSERVED exit_tranche_plan: 70% at 102000.0 then a 30% runner to None
+```
+
+`record_on` renders one `detail` for both branches, interpolating `final_target`, which is `None` by
+design on the live path. **The correct answer is computed and discarded**: the same record carries
+`"runner_terminates_on": ["STOP_HIT", "SESSION_CLOSE"]`. **`values` never persist** —
+`decision_trace.py:215` renders `detail` only, and `decision_record.py` has one JSON column,
+`reasons: list[str]`. So *"to None"* reads as a missing value when the runner has no price target
+**by design**.
+
+**THE DOCSTRING DESCRIBES THE PRE-`B162` WORLD.** Lines 12-26 assert `tp = entry + rr_partial * risk`
+and *"every live trade is the DEGENERATE RUNNER"*. **`tp=None` unconditionally at
+`strategy_step:223`/`:247`**, so the `TradePlan`/`DegenerateRunner` branch is unreachable from the
+live loop and `degenerate_runner` is `None` on every live bar. **The module's headline finding can
+never be recorded again**, while the docstring presents it as the first thing the module records —
+and the comment at `:117-119`, inside the dead branch, repeats it. **`T-0069`'s lesson: a note is an
+addition; retiring a claim needs a replacement.**
+
+**`"executed": True` is a literal** — nothing checks the partial executed, and it rides in `values`,
+so it is both unobserved and unreadable.
+
+**`B270`'s filter reaches this seam and costs nothing today** — dropped rows could only bias a
+*"plans would produce"* count, and there is none. **Not because an unfilled signal is moot, but
+because nothing consumes the population at all.**
+
+**BOUNDED:** a zero from a scanner is not proof; a consumer matching the string by pattern rather
+than by the constant would be outside the scan.
+
+Related: **B270**, **B245**, **B240**, **B162**, **B215**.
