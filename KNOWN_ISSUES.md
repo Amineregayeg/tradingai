@@ -15890,6 +15890,38 @@ incident is a container recreate destroying a live ETH position twelve hours in.
 
 **Not fixed here. Not deployed here.** Related: **B199**, **B221**, **B241**, **B240**, **B198**.
 
+**IT HAS RECURRED, SMALLER, AND IT NOW HOLDS A RULING — 2026-08-24 ~15:00.** The authorised deploy
+put the box on `d7f1ed6`. **Four task commits have landed since and are not on it:**
+
+```
+e490a90  T-0071   the fixture had one row where production has many
+19e6c30  T-0072   `ok` means NOTHING IS BROKEN — Malek's RULING
+4c18cd1  T-0067   the is_simulation contract named three enforcers and has one
+722fce0  T-0065   the two panels
+```
+
+**Verified in the deployed file rather than inferred from the sha** — `OK_STATUSES` is **absent**, and
+the aggregator still reads:
+
+```python
+problems = [name for name, c in components.items() if c.get("status") != "healthy"]
+```
+
+> **Malek ruled that `ok` means NOTHING IS BROKEN, the change is implemented, reviewed and passed —
+> and it is not running.** Under the deployed rule an idle engine is still a problem, which is the
+> exact behaviour the ruling was made to change.
+
+**And it was invisible from the symptom.** The live reading is `ok: False, problems: [backups,
+order_path]` with `order_path: withdrawn` — **and `withdrawn` is a problem under BOTH rules**, so the
+dashboard looks identical either way. **The ruling's presence or absence cannot be seen from the
+flag; only from the code.** That is this entry's own lesson arriving through a different door: the
+observation was the same, the artefact was not.
+
+**The deploy is not a seat's call and the reason has not changed** — a recreate needs `/engine/stop`
+first, and `stop()` closes the two open runners. **But the two things now converge: deploying would
+activate the ruling AND clear `B198`'s recurrence in the same act**, because closing those runners is
+exactly what frees both symbols.
+
 ### B250. A scanner that UNDER-reports makes its own guard agree with itself, and only that direction ships
 **Found in:** 2026-08-24, by Execute, inspecting the instrument it had just built for `T-0065`'s ARM
 2 — *the status set must be DERIVED from the backend, never retyped*
