@@ -56,9 +56,20 @@ def _flat_bars(n: int = 20):
 
 
 def _trace(*, took: bool = False, blocked: str | None = None) -> DecisionTrace:
+    """A trace as `evaluate_latest_bar_traced` would leave it.
+
+    `reached_entry_decision` is set unless a gate blocked, because `T-0059`/`B217` made it the
+    field `LIVE_NOT_REACHED` is keyed on — `blocked_by` covered three of seven block sources,
+    so a loop-blocked bar used to read as *"the live heuristic DECLINED"* for a bar it never
+    evaluated. **A hand-built trace is a trace PRODUCER**, and the flag is now the producer's
+    obligation: without it every fixture here is NOT_COMPARABLE and both arms below pass
+    vacuously, which is how this change announced itself.
+    """
     t = DecisionTrace(symbol="BTC/USD", timeframe="5m")
     if blocked is not None:
         t.gate(blocked, False, "forced for the test")
+    else:
+        t.reached_entry_decision = True
     t.took_trade = took
     return t
 

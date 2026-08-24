@@ -374,6 +374,14 @@ def test_the_real_compare_entry_path_emits_a_direction_and_flipping_live_flips_i
 
 
 def _live_trace(*, took: bool) -> DecisionTrace:
+    """A bar that REACHED the entry decision and either took it or declined it.
+
+    `reached_entry_decision` is required since `T-0059`/`B217`: it is what
+    `LIVE_NOT_REACHED` is keyed on, and a trace built by hand is a trace PRODUCER with the
+    same obligation as `strategy_step`. Without it this fixture yields NOT_COMPARABLE and
+    the direction arm passes over an empty population.
+    """
     t = DecisionTrace(symbol="BTC/USD", timeframe="5m")
+    t.reached_entry_decision = True
     t.took_trade = took
     return t

@@ -326,12 +326,29 @@ def examined_nothing(values: dict[str, Any]) -> bool:
 def _live_entry_verdict(trace: Any) -> tuple[bool | None, NotComparable | None]:
     """What the live path decided, or why there is nothing to compare against.
 
-    A bar stopped by `history`, `daily_bias` or `ltf_bos` never reached the candidate loop, so
-    it has no opinion about whether an entry POI existed. **That is `LIVE_NOT_REACHED`, and it
-    is not agreement** — counting it as agreement is the failure this whole triple exists to
-    prevent.
+    A bar that never reached the candidate loop has no opinion about whether an entry POI
+    existed. **That is `LIVE_NOT_REACHED`, and it is not agreement** — counting it as
+    agreement is the failure this whole triple exists to prevent.
+
+    **`B217`: THIS USED TO ASK `blocked_by`, WHICH COVERS THREE OF SEVEN BLOCK SOURCES.**
+    `trace.gate()` sets it for the three IN-TRACE gates; the four LOOP-LEVEL blocks — kill
+    switch, paused, already-in-a-position, max-concurrent — never touch it. A trace from a
+    loop-blocked bar fell through to `bool(took_trade)` and recorded `live_verdict=False`,
+    *"the live heuristic DECLINED"*, for a bar it never evaluated.
+
+    **The error is ASYMMETRIC and both halves argue FOR the cutover:** a rules-FAIL on such a
+    bar scores AGREE, a rules-PASS scores DISAGREE labelled RULES-LOOSER — the category
+    `T-0040` treats as new live exposure.
+
+    **`blocked_by` is SUBSUMED, not consulted alongside.** Every bar it would have caught sets
+    the flag False by never reaching the landmark, so reading both would be two statements of
+    one fact — `GATE-011` — and they could drift.
+
+    **The `False` default is REQUIRED.** `trace` is typed `Any` here, so this is a `getattr`;
+    a `True` default fails open, silently, forever, on every caller that passes an object
+    without the field.
     """
-    if getattr(trace, "blocked_by", None) is not None:
+    if not getattr(trace, "reached_entry_decision", False):
         return None, "LIVE_NOT_REACHED"
     return bool(getattr(trace, "took_trade", False)), None
 

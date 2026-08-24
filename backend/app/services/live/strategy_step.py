@@ -139,6 +139,18 @@ def evaluate_latest_bar_traced(
     ):
         return None, trace
 
+    # PAST EVERY GATE THAT CAN STOP THIS BAR. `B217`'s landmark, and it is "past every
+    # enforced gate", NOT "detection has run" — those are different lines and the difference
+    # is the whole fix. Detection (`_compute_swing`, `detect_fvg`, `detect_bos_choch` above)
+    # runs BEFORE two of the three gates, so a flag set there reads True on bars that
+    # `daily_bias` or `ltf_bos` went on to block. Those bars would stop being
+    # LIVE_NOT_REACHED and become COMPARABLE carrying `live_verdict = False` — "the live
+    # heuristic DECLINED" for a bar blocked before the entry decision was reached.
+    #
+    # Not a corner case: `ltf_bos` blocks 849 of 1060 rows (80.1%), and 358 of 375 since
+    # 08-19. `history` and `daily_bias` have never blocked a row in the corpus at all.
+    trace.reached_entry_decision = True
+
     # last confirmed swing low/high as-of i (lagged by swing_length)
     last_low = last_high = np.nan
     if swing is not None and len(swing):

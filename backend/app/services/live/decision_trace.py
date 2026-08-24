@@ -89,6 +89,26 @@ class DecisionTrace:
     #: nothing.
     blocked_by: str | None = None
 
+    #: Did this bar get PAST every gate that can stop it, and reach the entry decision?
+    #: (`B217`.)
+    #:
+    #: **THE POLARITY IS THE DESIGN, NOT A PREFERENCE.** `LIVE_NOT_REACHED` used to be keyed
+    #: on `blocked_by`, which `gate()` sets for the THREE in-trace gates only — the FOUR
+    #: loop-level blocks (kill switch, paused, already-in-a-position, max-concurrent) never
+    #: touch it. A trace from a loop-blocked bar fell through to `bool(took_trade)` and
+    #: recorded *"the live heuristic DECLINED"* for a bar it never evaluated.
+    #:
+    #: A NEGATIVE field — *"record why we blocked"* — is `B217` rebuilt: a block source added
+    #: later that forgets to write it falls through to "reached", silently, in the unsafe
+    #: direction. **A positive flag is covered by construction, because a new block source
+    #: does nothing at all.**
+    #:
+    #: Set at ONE place: past the last enforced gate, before the POI work. **Not where
+    #: detection runs** — detection precedes two of the three gates, so a flag set there would
+    #: read True on bars `daily_bias` or `ltf_bos` went on to block, which is `B217` rebuilt
+    #: inside the fix for `B217`.
+    reached_entry_decision: bool = False
+
     # -- building -----------------------------------------------------------
     def gate(self, name: str, passed: bool, detail: str, **values: Any) -> bool:
         """Record a gate and return whether it passed, so call sites read as
