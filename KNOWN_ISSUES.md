@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-24 (B259 — /mtr-api/ is MATCH-Trader, NOT MetaTrader. A three-letter vocabulary collision, disproved by the first line of cryptofundtrader.py itself: 'Crypto Fund Trader runs on the Match-Trade Technologies Match-Trader platform'. The manager raised the reuse hypothesis and the scope killed it in its first hour — it would otherwise have been found halfway through an implementation costed as reuse, which is B167's class. MT5 has no REST API in the standard product at all. Reusable: the BrokerAdapter interface, Position/Account normalisation, observe_only, the write gate, and the SHAPE of the bridge pattern. The adapter body is new. THE DOMINANT COST IS A SERVICE: cft_bridge_transport.py already runs a browser separately because CFT sits behind Cloudflare, measured 403/403/403/403/200, and MT5 is the same shape with a worse constraint — a Windows terminal, with failure modes that do not look like HTTP errors. AND MEASURED: grep -c bridge in data_health.py returns ZERO, so the bridge we ALREADY run is invisible to the health surface. The precedent is not 'a service will be needed', it is 'we have one and nothing watches it' — and B248 measured what invisible costs: five days.)
+Last updated: 2026-08-24 (B261 — `Position` cannot carry an MT5 position, and it has never been wrong before because of WHICH venues it has normalised from. Account transfers cleanly; Position does not. (1) NO FIELD FOR FINANCING COST: MT5 reports profit, swap and commission separately and we have one unrealized_pnl. Both venues we have ever normalised from are swap-free — paper by construction, CFT because it is crypto — so the gap has cost nothing yet. An MT5 demo holding FX or metals overnight accrues swap, tripled on Wednesdays; folded in silently or dropped, and if dropped then r_multiple and every R-based rule read a P&L missing its carrying cost, with the error growing with holding time. (2) lot_size IS B167's CLASS IN A FIELD RATHER THAN AN ENDPOINT NAME: in MT5 a lot is instrument-defined (100,000 units FX, 100oz gold) with broker-set volume_min/volume_step. The word survives the venue change and the quantity does not. T-0075 caught this exact collision for mtr/MetaTrader and did not apply it to the field it listed as reusable. WORSE THAN AN ORDINARY MAPPING GAP: lot_size is what the T-0038 contract arm AST-checks every close_position for, so the arm goes GREEN on an adapter reading it in the wrong unit — the guard proves the value is READ, never that it means the same thing.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -16222,3 +16222,96 @@ decision on `B252`; and no choice between Windows host, Wine container and vendo
 
 Related: **B167**, **B248**, **B252**, **B258**, **B239**.
 
+
+### B260. The `_adapters` reachability census is SEVEN sites, not six — and eviction is keyed on the registration key's SHAPE
+
+**Found reviewing `T-0075`, whose section 6 is itself a `B239` census.** The census that exists to
+catch what becomes reachable without appearing in a diff **missed a row of itself.**
+
+`grep -n "_adapters" backend/app/services/broker/manager.py` iterates the whole dict at
+`:369, :411, :480, :518, :569, :596, :633`. **Every published list says six and omits `:411`.**
+
+**The omitted row is the one with a guard on it:**
+
+```python
+for key in list(self._adapters):
+    if key in wanted_ids or not _looks_like_uuid(key):
+        continue                      # a NON-UUID key is NEVER evicted
+    adapter = self._adapters.pop(key, None)
+```
+
+The skip is deliberate and correct today — the live loop registers its `PaperBroker` under the
+literal key `"paper"`, and evicting it would take the engine's own broker out from under it
+(`register_adapter`, `:614`; sole caller `main.py:236`).
+
+**THE CONSEQUENCE, WHICH IS CONDITIONAL AND IS A DESIGN DECISION RATHER THAN A DEFECT:**
+adapter lifetime is not uniform — it depends on the *shape* of the string it was registered under.
+A venue registered as a connection row (UUID) is evicted when its row is deleted. **A venue
+registered the engine's way (literal key) is immune: deleting its connection leaves it live in all
+six other sites, including `close_all_positions` at `:569`, which `T-0067` established deliberately
+does NOT check `is_simulation`.** So a "deleted" venue could still be closed by the kill switch.
+
+**Nothing does this today** — `"paper"` is the only non-UUID key and it *should* be immune. It is
+recorded because the MT5 phase must choose a registration path, and the choice has never been
+described as load-bearing.
+
+**Also `B184`-shaped: "is this adapter permanent?" is encoded in `_looks_like_uuid(key)`, which is a
+string-format test standing in for a fact about ownership.** Nothing declares it, so nothing can
+disagree with it — and a UUID-keyed adapter that *should* be permanent would be evicted with no
+guard to notice.
+
+Related: **B239**, **B184**, **B221**, **B252**, **B259**.
+
+### B261. `Position` cannot carry an MT5 position: no field for financing cost, and `lot_size` is the same word for a different quantity
+
+**Found attacking `T-0075`'s reuse list.** `Account` (`base.py:12`) genuinely transfers. **`Position`
+(`app/schemas/broker.py`) does not, and it has never been wrong before because of WHICH venues it
+has normalised from.**
+
+**1 — NO FIELD FOR FINANCING COST.** MT5 reports `profit`, `swap` and `commission` as three separate
+quantities. `Position` has one `unrealized_pnl`. **Both venues we have ever normalised from are
+swap-free** — the paper broker by construction, CFT because it is crypto — so a missing swap field
+has never cost anything. **An MT5 demo holding FX or metals overnight accrues swap, tripled on
+Wednesdays.** It then either gets folded silently into `unrealized_pnl` or dropped; **if dropped,
+`r_multiple` and every R-based rule reads a P&L with its carrying cost missing**, and the error grows
+with holding time, so the longest-held positions are the most wrong.
+
+**2 — `lot_size` IS `B167`'s CLASS, IN A FIELD RATHER THAN AN ENDPOINT NAME.** Ours has only held
+paper/CFT sizing. **In MT5 a lot is instrument-defined** — 100,000 units for a standard FX lot, 100
+troy oz for gold — with a broker-set `volume_min` and `volume_step` per symbol. **The word survives
+the venue change and the quantity does not.** `T-0075` caught exactly this collision for `mtr` /
+MetaTrader and did not apply it to the field it was listing as reusable.
+
+**Why this is worse than an ordinary mapping gap:** `lot_size` is the field
+`test_t0038_partial_close_contract.py` AST-checks every adapter's `close_position` for (`B258`). **So
+the contract arm would go GREEN on an MT5 adapter that reads `lot_size` and interprets it in the
+wrong unit** — the guard proves the value is *read*, never that it means the same thing. A
+partial close of "0.5" would close half a lot or half a unit depending on a convention nothing
+declares.
+
+**NOT MEASURED:** I have run no MT5 anything. The MT5-side facts here are standard platform
+behaviour, not something I observed on this infrastructure — **the repository half (which fields
+exist, which venues have ever been normalised, what the contract arm checks) is measured.**
+
+Related: **B167**, **B258**, **B227**, **B259**, **B260**.
+
+**MANAGER — AND THE `lot_size` HALF HAS A CONSEQUENCE FOR `B258`'s ARM THAT DESERVES ITS OWN
+SENTENCE.** `B258` records that the partial-close contract arm AST-checks `close_position` for a
+*read* of `lot_size`, and calls that stronger than a signature check because *"a signature that
+accepts the parameter proves nothing — that is exactly what both simulators had."* True, and
+insufficient here:
+
+> **The arm proves the value is READ. It cannot prove it MEANS the same thing.** An MT5 adapter
+> reading `lot_size` as 100,000 units of FX or 100oz of gold **passes the arm** while trading a
+> quantity nobody intended.
+
+`B167` in a field rather than an endpoint name: **the word survives the venue change and the quantity
+does not.** The scope caught that exact collision for `mtr` and did not apply it to the field it
+listed as reusable.
+
+**And the financing-cost break has never been wrong for a reason that expires on contact with MT5:**
+both venues we have ever normalised from are swap-free — paper by construction, CFT because it is
+crypto. Overnight FX or metals accrues swap, tripled on Wednesdays. Folded into
+`unrealized_pnl` it is silent; dropped, **`r_multiple` and every R-based rule read a P&L missing its
+carrying cost — an error that GROWS WITH HOLDING TIME, so the longest-held positions are the most
+wrong.** `EXIT-001`'s runner is the longest-held position this system produces.
