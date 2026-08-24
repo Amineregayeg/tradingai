@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-24 (B264 — the retrospective sweep read task ids out of other tasks' TITLES. Its state map came from an UNANCHORED regex over `bus.py tasks`, so it took the first T-NNNN anywhere and the next word as its status: T-0032 -> 'shipped', T-0059 -> 'is', T-0066 -> 'follow', T-0072 -> 'landed'. The consumer is `landed = {t for t,s in states.items() if s == "DONE"}`, so EVERY task whose id appeared in another task's prose was missing from the DONE set and a dangling reference could never be raised. It DEGRADED AS THE LOOP IMPROVED — the more history a title cited, the more ids it swallowed. Anchored to line start: DONE count 64 of 76, and the next run raised FOUR violations that had been invisible. B250's shape in the checker rather than in a test. Second defect fixed in the same pass: the WHOEVER-CLOSES reminder fired for tasks closed hours earlier, which trains a reader to skip the block. And the occasion was a seat REFUSING to delete a true sentence to silence an alarm.)
+Last updated: 2026-08-24 (B265 — the `idle` branch, the WHOLE SUBJECT of Malek's ruling, has no arm on it, and the arm that claims to demonstrate it REPLACES THE PRODUCER: it monkeypatches order_path_health to return a hand-written `idle` literal, so it proves the aggregator keeps ok True given a component saying idle — which two arms above it already prove — and NOT that a stopped engine produces idle. Measured by mutation at the real producer (data_health.py:1328, `else "idle"` -> `else "healthy"`): a stopped engine reports itself HEALTHY and 128 tests across a DERIVED seven-file population pass. The only arm calling the producer directly asserts the OTHER branch, `unavailable`, which the ruling treats as a problem — so the branch the ruling is entirely about is the branch with no coverage. The manager's production observation ([backups,shadow,order_path] -> [backups] and back within an hour) IS the producer link and is counted as such, but it is an OBSERVATION, not a GUARD: it does not re-run tomorrow. Code is correct; do not delete the arm, rename it to what it proves. RENUMBERED from B263 — filed from a pinned worktree whose register predated the real B263, so the id came from a stale FILE rather than from the ledger.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -13726,6 +13726,24 @@ apparent result of a fix.
 **Fix:** write `ev["position_id"]` into `broker_id`. One line, no migration, and it is what the
 column already means. **Not fixed here.** Related: **B224**, **B223**, **B215**.
 
+**A SECOND CONSEQUENCE, added 2026-08-24 by Execute, and this entry did not carry it.** The
+reconciler's collapsed map is the defect. **The consequence is that every historical query grouped by
+`broker_id` silently aggregates the entire pre-fix history into ONE bucket.**
+
+Observed while verifying the `T-0063` result: two pre-fix rows reported `n_tranches = 276` — **the
+whole trade table** — because every row written before the fix shares the literal key. The
+`realized_r` values are unaffected, they were written by the old path; but an implied-risk figure
+derived from that grouping came out at **103.83**, which is an artefact of the aggregation and not a
+measurement.
+
+> **The same query is SOUND on post-fix rows and MEANINGLESS on pre-fix ones, and nothing in its
+> output says which.** Anyone reconciling history by position gets a well-formed wrong answer —
+> `B240`'s shape, on a key rather than a field.
+
+**So the fix has a reporting half the code change does not cover:** any query that groups by
+`broker_id` must either scope itself to rows written after the fix, or state that it cannot
+distinguish them.
+
 ### B227. `SUM(lot_size) < sized_units` is a float equality across three rounding steps — 12.92% of SETTLED trades read as still open
 **Found in:** 2026-08-23, baselining `B218` under T-0060 (Review) — measured, not reasoned
 **What it is:** `T-0057`'s remainder discriminator, and `T-0063`'s proposed completeness test, both
@@ -16578,3 +16596,57 @@ classification rather than deleting the sentence.** *Deleting a correct sentence
 tuning until the alarm stops.* The discharge is recorded with its reason and still printed. Related:
 **B250**, **B93**, **B240**.
 
+
+### B265. The `idle` branch — the whole subject of Malek's ruling — has no arm on it, and the arm that claims to demonstrate it replaces the producer
+
+> **RENUMBERED from `B263` by the manager, 2026-08-24.** Filed as `B263` from a **pinned detached worktree at `0620f48`** — correct practice for measurement, and its register predated the real `B263`, so reading the file there showed `B262` as the highest. **The id was taken from a stale file rather than bid from the ledger.** See the collision note in `B203`: *the file cannot see another seat's uncommitted entry; this ledger can* — and a pinned worktree cannot see a COMMITTED one either. The finding below is unaffected.
+
+**`B256`'s next instance, one day after it was filed.** `T-0077` ships
+`test_the_cost_is_REAL_and_this_arm_demonstrates_it`, whose docstring says *"drive the order path to
+`idle` — a stopped engine — and `ok` really does stay True."* **It does not drive the order path. It
+replaces it**, `monkeypatch.setattr(dh, "order_path_health", _idle)` returning a hand-written
+`{"status": "idle", …}` literal.
+
+**What the arm proves:** given a component reporting `idle`, the aggregator keeps `ok` True — already
+covered by `test_healthy_and_idle_are_the_WHOLE_of_the_allow_list` and the parametrised allow-list
+arm. **What it claims:** that a stopped engine reads green. **The link between the two is asserted
+nowhere.**
+
+**MEASURED.** The producer is one line, `data_health.py:1328`:
+
+```python
+"status": "withdrawn" if withdrawn else "healthy" if engine_running else "idle",
+```
+
+Anchor asserted unique (1 occurrence) and the mutation confirmed applied by re-reading the line —
+**not a void mutation**. Final `"idle"` → `"healthy"`, so a stopped engine reports itself HEALTHY:
+
+```
+population DERIVED: every test naming data_health | order_path | engine_running -> 7 files
+RESULT: 128 passed, 0 failed. NOTHING NOTICES.
+```
+
+**And the only arm that calls the producer directly asserts the OTHER branch:**
+`order_path_health(None)` → `"unavailable"`, which the ruling treats as a PROBLEM. **So the branch
+the ruling is entirely about is the branch with no coverage.**
+
+**Why this one is worse than an ordinary coverage gap:** `idle` versus `unavailable` **is** the
+ruling. `idle` is allow-listed, `unavailable` is a problem, and the difference decides whether a
+production boolean goes false. **A regression that made a stopped engine report `healthy` would turn
+the component's own summary into a lie while `ok` stayed True and every arm stayed green** — and the
+component summary is the only thing left telling a human the platform is not trading.
+
+**THE PRODUCER LINK IS ESTABLISHED, BUT BY OBSERVATION RATHER THAN BY GUARD.** With the engine
+stopped, `problems` went `[backups, shadow, order_path]` → `[backups]`, and back when it restarted;
+both directions inside an hour (manager's measurement, 2026-08-24, not mine — **I ran no query**).
+**That is evidence the system is right today. It does not re-run tomorrow.**
+
+**NOT A DEFECT IN SHIPPED CODE.** `data_health.py` behaves correctly and production confirms it. This
+is about what the suite would CATCH. **Do not delete the arm — it overstates a property that is
+true. Rename it to what it proves, and give the `idle` branch a real producer arm.**
+
+**BOUNDED:** I ran a derived seven-file population, not the full 1976-test suite. A test asserting on
+the health payload without naming `data_health`, `order_path` or `engine_running` is outside the scan
+(`B240` — a zero from a scanner is not evidence of absence).
+
+Related: **B256**, **B215**, **B229**, **B253**, **B240**.
