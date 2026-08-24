@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-24 (B251 — FIVE of forty-three implemented rules are ever EVALUATED in production and ONE decides a trade. Measured for Malek's phase directive before the MetaTrader 5 phase: 43 rule modules on disk, 23 importable from crypto_loop's cone, 5 with a recorded verdict in any production corpus (GATE-002/007/008/023 in telemetry across 4484 rows, ENTRY-001 in the entry comparison across 433), 1 DECIDING — EXIT-001, whose chain from ratified constant to executed lot was traced link by link rather than assumed. ENTRY is decided by the backtest heuristic, SIZING by a fixed 0.01 with gate_032 not importable, NEWS by nothing (strategy_step.py:61 says 'RECORDED, NEVER ACTED ON'). The instrument errs toward FLATTERY, not harshness: the cone walk is complete (no dynamic imports anywhere in live/rules/decision) so 23 is an OVER-count of what is used. A live MT5 run today would test the backtest heuristic plus EXIT-001, not the ratified strategy set.)
+Last updated: 2026-08-24 (B252 — `is_simulation` asks TWO DIFFERENT QUESTIONS at its two enforcing readers: `service.py:96` asks "is real money at risk" and `manager.py:484` asks "are these records a third party's". They coincide only because every adapter today is our own paper broker or a real venue. An MT5 DEMO answers them differently — no real money, but genuinely a third party's records — so NO VALUE of the flag is correct for it: True lets the engine trade and SILENTLY SKIPS RECONCILIATION, the exact check a demo exists to provide; False keeps reconciliation and makes execute() raise so the demo cannot place an order. B241's finding one layer in — not two flags disagreeing, one flag answering two questions. And whichever way it is resolved, the demo/real distinction must be read FROM THE VENUE, never from config: a demo and a live account differ by a server address, so a class constant cannot tell and a config field can be wrong.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -14961,6 +14961,104 @@ field that is present and constant. **Fourth instance today and the second by th
 only the harmless bound. It exercises **neither**: `rule_stricter` is zero too. The non-vacuity gate
 is NOT MET on both bounds, not one, and the criterion is unpublishable for a stronger reason than
 single-direction exposure.
+
+### B252. `is_simulation` asks two different questions at its two enforcing readers, and MT5-demo answers them differently
+**Found in:** 2026-08-24, scoping the MT5 phase under T-0076 (Review)
+**What it is:** the flag is enforced in exactly two places and each means something else by it — in
+its own words:
+
+```
+execution/service.py:96   "A non-simulation adapter here is a programming error, not a runtime
+                           condition — fail loud rather than risk a REAL ORDER."
+                           ASKS: is real money at risk?
+
+manager.py:484            "Skip the engine's own PaperBroker: it is not a THIRD PARTY whose records
+                           could disagree with ours, it IS our records."
+                           ASKS: are this adapter's records someone else's?
+```
+
+**Those are different questions.** They coincide today only because every adapter in the tree is
+either our own paper broker (no money, our records) or a real venue (money, their records). **Nothing
+has ever sat between them.**
+
+**An MT5 DEMO account does:**
+
+```
+real money at risk?       NO    -> service.py wants  is_simulation = True
+records a third party's?  YES   -> manager.py wants  is_simulation = False
+```
+
+> **There is no value of the flag that is correct for it**, and the cost of each wrong answer is
+> asymmetric in an unobvious way. `True` lets the engine trade **and silently skips reconciliation**
+> — one `continue`, no log, one fewer row in the report — **switching off the exact check a demo
+> account exists to provide.** `False` keeps reconciliation and makes `execute()` raise, so the demo
+> cannot place a single order.
+
+**This is `B241`'s finding one layer further in.** `B241` established that `is_simulation` (the
+venue) and `observe_only` (the write gate) had come apart. **This is `is_simulation` coming apart
+from itself** — not two flags disagreeing, one flag answering two questions and never having been
+asked both at once.
+
+**Fix: split it into the two questions already being asked** — `is_real_money` at the money
+chokepoint, `records_are_third_party` at the reconciliation one. **Not a third concept: the flag
+already carries two and MT5 is what separates them.** Cost is real and worth stating — `base.py`
+makes these abstract properties, so every adapter must declare each or become un-instantiable, which
+is the safety mechanism working and means five classes change.
+
+**AND THE REQUIREMENT THAT OUTRANKS THE FIX:** whichever way it is resolved, **an adapter must learn
+whether its account is demo or real BY ASKING THE VENUE, never from configuration** — a demo and a
+live MT5 account differ by a server address and a login, so a class constant cannot tell and a config
+field can be wrong. **Fail closed on an unreadable answer, and re-read on every reconnect rather than
+caching at construction**, because pointing at a different server IS a reconnect.
+
+**Not fixed here — T-0076 is scope-only and the choice is Malek's.** Related: **B241**, **B238**,
+**B221**.
+
+**MANAGER VERIFICATION — BOTH READERS CONFIRMED IN THEIR OWN COMMENTS, verbatim:**
+
+```
+service.py:92-95   "HARD SAFETY: this service only ever runs against a simulation broker …
+                    fail loud rather than risk a REAL ORDER."
+                    -> asks: IS REAL MONEY AT RISK?
+
+manager.py:481-485 "Skip the engine's own PaperBroker: it is not a THIRD PARTY whose records
+                    could disagree with ours, it IS our records. Reconciling a simulation
+                    against itself would produce noise, not signal."
+                    -> asks: ARE THESE RECORDS SOMEONE ELSE'S?
+```
+
+**They have coincided for every adapter that has ever existed** — each is either our own paper broker
+(no money, our records) or a real venue (money, their records). **Nothing has sat between them.**
+An MT5 **demo** does:
+
+```
+real money at risk?        NO    -> service.py wants True
+records a third party's?   YES   -> manager.py wants False
+```
+
+**So there is no value of the flag that is correct.** This is `B241` one layer further in: not two
+flags that have come apart, **one flag answering two questions and never having been asked both at
+once.**
+
+**AND THE LAUNDERING RUNS THE OTHER WAY FROM THE OBVIOUS ONE.** Setting `True` risks no money — a
+demo has none. What it launders is **RECONCILIATION**: `manager.py:484` is a bare `continue`, with no
+log and no report row. **We would connect a real broker for the first time and silently switch off
+the check that compares its records against ours — which is the single thing a demo account exists to
+provide.** The cost is not money; it is the evidence the phase is for, lost without a trace.
+
+**THE LIVE-ACCOUNT REQUIREMENT, and it is binding on every option.** A demo and a live MT5 account
+differ by a server address and a login, so neither a class constant (the live account inherits the
+demo's answer) nor a config-derived value (which depends on a config being right — the reasoning this
+register already rejected once) is acceptable. **Three requirements, not alternatives:** derive it
+from what the venue reports about itself at connect; **fail closed** — unreadable or unrecognised
+means REAL MONEY; and **re-read on every reconnect**, because pointing the adapter at a different
+server *is* a reconnect and a value fixed at construction is a class constant with extra steps.
+
+**UNVERIFIED AND LOAD-BEARING, named as such:** that MT5 reports an account trade mode at all. It is
+standard, it has **not** been checked against the client library, and requirement 1 rests on it
+entirely. **If it does not, there is no safe automatic discriminator and demo-versus-live becomes a
+deliberate human act with a loud confirmation rather than a field** — a materially different design,
+and one that must not be discovered after the adapter is written. Related: **B241**, **B238**.
 
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
