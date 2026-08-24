@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-24 (B277 — the fill-basis sizing fix CONFIRMED LIVE and ISOLATED. execution/service.py:108-116 sizes from the FILL rather than the SIGNAL price, and every previous confirmation of the 1% was consistent with EITHER basis because the two agree whenever the fill matches the signal. Today they differed by 29.06 — signal_entry 79697.05, fill_price 79667.99 — so the bases give different answers: fill basis 50.000914 = 1.000018% of 5000, signal basis 50.769929 = 1.015399%. The system produced 50.000914, so sizing is demonstrably on the fill and the 0.0154 points the signal basis would have added is exactly the drift the fix removes; here it would have been an OVER-risk. ALSO records the second leg of B215's close: lot_size and open_time prove the endpoint reports THE position but are fixed at entry so a stale cache would match them, while current_price, unrealized_pnl and r_multiple agreeing on a value that moved after entry proves LIVENESS — identity and liveness, two legs. And a derived stop of 77778.23 is corrected to the read value 77778.524921: r_multiple is published rounded to 3dp and dividing by it amplifies error, so the flagged figure indicted its own arithmetic rather than the system, as its author predicted.)
+Last updated: 2026-08-24 (B278 — sizing is EQUITY-based, not balance-based, measured and stated nowhere in the codebase. B277's BTC trade could not settle it because BTC was the FIRST position of the run, so equity trivially equalled balance; ETH opened at 16:35:26 while BTC was open and unrealised, so its row discriminates: fill 2499.040000, sl 2473.872543, units 1.987058, implied account = units x distance / 0.01 = 5000.9197 where a balance basis requires 5000.0000. One 6dp unit-tick moves that by ~0.0025, so the 0.92 gap is far outside rounding. Corroborated by the realised loss of -50.01, which is 1% of 5000.92 and not of 5000.00 — two routes, one from size at entry and one from money at exit — and it back-fills BTC's unrealised at that instant as approx +0.92. WHY IT MATTERS: equity-based sizing SHRINKS risk into a drawdown and balance-based does not; that compounds, and GATE-032's wiring would multiply it by applying a per-cell percentage to a moving base. ALSO CLOSES B277's stated bound: ETH filled 3.38 WORSE than signal on a LONG, and sizing off the worse fill produced FEWER units — the fix behaving as intended in the adverse direction, where B277 had only a favourable fill.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -17442,3 +17442,69 @@ divergence, and this says nothing about behaviour under a wide or adverse fill. 
 is that the basis is the fill, measured rather than read from the source.**
 
 Related: **B215**, **B268**, **B275**, **B261**.
+
+---
+
+### B278. Sizing is **EQUITY**-based, not balance-based — measured, and stated nowhere in the codebase
+
+**NOT A DEFECT. A behaviour nobody had established, and it is the kind that only shows itself when
+two positions overlap.** Found by review reasoning about what `B277` could *not* settle, and closed
+by one read.
+
+## Why `B277` could not answer it and this can
+
+`B277`'s BTC trade opened at **16:30:16 as the first position of the run**, so equity trivially
+equalled balance and the exactness proved nothing about which the sizer uses. **ETH opened at
+16:35:26 while BTC was still open and unrealised** — so the two bases give different answers and the
+row discriminates:
+
+```
+ETH decision row   fill 2499.040000   sl 2473.872543   sized_units 1.987058
+                   stop distance = 25.167457
+
+implied account = units x distance / 0.01  =  5000.9197
+BALANCE basis would require                =  5000.0000
+```
+
+**5000.92, not 5000.00.** `sized_units` is published at 6dp, and one unit-tick moves the implied
+account by ~0.0025 — **so the 0.92 gap is three orders of magnitude outside the rounding**, and the
+conclusion does not depend on precision.
+
+**CORROBORATED INDEPENDENTLY BY THE REALISED LOSS.** The trade stopped out at **−50.01**, which is
+1% of **5000.92** and not of 5000.00. Two routes to the same account value, one from the size at
+entry and one from the money at exit.
+
+**And it back-fills a figure nobody recorded:** BTC's unrealised P&L at 16:35:26 was **≈ +0.92**,
+which at `lot_size` 0.02646252 puts BTC ≈ 79702.76 at that instant.
+
+## What it means, and it matters far more at scale than at 5,000
+
+> **Equity-based sizing SHRINKS risk into a drawdown; balance-based does not.** With open losses the
+> next position is smaller; with open profits it is larger. **That is a real strategy property, it
+> compounds, and no docstring, ruling or register entry states which one this system implements.**
+
+**Nothing here says it is the wrong choice** — it is the more conservative of the two into a losing
+streak. **It is unrecorded, and `GATE-032`'s wiring will multiply it**, because a per-cell risk
+percentage applied to a moving base compounds two sources of variation rather than one.
+
+## `B277`'s stated bound is now CLOSED, on the same row
+
+`B277` said its evidence *"says nothing about behaviour under a wide or adverse fill."* **ETH is an
+adverse fill and the fill basis held.**
+
+```
+signal_entry 2495.660000   fill 2499.040000    filled 3.38 WORSE on a LONG
+stop distance from FILL   25.167457   -> implied account 5000.92   <- what the system used
+stop distance from SIGNAL 21.787457   -> implied account 4329.4    <- not what happened
+```
+
+**Sizing off the worse fill produced FEWER units**, which is the fix behaving exactly as intended:
+the position shrinks so the risk stays put. **`B277` had only a favourable fill; this is the other
+direction.**
+
+**BOUNDED:** two trades, two symbols, one venue, one run. The equity figure is inferred from the
+sizing arithmetic rather than read from an equity field — **no balance/equity column was queried**,
+and a direct read of the account snapshot at 16:35:26 would be a stronger form of the same claim if
+one is retained anywhere.
+
+Related: **B277**, **B275**, **B268**, **B215**.
