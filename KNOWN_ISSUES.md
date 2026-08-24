@@ -13377,6 +13377,53 @@ out: a signal whose silence is indistinguishable from the thing it is supposed t
 **Not fixed.** Recorded while building `T-0057`; the fix is a decision about whether that endpoint
 is meant to cover the simulation broker at all. Related: **B198**, **B199**.
 
+---
+
+## VERIFIED LIVE AND CLOSED, 2026-08-24 ~17:10 UTC. **The first open position since the fix shipped, and the measurement expires when it closes.**
+
+**This entry could never be settled by a test.** `B203`/`T-0062` built the fix; nothing had ever
+exercised it against a **real open position**, because none existed while anyone was looking. The
+condition arrived at 16:30:16 and was measured while it held — **prompted by review, who traced all
+four hops in source and correctly refused to call that a verification: a reachable path is not an
+occurring event.**
+
+**BOTH ENDPOINTS READ TOGETHER, because the original discrepancy was only visible as a pair:**
+
+```
+GET /api/positions      -> list, len 1
+   {"id": "cftsim-779f7aba28", "pair": "BTC/USD", "direction": "LONG",
+    "entry_price": "79667.99", "current_price": "78707.99",
+    "unrealized_pnl": "-25.404", "r_multiple": "-0.508",
+    "lot_size": "0.02646252", "sl": "77778.52492086103", "tp": null,
+    "open_time": "2026-08-24T16:30:16.034199Z"}
+
+GET /api/engine/status  -> running: True,  open_positions: 1
+```
+
+**1 and 1. THE PAIR AGREES**, and the disagreement of that pair *was* `B215` — the endpoint
+returning `[]` while the engine reported two open positions.
+
+**THE THIRD OUTCOME WAS RULED OUT FIRST, and it had to be, because a bare `[]` means two different
+things.** Review named the trap before the command ran: `[]` with the fix deployed is a live defect;
+`[]` without it is undeployed code and no finding at all. **Reading one as the other would either
+file a defect against working code or dismiss a real one — `B215`'s own shape, one level up.**
+Checked in the same breath:
+
+```
+/app/app/main.py:242    broker_manager.register_adapter("paper", LiveLoopBrokerProxy(live_loop))
+```
+
+**Present on the running box.** So the empty-list branch was never reachable as an ambiguity, and
+the positive result stands on its own.
+
+**CORROBORATION, not merely a non-empty list:** `lot_size` `0.02646252` matches the decision row's
+`sized_units` `0.026463`, and `open_time` `16:30:16.034199` matches its `created_at` to the second.
+**The endpoint is reporting THE position the engine opened, not merely A position.**
+
+**Still open at time of writing** — `r_multiple` `-0.508` is a live in-flight figure and will move.
+The claim verified here is the VISIBILITY of the position, not its outcome.
+
+
 ### B216. T-0057's doctrinal predicate separates nothing: EVERY position this engine has opened has NO TARGET
 **Found in:** T-0057 ARM 7, the control pair — **by the control coming back RED, which is the
 outcome a control exists to be capable of** (Execute)
