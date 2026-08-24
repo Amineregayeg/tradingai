@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-24 (B275 — sizing is a PRODUCER with no contract arm, and 'pre-registered' defends the fixed 1% against a threat that is NOT GATE-032. Explicitly NOT a re-filing of B188/B191/B192, which already record the zero-production-callers fact. THE 1% IS A DEFAULT: fixed_config.py:35-39 defends it against being a TUNING KNOB (ROI = risk_pct x n x avg_R, 'cannot make a strategy better, only louder') — true, and not about GATE-032, which does not tune risk_pct but SELECTS it per trade from a ratified nine-cell table. Optimisation and doctrine are different operations. And service.py:115's 'pre-registered and fixed precisely so that risk is a constant' sits inside an argument about sizing off the FILL rather than the SIGNAL price: it leans on constancy as a description of today, and wiring GATE-032 evaporates its stated rationale while leaving its actual argument intact. 'Pre-registered' is doing ratification-shaped work for a claim nobody ratified. A RULING depends on the unwired mechanism — gate_012:505-514, Salim's round-3 ruling (b). THE MT5 CONSEQUENCE B188 PREDATES: on demo the number size_position returns reaches a real venue, so sizing is a PRODUCER, and the contract arms that transfer cover close_position's lot_size, not sizing. Compounded by B261 — size_position returns UNITS while MT5 sizes in instrument-defined LOTS with broker-set volume_min/volume_step. This is the seam where a unit error is a money error. Also: test_engine_lifecycle.py:263-264 would stay green after wiring while no longer being about sizing.)
+Last updated: 2026-08-24 (B276 — GATE-032's two axes both use the token NONE with opposite meanings, and wiring it today would return UNGRADED_BOX on every bar. DISTURBANCE_GRADES = (NONE, LIGHT, HEAVY) so NONE IS a grade meaning no disturbance; BoxGrade = Literal[STANDARD, SUPER, MANIPULATED] so NONE is NOT a grade but the schema's rendering of NO GRADE. One token, two meanings, on the two axes of one lookup — B167's class inside a single rule's inputs, failing silently because ('NONE','NONE') reads as a legitimate cell and is not one. INPUT AUDIT: two of three inputs are literals and the third is shadow-only. disturbance_grade is computed only in shadow.py:439/:484; structure_box_grade is NEVER COMPUTED — grade_002_box_grade/BoxGrade is imported by nothing under live/ or execution/, and the one live mention is shadow.py:814 hardcoding 'NONE'; instrument_class is hardcoded ALIGNED_MAJOR at crypto_loop.py:916 and shadow.py:756. gate_032:352 says no box grade -> UNGRADED_BOX (:383), so a wired matrix fed today's inputs takes NO position rather than a smaller one — the engine stops trading and the sizer behaves exactly as specified. AND THE 1% IT WOULD REPLACE IS ALREADY ONE OF ITS CELLS (:329-331): RISK_PCT is exactly the STANDARD/NONE cell. Wiring does not introduce the matrix, it introduces VARIATION, and the variation needs a grader that does not exist.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -17288,3 +17288,48 @@ green arm that quietly changes subject makes a wiring change look safer than it 
 re-derived by me.
 
 Related: **B188**, **B191**, **B192**, **B261**, **B258**, **B273**.
+
+### B276. `GATE-032`'s two axes both use the token `NONE` and it means opposite things — and wiring it today returns `UNGRADED_BOX` on every bar
+
+**`T-0092`'s input audit.** The matrix indexes on `structure_box_grade` × `disturbance_grade`.
+**`NONE` is a legal value on one axis and the ABSENCE of a value on the other:**
+
+```
+DISTURBANCE_GRADES = ("NONE", "LIGHT", "HEAVY")     <- "NONE" IS a grade: no disturbance
+BoxGrade = Literal["STANDARD", "SUPER", "MANIPULATED"]
+                                                    <- "NONE" is NOT a grade; it is the schema's
+                                                       rendering of NO GRADE (:278, :283)
+```
+
+**One token, two meanings, on the two axes of one lookup.** `B167`'s class inside the inputs of a
+single rule — and it is the kind that fails silently, because `("NONE", "NONE")` reads as a
+legitimate cell and is not one.
+
+**THE MEASURED CONSEQUENCE.** Of the three inputs, **two are literals and the third is shadow-only:**
+
+```
+disturbance_grade    computed -- but only in shadow.py (:439, :484), not on the order path
+structure_box_grade  NEVER COMPUTED. grade_002_box_grade/BoxGrade is imported by NOTHING under
+                     live/ or execution/. The one live mention is shadow.py:814, hardcoding "NONE".
+instrument_class     hardcoded "ALIGNED_MAJOR" at crypto_loop.py:916 and shadow.py:756
+```
+
+`:352` — *"No box grade → `UNGRADED_BOX`"*, returned at `:383`. **So a wired `GATE-032` fed today's
+inputs returns `UNGRADED_BOX` on every bar: not a smaller position, NO position.** The engine would
+stop trading and the sizer would be behaving exactly as specified.
+
+**AND THE 1% IT WOULD REPLACE IS ALREADY ONE OF ITS CELLS** (`:329-331`): `fixed_config.RISK_PCT`
+is *"exactly this matrix's STANDARD/NONE cell."* **The flat 1% is not a placeholder standing in for
+the matrix — it is the matrix's answer for an ungraded, undisturbed standard box, applied
+unconditionally. Wiring does not introduce the matrix; it introduces VARIATION, and the variation
+needs a grader that does not exist.**
+
+**NOT A NEW COPY OF `B192`**, which already records that the grade-computing function has no caller.
+**What is new: the `NONE`/`NONE` collision, and that the failure mode of wiring is a full trading
+stop rather than a mis-size.**
+
+**ALSO RECORDED SO IT IS NOT REDISCOVERED:** the hardcoded `ALIGNED_MAJOR` is `B252`'s shape — a
+literal nothing checks. **Harmless while `GATE-008` refuses altcoin rosters; the day the roster
+changes it sizes an altcoin as a major, silently.**
+
+Related: **B192**, **B188**, **B275**, **B167**, **B252**.
