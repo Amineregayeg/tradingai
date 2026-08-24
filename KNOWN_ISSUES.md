@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-24 (B270 — review's T-0082 attack on B268. B268's CONCLUSION SURVIVES and its MECHANISM was wrong: `took_trade` is set at strategy_step.py:217/:244 immediately before `return Signal(...)`, so it means A SIGNAL WAS PRODUCED, not that a position opened — five rejection returns in execution/service.py sit between, three of them ordinary market conditions. And the population is FILTERED: _record_signal_decision runs only inside `if status == FILLED`, _record_abstention only on the no-signal path, and the else branch writes NO decision row — so every bar where the strategy decided to enter and the order did not fill is ABSENT, and those are exactly the live_verdict=True bars. B240's shape at the population rather than the counter, and the direction favours the conclusion: the real denominator is thinner than published. ALSO CORRECTED: the claim that the current run's stricter denominator is ZERO went stale within the hour — the engine entered BTC/USD LONG at 16:30:16, so there are now THREE live-entered bars today and ALL THREE scored AGREE. And the missing denominator is NOT recoverable: _act rejects live in a deque(maxlen=80) cleared on start, orders is empty, trades is a close-only insert.)
+Last updated: 2026-08-24 (B271 — crypto_loop.py:1455's reject branch says NEVER DROP A GENERATED SIGNAL SILENTLY and does exactly that in durable terms: logger.info plus _act into a deque(maxlen=80) that is cleared on start, with orders never written and trades a close-only insert, so a signal the strategy generated and the venue refused leaves NO durable record anywhere. This is the SAME defect the abstention fix at :1412 was written to cure — its own comment says rows appeared only when an order filled, so the engine's refusals left no trace at all — fixed for `sig is None` and still live for `sig produced, order not filled`. It is the worst branch to lose: these are the bars where the entry logic COMMITTED and something downstream refused, three of the five refusals being ordinary market conditions, and they are exactly the bars that could carry RULE_STRICTER — the only direction in which Salim's rules could be shown SAFER than the heuristic rather than merely different. And the missingness is not random: rejections correlate with volatility and spread, so the corpus is thinned where its information density is highest while publishing a denominator that looks complete.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -17003,3 +17003,73 @@ folded into a bucket.
 decision row, and is reachable through five ordinary conditions.
 
 Related: **B268**, **B240**, **B215**, **B213**, **B198**.
+
+---
+
+### B271. The reject branch promises *"NEVER drop a generated signal silently"* and drops it silently — the exact defect the abstention fix cured, still live one branch over
+
+**`T-0082` established the mechanism (review); this is what it means.** `B270` records that the
+comparison corpus is *abstained plus filled*. **This entry is about the branch in between, and
+about the fact that the codebase already diagnosed this defect once, in writing, and fixed only
+one of its two instances.**
+
+`crypto_loop.py:1412-1420`, the no-signal path, carries the diagnosis:
+
+> *"Record WHY, not just that nothing happened. `DecisionRecord` has carried
+> `abstained`/`reasons`/ABSTAINED since it was written and nothing ever populated them — **rows
+> appeared only when an order filled, so the engine's refusals (most of what it does) left no trace
+> at all.** 'No valid setup' is indistinguishable from 'the detector never fires', which is
+> precisely the question a simulation exists to answer."*
+
+**That fix covers `sig is None`. It does not cover `sig produced, order not filled`** —
+`crypto_loop.py:1455-1463`:
+
+```python
+else:
+    # NEVER drop a generated signal silently. A rejection ... is surfaced with its reason.
+    reason = res.get("reason") or res.get("status") or "rejected"
+    logger.info("Live signal not filled", ...)
+    await self._act("reject", f"{pair} ... setup NOT taken — {reason}")
+```
+
+**Both statements in that comment are true of the intent and false of the result, durably.**
+`logger.info` is a log line, and `_act` appends to `self.activity`, which is
+**`deque(maxlen=80)`** at `:230`, exposed forty at a time, and **`.clear()`ed on start at `:730`.**
+`orders` is never written by the live loop, and `trades` is a **close-only** insert. **So a signal
+the strategy generated and the venue refused leaves NO durable record anywhere.** That is what
+*"silently"* means for anything read after the fact.
+
+## Why this is the worst branch to lose, not merely a third one
+
+**These are the bars where the strategy DECIDED TO ENTER.** The abstention rows — the overwhelming
+majority — record the engine declining. The filled rows record it succeeding. **The rejected rows
+are the ones where the entry logic committed and something downstream refused**, and three of the
+five refusals at `execution/service.py:126, :130, :135, :146, :153` are ordinary market conditions
+rather than faults: no reference price, drift beyond threshold, market already through the stop.
+
+**They are therefore also exactly the bars that could carry `RULE_STRICTER`** — the only direction
+in which Salim's rules could be shown to be *safer* than the live heuristic rather than merely
+*different*. `B268` measures three live-entered bars in a day; **this branch is where the missing
+ones went.**
+
+## The asymmetry that makes it a measurement defect and not just a logging gap
+
+**Losing this branch is not random missingness.** A rejection correlates with volatility, with
+spread, with the market having already moved through the stop — **the conditions under which the
+two rule sets are most likely to disagree.** So the corpus is thinned precisely where its
+information density is highest, and every rate computed over it (`disagreement_rate` included)
+inherits that bias while publishing a denominator that looks complete.
+
+## Not a code change to make blind
+
+**The fix is not simply "call `_record_signal_decision` in the else branch."** A rejected signal has
+no fill price, no sized units and no position id, so it needs an outcome the schema can express —
+and adding rows to a live corpus mid-run makes before-and-after windows non-comparable, which is
+`B198`'s lesson about cutover-poisoned rows. **Scope it before writing it.**
+
+**BOUNDED:** measured by reading, not by running — there is nothing to run, since the artefact this
+entry is about does not exist. The claim that no durable record exists was checked against
+`orders` (empty), `trades` (close-only insert), `decision_records` (two of three branches) and
+`telemetry_records` (zero rows carrying the gate).
+
+Related: **B270**, **B268**, **B240**, **B238**, **B198**, **B215**.
