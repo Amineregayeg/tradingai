@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-24 (B266 — `order_path_health`'s docstring says a stopped engine reports `idle` with `watching: False`; it reports `idle` with `watching: True` and the DOCSTRING is the wrong half. `watching: False` occurs in exactly three places and all three are `unavailable` returns; the convention is stated by an arm — test_data_health.py:54, "a check that cannot see its data claimed to be watching" — so `watching` answers COULD THIS CHECK LOOK, not IS THE ENGINE LIVE. The code is correct and deliberately so: ARM E exists to keep a stopped engine reporting its per-symbol verdict, so it WAS watching. Documentation-only, no production consumer — but it is B238's shape, a false contract sentence load-bearing in the wrong direction, three lines from the property B265 says has no arm and describing the SAME branch, the stopped engine, which is the whole subject of Malek's ruling. T-0080's new producer arm asserts on that payload and must assert `watching is True`, or an arm written from the docstring would fail and invite a seat to 'fix' the production line — turning a documentation error into a behavioural one.)
+Last updated: 2026-08-24 (B269 — WITHDRAWN after investigation: the `of 6` literal in the entry comparison line is correct and enumerated in the module docstring; recorded rather than dropped because an unused id is a ledger gap. The substantive entry beside it is B268 — `rule_stricter` and `rule_looser` are printed adjacently and have DIFFERENT denominators: disagreement_direction returns RULE_STRICTER only when live ENTERED and RULE_LOOSER only when live DECLINED, and `live_verdict` resolves to `took_trade`. Measured across both of today's runs: stricter was offered 2 opportunities and looser 26, the only two bars where live entered BOTH scored AGREE, and in the run happening now stricter's denominator is ZERO — the value is published on every bar and cannot be non-zero. A reader concludes the rule is uniformly looser; the evidence does not support it. B240's shape on a live corpus, and it is the corpus that would justify the entry cutover.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -16710,3 +16710,147 @@ contradiction with a test now pointing at the wrong one.
 **Found by reading, not by a scan** — while measuring the producer for `T-0080`'s plan.
 
 Related: **B265**, **B238**, **B215**, **B229**, **B199**, **B178**.
+
+### B267. `pkgutil.iter_modules` is NOT recursive — an adapter one directory deep is invisible to the contract arm, and the suite stays green
+
+**`T-0081`, measured.** `test_t0038_partial_close_contract.py:40` walks
+`pkgutil.iter_modules(pkg.__path__)`, which **yields the names in that directory and does not
+descend.** Four placements, each a `BrokerAdapter` subclass whose `close_position` deliberately
+IGNORES `lot_size` — a canary, so *discovered* is loud and *invisible* is silent:
+
+```
+broker/mt5_flat.py                 flat module              DISCOVERED   <- CONTROL
+broker/mt5_pkg/adapter.py          __init__ empty           INVISIBLE
+broker/mt5_reexport/adapter.py     __init__ re-exports      DISCOVERED
+services/mt5_outside/adapter.py    outside the package      INVISIBLE
+```
+
+**The control is the point: had the flat module come back invisible, this would be a malformed probe
+rather than a property of `iter_modules`.** It did not.
+
+**THE RESULT IS THE ISOLATION RUN.** With only the two invisible placements left in the tree:
+**16 passed.** A deliberately defective adapter sits inside `app/services/broker/` and **the
+membership arm does not fire — the class never enters the population it pins — and `_reads_lot_size`
+never runs, because there is nothing to run it on.**
+
+**So `B258`'s "an MT5 adapter fails by name until a human names it" holds ONLY for adapters the walk
+can reach**, and it has never been tested otherwise because **every adapter today is a flat module.**
+MT5 is the first with a real reason to be a package — transport, symbol mapping, adapter — a shape
+`cft_bridge_adapter.py` + `cft_bridge_transport.py` already gestures at. **`__init__.py` re-exporting
+is a working escape hatch that depends on a human writing a line no test asks for.**
+
+**WHERE THE MT5 FILE GOES IS THEREFORE A CORRECTNESS QUESTION, NOT A STYLE ONE.**
+
+**NOT FIXED BY INSTRUCTION, AND DELIBERATELY:** widening `iter_modules` to `walk_packages` is a
+separate task with its own review — it changes the population of a shipped guard, and a guard whose
+denominator moves is exactly what the `-k paper` fix was about. **The membership literal was also
+left untouched: a failing membership arm IS the finding, and editing it to fit a probe would be
+`B213`'s shape.**
+
+**Everything reverted: porcelain 0, suite 16/16, worktree removed.**
+
+Related: **B258**, **B257**, **B250**, **B213**.
+
+---
+
+### B268. `rule_stricter` and `rule_looser` are published side by side and have different denominators — and in the run happening right now, `rule_stricter`'s denominator is ZERO
+
+**Measured against production, 2026-08-24, both of today's engine runs.** This is the corpus that
+would justify moving Salim's entry rules onto the ORDER path, so how it reads is not cosmetic.
+
+The published line (`decision_records.reasons`, one per bar):
+
+```
+entry rules: disagree=0 (rule_stricter=0 rule_looser=0) agree=1 not_comparable=0 rate=0.000 [1 of 6 rules comparable]
+```
+
+**The two counters are not commensurable, and `disagreement_direction` at `:169-176` is why:**
+
+```python
+if c.live_verdict and not rule_says_entry:   return "RULE_STRICTER"   # requires live ENTERED
+if rule_says_entry and not c.live_verdict:   return "RULE_LOOSER"     # requires live DECLINED
+```
+
+and `_live_entry_verdict` resolves `live_verdict` to **`took_trade`**. So `rule_stricter` can only
+be non-zero on a bar where **the live path actually opened a position.**
+
+## What that costs, measured
+
+```
+run f8b40671  03:50-15:36   83 decision rows   81 ABSTAINED + 2 WIN
+                            comparable 14 (agree 2, disagree 12)
+                            rule_stricter 0    rule_looser 12
+run fe837dd1  15:45-        14 decision rows   14 ABSTAINED + 0 entries
+                            comparable 14 (agree 10, disagree 4)
+                            rule_stricter 0    rule_looser 4
+```
+
+**The only two bars on which live entered BOTH scored AGREE** — verified by reading those two rows'
+own comparison lines, not inferred:
+
+```
+outcome=WIN  disagree=0 stricter=0 looser=0 agree=1 not_comparable=0
+outcome=WIN  disagree=0 stricter=0 looser=0 agree=1 not_comparable=0
+```
+
+**So across all of today: `rule_stricter` was offered TWO opportunities and `rule_looser` was
+offered TWENTY-SIX.** And in the current run `rule_stricter=0` is published on every bar while
+**its denominator is 0** — the live path has entered nothing since 15:45, so a non-zero value is
+arithmetically impossible. **It reads exactly as it would if the rule had had a hundred chances to
+be stricter and declined every one.**
+
+## Why this is the module's own principle, one level down
+
+`values()` at `:289-292` is emphatic and correct: *"THE DENOMINATOR IS PUBLISHED, ALWAYS. A rate
+whose denominator can be zero must publish its denominator: a ratio hides exactly one number and it
+is always the one that says whether the ratio means anything."* **That discipline is applied to
+`disagreement_rate` and not to the stricter/looser split**, whose two denominators are
+`live entered` and `live declined` and neither appears anywhere.
+
+## Why it matters NOW rather than as tidiness
+
+`T-0040`'s non-vacuity gate reads `rule_stricter`. **A reader — including a future seat deciding
+the cutover — sees `rule_stricter=0 rule_looser=12` and concludes the rule is uniformly LOOSER
+than the live heuristic: it never declines what live takes, it only adds exposure.** The evidence
+does not support the first half. **The rule has never been observed declining a live entry because
+it has been given two chances, and it agreed on both.**
+
+**This is `B240`'s shape on a live corpus** — a zero from an instrument that had no opportunity to
+produce anything else is not evidence of absence.
+
+**NOT A DEFECT IN THE COUNTERS.** `disagreement_direction` is careful, is the single site that
+decides direction, and its `direction_unknown` bucket exists precisely so the split stays total.
+**The defect is that two numbers with a 13:1 difference in exposure are printed adjacently with no
+way to tell.** The fix is to publish both denominators, exactly as the module already does for the
+rate.
+
+Related: **B240**, **B217**, **B213**, **B251**, **B269**.
+
+---
+
+### B269. WITHDRAWN — the `of 6` in the comparison line is a hardcoded literal, and it is CORRECT and DOCUMENTED
+
+**Bid, investigated, and cleared.** Recorded rather than dropped, because a silently unused id is a
+gap in the ledger and a gap is exactly the tell that says a seat reverted to reading the file
+(`B265`).
+
+**The hypothesis:** `entry_comparison.py:273` renders
+`f"[{len(COMPARABLE_RULE_IDS)} of 6 rules comparable]"` — a **derived** numerator beside a
+**literal** denominator, in the module whose own docstring insists the denominator is always
+published. That looked like a drift hazard.
+
+**It is not a defect.** The `6` is an enumeration the module docstring at `:38-52` spells out in
+full, with a reason per member for why it is not comparable: `ENTRY-001` (comparable), `GATE-038`
+(an identity on its own argument — *"it inflates the denominator with something that cannot
+disagree, which moves the published rate in the REASSURING direction"*), `GATE-037` (a conformance
+check, per-bar constant), and `GRADE-001/002/008` (producers with no `evaluate` and therefore no
+live-side counterpart). **The docstring closes with the exact sentence the literal serves:** *"So
+every figure this module produces says '1 of 6' beside it. Anyone reading 'the entry seam' as
+covering all six is reading a claim the record must not make."*
+
+**The residual maintenance note, and it is only that:** a seventh rule arriving at the entry seam
+would leave the literal reading `6`. The docstring enumerates the members, so the drift is
+traceable rather than silent — **not worth a change, and stated here so the next seat does not
+re-open it.**
+
+Related: **B268**.
