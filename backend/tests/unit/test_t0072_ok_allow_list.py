@@ -173,3 +173,69 @@ async def test_an_allow_listed_status_does_NOT_move_the_flag(all_healthy, status
     result = await dh.data_health()
     assert result["ok"] is True, f"{status!r} is allow-listed and still made ok False"
     assert "order_path" not in result["problems"]
+
+
+# ======================================================================================
+# T-0077 / `B253` — THE RULING'S RECORD, AND THE COST IT CARRIES
+#
+# `T-0072` landed the mechanism and not the consequence. **Before the ruling, `ok` False on
+# an idle engine was an ACCIDENT; after it, `ok` True on an idle engine is a DECISION — and
+# the code reads identically either way.** A scope block is the only thing that can carry
+# that difference to whoever meets a week-dead engine reading green.
+# ======================================================================================
+
+
+@pytest.mark.asyncio
+async def test_data_health_declares_its_OWN_scope(all_healthy):
+    """Every component carried `attests`/`does_not_attest`; the AGGREGATE that summarises
+    them had none — so the one claim a reader acts on was the one with no stated scope."""
+    result = await dh.data_health()
+    scope = result.get("scope")
+
+    assert scope, "data_health() returns no scope block of its own"
+    assert scope["attests"] == "nothing_is_broken"
+    assert any("TRADING" in item for item in scope["does_not_attest"]), (
+        "the one thing `ok` must be said NOT to attest is whether the platform is trading — "
+        "that is where `idle` and `withdrawn` part, and it is the whole of the ruling"
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_ACCEPTED_COST_is_stated_in_the_payload_not_only_the_source(all_healthy):
+    """**`B253`.** The cost was accepted, not overlooked, and it will look like a defect to
+    whoever meets it first: *an engine left off for a week reads green for the whole week.*
+
+    In the payload rather than only in a docstring, because the reader who needs it is
+    looking at a dashboard saying `ok: true`, not at `data_health.py`.
+    """
+    result = await dh.data_health()
+    cost = result["scope"]["accepted_cost"]
+
+    assert "week" in cost and "ok=True" in cost, cost
+    assert "the ruling working, not failing" in cost, (
+        "it must say the reading is INTENDED — a cost stated without that reads as a known "
+        "bug nobody fixed"
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_cost_is_REAL_and_this_arm_demonstrates_it(all_healthy):
+    """Not a claim about a hypothetical: drive the order path to `idle` — a stopped engine —
+    and `ok` really does stay True with `problems` empty.
+
+    *A scope note describing behaviour the system does not have would be worse than none.*
+    """
+    async def _idle(*a, **k):
+        return {
+            "status": "idle", "watching": False,
+            "summary": "the engine is not running — nothing is due, and nothing is withdrawn",
+        }
+
+    all_healthy.setattr(dh, "order_path_health", _idle)
+    result = await dh.data_health()
+
+    assert result["ok"] is True and result["problems"] == []
+    assert result["components"]["order_path"]["status"] == "idle"
+    assert "not running" in result["components"]["order_path"]["summary"], (
+        "and the COMPONENT must still say so — the flag stays quiet, the component does not"
+    )

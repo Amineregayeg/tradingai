@@ -840,6 +840,26 @@ async def data_health(loop=None) -> dict:
     be asked rather than re-implemented. Optional, and its absence reports the order-path
     component as `unavailable` rather than dropping it — a check that silently disappears
     when its input is missing is the failure this whole module exists to prevent.
+
+    WHAT `ok` ATTESTS, AND THE ONE THING IT DELIBERATELY DOES NOT (`T-0077`/`B253`)
+    Malek ruled that `ok` means **NOTHING IS BROKEN**. It does NOT attest that the platform
+    is TRADING. Those are different questions and `idle` is exactly where they part: an
+    engine that is deliberately off is not broken.
+
+    **THE COST OF THAT RULING, STATED BECAUSE IT WAS ACCEPTED RATHER THAN OVERLOOKED: AN
+    ENGINE LEFT OFF FOR A WEEK READS GREEN FOR THE WHOLE WEEK.** `ok` will be `True`, and
+    `problems` will be empty, and nothing on this surface will say the platform has not
+    traded since Tuesday. *That is the ruling working, not failing.*
+
+    **A future reader who finds a week-dead engine reading green must find this paragraph
+    before they find a bug**, because the code reads identically either way: before the
+    ruling, `ok` False on an idle engine was an ACCIDENT; after it, `ok` True on an idle
+    engine is a DECISION. `B244`'s shape on the surface `B244` was about — **the scope block
+    is the only thing that can carry the difference.**
+
+    *What answers "is it trading" is the `order_path` component's own status and summary
+    (`T-0057`), which distinguishes `idle` from `withdrawn` and says which symbols and for
+    how long. The flag is not the place to ask.*
     """
     dominance = dominance_health()
     backups = backup_health()
@@ -876,6 +896,23 @@ async def data_health(loop=None) -> dict:
         "ok": not problems,
         "checked_at": datetime.now(tz=timezone.utc).isoformat(),
         "problems": problems,
+        # THE SCOPE TRAVELS WITH THE FLAG, not only in this file. Every component already
+        # carries `attests`/`does_not_attest`; the aggregate that SUMMARISES them had none,
+        # so the one claim a reader acts on was the one claim with no stated scope.
+        "scope": {
+            "attests": "nothing_is_broken",
+            "does_not_attest": [
+                "whether the platform is TRADING — see the order_path component",
+                "whether the engine is running at all — `idle` is not a problem",
+                "whether any strategy is correct",
+            ],
+            # Said in the payload, not just the source, because this is the reading that
+            # will look like a defect to whoever meets it first.
+            "accepted_cost": (
+                "an engine left off for a week reads ok=True for the whole week; that is "
+                "the ruling working, not failing"
+            ),
+        },
         # NESTED, and it is not cosmetic. This used to end `**components`, so the top level
         # was `ok · checked_at · problems` PLUS the component keys — and a frontend deriving
         # its rows with `Object.entries` would render the first three AS COMPONENTS. Under
