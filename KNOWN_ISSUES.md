@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-24 (B258 — MT5 readiness of the SUITE, and one genuinely good result: TWO of six adapter properties transfer automatically, THREE will read as covered without being, and ONE cannot transfer at all. The binary in the task was wrong — there are three categories, and MT5 poses a narrower question than either, because MT5 REPLACES THE ADAPTER so what matters is whether an arm's subject is AN adapter or OUR adapter. Category 3 already exists: test_t0038_partial_close_contract.py:31 derives its population with pkgutil ('DERIVED, not enumerated: a new adapter is covered on the day it is added'), runs AST over close_position's BODY because a signature proves nothing, and asserts the discovered set equals a NAMED LITERAL — so an MT5 adapter is AUTO-DISCOVERED, has lot_size asserted on its body, and FAILS the membership arm until a human names it. Producer-bound and therefore silent after MT5: close_all_positions (B221 was exactly this), place_order, get_positions, and _settle's remaining_units — the last cannot transfer at all because it is OUR simulator's arithmetic and a real venue reports FILLS, not remainders. And the sweep's own first instrument was wrong and was discarded rather than published: it counted pure functions as producers.)
+Last updated: 2026-08-24 (B259 — /mtr-api/ is MATCH-Trader, NOT MetaTrader. A three-letter vocabulary collision, disproved by the first line of cryptofundtrader.py itself: 'Crypto Fund Trader runs on the Match-Trade Technologies Match-Trader platform'. The manager raised the reuse hypothesis and the scope killed it in its first hour — it would otherwise have been found halfway through an implementation costed as reuse, which is B167's class. MT5 has no REST API in the standard product at all. Reusable: the BrokerAdapter interface, Position/Account normalisation, observe_only, the write gate, and the SHAPE of the bridge pattern. The adapter body is new. THE DOMINANT COST IS A SERVICE: cft_bridge_transport.py already runs a browser separately because CFT sits behind Cloudflare, measured 403/403/403/403/200, and MT5 is the same shape with a worse constraint — a Windows terminal, with failure modes that do not look like HTTP errors. AND MEASURED: grep -c bridge in data_health.py returns ZERO, so the bridge we ALREADY run is invisible to the health surface. The precedent is not 'a service will be needed', it is 'we have one and nothing watches it' — and B248 measured what invisible costs: five days.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -16164,3 +16164,61 @@ evidence** — `B240` applied to a classifier rather than a query.
 read from the derivation and from `base.py`'s abstract mechanism — **structural, checkable now, not
 observed.** The cost ranking is a judgement: rows 3 and 6 from `B221`'s and `B223`'s actual
 histories, rows 4 and 5 reasoned. Related: **B256**, **B221**, **B223**, **B218**, **B240**.
+
+### B259. `/mtr-api/` is MATCH-Trader, not MetaTrader — and the bridge service we already run is invisible to `data_health`
+**Found in:** 2026-08-24, scoping the MetaTrader 5 phase. **The manager raised the reuse hypothesis;
+the scope killed it in its first hour.**
+
+**THE COLLISION IS THREE LETTERS AND IT IS STATED IN THE FILE'S OWN FIRST LINE**, which nobody had
+read before treating the endpoint as evidence:
+
+> *"Crypto Fund Trader (Match-Trader / QFX) broker adapter. Crypto Fund Trader runs on the
+> Match-Trade Technologies **Match-Trader** platform."*
+
+`mtr` = **MATCH**-Trader. Everything downstream agrees and none of it is MetaTrader:
+`POST /mtr-core-edge/login`, header `Auth-trading-api`, `offer.system.uuid`,
+`/market-data-api/{uuid}/api/quotations-with-daily-change`.
+
+**And MT5 has no REST API in the standard product at all** — its surfaces are the Windows-only Python
+package driving a running terminal, or the licensed server-side Manager/Gateway APIs.
+
+**`B167`'s exact class: a token borrowed from one vocabulary and read in another.** This one would
+have been found **halfway through an implementation costed as reuse**, because the resemblance is
+strong enough to survive a first look and the disproof is one line into the file.
+
+```
+NOT reusable   the adapter body — it is new work
+REUSABLE       the BrokerAdapter interface, Position/Account normalisation, observe_only,
+               the ExecutionService write gate, and the SHAPE of the bridge pattern
+```
+
+**THE DOMINANT COST IS THE SERVICE, AND THE PRECEDENT IS ALREADY IN THE TREE.**
+`cft_bridge_transport.py` exists because CFT sits behind Cloudflare TLS fingerprinting, and its
+docstring carries the measurement rather than the argument: `httpx` 403, `httpx`+UA 403, +cookies
+403, Playwright's HTTP stack 403, `fetch()` inside a real browser **200**. So `deploy/cft-bridge/`
+runs a browser as a **separate service** — 400MB per deploy, and a browser crash must not take the
+trading engine down.
+
+**MT5 is the same shape with a worse constraint: a running terminal on Windows.** A new service, a
+deploy story the runbook does not reach, and failure modes — not logged in, terminal self-updated,
+session expired, host rebooted — **that do not look like an HTTP error.**
+
+**AND THE `B248` HALF WAS MEASURED, NOT ASSERTED:**
+
+```
+grep -c "bridge" app/services/monitoring/data_health.py   ->   0
+```
+
+**The bridge service we ALREADY run is invisible to the health surface.** So the precedent is not
+*"a service will be needed"* — it is ***"we have one and nothing watches it."*** An MT5 phase that
+ships without a health component ships a **second** invisible dependency, and `B248` measured what
+that costs: five days.
+
+**WHAT THE SCOPE DELIBERATELY OMITS, and each omission is correct:** no estimate in hours (no
+measurement of MT5 terminal behaviour on this infrastructure exists, and one would be invented); no
+decision on `B252`; and no choice between Windows host, Wine container and vendor REST bridge —
+**that should get the treatment `cft_bridge_transport.py` got: test the routes, record which return
+200, let the measurement pick.** First hour of implementation, not a guess in a scope.
+
+Related: **B167**, **B248**, **B252**, **B258**, **B239**.
+
