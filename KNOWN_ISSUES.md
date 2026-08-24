@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-24 (B248 — NOTHING HAS SHIPPED SINCE 2026-08-19. The box runs 1521e371 = T-0051, committed 08-19 14:10; HEAD is 50 commits ahead and TEN task fixes are in git and not on the box, including T-0062's kill-switch repair and T-0057's order-path signal. Confirmed three ways: /api/system/version and /app/.build-sha agree on the old sha; /api/system/data-health has NO order_path component; /api/positions still returns []. TWO LIVE CONSEQUENCES: the kill switch still closes nothing and reports 0 closed 0 failed, with two open runners on a live paper balance; and data-health returns ok:True problems:[] right now while the order path has been frozen since 08-21, which is B199 unmitigated. Found by Execute obeying an instruction to RE-MEASURE rather than assume — the re-measurement was the finding. And every seat, manager included, has spent a day writing 'this is now fixed' meaning the TREE while reading it as the BOX: B240's precondition applied to the artefact rather than the field. THE DEPLOY QUESTION AND B198 ARE THE SAME QUESTION, because a safe deploy needs /engine/stop first and stop() closes the two runners.)
+Last updated: 2026-08-24 (B250 — a scanner that UNDER-reports makes its own guard agree with itself, and only that direction ships. Execute's status-set scanner for T-0065's ARM 2 was wrong three ways; the two that OVER-reported went red and announced themselves, and the one that read only ast.Constant MISSED a ternary and silently omitted `withdrawn` — the single status the whole B229/B234 thread exists for. ARM 2 would have gone GREEN over a status it never looked for. Caught before landing. B240 gains the direction: an over-reporting instrument fails loudly and costs an hour, an under-reporting one passes quietly and its silence IS the evidence — so a derived-input guard needs a control NAMING a member whose absence would be the failure, not a count.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -14855,6 +14855,63 @@ measure it — it took the figure from a peer's message and repeated it as its o
 argument for scheduling.** Its own account: *"I passed it on because it supported the case I was
 making, which is the worst reason to skip a check."* See `B240`.
 
+### B249. The backup verifier compares a SNAPSHOT against a LIVE count, so a healthy backup of a busy database fails by construction
+**Found in:** 2026-08-24, on the `backups: FAILING` alarm the deploy surfaced (Review)
+**What it is:** `deploy/backup/backup.sh` verifies that the dump restores, and the comparison spans
+two different instants:
+
+```
+:101  step 1   pg_dump -Fc > database.dump              <- the SNAPSHOT is taken here
+:115  step 2   copy the unrecoverable files             <- time passes
+:150  step 3   live=$(psql -d $DB_NAME  -c "count(*)")  <- read NOW
+:152           rest=$(psql -d $SCRATCH  -c "count(*)")  <- from the snapshot
+:153           if [ "$live" != "$rest" ]; then FAIL
+```
+
+**`pg_dump` is internally consistent** — it reads under a repeatable-read snapshot — so `restored` is
+a coherent point in time. **The dump is correct. The comparison is not.** Every row the engine writes
+between step 1 and step 3 appears in `live` and cannot appear in `rest`.
+
+> **So on a database being written to, this check fails by construction, and `live > restored` is
+> precisely the signature of the window rather than of loss.** The observed
+> `decision_records: live=1076 restored=1074` is two rows across a multi-step interval on the one
+> table the engine writes continuously.
+
+**Not a claim that no data was lost — a claim that this check cannot tell.** Both hypotheses predict
+the same sign. What would separate them is which tables differ: writes-during-the-window can only
+affect actively-written tables, so `broker_connections` (one static row) differing would mean
+something else entirely. **And the script cannot answer that either — see below.**
+
+**A SECOND DEFECT MAKES THE FIRST UNDIAGNOSABLE.** `:152` assigns `verify_msg=` rather than appending,
+inside a loop over three tables. **Only the LAST failing table reaches the `fail` message.** So
+*"decision_records: live=1076 restored=1074"* does not establish that `trades` and
+`broker_connections` passed — it establishes only that `decision_records` was the last to fail. The
+per-table `log` lines have the answer and the alarm does not carry it.
+
+**A THIRD, smaller:** `|| echo "ERR"` on either `psql` makes a query FAILURE render as a count
+mismatch — `live=ERR` against a number is `!=`, so an unreachable database reports *"the dump did not
+restore correctly."* Three causes, one message.
+
+**AND `:142` LOSES A REAL WARNING.** `verify_msg="pg_restore reported warnings"` is set WITHOUT
+`verify_ok=false`, so if a table later fails the warning is overwritten, and if none fails it is
+discarded silently. **The one signal that speaks about the restore itself is the one that cannot
+survive.**
+
+**Fix, and the first part is a question rather than a patch:** *what is this check for?* It exists to
+answer **"can this dump be restored?"** — and `pg_restore` succeeding with non-zero counts answers
+that. **Comparing against live answers a different question** — *"is the dump current?"* — which no
+backup can satisfy while writes continue. If currency is wanted, take the live count IMMEDIATELY
+before `pg_dump` rather than after step 2, which narrows the window from minutes to milliseconds;
+**do not add a tolerance, because choosing its size is `B93` and the write rate is not constant.**
+Then: accumulate `verify_msg` across tables, distinguish `ERR` from a mismatch, and let the
+`pg_restore` warning survive a later assignment.
+
+**Pre-existing, and the deploy REVEALED it rather than causing it** — the old code called backups
+healthy without verifying the restore. **The alarm is new; the condition is not; and the alarm is
+firing for a reason the code cannot currently distinguish from the one it names.**
+
+**Not fixed here.** Related: **B240**, **B215**, **B199**.
+
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
 **What it is:** `TELEMETRY_SCHEMA.json` hard-pins `engine.rule_registry_version` with
@@ -15549,6 +15606,20 @@ was making, which is the worst reason to skip a check."***
 **A borrowed number is load-bearing the moment you argue from it**, and it arrives with the
 authority of the seat that sent it rather than the evidence that produced it.
 
+**AND THE ERROR HAS A DIRECTION — added 2026-08-24, see `B250`.** Every precondition in this entry
+says *establish what you are measuring before quoting the measurement.* `B250` adds which way the
+failure points, and it decides which failures ever reach production:
+
+```
+an instrument that OVER-reports    fails loudly, gets fixed, costs an hour
+an instrument that UNDER-reports   passes quietly, gets trusted, and its silence IS the evidence
+```
+
+A guard whose input is derived by a scanner is only as wide as that scanner, and when the scanner
+under-reports **the guard agrees with it.** Agreement between an instrument and its own narrowed
+input is indistinguishable from correctness. **So derived inputs need a control naming a member
+whose absence would be the failure** — not a count.
+
 ### B248. NOTHING SHIPPED SINCE 2026-08-19. Fifty commits, ten task fixes, and every "this is now fixed" in this register is true of the tree and false of the box
 **Found in:** 2026-08-24, by Execute, obeying `T-0065` AMENDMENT 1's instruction to **re-measure
 `/api/positions` before treating the old behaviour as the baseline** — the re-measurement is the
@@ -15615,5 +15686,48 @@ incident is a container recreate destroying a live ETH position twelve hours in.
 `B198` is waiting on.** So there is one decision here, not two, and it is Malek's.
 
 **Not fixed here. Not deployed here.** Related: **B199**, **B221**, **B241**, **B240**, **B198**.
+
+### B250. A scanner that UNDER-reports makes its own guard agree with itself, and only that direction ships
+**Found in:** 2026-08-24, by Execute, inspecting the instrument it had just built for `T-0065`'s ARM
+2 — *the status set must be DERIVED from the backend, never retyped*
+**Caught before landing. Nothing shipped wrong.** Recorded for the asymmetry, which is general.
+
+**The arm was right and the instrument implementing it was wrong three times:**
+
+```
+took every element of `status, state = "down", "due"`   -> reported evaluation_state values AS statuses
+walked every Dict in the module                          -> picked up a per-panel `thickness` sub-dict
+                                                            and demanded a colour for `ok`
+read only ast.Constant                                   -> MISSED the ternary
+                                                            "withdrawn" if … else "healthy" if … else "idle"
+```
+
+**THE THIRD IS THE ONLY ONE THAT WOULD HAVE SHIPPED, AND THE REASON IS THE FINDING.** The first two
+**over-reported** — they demanded colours for things that are not statuses, so the guard went red and
+**announced itself immediately.** The third **under-reported**: it produced a shorter status set, the
+guard found a colour for every member of that shorter set, and **ARM 2 would have gone GREEN over a
+status it never looked for.**
+
+**And the status it silently omitted was `withdrawn`** — the single status the entire `B229`/`B234`
+thread exists for.
+
+> **A guard whose input is derived by a scanner is only as wide as the scanner. When the scanner
+> under-reports, the guard AGREES WITH IT — and agreement between an instrument and its own
+> narrowed input is indistinguishable from correctness.**
+
+**This is the `B240` family with a direction attached.** *Publish the denominator* and *confirm the
+field has more than one writer* both say: establish what you are measuring before quoting the
+measurement. This adds **which way the error points**:
+
+```
+an instrument that OVER-reports    fails loudly, gets fixed, costs an hour
+an instrument that UNDER-reports   passes quietly, gets trusted, and its silence is the evidence
+```
+
+**So a derived-input guard needs its own control**, and it is the same shape as every other control
+in this register: **assert the derived set against something that must contain a known member.** ARM
+2's scanner should be checked by asserting `withdrawn` is in the set it derives — a member whose
+absence is exactly the failure, named rather than counted. Related: **B240**, **B234**, **B229**,
+**B191**, **B213**.
 
 
