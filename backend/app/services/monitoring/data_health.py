@@ -814,6 +814,22 @@ async def panel_health() -> dict:
     }
 
 
+#: The statuses that let `ok` stay True. **`T-0072`: Malek ruled that `ok` means NOTHING IS
+#: BROKEN**, so a deliberately stopped engine does not make the platform broken and an
+#: unreadable component does.
+#:
+#: **AN ALLOW-LIST, AND NEVER A DENY-LIST.** `status not in ("withdrawn",)` would read the same
+#: on today's seven statuses and fold `unavailable` into `ok` — a component we CANNOT SEE
+#: reading as one that is fine, which is `B215`'s shape at the level of the flag itself. An
+#: allow-list fails CLOSED: a status nobody has thought about yet becomes a problem, loudly,
+#: instead of passing silently.
+#:
+#: *`healthy` and `idle` are the whole of it. The other five — `withdrawn`, `unavailable`,
+#: `down`, `stale`, `failing` — are problems, and `failing` is the one where the difference is
+#: a component ACTIVELY FAILING rather than merely quiet.*
+OK_STATUSES: tuple[str, ...] = ("healthy", "idle")
+
+
 async def data_health(loop=None) -> dict:
     """Everything that fails silently, in one place.
 
@@ -849,7 +865,7 @@ async def data_health(loop=None) -> dict:
         "correlate_panels": panels,
     }
     problems = [
-        name for name, c in components.items() if c.get("status") != "healthy"
+        name for name, c in components.items() if c.get("status") not in OK_STATUSES
     ]
 
     for name, c in components.items():

@@ -66,6 +66,20 @@ def _emitted_statuses() -> set[str]:
 
     tree = ast.parse(DATA_HEALTH.read_text(encoding="utf-8"))
     found: set[str] = set()
+
+    # `status = "failing"` — a BARE ASSIGNMENT to a variable that a returned dict then uses as
+    # `"status": status`. **`T-0072`/`B250`: the first version of this scanner missed it**, so
+    # the derived set was SIX and the real one is SEVEN, and the member it omitted was
+    # `failing` — the one status where the difference is a component ACTIVELY FAILING rather
+    # than merely quiet. Nothing was broken by it, because the colour table was written by
+    # hand and happened to include it: **the arm simply was not checking.** That is the
+    # under-reporting direction — it passes quietly and its silence IS the evidence.
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and any(
+            isinstance(t, ast.Name) and t.id == "status" for t in node.targets
+        ):
+            found.update(_literals(node.value))
+
     for fn in tree.body:
         if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
