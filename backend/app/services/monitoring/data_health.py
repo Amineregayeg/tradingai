@@ -326,6 +326,35 @@ SHADOW_STALE_BARS = 2.0
 SHADOW_DOWN_BARS = 4.0
 
 
+def _branch_variety(rows) -> dict:
+    """`distinct_outcomes` / `dominant_branch` / `dominant_share` from grouped rows.
+
+    **Named, not just counted.** `B250`: a derived input must be shown to contain a known
+    member, and `distinct_outcomes = 1` cannot say WHICH branch — so a reader could not tell
+    a single-branch corpus of `STAND_ASIDE` from one of `TAKE`, which mean opposite things.
+
+    `dominant_share` is a share of the rows that HAVE a decision. A `None` decision is not a
+    branch and is reported separately rather than counted as one — *"could not read" and
+    "read and stood aside" are the two states this module exists to keep apart.*
+    """
+    named = [(d, n) for d, n in rows if d is not None]
+    total = sum(n for _, n in named)
+    if not named:
+        return {
+            "distinct_outcomes": 0,
+            "dominant_branch": None,
+            "dominant_share": None,
+            "undecided_rows": sum(n for d, n in rows if d is None),
+        }
+    top, top_n = max(named, key=lambda kv: kv[1])
+    return {
+        "distinct_outcomes": len(named),
+        "dominant_branch": top,
+        "dominant_share": round(top_n / total, 4),
+        "undecided_rows": sum(n for d, n in rows if d is None),
+    }
+
+
 def _shadow_summary(c: dict) -> str:
     """LIVENESS ONLY — the payload says so itself and this line must not overclaim."""
     if (fb := _fallback_summary(c)) is not None:
@@ -396,6 +425,18 @@ async def shadow_health() -> dict:
             "correctness of the evaluation",
             "freshness of the correlate panels",
             "whether the grade reflects closed bars",
+            # `B244`. NAMED SPECIFICALLY, not folded into "correctness" — and the distinction
+            # is the whole finding. `B243` measured 4358 of 4358 `setup_evaluation` rows
+            # carrying decision=STAND_ASIDE, because `rec.setup_evaluation(` has exactly ONE
+            # call site and it sits on the `StandAside.unreadable` path. **Every one of those
+            # records is individually CORRECT**, so a corpus of 4358 identical correct rows is
+            # not a correctness problem and the nearest existing disclaimer does not reach it.
+            #
+            # *On a component whose block exists precisely to list its own limits, an unlisted
+            # limit is worse than on one that promises nothing* — a reader doing the RIGHT
+            # thing, reading the scope instead of the colour, still did not learn the corpus
+            # was single-branch.
+            "whether the corpus contains more than one outcome",
         ],
     }
 
@@ -449,6 +490,21 @@ async def shadow_health() -> dict:
                     )
                 )
             ).scalar() or 0
+
+            # `B244` PART 2 — the variety of the corpus, as VALUES and NEVER as a status.
+            # Grouped rather than counted so the DOMINANT branch can be NAMED: `B250` says a
+            # derived input must be shown to contain a known member, and a bare
+            # `distinct_outcomes` of 1 cannot say WHICH one, so it could not be checked.
+            branch_rows = (
+                await db.execute(
+                    select(TelemetryRecord.decision, func.count())
+                    .where(
+                        TelemetryRecord.record_type == "setup_evaluation",
+                        TelemetryRecord.created_at >= started,
+                    )
+                    .group_by(TelemetryRecord.decision)
+                )
+            ).all()
     except Exception as exc:  # noqa: BLE001
         # Cannot see it is never "fine" — the rule this module is built on.
         return {"status": "unavailable", "watching": False, "reason": str(exc), **scope}
@@ -510,6 +566,16 @@ async def shadow_health() -> dict:
         "symbols": symbols,
         "expected_per_hour": expected_per_hour,
         "observed_in_window": recent,
+        # THE VALUES, NOT A COLOUR — `order_path_health`'s own rule, and here it is
+        # load-bearing rather than stylistic. **This must never set a status.** The shadow is
+        # not broken: it is recording the only thing it CAN record, and a non-healthy status
+        # would flip `ok` for a component doing its job — `B229` arriving from the other side,
+        # one day after Malek ruled on that boolean.
+        #
+        # **AND NO THRESHOLD.** *"Fewer than N outcomes is an alarm"* is unanswerable: a
+        # legitimately quiet regime produces one branch too, and picking N is `B93`'s tuned
+        # number. Publish the count and let a human read it.
+        **_branch_variety(branch_rows),
         # PRORATED TO THE WINDOW ACTUALLY MEASURED, not to a flat hour.
         #
         # The count already starts at the run's own start (a deploy gap is not a

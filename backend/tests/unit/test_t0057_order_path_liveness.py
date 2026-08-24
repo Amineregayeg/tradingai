@@ -682,12 +682,34 @@ async def test_armA_a_withdrawn_order_path_turns_the_PRODUCTION_ok_FLAG_FALSE(
 @pytest.mark.asyncio
 async def test_the_order_path_component_is_BESIDE_the_shadow_not_inside_it(bound):
     """The two corpora have different legitimate-silence rules and one predicate cannot
-    carry both — merging them is `GATE-011`'s defect. `shadow_health` is untouched."""
+    carry both — merging them is `GATE-011`'s defect.
+
+    **CHECKED STRUCTURALLY, NOT BY SUBSTRING (`T-0068`).** This asserted
+    `"order_path" not in shadow_src` and fired on a COMMENT in `shadow_health` citing
+    `order_path_health`'s *"the VALUES, not a colour"* rule by name. **A citation is not a
+    merge, and a substring cannot tell them apart** — `B245`'s class inverted: there, prose
+    survived an identifier check; here, prose TRIPPED one.
+
+    *The property is that `shadow_health` does not CALL the order-path check or read its
+    inputs — so that is what is asserted, and the prose is free to explain itself.*
+    """
     import inspect as _inspect
 
     shadow_src = _inspect.getsource(dh.shadow_health)
-    assert "order_path" not in shadow_src
-    assert "_entry_block_reason" not in shadow_src
+    tree = ast.parse(shadow_src.lstrip())
+
+    calls = [
+        ast.unparse(n.func) for n in ast.walk(tree)
+        if isinstance(n, ast.Call)
+        and any(t in ast.unparse(n.func) for t in ("order_path", "_entry_block_reason"))
+    ]
+    assert not calls, f"shadow_health calls the order-path check: {calls}"
+
+    names = [
+        n.attr for n in ast.walk(tree)
+        if isinstance(n, ast.Attribute) and n.attr == "_entry_block_reason"
+    ]
+    assert not names, "shadow_health reaches the entry gate"
     assert "setup_evaluation" in shadow_src, "the shadow still watches the SHADOW corpus"
 
 
