@@ -542,7 +542,8 @@ class LiveCryptoLoop:
 
     async def _record_signal_decision(
         self, pair: str, entry_df, sig, sized_units: float, fill_price: float | None = None,
-        trace=None,
+        trace=None, sizing_equity: float | None = None,
+        sizing_risk_pct: float | None = None, sizing_price: float | None = None,
     ) -> None:
         """Persist a DecisionRecord for a taken signal (outcome OPEN), and remember
         its id so the eventual close can fill realized_r / gap_r / outcome.
@@ -581,6 +582,20 @@ class LiveCryptoLoop:
                 signal_tp=Decimal(str(round(tp, 6))) if tp is not None else None,
                 fill_price=Decimal(str(round(fill, 6))) if fill is not None else None,
                 sized_units=Decimal(str(round(float(sized_units), 6))),
+                # `B279`. SIX decimal places, not two: the finding this preserves lived in
+                # the fourth — 5000.9197 against 5000.00.
+                sizing_equity=(
+                    Decimal(str(round(float(sizing_equity), 6)))
+                    if sizing_equity is not None else None
+                ),
+                sizing_risk_pct=(
+                    Decimal(str(round(float(sizing_risk_pct), 6)))
+                    if sizing_risk_pct is not None else None
+                ),
+                sizing_price=(
+                    Decimal(str(round(float(sizing_price), 6)))
+                    if sizing_price is not None else None
+                ),
                 expected_r=Decimal(str(round(expected_r, 4))) if expected_r is not None else None,
                 outcome=OUTCOME_OPEN, cohort=COHORT_PAPER,
                 run_id=self.run_id,
@@ -616,6 +631,19 @@ class LiveCryptoLoop:
             "max_concurrent": self.max_concurrent,
             "price_source": getattr(self, "price_source_name", "binance"),
             "engine_version": ENGINE_CODE_VERSION,
+            # `T-0084`. THE RUN BOUNDARY IS THE SEPARATOR AND THIS IS THE HALF THAT SAYS SO.
+            #
+            # `cohort` would be a trap: it names the VENUE (replay|backtest|paper|live) and a
+            # policy value inside it makes one token mean two things. A row flag is not enough
+            # either — it labels ROWS while the thing that changed is the POPULATION, so every
+            # rate already published over a mixed run stays wrong with nothing saying so,
+            # which is `B268`'s defect one level up.
+            #
+            # Without this entry, run N and run N+1 are two denominators with nothing
+            # recording that they differ. `EngineRun.config`'s own docstring is the argument:
+            # *"Snapshotted at start so a result can never be read against the wrong settings
+            # later."*
+            "records_rejected_signals": True,
         }
 
     async def ensure_run(self) -> "uuid.UUID | None":
@@ -1056,6 +1084,66 @@ class LiveCryptoLoop:
             f"{len(positions)} position(s). DECLARED and UNRATIFIED (question 4, unanswered).",
         )
 
+    async def _record_rejected_signal(
+        self, pair: str, entry_df, sig, reason: str, trace
+    ) -> None:
+        """Persist a signal the strategy PRODUCED and execution REFUSED (`B271`).
+
+        **PERSISTENCE ONLY. Nothing re-runs.** `compare_entry(...).record_on(trace)` already
+        ran at `:1409`, ABOVE both the abstention fork and this rejection — so every bar
+        carries its comparison on the trace before execution can refuse it, and this writes
+        what is already there. *`T-0037`'s structural property survives for free*: its comment
+        says the seam runs AFTER the decision has returned, so "changes no decision" is
+        structural rather than tested-into-place, and persisting an existing trace cannot
+        weaken it. **Any fix that moved or re-ran the comparison would.**
+
+        NEITHER EXISTING WRITER COULD TAKE THIS ROW. `_record_signal_decision` asserts `OPEN`
+        with `sized_units`, `fill_price` and `expected_r` from a fill this bar does not have;
+        `_record_abstention` asserts `abstained=True, outcome=ABSTAINED` and the strategy DID
+        produce a signal.
+
+        `abstained` is FALSE here, and that is the field that keeps the two apart even for a
+        reader who does not know `REJECTED` exists.
+
+        Never raises: bookkeeping must not be able to stop the engine trading.
+        """
+        try:
+            from decimal import Decimal
+
+            from app.db.session import async_session_maker
+            from app.models.decision_record import (
+                COHORT_PAPER, OUTCOME_REJECTED, Attribution, DecisionRecord,
+            )
+
+            entry = float(sig.entry)
+            rec = DecisionRecord(
+                symbol=pair, timeframe=self.entry_tf,
+                inputs_hash=self._inputs_hash(entry_df),
+                code_path_hash=self._code_path_hash(),
+                score=None,
+                # NOT an abstention. The detector fired.
+                abstained=False,
+                reasons=_with_exit_plan(trace.reasons if trace is not None else None),
+                signal_dir=sig.direction.value,
+                signal_entry=Decimal(str(round(entry, 6))),
+                signal_sl=Decimal(str(round(float(sig.sl), 6))),
+                signal_tp=(
+                    Decimal(str(round(float(sig.tp), 6))) if sig.tp is not None else None
+                ),
+                # NO sized_units and NO fill_price: there was no fill, and inventing either
+                # would put a number nobody observed into the feedback loop's population.
+                outcome=OUTCOME_REJECTED,
+                rejection_reason=str(reason),
+                cohort=COHORT_PAPER,
+                run_id=self.run_id,
+                **Attribution.ict().as_columns(),
+            )
+            async with async_session_maker() as db:
+                db.add(rec)
+                await db.commit()
+        except Exception as exc:  # noqa: BLE001 - never let bookkeeping kill the loop
+            logger.warning("record rejection failed", pair=pair, error=str(exc))
+
     async def _record_abstention(self, pair: str, entry_df, trace) -> None:
         """Persist WHY no trade was taken.
 
@@ -1441,6 +1529,15 @@ class LiveCryptoLoop:
             await self._record_signal_decision(
                 pair, entry, sig, res.get("sized_units", 0), fill_price=res.get("fill"),
                 trace=trace,
+                # `B279`. The two inputs `size_position` was actually called with. Passed
+                # from the execution result rather than re-read here: a second read of
+                # `acct.equity` would be a different number by the time it happened, and
+                # would look like the one the size was computed from.
+                sizing_equity=res.get("equity_at_entry"),
+                sizing_risk_pct=sig.risk_pct,
+                # The DIVISOR the size was computed from — `mark` for a market order, and
+                # NOT the fill. `B280`.
+                sizing_price=res.get("sizing_price"),
             )
             await ws_manager.push_position_open(res)
             await self._act(
@@ -1457,6 +1554,9 @@ class LiveCryptoLoop:
             # size, or a sim-mode prop-firm breach) is surfaced with its reason.
             reason = res.get("reason") or res.get("status") or "rejected"
             logger.info("Live signal not filled", pair=pair, dir=sig.direction.value, reason=reason)
+            # `B271`: the bar was previously observable only in a maxlen=80 deque that is
+            # cleared on start. It is now a row.
+            await self._record_rejected_signal(pair, entry, sig, reason, trace)
             await self._act(
                 "reject",
                 f"{pair} {sig.direction.value} setup NOT taken — {reason}",

@@ -54,6 +54,17 @@ OUTCOME_ABSTAINED = "ABSTAINED"
 #: ABANDONED is excluded from that population instead, which is the honest
 #: treatment of a number nobody ever observed.
 OUTCOME_ABANDONED = "ABANDONED"
+#: The strategy PRODUCED a signal and EXECUTION refused it (`B271`/`T-0084`).
+#:
+#: **DELIBERATELY NOT `ABSTAINED`, and this is the whole of the value.** `ABSTAINED` means
+#: the detector never fired; this means it did and the order was declined. Folding them
+#: makes a `took_trade=True` bar indistinguishable from one where nothing was found —
+#: `B215`'s could-not-versus-did-not collapse, rebuilt **inside the one population that is
+#: currently correct**, which is `B268`'s denominator.
+#:
+#: Same argument `ABANDONED` makes above: its own value rather than the nearest existing
+#: one, because the nearest existing one is a different fact.
+OUTCOME_REJECTED = "REJECTED"
 DECISION_OUTCOMES: tuple[str, ...] = (
     OUTCOME_WIN,
     OUTCOME_LOSS,
@@ -61,6 +72,7 @@ DECISION_OUTCOMES: tuple[str, ...] = (
     OUTCOME_OPEN,
     OUTCOME_ABSTAINED,
     OUTCOME_ABANDONED,
+    OUTCOME_REJECTED,
 )
 
 # cohort ------------------------------------------------------------------
@@ -309,6 +321,50 @@ class DecisionRecord(Base):
     # Resolution -----------------------------------------------------------
     outcome: Mapped[str | None] = mapped_column(String, nullable=True)
     correction_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    #: THE TWO INPUTS THE SIZE WAS COMPUTED FROM (`B279`/`T-0084`).
+    #:
+    #: `execution/service.py` sizes with
+    #: `size_position(acct.equity, sig.risk_pct, sizing_price, sig.sl)` and **neither of the
+    #: first two arguments was recorded anywhere**. `prop_firm_snapshots` has an equity column
+    #: and **zero rows**, so the number a trade was sized against has never been persisted.
+    #:
+    #: **TWO COLUMNS, NOT ONE, BECAUSE ONE RE-BREAKS ON THE NEXT PLANNED CHANGE.**
+    #: `risk_pct` is reconstructible today only because it is the constant 1%, and the top
+    #: recommendation in front of Malek is to wire the risk matrix — which makes it per-trade
+    #: variable. Recording equity alone would be correct until the day that lands.
+    #:
+    #: **PRECISION IS NOT NEGOTIABLE.** `Numeric(14, 2)` is not enough: the finding this
+    #: preserves lived in the fourth decimal — `5000.9197` against `5000.00`.
+    #: **AND THE THIRD INPUT, WHICH IS THE DIVISOR (`B280`).** `size_position` takes FOUR
+    #: arguments and `sizing_price` is the one the stop distance is measured from —
+    #: `service.py:149` sets it to `mark`, the reference price read BEFORE the order goes in,
+    #: which is NOT the fill.
+    #:
+    #: **It is the input that degrades SILENTLY rather than failing.** A reconstruction using
+    #: `fill` instead is exact only where both come from the same cached mark — true of
+    #: `PaperBroker` today — and otherwise comes out wrong by exactly the slippage: measured,
+    #: 50 ticks puts the recomputed size 4.76% out, and nothing in the row says so.
+    #: *`fill_price` exists as a separate column precisely because they are not the same
+    #: thing*, and MT5 is where slippage gives the fill a second author.
+    sizing_equity: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
+    sizing_risk_pct: Mapped[Decimal | None] = mapped_column(Numeric(9, 6), nullable=True)
+    sizing_price: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
+
+    #: WHY execution refused this signal, RAW (`T-0084`).
+    #:
+    #: **A COLUMN, not `reasons`.** `reasons` is the field `_with_exit_plan`'s own docstring
+    #: calls *"a JSON list nothing parses"*, and it is the field `B270` criticised `B268` for
+    #: parsing — so putting the reason only there would recreate the problem in the commit
+    #: that fixes it.
+    #:
+    #: **STORED RAW, NOT CLASSIFIED.** The five rejection sites in `execution/service.py`
+    #: split three ordinary MARKET CONDITIONS (no reference price, drift beyond threshold,
+    #: market already through the stop) against two PRODUCER DEFECTS (non-positive size or
+    #: stop, twice). *A corpus that cannot tell a market condition from a fault rebuilds
+    #: `B215` in a second place*, and a classification chosen now would fix that split
+    #: before anyone has counted it.
+    rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Which population this decision belongs to ----------------------------
     cohort: Mapped[str] = mapped_column(

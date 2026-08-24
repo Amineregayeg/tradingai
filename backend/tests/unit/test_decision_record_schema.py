@@ -34,6 +34,7 @@ _CHAIN = [
     ("0005", "0005_telemetry_records.py", "0004"),
     ("0006", "0006_decision_outcome_abandoned.py", "0005"),
     ("0007", "0007_decision_attribution.py", "0006"),
+    ("0008", "0008_decision_outcome_rejected.py", "0007"),
 ]
 
 

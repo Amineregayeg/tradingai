@@ -12,6 +12,8 @@ arm proves the injection works and says nothing about whether the population exi
 """
 from __future__ import annotations
 
+import ast
+
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -306,10 +308,38 @@ def test_the_seam_runs_after_the_decision_and_touches_no_line_inside_it():
         "the entry comparison must not be reachable from inside the decision function"
     )
 
-    loop = (BACKEND / "app/services/live/crypto_loop.py").read_text(encoding="utf-8")
-    assert "compare_entry(" in loop, "must-hit: the seam is wired somewhere"
-    assert loop.index("evaluate_latest_bar_traced(") < loop.index("compare_entry("), (
-        "the comparison must run AFTER the decision"
+    loop_src = (BACKEND / "app/services/live/crypto_loop.py").read_text(encoding="utf-8")
+
+    # ORDER OF CALLS, BY AST — not order of TEXT.
+    #
+    # This compared `loop.index(...)` of two identifiers, and `T-0084` broke it by writing a
+    # DOCSTRING that cites `compare_entry(...)` to explain why a new writer is persistence
+    # only. The citation appears earlier in the file than the call, so the text check read it
+    # as the comparison running first. **A mention is not a call, and a substring cannot tell
+    # them apart** — the same repair `T-0068` made when a comment tripped an identifier guard.
+    #
+    # The property is that within the bar-handling function the decision is CALLED before the
+    # comparison is, so the comparison cannot influence a decision already made.
+    # ALL call sites per name, not one. My first version of this used a dict comprehension,
+    # so each name kept only its LAST occurrence — and a `compare_entry` call INSERTED ABOVE
+    # the decision left the later, legitimate call as the recorded line. **The mutation
+    # passed.** A guard that keeps one line per name cannot see a second call placed earlier,
+    # which is precisely the edit it exists to catch.
+    tree = ast.parse(loop_src)
+    lines: dict[str, list[int]] = {"evaluate_latest_bar_traced": [], "compare_entry": []}
+    for n in ast.walk(tree):
+        if not isinstance(n, ast.Call):
+            continue
+        name = getattr(n.func, "id", None) or getattr(n.func, "attr", None)
+        if name in lines:
+            lines[name].append(n.lineno)
+
+    assert lines["compare_entry"], "must-hit: the seam is wired somewhere"
+    assert lines["evaluate_latest_bar_traced"], "must-hit: the decision is called"
+    assert min(lines["compare_entry"]) > min(lines["evaluate_latest_bar_traced"]), (
+        f"a comparison call precedes the decision: decision first called at line "
+        f"{min(lines['evaluate_latest_bar_traced'])}, comparison at "
+        f"{sorted(lines['compare_entry'])}"
     )
 
 

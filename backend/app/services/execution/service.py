@@ -169,9 +169,16 @@ class ExecutionService:
         res["mode"] = self.mode.value
         res["sized_units"] = round(units, 8)
         res["equity_at_entry"] = acct.equity
-        # What we sized against, and how far the market had already moved. Both
-        # are recorded on the DecisionRecord so R can be measured against the
-        # price actually paid rather than the one the strategy hoped for.
+        # What we sized against, and how far the market had already moved.
+        #
+        # `B281`: this comment used to say **"Both are recorded on the DecisionRecord"** and
+        # NEITHER WAS. `T-0084` gives `sizing_price` a column — it is the divisor
+        # `size_position` used, and reconstructing a size from `fill` instead is wrong by
+        # exactly the slippage (`B280`). **`entry_drift_r` is STILL discarded**, and is filed
+        # rather than fixed here: it is a measurement of the market, not an input to the size.
+        #
+        # *A comment asserting a property the code does not have is `B238`'s class — a reader
+        # checking whether the value was persisted found a sentence saying it was.*
         res["sizing_price"] = sizing_price
         res["entry_drift_r"] = drift_r
         # The broker reports the true fill. It should equal sizing_price for
