@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-24 (B250 — a scanner that UNDER-reports makes its own guard agree with itself, and only that direction ships. Execute's status-set scanner for T-0065's ARM 2 was wrong three ways; the two that OVER-reported went red and announced themselves, and the one that read only ast.Constant MISSED a ternary and silently omitted `withdrawn` — the single status the whole B229/B234 thread exists for. ARM 2 would have gone GREEN over a status it never looked for. Caught before landing. B240 gains the direction: an over-reporting instrument fails loudly and costs an hour, an under-reporting one passes quietly and its silence IS the evidence — so a derived-input guard needs a control NAMING a member whose absence would be the failure, not a count.)
+Last updated: 2026-08-24 (B251 — FIVE of forty-three implemented rules are ever EVALUATED in production and ONE decides a trade. Measured for Malek's phase directive before the MetaTrader 5 phase: 43 rule modules on disk, 23 importable from crypto_loop's cone, 5 with a recorded verdict in any production corpus (GATE-002/007/008/023 in telemetry across 4484 rows, ENTRY-001 in the entry comparison across 433), 1 DECIDING — EXIT-001, whose chain from ratified constant to executed lot was traced link by link rather than assumed. ENTRY is decided by the backtest heuristic, SIZING by a fixed 0.01 with gate_032 not importable, NEWS by nothing (strategy_step.py:61 says 'RECORDED, NEVER ACTED ON'). The instrument errs toward FLATTERY, not harshness: the cone walk is complete (no dynamic imports anywhere in live/rules/decision) so 23 is an OVER-count of what is used. A live MT5 run today would test the backtest heuristic plus EXIT-001, not the ratified strategy set.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -15729,5 +15729,60 @@ in this register: **assert the derived set against something that must contain a
 2's scanner should be checked by asserting `withdrawn` is in the set it derives — a member whose
 absence is exactly the failure, named rather than counted. Related: **B240**, **B234**, **B229**,
 **B191**, **B213**.
+
+### B251. FIVE of forty-three implemented rules are ever evaluated in production, and ONE decides a trade
+**Found in:** 2026-08-24, answering Malek's phase directive — *"all the strategies that are
+implemented are used in the trades"* — before the MetaTrader 5 phase
+**A MEASUREMENT, not a defect.** It is the state the staged cutover produced, and no seat had stated
+the total.
+
+**THE LADDER, measured end to end. Each row is a different population and only the last one trades:**
+
+```
+ON DISK        43   rule modules under app/services/rules/
+IMPORTABLE     23   reachable from crypto_loop.py's import cone
+EVALUATED       5   distinct rule ids with a recorded verdict in ANY production corpus
+DECIDING        1   EXIT-001
+```
+
+**The five ever evaluated, and where:**
+
+```
+GATE-002 · GATE-007 · GATE-008 · GATE-023    telemetry setup_evaluation, 4484 rows
+ENTRY-001                                     decision_records entry comparison, 433 rows
+```
+
+**WHAT DECIDES A LIVE TRADE:**
+
+| decision | decided by | ratified rule? |
+|---|---|---|
+| **ENTRY** | the backtest heuristic — `history`, `daily_bias`, `ltf_bos` via `trace.gate` | **NO** |
+| **EXIT** | **`EXIT-001`** — chain traced from constant to executed lot | **YES** |
+| **SIZING** | fixed `risk_pct = 0.01` | **NO** — `gate_032` not importable from live |
+| **NEWS** | nothing — `record_on` → `observe` | **NO** |
+| **19:00 FLATTEN** | suppressed by flag | pending Salim's Q4 |
+
+**THE EXIT CHAIN IS UNBROKEN AND WAS ATTACKED RATHER THAN ASSUMED** — it is the one green cell:
+`strategy_step.py:25` imports `PARTIAL_AT_R`/`PARTIAL_FRACTION` from `exit_001_v1_model`; `:224-225`
+and `:248-249` build the partial price and fraction from them; `crypto_loop.py:1435` stores both into
+`_tranche_plans`; `:972` computes `lot = units * plan["fraction"]`. **Not a coincidence of
+`Params.rr_partial`.**
+
+**AND THE NEWS GATE IS STAGE A BY DESIGN, WHICH THE CODE SAYS IN ITS OWN WORDS** —
+`strategy_step.py:61`: *"`news` is T-0036 Stage A and is RECORDED, NEVER ACTED ON."* The task's title
+suggested otherwise; three places in the code do not.
+
+**THE INSTRUMENT ERRS TOWARD FLATTERY, VERIFIED.** The `IMPORTABLE` walk uses a full `ast.walk`, so
+in-function imports are included — a top-level-only walk reports 16 and would have wrongly called
+seven modules unreachable. And `importlib` / `__import__` / `import_module` appear **zero** times in
+`live/`, `rules/` and `decision/`, so nothing dynamic is missed. **So 23 is not an under-count; it is
+an OVER-count of what is used, because importable is not called.** `EVALUATED = 5` is the honest
+middle row and it comes from the corpus rather than the call graph.
+
+**WHY IT MATTERS NOW RATHER THAN AS TRIVIA.** The next phase is MetaTrader 5 demo accounts, which
+Malek calls *"the real test of our work."* **A live MT5 run today would test the backtest heuristic
+plus `EXIT-001`** — not the ratified strategy set. Whether entry and sizing are cut over first is
+therefore a decision about what the real test actually tests. Related: **B243**, **B188**, **B177**,
+`T-0041`, `T-0054`, `T-0056`.
 
 
