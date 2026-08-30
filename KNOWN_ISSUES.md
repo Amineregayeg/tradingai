@@ -20189,4 +20189,41 @@ needs to be reachable at the moment of measuring, not merely correct.
 **NOT filed as a task.** Part (1) is mechanical but rewrites 137 headings in a file three seats
 write concurrently, so it belongs in a quiet window and is the manager's call, not mine.
 
-Related: **B209**, **B314**, **B25**, **B63**.
+**⚠ AMENDED 2026-08-30, SAME DAY — TWO CORRECTIONS AND ONE OF THEM IS TO THIS ENTRY'S ARGUMENT.**
+
+**(1) THE TOOLING CLAIM WAS ALREADY STALE WHEN I FILED IT.** I wrote that my dash-form entries are
+*"invisible to the period-requiring tools already in this repo."* **True this morning, false by the
+time I wrote it** — `B311`/`B312` fixed the three sweeps that afternoon. Re-measured by running each
+tool's actual regex against real heading lines:
+
+| pattern | B209 (period) | B318 (dash) | B266 (bare) |
+|---|---|---|---|
+| `stale_sweep` / `deferral_sweep`, both call sites | ✓ | ✓ | ✓ |
+| `running_sweep` `HEADING` | ✓ | ✓ | ✓ |
+| `register_commit_check` | ✓ | ✓ | ✓ |
+| **old v3 `^### (B\d+)\.`** — negative control | ✓ | **✗** | **✗** |
+
+All four now use `\b` with an optional period. **The old pattern is included as the control: it
+still fails on dash-form, which is what proves the test discriminates rather than passing
+everything.** *(Staleness reported by the manager; re-measured here.)*
+
+**(2) COUNT REFINED: 165 period / 136 dash / 2 other**, not 165/137/1. The two others are `B266`
+(bare, no punctuation) and `B82` (`### B82 (original, 2026-08-15) —`, a parenthetical before the
+dash). My original bucket counted anything space-led as dash-form. Total 303 either way.
+
+**(3) AND THE CORRECTION THAT MATTERS — MY CAUSAL CLAIM WAS WRONG.** This entry said it *"carries
+the reason the re-derivation happened."* **It does not. The heading split did not cause it: I never
+searched the register at all.** A format that punishes the person who *does* search cannot explain a
+failure by someone who never looked.
+
+> **These are two distinct defects and I welded them into one story because it read better.**
+> **(a)** the register is not consulted before work — *that is what happened tonight, and it is the
+> whole cause*; **(b)** the heading split penalises whoever does consult it — *a real hazard that
+> was not operative here, and whose tooling half is now closed.*
+
+**What survives:** (a), undiminished and now the entry's only load-bearing claim. **What does not:**
+the tooling half of (b), fixed; and the framing that made (b) the explanation for (a). **The
+remaining work is unchanged and is the larger half — a normalised file is still a file nobody opens
+before working**, and normalising it would not have prevented tonight.
+
+Related: **B209**, **B314**, **B311**, **B312**, **B25**, **B63**.
