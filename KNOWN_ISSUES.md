@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-30 (B307 — EXECUTING on the board means ASSIGNED AND UNFINISHED, not BEING WORKED ON, and I reported two idle seats to Malek as busy because of it. Both peer processes were alive and idle at a prompt for two hours with my bus messages unread; ListAgents said idle and waiting, and the session json files had not been touched since 17:30 and 17:18. The board said EXECUTING the whole time and the board was CORRECT — the task was assigned and was not finished. B215's shape applied to my own instrument: a state that names a phase cannot report an activity, exactly as an empty position list means both none and could-not-ask. Made worse by corroboration: Execute's files were modified twelve minutes before I looked, which is real evidence of work that had already stopped, and both pieces of evidence agreed because both measured the same finished turn. The fix is a habit, not a field — check ListAgents and the session mtime before claiming a seat is working, and follow a bus message with a SendMessage poke or it waits indefinitely.)
+Last updated: 2026-08-30. HIGHEST ENTRY IS B307 — EXECUTING on the board means ASSIGNED AND UNFINISHED, not BEING WORKED ON, and I reported two idle seats to Malek as busy because of it; both peer processes were alive and idle at a prompt for nearly three hours with my bus messages unread while the board said EXECUTING and was CORRECT. B215's shape on my own instrument — a state that names a phase cannot report an activity — made worse by corroboration, because a working file modified twelve minutes earlier is evidence of a turn that had already ended. Amended same day for mixing a LOCAL ls clock with UTC bus timestamps inside the entry about misreading an instrument. LANDED AFTER IT, OUT OF ID ORDER: B302 — OrderRequest.lot_size is UNITS OR LOTS DEPENDING ON THE ADAPTER AND ON THE DIRECTION, differing by 100000x. I bid it for a universal claim that the field holds units everywhere and REVIEW BROKE IT: oanda.py:401 and :471 multiply by a hardcoded 100_000 while oanda.py:303 writes raw units back into the same field, so OANDA is internally inconsistent by five orders of magnitude, and cryptofundtrader:549 passes the value RAW to the live venue as 'volume' — the same word MetaApi uses for LOTS. Latent not live: broker_connections holds ONE row, cryptofundtrader, so OandaAdapter is never constructed in production.
 
 ---
 
@@ -19103,3 +19103,114 @@ than left: this file is where the project's numbers are supposed to be right. Co
 above; the conclusion is unchanged and slightly stronger.
 
 Related: **B215**, **B300**, **B304**, **B306**.
+
+---
+
+### B302. `OrderRequest.lot_size` is **units or lots depending on the adapter AND on the direction** — and the two conventions differ by 100 000×
+
+**I bid this for a universal claim — *"the field holds UNITS on every path, in both directions"* —
+and Review broke it. The true version is worse.** Review's instrument was an **AST walk over every
+call keyword named `lot_size` / `volume` / `units` across `app/`** — twenty bindings — rather than my
+grep for the field name. **Every measurement below re-verified independently before filing.**
+
+## THE PRODUCER PUTS UNITS IN
+
+```
+execution/service.py:162   lot_size=round(units, 8)      units = size_position(equity, risk_pct, price, sl)
+```
+
+## AND THE ADAPTERS DISAGREE ABOUT WHAT THEY RECEIVED
+
+```
+cryptofundtrader.py:549   "volume": float(request.lot_size)          RAW, no conversion   <- THE LIVE ONE
+cryptofundtrader.py:567   body["volume"] = float(lot_size)           RAW, on close
+paper.py:208              units=request.lot_size                     read as UNITS
+cft_sim.py:410            units=request.lot_size                     read as UNITS
+oanda.py:401              units = int(request.lot_size * 100_000)    READ AS LOTS
+oanda.py:471              units = int(lot_size * 100_000)            READ AS LOTS, on close
+```
+
+## AND OANDA DOES NOT AGREE WITH ITSELF
+
+```
+outbound  oanda.py:401   lot_size * 100_000   ->  the field is LOTS
+inbound   oanda.py:303   lot_size=Decimal(units)  <-  the field is UNITS
+```
+
+**It multiplies on the way out and stores raw units on the way back in. It is internally
+inconsistent by five orders of magnitude, in one file.** Every simulator round-trips closed —
+`paper.py:208`/`:206` and `cft_sim.py:410`/`:409` write units in and read units back. **OANDA is the
+only open loop.**
+
+**And it is the ONE adapter that ever implemented this conversion — one-directionally, with
+`100_000` HARDCODED.** `lots.py`'s scope block forbids exactly that: *"NO VENUE CONSTANT IS
+HARDCODED… a number invented here would be a guess about a venue nobody has connected to."* **The
+guess is already in the tree, and it disagrees with the other half of its own file.**
+
+## ⚠ LATENT, NOT LIVE — **MEASURED ON PRODUCTION, so nobody has to guess**
+
+```
+select broker, environment, connected from broker_connections;
+  cryptofundtrader | live | t     <- ONE ROW. There is no OANDA connection.
+```
+
+**`OandaAdapter` is never constructed in production**, so no order has ever been placed through the
+100 000× path. **That is the reason this is a defect and not an incident**, and it is also the reason
+it has survived: the broken adapter is the unused one.
+
+## WHY IT MATTERS NOW RATHER THAN WHENEVER OANDA IS CONNECTED
+
+**MetaApi's `volume` is MT5 LOTS.** The line an implementer will copy is already written, **in the
+live adapter**:
+
+```python
+cryptofundtrader.py:549      "volume": float(request.lot_size)
+```
+
+**Same word, opposite meaning.** On CFT — crypto — `volume` is coins, and passing units straight
+through is correct. On MT5 the identical line submits **units as lots**: on a 100 000-contract-size
+instrument, **an order 100 000× too large.** *The natural move is to copy the working line from the
+venue that works.*
+
+## THE PATTERN, AND THIS IS THE THIRD INSTANCE
+
+> **`unrealized_pnl` is gross-or-net by adapter (`B286`). `duration_seconds` is computed-or-zero by
+> adapter (`B289`). `lot_size` is units-or-lots by adapter AND BY DIRECTION.**
+
+**First one where the two conventions differ by five orders of magnitude rather than a rounding.**
+`T-0105` added `produced_by` for exactly this shape — **on the INBOUND side. `OrderRequest` has no
+equivalent**, so the outbound direction still cannot record whose convention a number is in. **Scope
+the pattern, not the field.**
+
+## THE TWO ZERO-CLAIMS SURVIVED REVIEW'S INSTRUMENT
+
+```
+units_to_lots              its own module and its own test file. Nothing else, anywhere.
+get_symbol_specification   appears only inside lots.py's DOCSTRING. Never as a call.
+```
+
+**So the function written to prevent this has no caller, and the call that would supply its three
+bounds exists nowhere.**
+
+## WHAT IT MEANS FOR `T-0106`'s `place_order` — Review's answer, and it closes the question
+
+**Refuse.** Not *"submit units with a docstring"*: **MT5 reads what arrives as lots, so that is not
+deferral — it is a wrong decision with a note attached.** Not *"convert from bounds the caller
+passes"*: the bounds come from `get_symbol_specification`, **which is not one of the members and
+exists nowhere**. **`place_order` is not deferrable because every number it submits IS an
+interpretation** — the same argument that made `is_simulation` undeferrable, and it lands on the same
+answer: **the explicit, safe, wrong-if-anything-too-strict one.**
+
+**AND REFUSING REACHES THE CHECKLIST.** `MT5_FIRST_CONNECTION.md:97` tells Malek to call
+`get_symbol_specification` — **the adapter has no member for it**, so the instruction is unactionable
+and the numbers he captures have nowhere to go. **If `place_order` refuses until bounds exist, the
+bounds need a home:** a thirteenth member, or an explicit statement that Phase 1 captures them by
+hand. **It is currently neither.** With `B305` they have no *subject* either — `contract_size` is per
+instrument and **there is no instrument list**.
+
+## BOUNDED, in Review's own words
+
+**A conversion done on a differently-named local, or a value passed positionally, is outside the
+key.** The sweep checked arithmetic on `lot_size` specifically and found the three OANDA sites.
+
+Related: **B286**, **B289**, **B305**, **B167**, **B227**.
