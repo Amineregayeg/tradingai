@@ -19317,6 +19317,55 @@ CONTAINER  cft_sim.py:347   duration_seconds=0,      <- a LITERAL ZERO, and it i
 * **`lot_size` reads `0.81321477` for ETH and `0.02374166` for BTC** — 0.81 ETH and 0.024 BTC.
   **UNITS**, on live data, exactly as `B302` says the producer binds them.
 
+## ⇢ AMENDED AGAIN — **THE MARKER THIS ENTRY ASKS FOR ALREADY EXISTED, AND IT IS PUBLISHED**
+
+Review's answer to *"what check makes this impossible to accumulate again"* was: **record the sha the
+container was built from, then the gap is `git log <sha>..HEAD -- backend/app`, one command, any
+time, by anyone.** Correct — **and it is already built.**
+
+```
+/api/system/version  ->  {"commit":"dcfdc1f11cbb…","ref":"main","source":"file:/app/.build-sha",
+                          "pinned":false,"known":true}
+```
+
+`app/core/build_info.py` was written for **`B3`**, and its own docstring is this entry's argument
+verbatim: *"Containers fetched `main` at startup and recorded nothing. `main` moves… You cannot debug
+or roll back what you cannot identify."* **It writes `/app/.build-sha` and publishes it over HTTP —
+no ssh, no docker, no database.**
+
+> **`B53`'s shape, on the question of what is deployed: a correct signal, produced continuously, with
+> no consumer.** The marker existed for the whole six days. **Nothing read it.**
+
+**Now something does.** `agents/deploy_preflight.py` gained two sections — *CODE vs `main`* and
+*SCHEMA vs IMAGE* — and prints both before the open-position check, because a deploy that does not
+work outranks a deploy that costs a position.
+
+## AND THE EXACT DERIVATION CONFIRMS THE ESTIMATE — **which is not the same as it being right**
+
+The seven above were derived from `--since=<container StartedAt>`. **From the deployed sha:**
+
+```
+git log dcfdc1f..HEAD -- backend/app     ->  THE SAME SEVEN COMMITS
+```
+
+**Same answer, better instrument.** The date form would have been wrong on any history with a
+rebase, a cherry-pick or a clock skew, and **it agreed here by circumstance rather than by
+construction** — which is the only reason worth recording it.
+
+## ⇢ A CORRECTION TO MY OWN `B302` SEVERITY NOTE, MADE HERE BECAUSE IT WAS MEASURED HERE
+
+`B302` says *"`broker_connections` holds one row… so `OandaAdapter` is never constructed"* — **true**
+— but I glossed it as *"the only adapter connected in production"*, and that is **false**:
+
+```
+/api/system/health  ->  "brokers": {"cryptofundtrader":"connected","cft_sim":"connected"}
+```
+
+**TWO adapters are connected. One has a database connection row.** `cft_sim` is registered by another
+path, and **it is the one holding both live positions** (`cftsim-` ids). **A connection row is not an
+execution path, and neither is the count of them.** The `OandaAdapter` conclusion is unaffected —
+`oanda` is in neither list.
+
 Related: **B271**, **B279**, **B286**, **B215**, **B305**.
 
 ### B308. `Account.open_trade_count` is a hardcoded `0` in the only connected adapter, and it is consumed
