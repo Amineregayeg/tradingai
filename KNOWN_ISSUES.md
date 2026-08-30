@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-30 (B286 — `unrealized_pnl` ALREADY means two different things across two adapters, and `r_multiple` is computed two different ways. B285 asked whether our single field is profit alone or profit+swap+commission; the answer is that it has never had one definition. paper.py:36-38 is `sign * (price - entry) * units`, GROSS price movement. cryptofundtrader.py:389 is `_dec(raw.get('profit', raw.get('netProfit', raw.get('openNetProfit'))))` — profit and netProfit are NOT the same quantity, and the adapter takes whichever key the venue sent while recording nothing about which. This is live now, not an MT5 problem. AND r_multiple is computed two ways: paper.py:170-171 is a PRICE RATIO not derived from pnl, while cryptofundtrader.py:402 is `(unrealized_pnl / volume) / risk`. If CFT's number is net, its r_multiple is already smaller than the price ratio gives — B184's shape on a dashboard figure. T-0063 IS SAFE: realized_r comes from the decision's stored geometry (crypto_loop.py:1253) and never reads Position.unrealized_pnl; Position.r_multiple is display-only. BUT THE SAME QUESTION EXISTS ONE LAYER OVER AND THERE IT IS REAL — realized_r is pnl/(|entry-sl|*units), denominator our geometry and numerator the pnl at close, so on MT5 the numerator gains swap and commission the denominator does not have and realized_r shifts with NO schema change. Schema: swap and commission as Decimal|None, never Decimal=0 — B215 decides the type. And CFT must stop falling back across profit/netProfit before any definition can be honoured.)
+Last updated: 2026-08-30 (B287 — a refusal CAUSED BY volume_max is labelled bound=BOUND_MIN in execution/lots.py; the reason string names volume_max and is correct, the machine-readable field says volume_min. `bound` exists so a caller can distinguish TOO SMALL from TOO LARGE without parsing prose — that is its entire purpose — and this is the one branch where the two causes meet, so a caller switching on it attributes a maximum-caused refusal to the minimum. AND THE ACCURATE PROSE MAKES IT LESS VISIBLE: anyone reading the message sees the right cause and has no reason to check the field, so the correct half hides the incorrect half. There is no BOUND_MAX constant and its absence is right for the ordinary case — hitting the maximum is a SIZE REDUCTION carried by clamped=True, not a refusal — but this branch is a genuine refusal whose cause is the maximum and the vocabulary has no value for it. Not blocking and not reachable on a sane instrument. ALSO: the case table has no coverage claim. Ten named arms plus a parametrised table over two instrument profiles, and nothing in the module, the test file or the commit body says what is NOT covered — concretely absent is a contract_size=100 metals profile, B261's own example.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -17937,3 +17937,72 @@ returns**, only that the adapter accepts three and distinguishes none. The front
 checked. `oanda.py:269` also derives from this field and is unreachable (`manager.py:33`).
 
 Related: **B285**, **B215**, **B184**, **B261**, **B063**.
+
+### B287. A refusal caused by `volume_max` is labelled `bound=BOUND_MIN` — the prose is right and the machine-readable field is not
+
+**`T-0097` review.** `execution/lots.py`'s post-clamp branch:
+
+```python
+stepped = (vmax / vstep).to_integral_value(rounding=ROUND_FLOOR) * vstep
+clamped = True
+if stepped < vmin:
+    return LotConversion(
+        lots=None, ..., bound=BOUND_MIN,          # the CAUSE is volume_max
+        reason=f"volume_max {volume_max} leaves no legal multiple of {volume_step} ...",
+    )
+```
+
+**The `reason` string names `volume_max` and is correct. The `bound` field says `volume_min`.**
+
+**`bound` exists so a caller can distinguish *too small* from *too large* without parsing prose** —
+that is the field's entire purpose, and this is the one branch where the two causes meet. **A caller
+switching on it attributes a maximum-caused refusal to the minimum.**
+
+**AND THE ACCURATE PROSE MAKES IT LESS VISIBLE, NOT MORE.** Anyone reading the message sees the right
+cause and has no reason to check the field — **so the correct half hides the incorrect half**, which
+is why this survives a careful read.
+
+**There is no `BOUND_MAX` constant, and its absence is correct for the ordinary case:** hitting the
+maximum is a **size reduction** carried by `clamped=True`, not a refusal. **But this branch is a
+genuine refusal whose cause is the maximum, and the vocabulary has no value for it.** Either add one,
+or make the branch say `BOUND_STEP` — *"no legal multiple exists"* is arguably a step fact — **but
+`BOUND_MIN` is the one thing it is not.**
+
+**NOT BLOCKING AND NOT REACHABLE ON A SANE INSTRUMENT:** it needs `volume_max` to leave no multiple
+at or above `volume_min`, which no real specification should present. **Recorded because the field is
+consumed by branching, and a wrong branch label is silent by construction.**
+
+**Also recorded from the same review — the case table has no coverage claim.** Ten named arms plus a
+parametrised table over two instrument profiles (`contract_size` `100_000` and `1.0`), and **nothing
+in the module, the test file or the commit body says what is NOT covered.** Concretely absent: a
+`contract_size=100` profile (metals — `B261`'s own example), and any statement that
+`volume_min`/`step`/`max` are assumed to arrive from `get_symbol_specification()` rather than being
+conventions we chose. **A table of cases is only as good as the cases it does not contain.**
+
+Related: **B261**, **B221**, **B215**, **B240**.
+
+> ### MANAGER ADDENDUM — verified, and there is a SECOND instance one branch down
+>
+> **Confirmed at `lots.py:140`**: the refusal whose `reason` correctly names `volume_max` carries
+> `bound=BOUND_MIN`. Review's characterisation is exact — **the accurate half hides the inaccurate
+> half**, because a reader who checks the message finds the right cause and never looks at the field.
+>
+> **THE VOCABULARY HAS THREE BOUND VALUES AND `BOUND_MIN` IS EMITTED THREE TIMES. ONLY ONE OF THE
+> THREE IS A MINIMUM-CAUSED REFUSAL:**
+>
+> ```
+> :123   stepped < vmin                       CORRECT   the minimum really is the cause
+> :140   volume_max leaves no legal multiple  WRONG     the cause is the MAXIMUM   <- B287
+> :152   rounds down to zero at step X        WRONG     the cause is the STEP
+> ```
+>
+> **`:152` is unreachable while `volume_min > 0`** — the `:123` branch catches it first, and the code
+> says so in a comment. **It is recorded because the fix should be the vocabulary, not the one line.**
+> Two of three emissions are mislabelled, and a one-line patch at `:140` would leave the same defect
+> sitting at `:152` waiting for the day `volume_min` is zero.
+>
+> **AND A HYPOTHESIS OF MINE THAT WAS WRONG, CHECKED RATHER THAN ASSUMED.** I expected to find
+> `BOUND_STEP` defined and never emitted — a declared value with no producer, which would have made
+> this a vocabulary that was wrong in both directions. **It is emitted, at `:102`, and asserted by two
+> arms.** The vocabulary is missing `BOUND_MAX`; it is not carrying dead values.
+
