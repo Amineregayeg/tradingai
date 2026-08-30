@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-30 (B292 — the CONFIRM kill-switch option is defeated by connected_to_broker=False. B285 established MetaApi has no close-all so the kill switch must iterate, and three options went to Malek: raise, report-per-symbol, or CONFIRM by re-reading positions — CONFIRM recommended as the only one that does not trust the thing that failed. B291 measured that connection is TWO booleans, connected and connected_to_broker, and that connected-to-cloud-but-not-to-broker is the state in which get_positions() returns an empty list that means nothing. So confirmation reads [] and concludes the book is FLAT — reporting success having closed nothing and having been unable to see anything. B215 exactly, on the path where it costs most, and B221's shape through a door nobody watched. It does NOT make CONFIRM wrong: the other two never look, so they cannot be misled, they simply never had the information. The repair is one precondition — establish connected_to_broker before treating an empty list as evidence, because an empty list from a broker we are not connected to is UNAVAILABLE, not FLAT, a distinction order_path_health already enforces elsewhere. BOUNDED: inferred from the documented flag, no connection has been made, and it is cheap to test on the first one.)
+Last updated: 2026-08-30 (B293 — an adapter that honestly RAISES has its honesty swallowed TWICE before the API, and the endpoint's contract commits to it. T-0106 will require get_positions() to raise when connected_to_broker is false, because the return type is a list and no value in a list means 'I could not ask' — correct, and the only option the type leaves. But manager.py:369's get_all_positions catches `except Exception`, logs a warning and CONTINUES, returning a SHORTER LIST; and positions.py:44 documents 'Returns an empty list when no brokers are connected — NEVER AN ERROR'. Layer 2 does precisely what layer 1 refused to do, one level up: the caller cannot distinguish 'that venue had no positions' from 'that venue could not be asked'. B215 reconstituted at the aggregate. Layer 3 is not an oversight but a written contract, so even a propagating manager would be caught there — the adapter's raise buys nothing observable at the API surface as things stand. NOT an argument against raising: the adapter should be honest regardless. The finding is that the fix is incomplete INVISIBLY — an adapter that refuses to lie, an aggregate that never surfaces the refusal, and a green suite. DORMANT TODAY, B239's shape: every registered adapter is ours and local, so a local adapter effectively cannot be unreachable and the except-and-continue has never discarded anything. The first REMOTE adapter makes it reachable, and MT5 is that adapter. The aggregate needs a per-adapter status channel — the shape data_health already uses and order_path_health already enforces.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -18263,3 +18263,44 @@ rather than observed.** It is the first thing to test on a real connection, and 
 break the broker link, read positions.
 
 Related: **B291**, **B285**, **B221**, **B215**.
+
+### B293. An adapter that honestly RAISES has its honesty swallowed twice before the API — and the endpoint's contract commits to it
+
+**`T-0110`.** `T-0106` will require `get_positions()` to **raise** when `connected_to_broker` is false,
+because *the return type is a list and no value in a list means "I could not ask"* — **correct, and
+the only option the type leaves.** But the two layers above it are built to discard exactly that.
+
+```
+1. ADAPTER          raises. Honest: an empty list from an unreachable broker is a lie.   (T-0106)
+2. manager.py:369   get_all_positions() catches `except Exception`, logs a warning,
+                    and CONTINUES -> returns a SHORTER LIST.
+3. positions.py:44  "Returns an empty list when no brokers are connected -- NEVER AN ERROR."
+```
+
+**Layer 2 does precisely what layer 1 refused to do**, one level up: the caller receives a list that
+**cannot distinguish "that venue had no positions" from "that venue could not be asked."** `B215`
+exactly, reconstituted at the aggregate.
+
+**And layer 3 is not an oversight — it is a written contract.** The endpoint documents *"never an
+error"*, so even a propagating manager would be caught there. **The adapter's raise buys nothing
+observable at the API surface as things stand.**
+
+**THIS IS NOT AN ARGUMENT AGAINST RAISING.** The adapter should be honest regardless — its contract is
+its own. **The finding is that the fix is incomplete in a way that is invisible**: a reviewer sees an
+adapter that refuses to lie, an aggregate that never surfaces the refusal, and a green suite.
+
+**WHY IT IS DORMANT TODAY AND NOT TOMORROW — `B239`'s shape.** Every adapter currently registered is
+ours and local: the paper broker, its proxy, the simulators. **A local adapter effectively cannot be
+unreachable, so the `except Exception: log and continue` has never discarded anything.** The first
+**remote** adapter makes it reachable, and **MT5 is that adapter.**
+
+**WHAT WOULD ACTUALLY CARRY IT:** the aggregate needs a channel for *"one venue could not be asked"* —
+a per-adapter status beside the list, which is the shape `data_health` already uses and
+`order_path_health` already enforces (`unavailable` versus `idle`). **Not a new idea; an existing one
+this path does not have.** Same conclusion `B292` reached about the kill switch, one endpoint over.
+
+**NOT BLOCKING `T-0106`.** The adapter's behaviour is right and should ship. **Recorded so the raise
+is not mistaken for a completed fix**, and so whoever meets a short position list on the dashboard
+knows why it is short.
+
+Related: **B292**, **B215**, **B239**, **B221**.
