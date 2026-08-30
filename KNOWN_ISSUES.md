@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-30 (B322 — A SEAT'S CLAIM ABOUT ITS OWN AUTHORSHIP IS THE ONE THING ANOTHER SEAT WILL NOT CHECK. Review carried a standing note for six days attributing T-0111's falsified rationale to itself; it was the manager's, per B294 written by review at the time — 'and THE MANAGER WROTE IT' — and per tasks/T-0111/state.json recording by: manager. The note's only worked instance was an error absorbed from another seat. THE NEAR MISS IS THE FINDING: B320 was an argument about where falsified because-clauses ORIGINATE, review went to correct me believing it had written that sentence, and was one sentence from asserting so into that analysis — which would have corrupted the tally in MY favour, the direction that gets accepted fastest, and I would have had no reason to doubt it. Every other claim it made tonight I verified against the file; authorship is the one class where the natural check is ASK THE AUTHOR and the author is the unreliable instrument. THE PAIR IS EXACT: B209/B319 could not recall work it HAD done and re-derived an entry it had corrected; this recalled work it had NOT done. Opposite directions, one cause — a recollection is a RECONSTRUCTION and it is confident either way, and both were settled by opening a file rather than by thinking harder, which in both cases produced a fluent, specific, wrong answer. THE RULE: 'I wrote that' and 'I already checked that' are recollections and get the same treatment as any other unverified claim, especially when offered as a CORRECTION — because a seat correcting you about YOUR work invites a check and a seat correcting you about THEIR work does not.)
+Last updated: 2026-08-31 (B323 — after a restart the engine status payload reports a BALANCE AND A TRADE COUNT WITH NO RUN BEHIND THEM. Measured on a stopped engine right after the 0008 deploy: running false, started_at null, closed_trades 48, balance 6973.87 — against 13 trades for the run that had just ended and 293 in the whole table, so 48 is neither. Mechanism as far as traced: crypto_loop.py:296 counts self.paper._closed excluding reason=='replay', and SimPropFirmBroker restores nothing on construction, so a warmup seeds those rows. NOT DETERMINED and stated rather than glossed: the 48 are non-replay, so something in warmup closes under other reasons and I did not confirm what — stopped because four ruled items were waiting, not because it was answered. Worth an id anyway because a dashboard reader meets the two fields that look like results and has no reason to consult started_at, whose null reads as unknown rather than as none — B229's family, a value correct for the object it was computed from presented where a reader attributes it to something else. And it bears on runs/: a run document's opening balance comes from this payload, and a figure from a warmed never-started loop would be indistinguishable from one from a real run.)
 
 ---
 
@@ -20477,3 +20477,61 @@ especially, when it is offered as a *correction* to someone else. **`state.json`
 check, and a seat correcting you about THEIR work does not.** The second is where nobody looks.
 
 Related: **B319**, **B320**, **B209**, **B140**, **B314**.
+
+---
+
+### B323 — after a restart the status payload reports a **balance and a trade count with no run behind them**, and only `started_at: null` says so
+
+**Observed during the 2026-08-31 deploy, on a stopped engine.** Not a fault in the deploy — the
+numbers are the same before and after in kind, and the deploy is what made the contrast visible.
+
+```
+GET /api/engine/status, engine stopped, immediately after the container recreate:
+  running          false
+  started_at       null          <- the ONLY field that says no run is active
+  open_positions   0
+  closed_trades    48
+  balance          6973.87
+  equity           6973.87
+
+the run that had just ended (fe837dd1):   13 trades in the DB
+the whole trades table:                  293 rows
+```
+
+**48 is neither.**
+
+## THE MECHANISM, as far as I traced it
+
+```python
+# crypto_loop.py:296-302
+closed = [c for c in self.paper._closed if c.get("reason") != "replay"]
+closed_n = len(closed)
+realized = sum(float(c.get("pnl", 0) or 0) for c in closed)
+balance = round(self.starting_balance + realized, 2)
+```
+
+**`SimPropFirmBroker.__init__` sets `balance = starting_balance` and `_closed = []`** — it restores
+nothing. So a freshly constructed loop reports 0 and the starting balance. **It reported 48 and
+6973.87**, and the comment one line above names a **warmup that seeds `_closed`**.
+
+## ⚠ WHAT I DID NOT DETERMINE, stated rather than glossed
+
+**The filter EXCLUDES `reason == "replay"`, so these 48 are NOT replay rows.** Something in warmup
+produces closes under other reasons — plausibly SL/TP hits during the replayed bars — **and I did
+not confirm that.** I stopped because four ruled items were waiting, not because the question was
+answered. **This entry is an observation with a partial mechanism, not a diagnosis.**
+
+## WHY IT IS WORTH AN ID ANYWAY
+
+**A dashboard reader meets `balance 6973.87` and `closed_trades 48` and has no reason to consult
+`started_at`.** The two fields that look like results are populated; the one field that says *these
+are not from a run* is a null that reads as "unknown" rather than as "none".
+
+> **`B229`'s family: a value that is correct for the object it was computed from, presented where a
+> reader will attribute it to something else.** The engine has not traded since the restart and its
+> status says otherwise to anyone not reading every field.
+
+**And it bears on `runs/`:** a run document's opening balance is read from this payload. **A figure
+taken from a warmed, never-started loop would be indistinguishable from one taken from a real run.**
+
+Related: **B229**, **B215**, **B308**, **B309**.
