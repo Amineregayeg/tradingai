@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-30 (B281 — a comment at execution/service.py:172-174 asserted that what we sized against and how far the market had moved are "BOTH RECORDED ON THE DecisionRecord", and NEITHER WAS: res["sizing_price"] and res["entry_drift_r"] are returned by execute() and `grep -rn entry_drift_r app/` outside that file returns nothing, while sizing_price had no column until T-0084. B238's class — a reader checking whether the value was persisted found a sentence saying it was, which is worse than silence because silence sends you to the source. Filed beside B280, which established that the sizing reconstruction is exact only where fill == sizing_price and that nothing recorded the divisor. Both entries are Execute's, from T-0084.)
+Last updated: 2026-08-30 (B282 — a must-hit that INSERTS the row it asserts, so it can never fail, and the producer can NULL every sizing column with the suite green. T-0084's test_MUST_HIT_at_least_one_row_carries_all_three_sizing_columns was added at Review's request to stop the reconstruction arm passing over an empty set; it inserts a row with all three sizing columns and then asserts a row with all three exists. B272's shape INSIDE the arm requested to prevent vacuity — the test_there_are_adapters_to_check pattern works because its population is DERIVED FROM THE TREE, and a population the arm writes itself is not a population. MEASURED: setting the producer's three sizing arguments to None at crypto_loop:1536-1540 (anchor unique, mutation confirmed applied) means every production row carries NULL in all three columns, and the two suites report 33 passed, 0 failed. NOTHING NOTICES. B256's class: every arm builds its own DecisionRecord, so all test the PREDICATE and none tests the PRODUCER. Consequence is B279's own failure mode one level up — if the call site regresses, reconstruction silently becomes impossible again and the arm guaranteeing it stays possible reports green. FIX: the instrument this codebase already uses, an AST arm asserting _record_signal_decision is called with all three sizing keywords. NOTHING SHIPPED IS WRONG.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -17663,3 +17663,51 @@ Related: **B278**, **B277**, **B240**, **B261**, **B275**.
 >
 > Review's own framing, and it is the sharper one: *"the reconstruction is not the finer of two
 > routes — it is the only route, and it is the one about to break."*
+
+### B282. A must-hit that inserts the row it asserts — and the producer can NULL every sizing column with the suite green
+
+**`T-0084` review.** `test_MUST_HIT_at_least_one_row_carries_all_three_sizing_columns` was added at
+my request, to stop the reconstruction arm passing over an empty set. **It inserts the row it then
+asserts exists:**
+
+```python
+await _insert(db_session, ..., sizing_equity=..., sizing_risk_pct=..., sizing_price=...)
+rows = ... select(DecisionRecord).where(sizing_equity.is_not(None), ...)
+assert rows, "no row carries all three"
+```
+
+**It creates what it checks, so it can never fail** — `B272`'s shape, **inside the arm requested to
+prevent vacuity.** The `test_there_are_adapters_to_check` pattern I cited works because its
+population is **derived from the tree**; a population the arm writes itself is not a population.
+
+**MEASURED.** Producer's three sizing arguments set to `None` at `crypto_loop:1536-1540` — anchor
+asserted unique, mutation confirmed applied, not void:
+
+```
+every production row would carry NULL in all three sizing columns
+  -> test_t0084_rejected_signal.py + test_t0037_entry_seam.py
+  -> 33 passed, 0 failed.  NOTHING NOTICES.
+```
+
+**`B256`'s class: every arm builds its own `DecisionRecord`, so all of them test the PREDICATE — the
+arithmetic is right — and none tests the PRODUCER.** The reconstruction arm proves
+`equity × risk_pct / |price − sl|` reproduces `sized_units` **on a row the test wrote**, which was
+never in doubt.
+
+**THE CONSEQUENCE IS `B279`'S OWN FAILURE MODE ONE LEVEL UP.** The columns exist so reconstruction
+stops depending on a technique that degrades. **If the call site regresses, reconstruction silently
+becomes impossible again — and the arm that exists to guarantee it stays possible reports green.**
+
+**THE FIX IS THE INSTRUMENT THIS CODEBASE ALREADY USES.** `T-0068` guards a structural constraint
+with an AST arm over the source. Same shape here: **assert `_record_signal_decision` is called with
+all three sizing keywords.** One arm, no database, catches exactly the mutation above. **The
+value-level must-hit should then query rows it did not write, or be deleted rather than left looking
+like a guard.**
+
+**NOTHING SHIPPED IS WRONG.** The producer does pass the values, the writer does store them, the
+migration is reversible, the divisor is `sizing_price`. **This is about what the suite would catch.**
+
+**BOUNDED:** two suites, 33 tests, not the full suite. **No query run — I have not confirmed the
+columns are populated on the live box, only that the code path passes them.**
+
+Related: **B272**, **B256**, **B279**, **B280**, **B258**.
