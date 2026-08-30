@@ -197,6 +197,51 @@ settled earlier and on purpose, because a kill switch that refuses to close a re
 than the risk it avoids. **So this is the one path where an MT5 failure has no safety flag in front
 of it.**
 
+## A number on your dashboard will change on MT5, and nothing would announce it
+
+**`realized_r` — the R-multiple every trade result is judged by — shifts on MT5 with no schema
+change, no migration, and no error.**
+
+```
+realized_r  =  pnl at close  /  (|entry - stop| * units)
+               ^^^^^^^^^^^^     ^^^^^^^^^^^^^^^^^^^^^^^
+               the VENUE's      OUR stored geometry
+```
+
+**On MT5 the venue's close P&L includes swap and commission.** So the numerator gains components the
+denominator does not have, and **every R figure quietly becomes slightly worse than the trade
+geometry says.** Not a bug that throws — a number that means something different than it did.
+
+**It is worth being precise about the blast radius, because the first guess was wrong.** The stored
+result the exit rule was verified on is **safe**: it is computed from the decision's own geometry and
+never touches the position P&L field. **That was checked, not assumed.** The exposure is the *other*
+calculation, one layer up, which the schema work would never have touched.
+
+### And the same ambiguity already exists on the venue you trade today
+
+**Our position P&L field has no single definition right now:**
+
+```
+paper broker   sign * (price - entry) * units          GROSS price movement
+CFT adapter    profit  OR  netProfit  OR  openNetProfit    whichever the venue sent
+```
+
+**`profit` and `netProfit` are not the same quantity** — one conventionally gross, the other net of
+costs — and **the adapter takes whichever key arrives while recording nothing about which.** So the
+field's meaning is decided per response, invisibly.
+
+**This has never mattered because both venues we have ever used are swap-free** — the paper broker by
+construction, crypto because it has no overnight financing. **MT5 is the first venue that charges,
+and it is what forces the question.**
+
+**One consequence already live:** the R-multiple shown for a CFT position is derived from that field,
+while the paper broker's is a pure price ratio. **Same name on the same dashboard, two different
+quantities**, depending which adapter produced the row.
+
+**The fix does not need to wait for MT5 and does not depend on which key CFT sends today:** the
+adapter must record which key it read, or read one and **fail loudly** rather than falling back
+silently. **No definition survives an adapter that does not know which quantity it holds.**
+
 ## Honest risks
 
 **The strategy is not what you might assume it is.** Of your sixteen rulings, **one reaches a live
