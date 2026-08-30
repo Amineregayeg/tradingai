@@ -52,6 +52,28 @@ book is flat would report success having closed nothing.
 
 **Unblocks:** the kill-switch decision, and every `get_positions()` interpretation.
 
+### 1.1b Does an unreachable broker make the position list silently SHORT? `B293`
+
+**Do this while the broker link is still down from 1.1 — it needs the same induced state and costs
+nothing extra.**
+
+**Call `GET /api/positions` and look at what comes back.**
+
+**What is predicted:** the adapter raises honestly, the layer above it catches the error, logs a
+warning and **continues** — returning a *shorter list* — and the endpoint's own contract is
+*"never an error"*. **So a broker you cannot reach produces a position list that is silently
+missing its positions, with nothing at the API surface saying so.**
+
+| what you see | what it means |
+|---|---|
+| a short list, no indication anything failed | **B293 confirmed on the real system** |
+| an error, or a list carrying a per-adapter status | already fixed — check whether T-0111 landed |
+
+**Why it is worth the two minutes:** this is the one prediction on this list that can be **confirmed
+by observation rather than by reading the code**, and it is the defect that would let a kill-switch
+confirmation step report a flat book it never actually saw.
+
+
 ### 1.2 The account type field — **the safety argument rests on this one** `B284` `T-0100`
 
 **Question:** what does `type` contain, and what happens when the read fails or returns something
@@ -156,6 +178,20 @@ since the prop firm we trade today does not use MT5's enum at all. **A retail de
 `DEMO`, so this stays open until a prop account exists.**
 
 ---
+
+## What this list does not prove
+
+**It was derived, and the derivation has a known hole.** The items were found by sweeping the
+register for entries that explicitly mark something as unverified — **141 entries parsed, 30
+carrying such a marker, 12 relevant here.**
+
+**That finds unanswered QUESTIONS. It does not find PREDICTED BEHAVIOURS.** Item 1.1b above carries
+no such marker — it is a prediction about what the system will do, and a prediction is confirmable on
+a first connection exactly like a question is. **It was found by someone remembering it existed, not
+by the sweep.**
+
+**So: everything on this list is worth doing, and the list is not provably complete.** If something
+surprises you that is not here, that is the gap rather than a failure of the individual items.
 
 ## THE SHORT VERSION
 
