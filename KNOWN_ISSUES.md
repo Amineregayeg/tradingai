@@ -17979,6 +17979,23 @@ in the module, the test file or the commit body says what is NOT covered.** Conc
 `volume_min`/`step`/`max` are assumed to arrive from `get_symbol_specification()` rather than being
 conventions we chose. **A table of cases is only as good as the cases it does not contain.**
 
+**CLOSED BY `T-0103`, 2026-08-30 — recorded by this entry's author because a stale entry is read as
+an open one.** Both stated problems are fixed and verified by mutation:
+
+* **The bound label.** All three branches re-keyed — `BOUND_MIN` for the minimum, **`BOUND_MAX`
+  added** for the max-caused refusal, `BOUND_STEP` for the zero-lot branch. **Reverting either
+  corrected branch to `BOUND_MIN` fires two arms**, one of which quotes this entry's own reasoning
+  back: *"its own reason string names volume_max and is correct — which is what makes this survive a
+  careful read."*
+* **The coverage claim.** `lots.py:21` now carries a `B240` scope block naming what is not covered —
+  **and the metals gap this entry named as absent was CLOSED rather than disclaimed**, with a
+  `contract_size=100` profile and its own arm.
+
+**WHAT REMAINS OPEN AND IS NOT THIS ENTRY'S:** the three bounds are still **assumed** to arrive from
+`get_symbol_specification()` and nothing has checked that — *"if a caller passes conventions WE
+picked instead, this function is validating against itself."* **That is a first-connection item, not
+a defect**, and it is `MT5_FIRST_CONNECTION.md` item 1.3.
+
 Related: **B261**, **B221**, **B215**, **B240**.
 
 > ### MANAGER ADDENDUM — verified, and there is a SECOND instance one branch down
