@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-30 (B316 — place_order has THREE regimes, two adapters have NO schema at all, and setdefault('status','FILLED') turns an unrecognised venue reply into a fill. B315 reported place_order as a SILENCE in four of five; read by hand, the silence was not absence from the instrument's reach but ABSENCE OF A SCHEMA. paper and cft_sim carry a local schema with UPPERCASE status (FILLED/REJECTED, failure in `reason`); live_loop_proxy carries a local schema with lowercase `rejected`; cryptofundtrader and oanda return the VENUE PAYLOAD UNCHANGED — not a different vocabulary, no vocabulary. That is a category the sweep's four answers did not have, since all four assume an adapter HAS a key set. AND THE CONTAINMENT IS A setdefault: execution/service.py does res.setdefault('status','FILLED') and crypto_loop.py:1518 checks `if res.get('status') == 'FILLED'`. A venue reply with no status key becomes a FILL — not unknown, not rejected — and the loop records a signal decision and pushes a position-open. The only thing between that and a false fill is the venue always reporting rejections as an HTTP error: _handle_response raises on 401/403, 429 and >=400, STATUS CODES ONLY, so a 200 carrying a business-level rejection is defaulted to FILLED. B221's shape on the order path. NOT MEASURED and it is the whole question: whether Match-Trader ever returns 200 with a business error — one live response, same class as B286's open question, on a venue we already trade.)
+Last updated: 2026-08-30 (B317 — B316's setdefault is safe ONLY BECAUSE OF WHO HOLDS THE EXECUTION SLOT and nothing records that as the reason. service.py:168 turns a venue reply with no status key into a FILL; the reason it is not happening is that crypto_loop.py:168 and :794 construct ExecutionService(self.paper, ExecMode.PAPER) and self.paper is always SimPropFirmBroker or PaperBroker, never the CFT adapter — both simulators always set status, so the default runs on every order and never fires. Identical in the container. No comment, docstring or arm records that, and T-0106 puts a venue adapter in that slot on purpose. AND IT IS NOT ONLY A MISSING KEY: _handle_response returns {} on an EMPTY body and {} on UNPARSEABLE JSON, so a truncated response or a content-type mishap becomes {"status": "FILLED"} — B316's open question gains a second and much cheaper form. FOURTH INSTANCE TODAY of a mechanism that exists and does not run, after B302, B303 and B309, and in every one the gap was invisible from the code: reachability is a property of what holds the slot, what is deployed and what the venue does, each a separate measurement. Filed as its own entry rather than appended to B316, which is review's, and recorded here because the message reporting it to its author was dropped by the relay.)
 
 ---
 
@@ -19997,3 +19997,72 @@ implementer would read for it are the two with no schema.** A `setdefault` that 
 worked"* is a defensible default for a simulator and a dangerous one for a venue.
 
 Related: **B221**, **B286**, **B315**, **B303**, **B215**.
+
+---
+
+### B317. `B316`'s default is safe **only because of who currently holds the execution slot**, and nothing records that as the reason — plus an empty 200 is a fill
+
+**Filed as its own entry rather than appended to `B316`, which is Review's.** Both halves were
+measured while verifying `B316` before landing it. **I attempted to report them for its author to
+incorporate and the message was dropped by the relay**, so they are recorded here rather than left
+in a commit message — *a finding that lives only in a channel that failed is a finding nobody has.*
+
+## HALF ONE — **THE CONTAINMENT IS THE SLOT, AND IT IS NOT WRITTEN DOWN ANYWHERE**
+
+`B316`: `service.py:168` does `res.setdefault("status", "FILLED")`, so a venue reply carrying no
+`status` key becomes a **fill**. **The reason that is not happening today:**
+
+```
+crypto_loop.py:168, :794   self.execution = ExecutionService(self.paper, ExecMode.PAPER)
+crypto_loop.py:157         self.paper = SimPropFirmBroker(...)
+crypto_loop.py:162         self.paper = PaperBroker(...)
+container       :168 / :766   identical
+```
+
+**`self.paper` is NEVER the `CryptoFundTraderAdapter`.** The only live caller of
+`broker.place_order` holds a **simulator**, and both simulators build a local schema that always
+sets `status` — **so the `setdefault` runs on every order and never fires.**
+
+> **The default is safe because of who holds the slot, and NOTHING RECORDS THAT AS THE REASON.**
+> Not a comment beside the `setdefault`, not a docstring, not an arm. **`T-0106` puts a venue
+> adapter in that slot on purpose.**
+
+**A `setdefault` meaning *assume it worked* is defensible in a simulator and dangerous at a venue**
+(Review's sentence). **The code cannot tell which it is talking to, and neither can a reader.**
+
+## HALF TWO — **IT IS NOT ONLY A MISSING KEY. AN EMPTY 200 IS A FILL**
+
+```python
+# cryptofundtrader.py, _handle_response success path
+if not response.content:
+    return {}
+try:
+    return response.json()
+except Exception:
+    return {}
+```
+
+**`{}` on an empty body, and `{}` on unparseable JSON.** So the trigger is not a complete payload
+that happens to omit one field — it is **a truncated response, a proxy returning an empty body, a
+content-type mishap, any malformed JSON.** `{}` → `setdefault` → `{"status": "FILLED"}` →
+`crypto_loop:1518` records a signal decision and pushes a position-open.
+
+**`B316`'s open question — does Match-Trader ever return 200 with a business error? — gains a second
+and much cheaper form: does it ever return an EMPTY or MALFORMED 200?** Every HTTP client sees those
+eventually.
+
+## THE SHAPE, AND IT IS THE FOURTH TODAY
+
+**`B302`** latent because `OandaAdapter` is never constructed. **`B303`**'s OANDA shape dead behind
+an unconditional `raise`. **`B309`**'s seven commits landed and not running. **This one safe only
+because a simulator holds a slot.**
+
+> **Four separate places today where the mechanism EXISTS and does not RUN, and in every one the
+> gap between those two was invisible from the code.** I got `B302`'s version wrong first — glossing
+> *one connection row* as *the only adapter connected* — and corrected it in `B309`. **The correction
+> is cheap; the habit of checking is the finding.**
+
+**Reachability is not a property of the code being read. It is a property of what is holding the
+slot, what is deployed, and what the venue does — and each of those is a separate measurement.**
+
+Related: **B316**, **B302**, **B303**, **B309**, **B221**.
