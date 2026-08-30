@@ -20,6 +20,35 @@ default — the one outcome this document says nobody should choose.**
 
 ---
 
+## When you have credentials, start here
+
+**[`MT5_FIRST_CONNECTION.md`](MT5_FIRST_CONNECTION.md)** — every open question turned into an ordered
+test plan, each item naming the register entry behind it.
+
+**One item needs no working account at all.** Telling a wrong server name from a wrong password is
+settled by **deliberately getting it wrong twice** — misspell the server, then use a bad password.
+Two minutes, free, and it can be done before anything connects. Those two failures are the ones a
+first connection actually meets, and they have identical symptoms if nobody has checked.
+
+**Two items gate everything after them**, and the order is not cosmetic:
+
+1. **Connection state, before anything reads positions.** An empty list from a broker you cannot see
+   is *cannot see*, not *nothing there* — every later reading is uninterpretable until that is
+   confirmed, and the kill-switch design depends on it.
+2. **Account type, before anything touches the safety flag** — with the disconnect-mid-session test
+   attached, because if *failed* and *unrecognised* look the same, **a new account type would read as
+   an outage forever.**
+
+**The most important item needs a closed trade**, so it cannot be done on day one: whether the
+venue's profit figure includes financing costs. **That single call decides whether your R-multiples
+still mean what they meant on the paper broker.**
+
+**And one question cannot be answered on a demo at all.** A retail demo reports `DEMO`, so the
+`CONTEST` behaviour — the state a prop-firm challenge account would report — stays open until such an
+account exists.
+
+---
+
 ## What only you can supply
 
 ### 1. A decision — `is_simulation` for an MT5 demo
