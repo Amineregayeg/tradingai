@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-30 (B305 — NOTHING ANYWHERE STATES WHICH INSTRUMENTS THE MT5 CONNECTION WILL TRADE. crypto_loop.py is the only live loop, fixed_config.py:45 pins SYMBOLS to BTC/USD and ETH/USD as Final, main.py:235 constructs the loop with no arguments so that dict is what production runs, and all four market-data sources — binance, binance_perp, cft, dominance — are crypto. There is no forex or metals price source in the tree. MT5_FIRST_CONNECTION:97 tells Malek to capture the volume bounds 'for the instruments we would trade' and never names one, while MT5_READINESS frames MT5 as the first venue that charges overnight financing, which is a property of forex and CFDs rather than spot crypto. So the document implies forex while all six queued MT5 tasks assume the remaining work is an adapter. Crypto CFDs on MT5 means everything queued is correct; forex or metals means there is no feed, no history, no symbol map and no loop — a programme rather than an adapter. Every MT5 task so far was about the TRANSPORT, so none had to name an instrument and none noticed nothing does. A question for Malek; filed rather than answered.)
+Last updated: 2026-08-30 (B306 — service.py:130 and :153 return the IDENTICAL rejection reason string, 'non-positive size / stop', for two structurally different causes: at :130 the signal is malformed because entry equals the stop, a strategy bug; at :153 size_position returned non-positive, an account or market condition with the strategy blameless. Opposite causes, opposite responses, one string — and it is not a log line but a COLUMN: crypto_loop.py:1555 takes res.get('reason') verbatim into _record_rejected_signal and :1136 writes rejection_reason=str(reason). B271 made rejections durable rows so they could be analysed, and nothing else on the row separates the two causes. Third instance today of a vocabulary narrower than the states it names, after B304 and B300, and in all three the prose beside it is correct. Found while verifying T-0124's stated facts against the file before Execute builds from them.)
 
 ---
 
@@ -18975,3 +18975,57 @@ first-connection checklist tells Malek *which* symbols to run `get_symbol_specif
 **It is a question for Malek and cannot be derived.** Filed rather than answered.
 
 Related: **B302**, **B287**, **B284**.
+
+---
+
+### B306. Two structurally different rejections return the **identical** `reason` string, and it is persisted verbatim as `rejection_reason`
+
+**Found while verifying `T-0124`'s stated facts against `service.py` before Execute builds from
+them** — the same practice that produced `B304` an hour earlier.
+
+```python
+# service.py:128-130   THE SIGNAL IS MALFORMED
+intended_risk = abs(sig.entry - sig.sl)
+if intended_risk <= 0:
+    return {"status": "rejected", "reason": "non-positive size / stop"}
+
+# service.py:152-153   THE ACCOUNT CANNOT FUND IT AT THE RULED RISK
+units = size_position(acct.equity, sig.risk_pct, sizing_price, sig.sl)
+if units <= 0:
+    return {"status": "rejected", "reason": "non-positive size / stop"}
+```
+
+**Same string. Opposite causes. Opposite responses.**
+
+* `:130` — **entry equals the stop.** The strategy emitted a signal with no risk distance. That is a
+  **strategy bug** and someone should look at the rule that produced it.
+* `:153` — the distance is fine and the computed size came out non-positive: **the account, the
+  ruled risk percentage, or the sizing price.** That is an **account or market condition** and the
+  strategy is blameless.
+
+## IT IS NOT AN EPHEMERAL LOG LINE — **IT IS A COLUMN**
+
+```
+crypto_loop.py:1555   reason = res.get("reason") or res.get("status") or "rejected"
+crypto_loop.py:1559   await self._record_rejected_signal(pair, entry, sig, reason, trace)
+              :1136   rejection_reason=str(reason)
+```
+
+**`B271` made rejections durable rows precisely so they could be analysed afterwards.** Every such
+row for either cause reads `non-positive size / stop`, **and nothing else on the row separates them**
+— `_record_rejected_signal` takes no sizing inputs at all, which is `T-0124`'s deliverable two.
+
+> **The rows exist, they are queryable, and the question they were created to answer cannot be asked
+> of them.**
+
+## THE FAMILY, AND IT IS THE THIRD TODAY
+
+`B304` — two refusal branches sharing `BOUND_NON_POSITIVE`. `B300` — could-not-ask collapsed into
+asked-and-fine. **This one, on a persisted column.** All three are *a vocabulary narrower than the
+set of states it is asked to name*, and in all three **the prose beside it is correct** — here the
+comment at `:1553` says *"NEVER drop a generated signal silently… surfaced with its reason"*, which
+is true, and the reason does not distinguish.
+
+**Cheap:** two distinct strings, and `T-0124` is already opening this function.
+
+Related: **B304**, **B300**, **B283**, **B271**, **B215**.
