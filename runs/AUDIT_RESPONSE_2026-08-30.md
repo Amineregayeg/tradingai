@@ -82,6 +82,11 @@ read, with decimals carried as strings so no precision is lost.
 
 ### Q2.2 — who holds write access
 
+> **⚠ CORRECTED — READ THE ADDENDUM.** The figures in this section were measured against
+> `orchestra-postgres-1`, **the wrong database**. Re-measured on the engine's actual database
+> (`tradingai-db-1`) the conclusion is unchanged, but one value was wrong and two further facts
+> emerged. See *"Q2.2 and Q2.3 were measured against the WRONG DATABASE"* at the end.
+
 **One role. It is a superuser. There is no separation of any kind.**
 
 ```
@@ -99,6 +104,11 @@ container, has it** — that includes me, and it is how every figure in this res
 There is no read-only credential, because no read-only role exists.
 
 ### Q2.3 — is there a database audit log
+
+> **⚠ CORRECTED — READ THE ADDENDUM.** The figures in this section were measured against
+> `orchestra-postgres-1`, **the wrong database**. Re-measured on the engine's actual database
+> (`tradingai-db-1`) the conclusion is unchanged, but one value was wrong and two further facts
+> emerged. See *"Q2.2 and Q2.3 were measured against the WRONG DATABASE"* at the end.
 
 **No. Plainly: no.** Nothing today distinguishes a row the engine wrote from a row someone wrote by
 hand. Measured:
@@ -123,8 +133,9 @@ cover the future only.
 
 **Technically straightforward and currently non-existent.** No read-only role exists; one would have
 to be created (`CREATE ROLE ... LOGIN`, `GRANT CONNECT`, `GRANT SELECT` on the four tables, and
-critically **not** superuser). That is a decision for Malek, not for me, and I have not made any
-change to database roles.
+critically **not** superuser). **SUPERSEDED — this has since been done. See the addendum.** *(Written before the fix: "That is
+a decision for Malek, not for me, and I have not made any change to database roles." The role
+was subsequently created and verified read-only; the password is with Malek.)*
 
 I would add one thing in favour of it: **it removes me from the path.** Every figure in this
 document was produced by the same agent whose work is under audit, which is the structural problem
@@ -497,3 +508,129 @@ agent's word for it.** That is the accurate summary, and it is the thing items 1
    reviewed any of it.** Both answered without hedging.
 3. **Q4.1 — reproduced live, matching exactly**, plus RUN-21 unprompted. **Name any run and I will
    run it on request** — the script is committed so you need not take my word for the result.
+
+---
+
+# Addendum — what has been FIXED since this response was written, and one error in it
+
+## A correction to this document: Q2.2 and Q2.3 were measured against the WRONG DATABASE
+
+**Found while implementing the fixes below.** The VPS runs several projects. I measured roles and
+audit settings on `orchestra-postgres-1` — **a different project's database.** The engine's database
+is `tradingai-db-1`:
+
+```
+DATABASE_URL -> postgresql+asyncpg://tradingai:***@db:5432/tradingai
+container    -> tradingai-db-1   (image timescale/timescaledb:latest-pg16)
+```
+
+**Re-measured on the correct database, the conclusions hold — but I reached them by luck, not
+method, and that needs saying in a document about not trusting unverified claims:**
+
+```
+login roles      tradingai | rolsuper = t          <- still ONE role, still SUPERUSER
+log_statement    none                              <- unchanged
+logging_collector off  |  wal_level replica  |  archive_mode off  |  track_commit_timestamp off
+triggers         trades / trg_trades_updated_at    <- one, not an audit trail
+tables           all 5 present in schema `public`
+rows             24 runs | 1678 decisions | 289 trades
+```
+
+**One figure was wrong:** I reported `shared_preload_libraries` as empty. On the real database it is
+`timescaledb`. **Still no `pgaudit`**, so the Q2.3 answer — no audit trail — is unchanged.
+
+**Two further facts the correct database revealed:**
+
+* **The database port is not published** (`"5432/tcp": null`). It is reachable only inside the Docker
+  network, which is good for exposure and means **a read-only credential is only usable over an SSH
+  tunnel** — see below.
+* **`POSTGRES_PASSWORD` is the literal string `tradingai`**, hardcoded in the compose file. Not
+  directly exploitable while the port is unpublished, but it is a weak credential for a superuser
+  account and should be rotated.
+
+---
+
+## FIXED
+
+### 1. A read-only credential now exists (Q2.4, and the top item of Q8.1)
+
+**Created on the correct database and verified least-privilege.** Role `auditor`:
+
+```
+CAN READ    engine_runs (24), decision_records (1678), trades, telemetry_records, candles
+CANNOT      INSERT -> ERROR: cannot execute INSERT in a read-only transaction
+            UPDATE -> ERROR: cannot execute UPDATE in a read-only transaction
+            DELETE -> ERROR: cannot execute DELETE in a read-only transaction
+CANNOT      see ungranted tables -> ERROR: permission denied for table alembic_version
+rolsuper    f
+```
+
+It carries `default_transaction_read_only = on` **in addition to** having only `SELECT` grants, so
+writes fail twice over. **The password is with Malek and is deliberately not in this repository.**
+
+**One practical limit:** the port is unpublished, so the credential works from inside the Docker
+network or over an SSH tunnel — e.g.
+`ssh -L 5432:db:5432 <vps>` then connect to `localhost:5432`. **Publishing the port to the internet
+would be a worse trade than the tunnel.**
+
+### 2. Write statements are now logged (Q2.3, as far as is possible without a restart)
+
+```
+ALTER SYSTEM SET log_statement = 'mod';      -- every INSERT/UPDATE/DELETE/DDL
+ALTER SYSTEM SET log_connections = on;
+ALTER SYSTEM SET log_line_prefix = '%m [%p] %u@%d ';
+select pg_reload_conf();                     -- reload, NOT a restart
+```
+
+**Verified working** — a rolled-back test INSERT appeared in the log with user, database and
+timestamp, and left the row count unchanged at 24:
+
+```
+2026-08-30 01:24:35.455 UTC [847897] tradingai@tradingai LOG:  statement: begin; insert into
+engine_runs (...) values (...); rollback;
+```
+
+**This covers the future only. It does not reconstruct 2026-08-04 → 2026-08-25**, which remains
+unrecoverable. **And it is deliberately the weaker option:** `track_commit_timestamp`,
+`wal_level = logical` and `logging_collector` are all `postmaster` context and need a **database
+restart**, which would kill run 24 — open and running for six days. **I did not restart production
+to improve its own audit trail. That is Malek's call, and the right moment is the next planned
+deploy.**
+
+### 3. Per-run checksums (Q8.1 item 3)
+
+`runs/data/CHECKSUMS.txt` — SHA-256 of all 25 data files, verified with `sha256sum -c`. **Each run
+document now carries its own hash in an `## Integrity` section.** A later export whose hashes differ
+is a different dataset rather than a re-render.
+
+**Honest limit:** these were generated at export time by the same process that produced the data, so
+they detect **drift and tampering after the fact**, not fabrication at source. The real version is
+hashing at run close, which is future work.
+
+### 4. The export is refreshed and is no longer six days stale (Q7.3)
+
+Regenerated against current data: **1342 → 1678 decisions, 283 → 289 trades.** Run 24 is **still
+open**, so the export remains **provisional** — that has not changed and cannot until the run ends.
+
+### 5. Two false claims corrected in place
+
+`runs/README.md`'s position-id claim and `runs/METHOD.md`'s reason for withholding the script — both
+described in Q7.2b and Q2.1, both now corrected in the files themselves rather than only here.
+
+### 6. Verification runs published as artefacts (Q8.1 item 4)
+
+[`VERIFICATION_2026-08-30.md`](VERIFICATION_2026-08-30.md) — **20 candles against Binance's public
+API, 80 values, every one exact**, plus a live recomputation of RUN-23 and an unselected RUN-21.
+Scripts committed so you can run them yourself.
+
+---
+
+## NOT FIXED, and why
+
+| item | status |
+|---|---|
+| **Log retention** (Q8.1 item 5) | **Blocked.** `/docker/tradingai/docker-compose.yml` is not writable by the deploy user and `sudo` needs a password I do not have. The change is four lines — a `logging:` block with `max-size: 50m`, `max-file: 10` on `db` and `api`. **Malek can apply it; it takes effect on the next recreate.** Until then the new write-audit log rolls at 30 MB like everything else. |
+| **`track_commit_timestamp`, `wal_level=logical`, `pgaudit`** | **Deliberately not done.** All require a database restart, which would end run 24. Should go in at the next planned deploy. |
+| **Reconstructing the 2026-08 audit window** | **Impossible.** No WAL archive, no statement log, no commit timestamps existed at the time. Nothing can recover it. |
+| **A human reviewer who is not Malek** (Q6.2, Q8.1 item 6) | **Cannot be fixed by me.** It is the only item on the list that tooling does not touch, and it is the one the rest of this document keeps pointing at. |
+| **Rotating the `tradingai` superuser password** | **Not done.** It is the literal string `tradingai`. Rotating it means updating the compose file and restarting — same blocker and same restart cost as above. **Flagged rather than actioned.** |
