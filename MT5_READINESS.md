@@ -3,8 +3,12 @@
 **Updated 2026-08-30.** For the phase after this one: linking an MT5 demo account and running the
 strategy against it.
 
-**Short version: two things wait on you and neither can be worked around. Everything else is either
-done or in progress.**
+**Short version: THREE things wait on you. Everything else is either done or in progress.**
+
+**The third is easy to miss and this document previously buried it** — the kill-switch behaviour
+below. It is named in the body as a decision only you can make, and it was absent from this
+summary. **A reader who acted on the short version would settle two and ship the third as a
+default — the one outcome this document says nobody should choose.**
 
 ---
 
@@ -59,10 +63,17 @@ being right — **which is exactly what we have already ruled a safety property 
 | `REAL` | real money |
 | **`CONTEST`** | **neither** |
 
-**`CONTEST` is not a hypothetical.** A prop-firm challenge account is exactly that shape — and this
-platform already operates in that world: the engine's own run config records
-`"mode": "PROP_FIRM_SIM"`, and the one non-paper adapter in the tree is Crypto Fund Trader, a prop
-firm. **It is the state this project is most likely to meet and least likely to have planned for.**
+**`CONTEST` is not a hypothetical, and the reasoning behind that is INFERRED rather than observed.**
+A prop-firm challenge account is exactly that shape, and this platform already operates in that
+world: the engine's run config records `"mode": "PROP_FIRM_SIM"` and the one non-paper adapter is
+Crypto Fund Trader, a prop firm. **It is the state this project is most likely to meet and least
+likely to have planned for.**
+
+> **Marked, because the inference crosses a platform boundary.** Crypto Fund Trader runs on
+> **Match-Trader, not MetaTrader** — so the argument is *a prop firm on one platform implies a prop
+> account on a different platform reports that platform's contest value.* Plausible, and inferred
+> across exactly the line that has already caught us once. **No MT5 prop account has been
+> observed.**
 
 Failing closed puts `CONTEST` on the real-money side: no money at risk, but a **real broker
 connection whose records belong to a third party** — which is the *other* question this one flag is
@@ -94,10 +105,15 @@ decision only you can take. See *"The transport is settled"* below.
 
 ---
 
-## The transport is settled, and it costs money
+## The transport is CHOSEN, and it costs money
 
 **Measured on this box — `Linux x86_64`, `python 3.12.3` — with nothing installed; every resolution
 was a dry run.**
+
+> **"Chosen", not "settled", and the distinction is not pedantry.** A `--dry-run` proves pip can
+> compute a dependency set. **It proves nothing about authentication, websocket behaviour, rate
+> limits, or whether the pinned old `socketio` major coexists at RUNTIME rather than merely
+> resolving.** The candidate is picked; it has never connected to anything.
 
 ### The official MetaTrader 5 Python package cannot run here, and not for the usual reason
 
@@ -188,9 +204,25 @@ That is the exact shape that has already cost this project once: an operation th
 over an action that did not happen**. On the paper broker the kill switch closes everything in one
 call and cannot half-succeed. On MT5 it can.
 
-**The decision to record — not to default:** when closing position 3 of 5 fails, does the kill switch
-**raise**, or **report per-symbol** and continue? Both are defensible. **Silently returning success
-is not**, and it is what happens if nobody chooses.
+**The decision to record — not to default:** when closing position 3 of 5 fails, what does the kill
+switch do?
+
+| option | what it does | what it trusts |
+|---|---|---|
+| **Raise** | stop at the first failure and surface it | the close calls' own answers |
+| **Report per-symbol** | continue, return what closed and what did not | the close calls' own answers |
+| **Confirm** | close, then **re-read positions and assert the book is flat** | nothing — it checks |
+
+**The third option was missing from an earlier version of this document, and it is the one that
+actually addresses the failure being guarded against.** Raise and report-per-symbol both believe
+what the close calls told them. **Confirmation does not** — and "reported success, closed nothing"
+is precisely a case where the calls' own answers were the thing that lied.
+
+**It costs an extra round trip and it is the only option that earns the claim.** Your own framing,
+turned back on itself: *"closed everything" stops being a return value and becomes a claim the
+adapter has to earn* — **earning it is what confirmation does.**
+
+**Silently returning success is not on the list**, and it is what happens if nobody chooses.
 
 **Worth knowing alongside it:** this member deliberately does *not* check `is_simulation` — that was
 settled earlier and on purpose, because a kill switch that refuses to close a real position is worse
@@ -208,9 +240,32 @@ realized_r  =  pnl at close  /  (|entry - stop| * units)
                the VENUE's      OUR stored geometry
 ```
 
-**On MT5 the venue's close P&L includes swap and commission.** So the numerator gains components the
-denominator does not have, and **every R figure quietly becomes slightly worse than the trade
-geometry says.** Not a bug that throws — a number that means something different than it did.
+**⚠ THE WARNING HOLDS. THE DIRECTION IS UNVERIFIED, and an earlier version of this document stated
+one branch as though it were known.** Checked against MetaApi's deal model, quoted:
+
+```
+profit       number   REQUIRED   "deal profit"
+commission   number              "deal commission"
+swap         number              "deal swap"
+```
+
+**The documentation does not say whether `profit` already includes the other two.** And **three
+separate fields argue that it does not** — reporting a component separately from a total containing
+it would be double-counting.
+
+**Both branches are a problem, and the unstated one is worse:**
+
+| if the venue's `profit`… | then `realized_r`… |
+|---|---|
+| **includes** swap and commission | gains components the denominator lacks — **R gets worse than the geometry says** |
+| **excludes** them | stays geometry-comparable and **silently ignores real costs — R looks FINE while the account pays** |
+
+**A figure that quietly overstates performance on a live venue is worse than one that understates
+it** — and it is the branch the field layout points at.
+
+**The check is one closed deal:** read `profit` for it and compare against the position's realised
+total. **It cannot be done before you have an account**, and it should be done on the first closed
+trade rather than after a month of figures nobody can interpret.
 
 **It is worth being precise about the blast radius, because the first guess was wrong.** The stored
 result the exit rule was verified on is **safe**: it is computed from the decision's own geometry and
@@ -245,8 +300,8 @@ silently. **No definition survives an adapter that does not know which quantity 
 ## Honest risks
 
 **The strategy is not what you might assume it is.** Of your sixteen rulings, **one reaches a live
-trade** — see the ruling ledger. Four more discharge only when the risk matrix is wired, and that
-component is itself waiting on a grader that runs nowhere. **Linking MT5 tests the plumbing, not the
+trade** — see the ruling ledger. **Three** more discharge only when the risk matrix is wired, and that component is itself waiting on
+a grader that runs nowhere. **Linking MT5 tests the plumbing, not the
 strategy**, and it is worth being clear about that before the demo account is treated as a verdict
 on the trading logic.
 
