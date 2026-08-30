@@ -19898,4 +19898,49 @@ same three key names from the discarded v1 — **the output, again, not the logi
 instrument has the wrong subject for it by construction. **Stated as scope so the exclusion is not
 read as a miss.**
 
+---
+
+## ⚠ AMENDED — **THE FOURTH CATEGORY WAS IN THIS TABLE AND I DID NOT CROSS IT**
+
+**Two rows above, four lines apart, and one adapter disagreeing with itself:**
+
+```python
+live_loop_proxy.py:141  place_order      if target is None:
+                            return {"status": "rejected", "reason": self.unavailable_reason}
+live_loop_proxy.py:147  close_position   if target is None:
+                            return {"status": "error",    "error":  self.unavailable_reason}
+```
+
+**Identical condition, identical VALUE, two statuses and two key names, six lines apart.** That is
+the fourth answer this sweep defined — *one adapter disagreeing with itself across two call paths* —
+**sitting in its own output, unremarked.**
+
+**AND THE REASON IS STRUCTURAL, WHICH MATTERS MORE THAN THE INSTANCE.** The table is **member-major**:
+it asks *"do adapters agree about this member?"* **The fourth category is a question about one
+adapter across members, and a member-major table cannot express it.** Both facts were in the output;
+nothing put them side by side.
+
+> **This is not a property no control tested — it is a property the OUTPUT SHAPE cannot state.** A
+> control could not have caught it: **the table has to be transposed before the disagreement exists
+> as a row at all.**
+
+**THE TRANSPOSE'S OWN DENOMINATOR: 1 of 6.** An adapter needs **two or more readable members** before
+it can be caught disagreeing with itself, and **only `live_loop_proxy` has two** — every other adapter
+yields keys for exactly one member, because `place_order` is a silence in four of five. **So the
+transpose finds the one case it is able to see, and says nothing about the other five.**
+
+## ✅ AND THE PROXY'S THIRD SHAPE IS REASONED — DO NOT SWEEP IT IN
+
+`close_all_positions` returns **`[]`** when unbound, **with the argument in its own docstring**: the
+kill switch *"counts any row whose status is not `error`/`failed` as CLOSED, so a `no_broker` marker
+would be counted as a position successfully closed — inflating the number the operator reads at
+exactly the moment it must not be inflated."*
+
+**Three shapes for one condition, and the third is deliberate and load-bearing.** A reader who
+harmonises all three **breaks the kill switch's count** — which is why this amendment names it rather
+than leaving a tidy list of three inconsistencies.
+
+**The two that ARE the finding are `rejected`/`reason` against `error`/`status`**, where nothing
+distinguishes them and nothing depends on the difference.
+
 Related: **B303**, **B302**, **B314**, **B215**, **B240**.
