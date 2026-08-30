@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-30 (B311 — 135 OF 292 REGISTER HEADINGS HAVE NO TRAILING PERIOD, so every tool keyed on '### B<n>.' silently skips them. The instance is the tool I wrote today: running_sweep.py, whose entire purpose is finding entries an instrument cannot see, swept 157 of 292 — 54% — while printing an UNREACHABLE count as though that were its only blind spot. A tool that states its own bounds and states the WRONG ones is worse than one that states none, because the stated bound is what stops the reader looking for the unstated one. Caught by B266 surfacing as a KeyError while diagnosing an unrelated miss. register_commit_check.py:61 has used the correct pattern all along, ten metres away. FILED WITH B310 — lots.py:174, lots.py:192 and test_t0097_units_to_lots.py:211 cite B283 three times for what is B287, B283 being about BridgeTransport and MT5 reusability; I repeated the wrong citation into B304 this afternoon without opening the entry, and it propagated again into another seat's T-0128 triage. One wrong citation in a code comment produced a wrong citation in a register entry and a wrong member in another seat's triage in the same day. A file:line citation is checkable; AN ID IS NOT A LOCATION and nothing resolves it.)
+Last updated: 2026-08-30 (B312 — two shipped sweeps see 53% of the register, and the third is unaffected for a reason worth stating. stale_sweep.py:107 and deferral_sweep.py:89 both use `### [A-Z]+\d+\.` and REQUIRE a trailing period; running_sweep.py:89 was fixed by B311. Measured: 295 headings matching ^### B<n>, 136 with NO trailing period (46%), so the two shipped tools see 159 (53%) and neither says so. B311's point applies harder here — a tool that states its bounds and states the WRONG ones is worse than one that states none, because the stated bound stops a reader looking for the unstated one. landed_sweep.py is NOT affected and not because it got the regex right: it has NO heading pattern at all, its regexes are T-\d{4}/DEFER/NARRATION, and at :192 it scans KNOWN_ISSUES.md line by line for task references — its population is lines mentioning a task id, not entries. A different limit does apply to it (it reports file:line and cannot attribute a finding to an entry), stated so 'unaffected' is not read as 'audited clean on every axis'. NOTHING RUN DELIBERATELY: the fraction comes before the findings, and a 53% tool's output is not worth reading until the pattern is fixed — its findings would be true and its silences would mean nothing. AND MY OWN FIRST TWO NUMBERS WERE WRONG: 182/61% because [A-Z]+ matched non-B headings, and 291 period-less because ^### (B\d+)(?!\.) backtracks into a prefix so `### B19.` matches `B1`. Both caught by reading the output and seeing B4 repeated eleven times.)
 
 ---
 
@@ -19575,3 +19575,82 @@ deliberately two functions earlier.
 the 135**, which is a task and not a claim.
 
 Related: **B301**, **B296**, **B267**, **B310**.
+
+### B312. Two shipped sweeps see 53% of the register — and the third is unaffected for a reason worth stating
+
+**Audit requested after `B311` found the same defect in `running_sweep.py` while it was being
+written. `B311` is the instance that was caught before shipping; these two shipped.**
+
+```
+stale_sweep.py:107     re.match(r"### [A-Z]+\d+\.", p)      REQUIRES the trailing period
+deferral_sweep.py:89   identical pattern
+running_sweep.py:89    r"^### (B\d+)\b\.?(.*)$"             period optional -- FIXED (B311)
+```
+
+**MEASURED AGAINST THE FILE:**
+
+```
+headings matching ^### B<n>            295
+headings with NO trailing period       136   (46%)
+stale_sweep / deferral_sweep see       159   (53%)
+running_sweep sees                     295   (100%)
+```
+
+**So two shipped tools are blind to 136 entries, and neither says so.** `B311`'s point applies with
+more force here: **a tool that states its bounds and states the WRONG ones is worse than one that
+states none**, because the stated bound is what stops a reader looking for the unstated one.
+
+**`landed_sweep.py` IS NOT AFFECTED, and the reason is not "it got the regex right".** It has **no
+heading pattern at all** — its regexes are `T-\d{4}`, `DEFER` and `NARRATION`, and at `:192` it reads
+`KNOWN_ISSUES.md` **scanning for task references line by line.** **Its population is lines mentioning
+a task id, not entries.** So this defect cannot reach it — **and a different limit can: it reports
+`file:line` and cannot attribute a finding to an entry**, which is out of scope here and stated so
+the "unaffected" verdict is not read as "audited clean on every axis".
+
+**NOTHING RUN, DELIBERATELY.** The brief was to report the fraction each tool sees **before** anything
+it found, and **a 53% tool's output is not worth reading until the pattern is fixed** — its findings
+would be true and its silences would mean nothing.
+
+**AND MY OWN FIRST MEASUREMENT OF THIS WAS WRONG, caught by cross-checking rather than by care.** My
+first pattern gave **182 (61%)** because `[A-Z]+\d+` matches non-`B` headings too, and my count of
+period-less headings gave **291** because `^### (B\d+)(?!\.)` **backtracks into a prefix** — `### B19.`
+matches `B1` followed by `9`. **Two wrong numbers in one check, both found by reading the output and
+seeing `B4` repeated eleven times.**
+
+**THE FIX WAS TWO SITES PER FILE, AND ONE SITE LOOKS COMPLETE.** Each tool requires the period
+**twice** — once in the split filter, once in the per-entry heading parse:
+
+```
+stale_sweep.py:117 / :123        deferral_sweep.py:99 / :103
+```
+
+**Fixing only the split filter CRASHED** — `AttributeError: 'NoneType' has no attribute 'group'` —
+because the second pattern still demanded the period and returned `None` on the 136 entries the first
+had just let in.
+
+> **AND THE CRASH WAS LUCK, WHICH IS THE PART WORTH KEEPING.** Had the second pattern been lenient in
+> some *other* way — matching but capturing the wrong group — it would have **silently mis-parsed 136
+> entries** instead of failing. **A loud failure is not evidence the fix was careful.**
+
+**Fixed: split filter `### [A-Z]+\d+\b`, heading parse `\.?`.** Checked rather than assumed —
+`[A-Z]+\d+` still requires digits immediately after letters, so `### PHASE 3` and `### T-0084` stay
+out, and the 23 dotted `A`/`D`/`E`/`F`/`G` ids stay in. **183 → 319 entries, gaining exactly the 136.**
+
+## ⚠ AND THE FIX DID NOT MAKE `stale_sweep` TRUSTWORTHY — IT MADE ITS STATED BOUND HONEST
+
+```
+stale_sweep, after the fix:   319 entries   examined 49   flagged 44   clean 5   NOT EXAMINED 269
+```
+
+**Heading coverage went 53% → 100%. ACTUAL coverage is 15%**, because the tool skips every entry with
+no parseable date in `Found in:` — **which it has always printed, and which nobody weighed.**
+
+> **The heading defect was the bound NOBODY STATED. Underneath it sits a far larger bound the tool
+> has ALWAYS stated.** And the fix makes the second one **more** dangerous to misread: a reader who
+> now sees **"319 entries"** at the top is invited to read **44 flags as 44 of 319**. It is 44 of 49.
+
+**So the correct headline for that tool is `44 of 49 examined, 269 not examined` — never `44 of
+319`.** Fixing a stated-wrong bound can make an unstated-but-true one harder to see, **because the
+newly-correct number is the one the reader anchors on.**
+
+Related: **B311**, **B240**, **B150**, **B298**.
