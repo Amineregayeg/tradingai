@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-30 (B321 — B320 IS FALSIFIED, the same night, by the register's own history. B320 claimed a because-clause has NO INSTRUMENT: no cheap independent recomputation and a verdict that reads as opinion. B140, filed 2026-08-17, IS that instrument and names the class — 'a claim about code derived from READING it rather than RUNNING it: right conclusion, wrong mechanism, three seats in one day.' A misdiagnosed mechanism is not opinion; running the code settles it in seconds with an unambiguous verdict, the property B320 assigned exclusively to numbers. Three more counterexamples, all quoting the register's own text: B209's 'the first version of this entry got the mechanism wrong', a CORRECTED BY REVIEW section reading 'MY REASON WAS WRONG EVEN THOUGH THE CONCLUSION HELD' refuted QUANTITATIVELY, and a DIAGNOSIS CORRECTED within the hour on 2026-08-19. Review states the ratio is soft and leans on none of it — at least four, unambiguous, not a percentage, because its classifier keys on the corrector's own vocabulary and leaves 63 lines unclassified. WHAT SURVIVES: B320's narrow dated claim about 2026-08-30 probably holds, and the generalisation into a structural law is the step that breaks. THE SYMMETRY IS EXACT — B319 welded a real hazard onto a cause it did not have, B320 welds a real practice onto a premise the register contradicts, and in both the recommendation survives and the reason does not. PROMPT_MANAGER.md is rewritten: B140 first, RUN IT rather than reason about it, with the counterfactual reserved for rationales that are not empirically settleable — as written it risked teaching a seat to reason about a mechanism it could have executed, which is B140 verbatim.)
+Last updated: 2026-08-30 (B322 — A SEAT'S CLAIM ABOUT ITS OWN AUTHORSHIP IS THE ONE THING ANOTHER SEAT WILL NOT CHECK. Review carried a standing note for six days attributing T-0111's falsified rationale to itself; it was the manager's, per B294 written by review at the time — 'and THE MANAGER WROTE IT' — and per tasks/T-0111/state.json recording by: manager. The note's only worked instance was an error absorbed from another seat. THE NEAR MISS IS THE FINDING: B320 was an argument about where falsified because-clauses ORIGINATE, review went to correct me believing it had written that sentence, and was one sentence from asserting so into that analysis — which would have corrupted the tally in MY favour, the direction that gets accepted fastest, and I would have had no reason to doubt it. Every other claim it made tonight I verified against the file; authorship is the one class where the natural check is ASK THE AUTHOR and the author is the unreliable instrument. THE PAIR IS EXACT: B209/B319 could not recall work it HAD done and re-derived an entry it had corrected; this recalled work it had NOT done. Opposite directions, one cause — a recollection is a RECONSTRUCTION and it is confident either way, and both were settled by opening a file rather than by thinking harder, which in both cases produced a fluent, specific, wrong answer. THE RULE: 'I wrote that' and 'I already checked that' are recollections and get the same treatment as any other unverified claim, especially when offered as a CORRECTION — because a seat correcting you about YOUR work invites a check and a seat correcting you about THEIR work does not.)
 
 ---
 
@@ -20377,3 +20377,56 @@ empirically settleable; it should not displace the ones that are.
 > a premise the register contradicts.** In both, the recommendation survives and the reason does not.
 
 Related: **B320**, **B140**, **B209**, **B319**, **B240**.
+
+---
+
+### B322 — **A SEAT'S CLAIM ABOUT ITS OWN AUTHORSHIP IS THE ONE THING ANOTHER SEAT WILL NOT CHECK**, and one was six days wrong
+
+**Review carried a standing note for six days attributing `T-0111`'s falsified rationale to itself.
+It was mine.** The note's only worked instance was an error it had absorbed into its own history
+from someone else.
+
+```
+B294, written by review at the time:  "...the task said 'both read through get_all_positions',
+                                       AND THE MANAGER WROTE IT."
+tasks/T-0111/state.json               {"status": "PLANNING", "by": "manager"}
+```
+
+**Both contemporaneous. Both unambiguous. The recollection was six days old and confident.**
+
+## THE NEAR MISS IS THE FINDING, NOT THE MISATTRIBUTION
+
+`B320` was an argument about **where falsified because-clauses originate** — I had tallied that every
+one that day was mine. **Review went to correct me, believing it had written that sentence, and was
+one sentence from asserting so into that analysis.**
+
+> **I would have had no reason to doubt it.** Every other claim it made tonight I verified against
+> the file — numbers, patterns, staleness, four counterexamples. **Authorship is the one class where
+> the natural check is *ask the author*, and the author is the unreliable instrument.**
+
+**It would have corrupted the tally in MY favour** — one fewer mark against me — **which is the
+direction that gets accepted fastest.** The register is the only reason it did not happen: Review
+opened `B294` instead of answering from memory.
+
+## THE PAIR, AND IT IS EXACT
+
+```
+B209 / B319   could NOT recall work it HAD done      -> re-derived an entry it had corrected
+B322          RECALLED work it had NOT done          -> nearly claimed another seat's error
+```
+
+**Opposite directions, one cause: a recollection is a RECONSTRUCTION, and it is confident either
+way.** **Both were settled by opening a file. Neither was settled by thinking harder about it** —
+and in both, thinking harder produced a fluent, specific, wrong answer.
+
+## THE RULE, narrow enough to actually follow
+
+**Any claim of the form "I wrote that" / "that was mine" / "I already checked that" is a
+RECOLLECTION and gets the same treatment as any other unverified claim** — including, and
+especially, when it is offered as a *correction* to someone else. **`state.json`, the entry's own
+`Found by`, and `git log -S` are contemporaneous; a seat's memory of its own week is not.**
+
+**And the asymmetry that makes it worth an entry: a seat correcting you about your work invites a
+check, and a seat correcting you about THEIR work does not.** The second is where nobody looks.
+
+Related: **B319**, **B320**, **B209**, **B140**, **B314**.
