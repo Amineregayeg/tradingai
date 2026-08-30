@@ -51,6 +51,39 @@ account exists.
 
 ## What only you can supply
 
+### 0. ⛔ THE ONE THAT COMES BEFORE THE OTHERS — **what will MT5 actually trade?**
+
+**Document:** `B305`, filed 2026-08-30. **This is not a code question and it cannot be derived.**
+
+**Measured today:**
+
+```
+crypto_loop.py            the ONLY live loop
+fixed_config.py:45        SYMBOLS: Final = {"BTC/USD": "BTCUSDT", "ETH/USD": "ETHUSDT"}
+main.py:235               LiveCryptoLoop()  -- no arguments, so THAT dict is what production runs
+market_data/sources/      binance, binance_perp, cft, dominance -- ALL FOUR ARE CRYPTO
+```
+
+**There is no forex or metals price source in this tree.** The first-connection checklist tells you
+to capture the volume bounds *"for the instruments we would trade"* — **and never names one.**
+
+**Two answers, and they are not the same size of work:**
+
+* **Crypto CFDs on MT5** (most MT5 brokers list BTCUSD/ETHUSD) — the existing loop and feed drive it
+  unchanged, **the adapter really is the last piece**, and everything queued below is correctly
+  scoped.
+* **Forex or metals** — **there is no feed, no candle history, no symbol map and no loop** for the
+  instrument. **That is a programme, not an adapter**, and the six queued MT5 tasks are scoped for
+  the other answer.
+
+**This document has been implying the second one.** *"MT5 is the first venue that charges [overnight
+financing]"* is true of forex and CFDs and not of spot crypto — **written without noticing it was an
+answer to a question nobody had asked.**
+
+**Every MT5 task so far has been about the TRANSPORT** — which SDK runs here, which members map, what
+a mock must model. **None of them had to name an instrument, so none noticed that nothing does.**
+
+
 ### 1. A decision — `is_simulation` for an MT5 demo
 
 **Document:** `agents/tasks/T-0076/decision-for-malek.md`, 227 lines, waiting since 2026-08-24.

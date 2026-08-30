@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-30 (B304 — lots.py has SIX bound= sites and the refusal-cause arm's table has FIVE, so T-0112's own instruction to assert the two counts are equal was unsatisfiable as written; and the sixth is B283 STILL LIVE. Measured by running it: units_to_lots('abc', ...) and units_to_lots(0.0, ...) both return bound='non_positive' with requested_lots 0.0, so a caller that BRANCHES cannot tell an unparseable input from a request for zero units. The reason strings are both correct and distinct, which is precisely what let B283 survive a careful read. There is no BOUND_UNREADABLE constant — the state has no name, so this is a missing token rather than a mis-chosen one. And the derived form T-0112 rejected would be BLIND to it while looking straight at it: all four BOUND_ constants ARE emitted; it is the SITE count that is short.)
+Last updated: 2026-08-30 (B305 — NOTHING ANYWHERE STATES WHICH INSTRUMENTS THE MT5 CONNECTION WILL TRADE. crypto_loop.py is the only live loop, fixed_config.py:45 pins SYMBOLS to BTC/USD and ETH/USD as Final, main.py:235 constructs the loop with no arguments so that dict is what production runs, and all four market-data sources — binance, binance_perp, cft, dominance — are crypto. There is no forex or metals price source in the tree. MT5_FIRST_CONNECTION:97 tells Malek to capture the volume bounds 'for the instruments we would trade' and never names one, while MT5_READINESS frames MT5 as the first venue that charges overnight financing, which is a property of forex and CFDs rather than spot crypto. So the document implies forex while all six queued MT5 tasks assume the remaining work is an adapter. Crypto CFDs on MT5 means everything queued is correct; forex or metals means there is no feed, no history, no symbol map and no loop — a programme rather than an adapter. Every MT5 task so far was about the TRANSPORT, so none had to name an instrument and none noticed nothing does. A question for Malek; filed rather than answered.)
 
 ---
 
@@ -18926,3 +18926,52 @@ arm's four causes are complete. **It is the SITE count that is short, not the TO
 ordering, and worth writing down.
 
 Related: **B283**, **B240**, **B215**, **B301**.
+
+---
+
+### B305. **Nothing anywhere states which instruments the MT5 connection will trade** — and every price source in the tree is crypto
+
+**Not a code defect. A scope question that six queued tasks have been answering by assumption.**
+
+## MEASURED
+
+```
+app/services/live/                       crypto_loop.py is the ONLY live loop
+fixed_config.py:45  SYMBOLS: Final = {"BTC/USD": "BTCUSDT", "ETH/USD": "ETHUSDT"}
+main.py:235         LiveCryptoLoop()     -- no arguments, so production runs THAT dict
+market_data/sources/  binance.py  binance_perp.py  cft.py  dominance.py
+                      ALL FOUR ARE CRYPTO. There is no forex or metals source in the tree.
+```
+
+`_fetch_bars` supports exactly two providers — Binance and `CFTSource` — **and the symbol map's
+values are Binance tickers.** The map is injectable; **the feed is not.**
+
+## THE GAP
+
+**`MT5_FIRST_CONNECTION.md:97` tells Malek to capture `volume_min` / `volume_step` / `volume_max`
+"for the instruments we would trade" and never names one.** `MT5_READINESS.md` frames MT5's
+significance as *"the first venue that charges [overnight financing]"* — **a property of forex and
+CFDs, not of spot crypto** — so the document implies a forex venue while **every plan in the queue
+assumes the remaining work is an adapter.**
+
+## THE TWO ANSWERS ARE NOT THE SAME SIZE OF WORK, WHICH IS WHY THIS CANNOT STAY IMPLICIT
+
+**(a) Crypto CFDs on MT5.** Most MT5 brokers list BTCUSD/ETHUSD. The existing loop and Binance feed
+drive it unchanged, the adapter really is the last piece, **and the financing sentence stays true —
+MT5 crypto CFDs charge swap where spot does not.** Everything queued is correct.
+
+**(b) Forex or metals.** Then there is **no price source, no candle history, no symbol map and no
+loop** for the instrument, and `T-0097`'s metals example (`contract_size` 100) is about something the
+platform cannot currently price. **That is a programme, not an adapter** — and the six MT5 tasks in
+the queue are scoped for (a) while the readiness document reads like (b).
+
+## WHY IT SURFACED NOW AND NOT EARLIER
+
+**Every MT5 task so far has been about the TRANSPORT** — which SDK runs on this box, which members
+map, what a mock must model, what a first connection should measure. **None of them had to name an
+instrument, so none of them noticed that nothing does.** Found by checking whether the
+first-connection checklist tells Malek *which* symbols to run `get_symbol_specification` against.
+
+**It is a question for Malek and cannot be derived.** Filed rather than answered.
+
+Related: **B302**, **B287**, **B284**.
