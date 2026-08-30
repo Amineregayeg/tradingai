@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-30 (B294 — the kill switch does NOT share the aggregate. get_all_positions is called only from positions.py:50, :68 and :90, all in the router, while close_all_positions at manager.py:566 has its OWN loop over _adapters and never calls it — so B293's fix would NOT have touched the kill switch, which T-0111 itself calls the urgent consumer. The conclusion survives and the mechanism does not: the shared thing is ITERATING _adapters AND DISCARDING THE PER-ADAPTER OUTCOME, not a common function, which changes the work from one place to two. AND THERE ARE THREE CONSUMERS, the unnamed one being worst: DELETE /positions/{id} uses the aggregate to LOCATE a position, so an unreachable adapter makes an existing position return 404 — not omission but DENIAL, on the endpoint a human reaches for to close one position. Review named the failure mode against itself and it is not did-not-check: it had already MEASURED close_all_positions' own loop in T-0100 and asserted the shared-function version anyway because it made a cleaner generalisation. Having the measurement and preferring the tidier claim is a distinct failure, and the manager carried it without checking.)
+Last updated: 2026-08-30 (B295 — two of T-0102's arms exercise a COPY of the rule instead of the adapter, and the commit's own docstring documents that exact defect. Nothing shipped is wrong: all four producers supply pnl_source, the field is required, oanda uses membership rather than a defaulted read, and cryptofundtrader:426 reads raw.get(pnl_source) so value and provenance come from ONE lookup and cannot diverge by construction. This is about what the suite would catch. pnl_key_present's docstring says it was extracted so 'the arm can import it rather than re-implement it', because an earlier test was 'exercising the copy' — found, fixed for CFT, recorded, and the same commit has two more instances. INSTANCE 1: test_the_recorded_key_is_the_one_ACTUALLY_PRESENT calls _cft_source in ISOLATION and never builds a Position, so mutating the read to raw.get('profit') leaves 13 passed — on {'netProfit':'4'} that records 'netProfit' while the value is _dec(None) -> 0, a zero P&L labelled as read from netProfit. INSTANCE 2: test_a_value_from_a_DEFAULT_does_not_record_a_key_name DEFINES _oanda_source inside itself and never touches oanda.py, so making oanda record 'unrealizedPL' unconditionally also leaves 13 passed. Fourth appearance of B290's family. PROCESS NOTE, SECOND TIME: I bid this id then wrote 'Filed B295' when I had only bid it. B288 records the identical error and its closing line is 'bid and filed are different states' — that note did not prevent this one. A lesson recorded in the artefact is not a change in behaviour; what closes it is the register hook now refusing a commit that claims an id the diff does not add.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -18385,3 +18385,67 @@ first put a false claim into a pushed commit message (`B288`). **Both times the 
 without checking**, which is the other half and is recorded as such.
 
 Related: **B293**, **B292**, **B221**, **B288**.
+
+### B295. Two of `T-0102`'s arms exercise a COPY of the rule instead of the adapter — and the commit's own docstring documents that exact defect
+
+**`T-0102` review. Nothing shipped is wrong**: all four producers supply `pnl_source`, the field is
+required, `oanda` uses membership rather than a defaulted read, and `cryptofundtrader:426` reads
+`raw.get(pnl_source)` so **value and provenance come from one lookup and cannot diverge by
+construction.** **This is about what the suite would catch.**
+
+**The shape is written down in the commit that contains it.** `pnl_key_present`'s docstring:
+
+> *"**A NAMED FUNCTION SO THE ARM CAN IMPORT IT RATHER THAN RE-IMPLEMENT IT.** Its first test
+> re-implemented the selection inline, and a mutation restoring the old silent fallback left those
+> arms green — **they were exercising the copy.**"*
+
+**Found, fixed for CFT by extracting the function, recorded — and the same commit has two more
+instances.**
+
+**INSTANCE 1 — the value-to-key link is untested.**
+`test_the_recorded_key_is_the_one_ACTUALLY_PRESENT` calls `_cft_source(raw)` **in isolation**; it
+never builds a `Position` and never checks where `unrealized_pnl` came from.
+
+```
+MUTATION:  unrealized_pnl = _dec(raw.get(pnl_source) ...)  ->  _dec(raw.get("profit"))
+           13 passed, 0 failed.
+```
+
+**On `{"netProfit": "4"}` that records `"netProfit"` while the value is `_dec(None)` → 0 — a zero
+P&L labelled as read from `netProfit`.** The field lying in the exact way it exists to prevent.
+
+**INSTANCE 2 — the OANDA arm defines the function it tests, inside itself:**
+
+```python
+def test_a_value_from_a_DEFAULT_does_not_record_a_key_name():
+    def _oanda_source(side: dict) -> str | None:      # defined INSIDE the test
+        return "unrealizedPL" if "unrealizedPL" in side else None
+```
+
+**It never touches `oanda.py`.**
+
+```
+MUTATION:  oanda.py:254  ->  pnl_source = "unrealizedPL"   (the default treated as a read)
+           13 passed, 0 failed.
+```
+
+**`pnl_key_present` was extracted for precisely this reason and `oanda` got no such extraction.**
+
+**FIX:** extract OANDA's selection as a named function the arm imports, and add an arm that builds a
+`Position` **through the real adapter path** and asserts the value and the recorded key **agree**.
+
+**FOURTH APPEARANCE OF `B290`'s FAMILY** — and this time in a field whose entire job is to say how
+another field should be read.
+
+---
+
+**PROCESS NOTE, AND IT IS THE SECOND TIME.** I bid this id, then wrote *"Filed **B295**"* in my
+review and my message **when I had only bid it.** `B288` records the identical error and closes with
+*"bid and filed are different states."* **That note did not prevent this one.**
+
+> **A lesson recorded in the artefact is not a change in behaviour.** `B288`'s note was the
+> resolve-to-be-careful version and it failed inside a day. **What actually closes it is the
+> register hook now refusing a commit that claims an id the diff does not add** — the tooling, not
+> the resolution.
+
+Related: **B290**, **B288**, **B282**, **B256**, **B286**.
