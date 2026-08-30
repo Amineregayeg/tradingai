@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-30 (B293 — an adapter that honestly RAISES has its honesty swallowed TWICE before the API, and the endpoint's contract commits to it. T-0106 will require get_positions() to raise when connected_to_broker is false, because the return type is a list and no value in a list means 'I could not ask' — correct, and the only option the type leaves. But manager.py:369's get_all_positions catches `except Exception`, logs a warning and CONTINUES, returning a SHORTER LIST; and positions.py:44 documents 'Returns an empty list when no brokers are connected — NEVER AN ERROR'. Layer 2 does precisely what layer 1 refused to do, one level up: the caller cannot distinguish 'that venue had no positions' from 'that venue could not be asked'. B215 reconstituted at the aggregate. Layer 3 is not an oversight but a written contract, so even a propagating manager would be caught there — the adapter's raise buys nothing observable at the API surface as things stand. NOT an argument against raising: the adapter should be honest regardless. The finding is that the fix is incomplete INVISIBLY — an adapter that refuses to lie, an aggregate that never surfaces the refusal, and a green suite. DORMANT TODAY, B239's shape: every registered adapter is ours and local, so a local adapter effectively cannot be unreachable and the except-and-continue has never discarded anything. The first REMOTE adapter makes it reachable, and MT5 is that adapter. The aggregate needs a per-adapter status channel — the shape data_health already uses and order_path_health already enforces.)
+Last updated: 2026-08-30 (B294 — the kill switch does NOT share the aggregate. get_all_positions is called only from positions.py:50, :68 and :90, all in the router, while close_all_positions at manager.py:566 has its OWN loop over _adapters and never calls it — so B293's fix would NOT have touched the kill switch, which T-0111 itself calls the urgent consumer. The conclusion survives and the mechanism does not: the shared thing is ITERATING _adapters AND DISCARDING THE PER-ADAPTER OUTCOME, not a common function, which changes the work from one place to two. AND THERE ARE THREE CONSUMERS, the unnamed one being worst: DELETE /positions/{id} uses the aggregate to LOCATE a position, so an unreachable adapter makes an existing position return 404 — not omission but DENIAL, on the endpoint a human reaches for to close one position. Review named the failure mode against itself and it is not did-not-check: it had already MEASURED close_all_positions' own loop in T-0100 and asserted the shared-function version anyway because it made a cleaner generalisation. Having the measurement and preferring the tidier claim is a distinct failure, and the manager carried it without checking.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -18321,3 +18321,67 @@ is not mistaken for a completed fix**, and so whoever meets a short position lis
 knows why it is short.
 
 Related: **B292**, **B215**, **B239**, **B221**.
+
+---
+
+### B294. The kill switch does NOT share the aggregate — two loops, not one — and `DELETE /positions/{id}` turns an unreachable adapter into a 404
+
+**Found by review attacking `T-0111`'s plan, and it falsifies that task's central rationale.** The
+task said *"both read through `get_all_positions`"*, and the manager wrote it. **Measured:**
+
+```
+get_all_positions callers      positions.py:50, :68, :90   -- ALL THREE in the router
+close_all_positions            manager.py:566-573, its OWN
+                               `for connection_id, adapter in self._adapters.items():`
+                               -- it never calls get_all_positions
+```
+
+**So `B293`'s fix, applied to `get_all_positions`, would NOT have touched the kill switch** — which
+`T-0111` itself calls *"the urgent consumer"*. Two independent loops over `_adapters`, each with its
+own `except Exception`.
+
+**The conclusion survives; the mechanism does not.** It IS one defect on two paths — **but the shared
+thing is *iterating `_adapters` and discarding the per-adapter outcome*, not a common function.**
+That changes the work from one place to two, and a plan built on the wrong sentence **fixes the
+endpoint and leaves the kill switch.**
+
+**And the task contradicted itself in its own body** — it asserted both read through the aggregate,
+then named `close_all_positions` separately. **The right half was written down beside the wrong one.**
+
+## THREE consumers, and the unnamed one is the worst
+
+`T-0111` named the endpoint and the kill switch. **There are three callers and the third is a
+different failure class.** `positions.py:90`, `DELETE /positions/{id}`:
+
+```python
+positions = await broker_manager.get_all_positions()
+target = next((p for p in positions if p.id == position_id), None)
+if target is None:
+    raise HTTPException(404, f"Position '{position_id}' not found in any connected broker")
+```
+
+**It uses the aggregate to LOCATE a position before closing it.** With an adapter unreachable, a
+position that exists is absent from the list — **so the API returns 404 and tells the operator the
+position does not exist.**
+
+> **That is not omission. It is denial** — and it lands on the endpoint a human reaches for when they
+> want a specific position closed. **`B221`'s family: the system reports something about an action it
+> could not perform**, and here the report actively contradicts reality.
+
+**And naming a subset of consumers is precisely what `T-0105` was corrected for one task earlier.**
+
+## The failure mode review named against itself, and it is not "did not check"
+
+The false sentence was **plausible, adjacent to something true, and unchecked by either seat.**
+Review's own account: **`close_all_positions` iterating `_adapters` is something it had already
+measured and written down in `T-0100`** — and it asserted the shared-function version anyway,
+**because it made a cleaner generalisation.**
+
+> **Having the measurement and preferring the tidier claim is a distinct failure from not having
+> checked.**
+
+**It is the second time a wrong sentence of review's has propagated into something permanent** — the
+first put a false claim into a pushed commit message (`B288`). **Both times the manager carried it
+without checking**, which is the other half and is recorded as such.
+
+Related: **B293**, **B292**, **B221**, **B288**.
