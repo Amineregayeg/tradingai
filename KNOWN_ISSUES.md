@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-30 (B312 — two shipped sweeps see 53% of the register, and the third is unaffected for a reason worth stating. stale_sweep.py:107 and deferral_sweep.py:89 both use `### [A-Z]+\d+\.` and REQUIRE a trailing period; running_sweep.py:89 was fixed by B311. Measured: 295 headings matching ^### B<n>, 136 with NO trailing period (46%), so the two shipped tools see 159 (53%) and neither says so. B311's point applies harder here — a tool that states its bounds and states the WRONG ones is worse than one that states none, because the stated bound stops a reader looking for the unstated one. landed_sweep.py is NOT affected and not because it got the regex right: it has NO heading pattern at all, its regexes are T-\d{4}/DEFER/NARRATION, and at :192 it scans KNOWN_ISSUES.md line by line for task references — its population is lines mentioning a task id, not entries. A different limit does apply to it (it reports file:line and cannot attribute a finding to an entry), stated so 'unaffected' is not read as 'audited clean on every axis'. NOTHING RUN DELIBERATELY: the fraction comes before the findings, and a 53% tool's output is not worth reading until the pattern is fixed — its findings would be true and its silences would mean nothing. AND MY OWN FIRST TWO NUMBERS WERE WRONG: 182/61% because [A-Z]+ matched non-B headings, and 291 period-less because ^### (B\d+)(?!\.) backtracks into a prefix so `### B19.` matches `B1`. Both caught by reading the output and seeing B4 repeated eleven times.)
+Last updated: 2026-08-30 (B313 — landed_sweep's population is 5.2x its subject count and 37% of it has no entry to attribute to. The last of the four sweeps whose denominator nobody knew. B312 established it is unaffected by the heading defect BECAUSE it has no heading pattern: it scans lines for T-\d{4}, so its population is LINES not entries — a limit stated and never measured. REACH: 296 entries, 268 containing at least one T-id line (90%), 28 unreachable because they never cite a task — consistent with deferral_sweep's widened result of zero unowned. ATTRIBUTABILITY: 1385 T-id lines across everything it scans — 863 (62%) in KNOWN_ISSUES.md where an entry EXISTS and the tool does not use it, and 522 (37%) in backend/ and scripts/ across 122 files where NO entry exists. So 37% is unattributable BY CONSTRUCTION and the rest is attributable-but-not-attributed. AND THE RATIO IS THE FINDING: 1385 lines over 268 attributable entries is 5.2 potential findings per subject, and within the register alone 863 over 268 is 3.2 lines per entry — a reader sees line-shaped noise over an entry-shaped problem and cannot tell that three flags are one fact. Not a defect in what it reports; every line it flags is a real citation. The defect is that its denominator was never stated, the same shape as stale_sweep printing 319 beside 44. Fix needs no new scan: group register hits by containing entry and report entries-affected beside lines-flagged. BOUNDED: I measured the population, not the output — the fraction comes before the findings.)
 
 ---
 
@@ -19654,3 +19654,53 @@ no parseable date in `Found in:` — **which it has always printed, and which no
 newly-correct number is the one the reader anchors on.**
 
 Related: **B311**, **B240**, **B150**, **B298**.
+
+### B313. `landed_sweep`'s population is 5.2× its subject count, and 37% of it has no entry to attribute to
+
+**The last of the four sweeps whose denominator nobody knew.** `B312` established it is unaffected by
+the heading defect **because it has no heading pattern** — it scans lines for `T-\d{4}`, so its
+population is **lines**, not entries. **That limit was stated and never measured. Measured now.**
+
+**REACH — what a line-keyed population covers of an entry-keyed one:**
+
+```
+entries in the register                                     296
+entries containing at least one T-id line                   268   (90%)
+ENTRIES A LINE-KEYED SWEEP CANNOT REACH AT ALL               28
+```
+
+**90% is better than the shape suggests**, and the 28 are not a hidden defect class: they are entries
+that **never cite a task**, which is consistent with `deferral_sweep`'s widened result — 6 entries
+with deferral language, all naming a task, **zero unowned.**
+
+**ATTRIBUTABILITY — what the output can be traced to:**
+
+```
+lines mentioning a T-id across everything it scans          1385
+   in KNOWN_ISSUES.md          863  (62%)   an entry EXISTS -- and the tool does not use it
+   in backend/ and scripts/    522  (37%)   NO entry exists, across 122 files
+```
+
+> **So 37% of its findings are unattributable BY CONSTRUCTION** — a task id in a code comment has no
+> entry behind it — **and the other 62% is attributable-but-not-attributed**, because the tool reports
+> `file:line`.
+
+**AND THE RATIO IS THE FINDING, NOT EITHER PERCENTAGE.** 1385 lines over 268 attributable entries is
+**5.2 potential findings per subject** — and within the register alone, 863 lines over 268 entries is
+**3.2 lines per entry.** **A reader triaging its output sees line-shaped noise over an entry-shaped
+problem**, and cannot tell that three flags are one fact.
+
+**NOT A DEFECT IN WHAT IT REPORTS.** Every line it flags is a real citation. **The defect is that its
+denominator was never stated**, so *"N findings"* has never been readable — the same shape as
+`stale_sweep` printing `319` beside `44` (`B312`), where the honest headline was `44 of 49 examined`.
+
+**WHAT WOULD MAKE THE OUTPUT READABLE**, and it needs no new scan: **group register hits by containing
+entry and report `entries affected` beside `lines flagged`** — the containing entry is derivable from
+the line number by the same heading walk `running_sweep` already does. **Code hits stay line-keyed
+because there is nothing else they could be**, and saying so separates the 37% rather than mixing it
+in.
+
+**BOUNDED:** I measured the population, **not the tool's output** — I did not run it, because
+`B312`'s rule applies: **the fraction comes before the findings**, and this is the fraction.
+
+Related: **B312**, **B311**, **B240**, **B298**.
