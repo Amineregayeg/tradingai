@@ -54,6 +54,33 @@ class Position(BaseModel):
     entry_price: Decimal
     current_price: Decimal
     unrealized_pnl: Decimal
+    #: WHICH QUANTITY `unrealized_pnl` ACTUALLY IS (`B286`). **Required: a position carrying a
+    #: P&L value must be unconstructible without saying where the number came from.**
+    #:
+    #: `cryptofundtrader.py` read it as
+    #: `raw.get("profit", raw.get("netProfit", raw.get("openNetProfit")))` — a three-deep
+    #: silent fallback across keys that **are not the same quantity**. `profit` is
+    #: conventionally GROSS and `netProfit` is net of costs, so the field held one of three
+    #: different measurements with nothing recording which. **No definition of this field can
+    #: be honoured while a caller cannot tell them apart.**
+    #:
+    #: THREE STATES, AND THE THIRD IS THE POINT. Four adapters build a `Position` and `paper`
+    #: COMPUTES its P&L with no key involved, so two states would make `None` mean both
+    #: *"computed locally, correctly"* and *"nothing was read, which is a fault"* — the same
+    #: could-not-ask collapse this field exists to prevent (`B215`).
+    #:
+    #:     "profit" | "netProfit" | "openNetProfit"   the key ACTUALLY present and read
+    #:     "computed"                                 derived locally — paper, cft_sim
+    #:     None                                       nothing read and nothing computed: a
+    #:                                                FAULT, and the value is not to be trusted
+    #:
+    #: **A `.get(key, default)` IS NOT A KEY READ.** The key may be absent while a value still
+    #: appears, so a provenance recorded from a defaulted read would name a key the payload
+    #: never carried. Either the key was PRESENT — record it — or nothing was read.
+    #:
+    #: **It must never default to `"profit"`.** That reintroduces the ambiguity one layer
+    #: down, in a field whose entire purpose is to remove it.
+    pnl_source: str | None
     r_multiple: Decimal | None = None
     lot_size: Decimal
     sl: Decimal | None = None

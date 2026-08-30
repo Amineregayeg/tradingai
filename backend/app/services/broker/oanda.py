@@ -241,6 +241,17 @@ class OANDAAdapter(BrokerAdapter):
             avg_price_str = side.get("averagePrice", "0")
             entry_price = Decimal(avg_price_str)
 
+            # `B286`. BROUGHT IN LINE RATHER THAN DELETED, and the reason is that an adapter
+            # which is dead today is the template someone reads tomorrow. `manager.py:33`
+            # records that the OANDA branch was removed and this app is crypto-only, so
+            # nothing reaches here — but the shape gets copied.
+            #
+            # `.get(key, default)` IS NOT A KEY READ: the key may be absent while a value
+            # still appears, and `"0"` is a fabricated P&L that reads as a real one. The
+            # value still has to exist because `Position.unrealized_pnl` is non-optional, so
+            # the FAULT is carried in the provenance instead: `pnl_source=None` says the
+            # number was not read and is not to be trusted.
+            pnl_source = "unrealizedPL" if "unrealizedPL" in side else None
             unrealized_pnl = Decimal(side.get("unrealizedPL", "0"))
 
             # Current price isn't in openPositions payload; approximate from entry+PnL
@@ -281,6 +292,7 @@ class OANDAAdapter(BrokerAdapter):
                     entry_price=entry_price,
                     current_price=current_price.quantize(Decimal("0.000001")),
                     unrealized_pnl=unrealized_pnl,
+                    pnl_source=pnl_source,
                     r_multiple=r_multiple,
                     lot_size=Decimal(units),
                     sl=sl,

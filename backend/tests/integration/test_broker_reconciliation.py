@@ -66,7 +66,13 @@ def position(pair="BTC/USD", pid="pos-1", direction=DirectionType.LONG, lots="0.
     return Position(
         id=pid, pair=pair, direction=direction, lot_size=Decimal(lots),
         entry_price=Decimal("62000"), current_price=Decimal("62100"),
-        unrealized_pnl=Decimal("5"), duration_seconds=3600,
+        unrealized_pnl=Decimal("5"),
+        # `B286`. A hand-built Position is a Position PRODUCER, and the provenance is now the
+        # producer's obligation — the same lesson `T-0059`'s flag taught. `"computed"`
+        # because this fixture derives the number itself; recording a KEY NAME here would
+        # claim a payload that does not exist.
+        pnl_source="computed",
+        duration_seconds=3600,
         open_time=datetime.now(timezone.utc),
     )
 

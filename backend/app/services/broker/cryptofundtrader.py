@@ -47,6 +47,29 @@ from app.db.enums import DirectionType
 from app.schemas.broker import Position
 from app.services.broker.base import Account, BrokerAdapter, OrderRequest
 
+#: The P&L keys this venue is known to send, in the order the adapter has always preferred.
+#: **The ORDER IS UNCHANGED by `T-0102`** — that task records which key was read and decides
+#: nothing about which one the venue actually sends, because asking the live API is `T-0114`
+#: and is gated: CFT is a third-party production broker.
+PNL_KEYS: tuple[str, ...] = ("profit", "netProfit", "openNetProfit")
+
+
+def pnl_key_present(raw: dict) -> str | None:
+    """Which P&L key this payload ACTUALLY carries, or `None` if it carries none (`B286`).
+
+    **A NAMED FUNCTION SO THE ARM CAN IMPORT IT RATHER THAN RE-IMPLEMENT IT.** Its first
+    test re-implemented the selection inline, and a mutation restoring the old silent
+    fallback in this module left those arms green — they were exercising the copy. Same
+    shape as `T-0065`'s vitest duplicate, and the fix is not to pin the copy but to remove it.
+
+    **PRESENCE, NOT `.get` WITH A DEFAULT.** The key may be absent while a value still
+    appears, and a provenance taken from a defaulted read would name a key the payload never
+    carried. **And never a fallback to `"profit"`** — that reintroduces the ambiguity one
+    layer down, in the field whose whole purpose is to remove it.
+    """
+    return next((k for k in PNL_KEYS if k in raw), None)
+
+
 DEFAULT_HOST = "https://trading.cryptofundtrader.com"
 
 # Host-level auth endpoint.
@@ -386,9 +409,21 @@ class CryptoFundTraderAdapter(BrokerAdapter):
             current_price = _dec(
                 raw.get("currentPrice", raw.get("marketPrice")), default=str(entry_price)
             )
-            unrealized_pnl = _dec(
-                raw.get("profit", raw.get("netProfit", raw.get("openNetProfit")))
-            )
+            # `B286`. THIS WAS A THREE-DEEP SILENT FALLBACK ACROSS KEYS THAT ARE NOT THE
+            # SAME QUANTITY: `raw.get("profit", raw.get("netProfit", raw.get(
+            # "openNetProfit")))`. `profit` is conventionally GROSS and `netProfit` is net of
+            # costs, so `unrealized_pnl` held one of three different measurements with nothing
+            # recording which — and no definition of the field can be honoured while a caller
+            # cannot tell them apart.
+            #
+            # The ORDER is unchanged: this task records which key was read and decides nothing
+            # about which key the venue actually sends, which is `T-0114` and is gated.
+            #
+            # PRESENCE, not `.get` with a default: the key may be absent while a value still
+            # appears, and a provenance taken from a defaulted read would name a key the
+            # payload never carried.
+            pnl_source = pnl_key_present(raw)
+            unrealized_pnl = _dec(raw.get(pnl_source) if pnl_source else None)
             volume = _dec(raw.get("volume", raw.get("lots", raw.get("size"))))
             sl = raw.get("stopLoss", raw.get("slPrice", raw.get("sl")))
             tp = raw.get("takeProfit", raw.get("tpPrice", raw.get("tp")))
@@ -410,6 +445,7 @@ class CryptoFundTraderAdapter(BrokerAdapter):
                     entry_price=entry_price,
                     current_price=current_price,
                     unrealized_pnl=unrealized_pnl,
+                    pnl_source=pnl_source,
                     r_multiple=r_multiple,
                     lot_size=volume,
                     sl=sl_dec,

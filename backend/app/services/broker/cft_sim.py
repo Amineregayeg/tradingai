@@ -341,6 +341,11 @@ class SimPropFirmBroker(BrokerAdapter):
                 id=p.id, pair=p.pair, direction=p.direction,
                 entry_price=Decimal(str(p.entry)), current_price=Decimal(str(mark)),
                 unrealized_pnl=Decimal(str(round(p.upnl(mark), 4))), r_multiple=rmult,
+                # DERIVED LOCALLY — no venue key is involved, so this is `"computed"` and
+                # NOT `None`. `None` means nothing was read AND nothing was computed, which
+                # is a fault; collapsing the two would make a correct local calculation
+                # indistinguishable from a failed read (`B215`).
+                pnl_source="computed",
                 lot_size=Decimal(str(p.units)),
                 sl=Decimal(str(p.sl)) if p.sl else None,
                 tp=Decimal(str(p.tp)) if p.tp else None,
