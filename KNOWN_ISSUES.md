@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-30 (B289 — duration_seconds is COMPUTED by oanda and cryptofundtrader and HARDCODED to 0 by paper and cft_sim, and it is a REQUIRED int on Position so the two that cannot compute it have no way to say so: zero is the only value satisfying the type. Nothing reads it, measured, so there is no live defect — it is filed because it is the THIRD instance of one pattern, after unrealized_pnl and r_multiple in B286: three fields, one schema, and in each case the meaning depends on which adapter built the row with nothing recording which. The schema is being used as a SHAPE and treated as a CONTRACT. It becomes MT5's problem because a fifth adapter must choose and there is no rule to choose by, and because 0 is B215's collapse again — this venue does not report an age and this position is zero seconds old are the same value, while open_time sits correctly on the same object. Found while investigating why the live engine had written no decision for 35 hours: it had not stopped, both symbols were held.)
+Last updated: 2026-08-30 (B290 — T-0098's new sizing arms guard PRESENCE, not PROVENANCE: binding sizing_price to the fill reintroduces B280 with the suite green. The two arms are a real improvement and meet their acceptance condition twice — setting the three sizing arguments to None fires test_none_of_the_three_is_bound_to_a_LITERAL_None, and REMOVING the keywords entirely (same NULL columns via parameter defaults, no literal None to find) fires test_the_producer_passes_ALL_THREE_sizing_inputs_at_its_call_site. BUT NEITHER CHECKS WHAT THE KEYWORDS ARE BOUND TO. Measured: sizing_price=res.get('sizing_price') -> res.get('fill') gives 18 passed, 0 failed. That is B280 exactly, reintroduced — and B280 is why the column exists, size_position dividing by |sizing_price - sl| and never |fill - sl|, measured at 4.76% out at fifty ticks. The reconstruction arm cannot save it because it builds its own row with internally consistent values; a real row would be internally INCONSISTENT and no arm reconstructs from a row the PRODUCER wrote. FIX in the same instrument: the arms already parse the call site and check the keyword SET; one more assertion checks the bound EXPRESSION. GENERAL FORM: a structural arm over a call site can check that a keyword is present, that it is not obviously empty, and that it holds the right value — these do the first two, and the third is where the defect the column exists for lives.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -18109,3 +18109,43 @@ and the field beside it lies.
 (`B240` — a zero from a scanner is not evidence of absence).
 
 Related: **B286**, **B215**, **B261**, **B184**.
+
+### B290. The new sizing arms guard PRESENCE, not PROVENANCE — binding `sizing_price` to the fill reintroduces `B280` with the suite green
+
+**`T-0098` review.** The two arms added are a real improvement and they meet their acceptance
+condition twice: setting the producer's three sizing arguments to `None` fires
+`test_none_of_the_three_is_bound_to_a_LITERAL_None`, and **removing the keywords entirely** — which
+produces the same NULL columns via the parameter defaults, with no literal `None` to find — fires
+`test_the_producer_passes_ALL_THREE_sizing_inputs_at_its_call_site`. **Two failure modes, two arms,
+each naming its own.**
+
+**BUT NEITHER CHECKS WHAT THE KEYWORDS ARE BOUND TO. MEASURED:**
+
+```python
+sizing_price=res.get("sizing_price")   ->   sizing_price=res.get("fill")
+
+    18 passed, 0 failed.   NOTHING NOTICES.
+```
+
+**That is `B280` exactly, reintroduced** — and `B280` is the reason the column exists. `size_position`
+divides by `|sizing_price − sl|` and never `|fill − sl|`; the difference was measured at **4.76% at
+fifty ticks**. **A mutation binding the column to the fill is invisible to every arm in the suite.**
+
+**WHY THE RECONSTRUCTION ARM DOES NOT SAVE IT:** it builds its own row with internally consistent
+values, so it can never observe a producer binding the wrong source. **A real row would be internally
+INCONSISTENT — `sized_units` computed from one price while `sizing_price` holds another — and no arm
+reconstructs from a row the PRODUCER wrote.** `B282`'s shape surviving in the one dimension the new
+arms do not cover.
+
+**FIX, IN THE SAME INSTRUMENT:** the arms already parse the call site and check the keyword **set**.
+**One more assertion checks the bound expression** — `sizing_price` to `res.get("sizing_price")`,
+`sizing_equity` to `res.get("equity_at_entry")`, `sizing_risk_pct` to `sig.risk_pct`.
+
+**NOTHING SHIPPED IS WRONG** — the call site binds the correct sources today. **This is about what the
+guard would catch**, and the guard is strictly better than what preceded it.
+
+**GENERAL FORM WORTH CARRYING:** a structural arm over a call site can check three separate things —
+**that a keyword is present, that it is not obviously empty, and that it holds the right value.**
+These arms do the first two. **The third is where the defect the column exists for lives.**
+
+Related: **B280**, **B282**, **B279**, **B256**.
