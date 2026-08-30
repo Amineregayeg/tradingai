@@ -20,6 +20,7 @@ from __future__ import annotations
 import pytest
 
 from app.services.execution.lots import (
+    BOUND_MAX,
     BOUND_MIN,
     BOUND_NON_POSITIVE,
     BOUND_STEP,
@@ -204,3 +205,108 @@ def test_size_position_is_UNTOUCHED_by_this_module():
 
     # And the sizer itself still returns UNITS, unchanged.
     assert size_position(5000.0, 0.01, 70_000.0, 69_000.0) == pytest.approx(0.05, abs=1e-9)
+
+
+# ======================================================================================
+# T-0103 / `B283` — A REFUSAL MUST CARRY THE BOUND THAT *CAUSED* IT
+#
+# Three branches refused with `bound=BOUND_MIN` and only one was minimum-caused. **The
+# accurate prose hid the inaccurate field:** the `volume_max` branch's reason string names
+# `volume_max` and is correct, so a reader who checks the message finds the right cause and
+# never looks at the field. *It survives a careful read and fails only where a caller
+# BRANCHES rather than reads* — which is precisely what `T-0097` said the bound was for.
+# ======================================================================================
+
+#: An instrument whose own bounds leave NO legal volume: the largest multiple of the step at
+#: or below the max is below the min. The refusal is caused by the MAXIMUM.
+NO_LEGAL_VOLUME = dict(contract_size=1.0, volume_min=5.0, volume_step=0.3, volume_max=1.0)
+#: A zero minimum, which makes the round-down-to-zero branch REACHABLE. The cause is the STEP.
+ZERO_MIN = dict(contract_size=1.0, volume_min=0.0, volume_step=0.1, volume_max=10.0)
+
+
+def test_the_max_caused_refusal_does_NOT_report_volume_min():
+    r = units_to_lots(50.0, **NO_LEGAL_VOLUME)
+
+    assert r.refused is True
+    assert r.bound == BOUND_MAX, (
+        f"a refusal caused by volume_max reported {r.bound!r}. Its own reason string names "
+        "volume_max and is correct — which is what makes this survive a careful read."
+    )
+    assert "volume_max" in r.reason, "and the message must still name the real cause"
+
+
+def test_the_step_caused_refusal_does_NOT_report_volume_min():
+    """**Re-keyed even though it is unreachable while `volume_min > 0`.** A one-line fix to
+    the max branch would have left the identical defect here for the day an instrument
+    reports a zero minimum — and the comment saying it is unreachable is exactly what would
+    stop anyone looking. With `volume_min = 0` it IS reachable, and this exercises it."""
+    r = units_to_lots(0.05, **ZERO_MIN)
+
+    assert r.refused is True
+    assert r.bound == BOUND_STEP, f"a refusal caused by the step reported {r.bound!r}"
+    assert r.lots is None, "and still never 0.0"
+
+
+def test_every_refusal_branch_reports_a_DISTINCT_and_CORRECT_cause():
+    """All four causes, side by side. *A caller that cannot tell them apart cannot report any
+    of them honestly*, and three of them used to be the same token."""
+    causes = {
+        "below the minimum":       units_to_lots(500.0, **FX).bound,
+        "bounds leave nothing":    units_to_lots(50.0, **NO_LEGAL_VOLUME).bound,
+        "rounds down to zero":     units_to_lots(0.05, **ZERO_MIN).bound,
+        "non-positive units":      units_to_lots(0.0, **FX).bound,
+        "unusable instrument":     units_to_lots(1.0, **dict(FX, volume_step=0.0)).bound,
+    }
+    assert causes["below the minimum"] == BOUND_MIN
+    assert causes["bounds leave nothing"] == BOUND_MAX
+    assert causes["rounds down to zero"] == BOUND_STEP
+    assert causes["non-positive units"] == BOUND_NON_POSITIVE
+    assert causes["unusable instrument"] == BOUND_STEP
+    assert len({causes["below the minimum"], causes["bounds leave nothing"]}) == 2, (
+        "the min-caused and max-caused refusals must not share a token"
+    )
+
+
+# ======================================================================================
+# `B261`'s OWN EXAMPLE — a lot meaning something else entirely
+# ======================================================================================
+
+#: A metals-shaped profile. `contract_size=100` is `B261`'s example of the same field name
+#: carrying a different quantity, and the whole reason this conversion exists.
+METALS = dict(contract_size=100.0, volume_min=0.01, volume_step=0.01, volume_max=50.0)
+
+
+def test_a_metals_profile_converts_on_its_OWN_contract_size():
+    """100 units is 1.00 lots here and 0.001 lots on the FX profile — **the same number of
+    units, two different orders.** That is the failure this module exists to prevent, and it
+    was previously absent from the table."""
+    metals = units_to_lots(100.0, **METALS)
+    fx = units_to_lots(100.0, **FX)
+
+    assert metals.refused is False and metals.lots == pytest.approx(1.0, abs=1e-9)
+    assert fx.refused is True and fx.bound == BOUND_MIN, (
+        "100 units is below the FX minimum — the same units, a legal order on one instrument "
+        "and a refusal on the other"
+    )
+
+
+def test_the_module_PUBLISHES_what_it_does_not_cover():
+    """**`B240`.** Ten arms and a table over now-three profiles, and a coverage claim without
+    its complement is the shape this register keeps finding.
+
+    The assumption that matters most is the one that cannot be seen from inside: **if the
+    three bounds are conventions WE picked rather than the broker's, the function is
+    validating against itself.**
+    """
+    import inspect
+
+    from app.services.execution import lots as lots_mod
+
+    doc = inspect.getdoc(lots_mod) or ""
+    assert "DOES NOT COVER" in doc
+    assert "get_symbol_specification" in doc, (
+        "the assumed SOURCE of the three bounds must be named — if they are ours, every "
+        "refusal is correct with respect to numbers nobody at the venue ever stated"
+    )
+    assert "validating against itself" in doc
+    assert "margin" in doc, "a legal volume can still be refused for margin"
