@@ -51,7 +51,23 @@ account exists.
 
 ## What only you can supply
 
-### 0. ⛔ THE ONE THAT COMES BEFORE THE OTHERS — **what will MT5 actually trade?**
+### 0. ✅ RULED 2026-08-31 — **MT5 TRADES CRYPTO CFDs (BTC/ETH)**
+
+**You ruled this. Everything below in this item is kept as the reasoning behind the question, not
+as an open question.** Under this answer the existing loop, the Binance feed and the candle history
+drive MT5 unchanged, **what changes is one adapter**, and every queued MT5 task is correctly scoped
+already.
+
+**It stays a CONSTRAINT after being closed as a question:** crypto CFDs, **not** whatever the broker
+lists. An MT5 account offering forex does not widen it without a new decision.
+
+**And the financing question survives:** MT5 crypto CFDs **charge swap** where spot does not, so
+`B261` and §3.1 of the first-connection checklist are still the most important thing a closed trade
+settles.
+
+---
+
+#### The question as it was put, kept for the reasoning
 
 **Document:** `B305`, filed 2026-08-30. **This is not a code question and it cannot be derived.**
 
@@ -165,7 +181,23 @@ no longer conditional. **It is a paid service and its free tier is discretionary
 decision only you can take. See *"The transport is settled"* below.
 
 
-### 3. A ruling — the kill switch, when it cannot close everything
+### 3. ✅ RULED 2026-08-31 — **the kill switch, as a PROPERTY**
+
+> **Every position open when the switch was pulled must be CLOSED, FAILED WITH A REASON, or NOT
+> ATTEMPTED. A position in none of those three states is a bug by construction.**
+
+**You ruled the property rather than picking a design, which is what was recommended and why:** all
+three designs can satisfy it, today's CFT code violates it, and it is the only formulation that does
+not change when the transport does. **`NOT ATTEMPTED` is the state none of the four shapes in the
+tree can express**, and it is the one that matters at 3am.
+
+**Consequences, now in motion:** `T-0106`'s prohibition on `close_all_positions` is lifted with the
+property as its specification; `B303`'s CFT defect is fixed under it; and an arm asserts it over
+every implementation.
+
+---
+
+#### The question as it was put, kept for the reasoning
 
 **Document:** `agents/tasks/T-0125/decision-for-malek.md`, about two minutes. **New 2026-08-30.**
 
