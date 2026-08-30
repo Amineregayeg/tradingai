@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-30 (B317 — B316's setdefault is safe ONLY BECAUSE OF WHO HOLDS THE EXECUTION SLOT and nothing records that as the reason. service.py:168 turns a venue reply with no status key into a FILL; the reason it is not happening is that crypto_loop.py:168 and :794 construct ExecutionService(self.paper, ExecMode.PAPER) and self.paper is always SimPropFirmBroker or PaperBroker, never the CFT adapter — both simulators always set status, so the default runs on every order and never fires. Identical in the container. No comment, docstring or arm records that, and T-0106 puts a venue adapter in that slot on purpose. AND IT IS NOT ONLY A MISSING KEY: _handle_response returns {} on an EMPTY body and {} on UNPARSEABLE JSON, so a truncated response or a content-type mishap becomes {"status": "FILLED"} — B316's open question gains a second and much cheaper form. FOURTH INSTANCE TODAY of a mechanism that exists and does not run, after B302, B303 and B309, and in every one the gap was invisible from the code: reachability is a property of what holds the slot, what is deployed and what the venue does, each a separate measurement. Filed as its own entry rather than appended to B316, which is review's, and recorded here because the message reporting it to its author was dropped by the relay.)
+Last updated: 2026-08-30 (B318 — _handle_response SWALLOWS THE PARSE EXCEPTION AND LOGS NOTHING ON EITHER DEGRADED PATH, so the condition B316 and B317 describe would leave NO TRACE if it has already happened: zero logger calls in that window and `except Exception: return {}` discarding the exception whole, with no type and no line. 'We have never seen one' is therefore not available as evidence — B215's shape and its sharper form, an absence where no evidence was ever COLLECTABLE, and none will be until that changes. It is its own entry because it OUTLIVES THE FIX: after T-0130's three-state UNKNOWN lands, an empty or malformed 200 becomes a correctly-handled UNKNOWN THAT STILL NOBODY CAN SEE. AND ITS TWO NEIGHBOURS: B317 — B316's setdefault is safe only because crypto_loop constructs ExecutionService(self.paper, ExecMode.PAPER) and self.paper is always a simulator, never the CFT adapter, an invariant NOTHING RECORDS while T-0106 exists to break it; B316 — cryptofundtrader and oanda forward the venue reply UNCHANGED so they have no schema at all, and service.py:168's res.setdefault('status', 'FILLED') turns an EMPTY or UNPARSEABLE 200 into a FILL that crypto_loop:1518 records as a position-open.)
 
 ---
 
@@ -19996,7 +19996,32 @@ the assumption.**
 implementer would read for it are the two with no schema.** A `setdefault` that means *"assume it
 worked"* is a defensible default for a simulator and a dangerous one for a venue.
 
-Related: **B221**, **B286**, **B315**, **B303**, **B215**.
+**⚠ AMENDED — MY TRIGGER CLAIM WAS TOO NARROW, AND THE CORRECTION MAKES THIS WORSE.** I wrote that
+the trigger is *a `200` carrying a business rejection* — a complete payload omitting one field.
+**Verified against `_handle_response`'s tail:**
+
+```python
+if not response.content:
+    return {}
+try:
+    return response.json()
+except Exception:
+    return {}
+```
+
+**`{}` on an EMPTY body, and `{}` on UNPARSEABLE JSON.** So the trigger is not a well-formed reply
+missing a key — **it is a truncated response, an empty body, a content-type mishap, a proxy
+returning nothing.** `{}` has no `status`, `setdefault` makes it `"FILLED"`, and the loop records a
+fill.
+
+> **Every HTTP client meets an empty or malformed `200` eventually.** My open question stands and
+> gains a second, far cheaper form: **does Match-Trader ever return an EMPTY or MALFORMED `200`?**
+> *(Measured by the manager, verified by me; the entry is amended rather than a new one filed,
+> because it corrects this entry's own claim.)*
+
+**The invariant that keeps it from firing today is `B317`'s subject and belongs there, not here.**
+
+Related: **B221**, **B286**, **B315**, **B303**, **B215**, **B317**.
 
 ---
 
@@ -20066,3 +20091,47 @@ because a simulator holds a slot.**
 slot, what is deployed, and what the venue does — and each of those is a separate measurement.**
 
 Related: **B316**, **B302**, **B303**, **B309**, **B221**.
+
+### B318 — `_handle_response` SWALLOWS THE PARSE EXCEPTION AND LOGS NOTHING ON EITHER DEGRADED PATH, so the condition B316 and B317 describe would leave no trace if it has already happened
+
+`backend/app/services/broker/cryptofundtrader.py`, tail of `_handle_response`:
+
+```python
+if not response.content:
+    return {}          # empty 200 -> {}     no log
+try:
+    return response.json()
+except Exception:
+    return {}          # unparseable -> {}   no log, exception discarded whole
+```
+
+**Two degraded outcomes, zero observability.** The `except` does not re-raise, does not record the
+exception type, does not log the body it failed to parse. Both paths return the same `{}` an
+ordinary empty-but-valid reply would produce, so a caller cannot distinguish *the venue said
+nothing* from *the venue said something I could not read*.
+
+**This is a SEPARATE defect from B316/B317 and it OUTLIVES their fix.** `T-0130`'s three-state
+`UNKNOWN` stops `{}` becoming a `FILLED` — that is the safety half, and it is the right fix. **It
+does not make the condition visible.** After `T-0130` lands, an empty or malformed `200` becomes a
+correctly-handled `UNKNOWN` that still nobody can see, count, or attribute to a cause.
+
+**The consequence that matters, and it is why this is filed rather than folded into a task:**
+
+> **"We have never seen one" is not available as evidence, and cannot become available.** No log,
+> no telemetry, no exception. If a truncated body has already turned an order into a phantom fill,
+> **the record of it does not exist** — and none will exist going forward either.
+
+**`B215`'s shape in its sharper form.** B215 says an absence is undetermined and must not be read
+as a zero. **This is the case where no evidence was ever collectable** — so the usual remedy of
+*go and look* has nothing to look at. The fix is not a better search; it is to start recording.
+
+**Scope note — what I did NOT check.** Whether the other adapters' response handlers have the same
+silent-`{}` shape. `oanda.py` and the proxy were read for `place_order`'s *return schema* under
+`T-0129`, not for their error handling, and **a region I read for one property is not a region I
+have read.** Unmeasured, not clean.
+
+**Fix:** log at `WARNING` before each `return {}` — `context`, `status_code`,
+`len(response.content)`, and on the parse path the exception type and the leading bytes.
+**Queued as `T-0131`**, which needs no authorisation and no venue cooperation.
+
+Related: **B316**, **B317**, **B215**, **B221**, **T-0130**, **T-0131**.
