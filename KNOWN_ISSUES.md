@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-24 (B279 — the equity a trade was sized against is NEVER RECORDED, so every risk figure must be inferred, and the inference stops working on a real venue. Answering B278's open bound: DecisionRecord has NO equity/balance/account column — it records sized_units and the prices but not the number those units were computed FROM. PropFirmSnapshot does hold equity and balance, at Numeric(14,2) — TWO decimal places — written by observe_sync.py:80 and compliance/engine.py:74, neither of which is the trading loop at decision time. So a direct read would be stronger in KIND and WEAKER IN PRECISION: the column holds 5000.92 where the arithmetic gave 5000.9197, and equity moves continuously with unrealised P&L so a snapshot seconds away is a different number. THE SOURCE ALSO SETTLES B278 DIRECTLY: execution/service.py:151 is `units = size_position(acct.equity, ...)`. B278 inferred the equity basis from live arithmetic; the source says it outright, and the two routes together close a gap neither closes alone — the source says what the code does, the arithmetic says what the RUNNING BOX did. B240's shape at the sizing layer: the denominator of every risk figure is absent from the row that used it. AND THE RECONSTRUCTION IS ABOUT TO BREAK — it works only because the paper broker's equity moves solely from our own positions; on an MT5 demo it also moves from swap, commission and financing, which B261 established we have no field for. Cheapest to fix before MT5, because the rows written from now on are the ones that will be re-read.)
+Last updated: 2026-08-30 (B281 — a comment at execution/service.py:172-174 asserted that what we sized against and how far the market had moved are "BOTH RECORDED ON THE DecisionRecord", and NEITHER WAS: res["sizing_price"] and res["entry_drift_r"] are returned by execute() and `grep -rn entry_drift_r app/` outside that file returns nothing, while sizing_price had no column until T-0084. B238's class — a reader checking whether the value was persisted found a sentence saying it was, which is worse than silence because silence sends you to the source. Filed beside B280, which established that the sizing reconstruction is exact only where fill == sizing_price and that nothing recorded the divisor. Both entries are Execute's, from T-0084.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -15183,6 +15183,62 @@ once, indistinguishable from a correct implementation by every instrument we hav
 
 **So an MT5-demo adapter declaring `is_simulation = True` is not merely answering this entry's two
 questions with one word — it is supplying, by assertion, the only fact the write gate consults.**
+### B280. The sizing reconstruction is exact only where `fill == sizing_price`, and nothing records which
+**Found in:** T-0084, applying the manager's own two-column argument to the acceptance arm he wrote (Execute)
+**What it is:** `B279` folded `sizing_equity` and `sizing_risk_pct` into the decision row so a reader
+could recompute `sized_units`. The proposed arm was
+`sizing_equity × sizing_risk_pct / |fill − sl|`. **`size_position` does not use the fill:**
+
+```
+service.py:149   sizing_price = mark          # the reference price read BEFORE the order goes in
+service.py:151   units = size_position(acct.equity, sig.risk_pct, sizing_price, sig.sl)
+size_position    (equity * risk_pct) / |entry - sl|
+```
+
+**Measured, not argued:**
+
+```
+sized_units from sizing_price=70000        0.05000920
+reconstructed with fill == sizing_price    0.05000920   EXACT
+reconstructed with fill = 70050 (50 ticks) 0.04762781   4.76% OUT
+```
+
+**`sizing_price` was persisted nowhere** — returned by `execute()` on both the success and the
+rejection dict, landing in no column. So the reconstruction was exact only where the reference read
+and the fill come from the same cached mark, **which is a property of `PaperBroker` rather than of
+the system.** `fill_price` exists as a separate column precisely because they are not the same
+thing, and MT5 is where slippage gives the fill a second author.
+
+**It is the input that degrades SILENTLY rather than failing** — the recomputed size just comes out
+wrong, by exactly the slippage, and the row cannot say it happened.
+
+**FIXED in `T-0084`:** `sizing_price Numeric(18, 6)` in the same revision. `size_position` is a pure
+function of four arguments, and all four are now stored — `sizing_equity`, `sizing_risk_pct`,
+`sizing_price`, and `signal_sl`, which was already there. *Recording inputs is venue-independent;
+recording derivations is not.* Related: **B279**, **B281**.
+
+### B281. A comment asserted two values were "recorded on the DecisionRecord" and neither was
+**Found in:** T-0084, while verifying `B280` (Execute)
+**What it is:** `execution/service.py:172-174` read:
+
+> *"What we sized against, and how far the market had already moved. **Both are recorded on the
+> DecisionRecord** so R can be measured against the price actually paid rather than the one the
+> strategy hoped for."*
+
+**Neither was.** `res["sizing_price"]` and `res["entry_drift_r"]` are both returned by `execute()`
+and `grep -rn entry_drift_r app/` outside that file returns nothing at all; `sizing_price` had no
+column until `T-0084`.
+
+**This is `B238`'s class:** a reader checking whether the value was persisted found a sentence
+saying it was. *Worse than silence, because silence sends you to the source.* And the sentence is
+the strongest evidence the column was overdue rather than new — the distinction between the fill and
+the sizing price was known, written down, and thrown away on every bar.
+
+**Half fixed.** `T-0084` gives `sizing_price` a column and corrects the sentence. **`entry_drift_r`
+is still discarded** and is filed rather than fixed: it is a measurement of the market, not an input
+to the size, so it does not belong in the same change as the four arguments of a pure function.
+Related: **B280**, **B279**, **B238**.
+
 
 ### B8. The delivered contract artefacts are mutually incompatible — BLOCKED ON SALIM
 **Found in:** M1 (implementing the telemetry layer)
@@ -17557,6 +17613,36 @@ because the rows written from now on are the ones that will be re-read.
 
 **BOUNDED:** I read the models and the call site. **I ran no query, and I did not check whether a
 snapshot near `16:35:26` happens to exist** — only that nothing guarantees one does.
+
+**AMENDED BY ITS AUTHOR — THIS ENTRY STATED THE WEAKER OF TWO FIXES.** Everything above frames the
+problem as *preserving a reconstruction technique before MT5 breaks it*. **That is the wrong goal, and
+`T-0084`'s third column is what made the better one visible.**
+
+```
+size_position(equity, risk_pct, entry, sl)   is a PURE FUNCTION
+  equity        -> sizing_equity      recorded by T-0084
+  risk_pct      -> sizing_risk_pct    recorded by T-0084
+  sizing_price  -> sizing_price       recorded by T-0084  (:118 LIMIT / :149 MARKET)
+  sl            -> signal_sl          already recorded
+```
+
+**Recording the four ARGUMENTS to a pure function makes its output reconstructible forever,
+independently of how those arguments were obtained.** `sized_units` stops being inferred from
+observed behaviour and becomes arithmetic over stored values.
+
+> **RECORDING INPUTS IS VENUE-INDEPENDENT; RECORDING DERIVATIONS IS NOT.** So the MT5 deadline this
+> entry opens with **is not a deadline at all** once all four are stored — there is nothing left to
+> degrade when equity gains a second author, because nothing is being back-inferred.
+
+**AND IT ONLY HOLDS AT FOUR.** With three of the four it remains an estimate, silently wrong by the
+slippage — measured by Execute at **4.76% out at fifty ticks**. **The third column is not a
+nice-to-have; it is the one that makes the property true**, and it was found by applying this entry's
+own two-column argument to the arm written to test it.
+
+**Also sharper than stated above:** `sizing_price` was never merely unrecorded — `service.py:158`
+and `:175` **already return it**, and `:177` already says *"it should equal `sizing_price` for these
+in-process sims, but trust the broker's number, not our estimate."* **The distinction was known,
+written down, and discarded at the last step.**
 
 Related: **B278**, **B277**, **B240**, **B261**, **B275**.
 
