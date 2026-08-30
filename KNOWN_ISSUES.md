@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-30 (B287 — a refusal CAUSED BY volume_max is labelled bound=BOUND_MIN in execution/lots.py; the reason string names volume_max and is correct, the machine-readable field says volume_min. `bound` exists so a caller can distinguish TOO SMALL from TOO LARGE without parsing prose — that is its entire purpose — and this is the one branch where the two causes meet, so a caller switching on it attributes a maximum-caused refusal to the minimum. AND THE ACCURATE PROSE MAKES IT LESS VISIBLE: anyone reading the message sees the right cause and has no reason to check the field, so the correct half hides the incorrect half. There is no BOUND_MAX constant and its absence is right for the ordinary case — hitting the maximum is a SIZE REDUCTION carried by clamped=True, not a refusal — but this branch is a genuine refusal whose cause is the maximum and the vocabulary has no value for it. Not blocking and not reachable on a sane instrument. ALSO: the case table has no coverage claim. Ten named arms plus a parametrised table over two instrument profiles, and nothing in the module, the test file or the commit body says what is NOT covered — concretely absent is a contract_size=100 metals profile, B261's own example.)
+Last updated: 2026-08-30 (B288 — whether MetaApi's close P&L INCLUDES swap and commission is UNVERIFIED, and the undocumented branch is the dangerous one. MT5_READINESS.md stated it as fact and its whole realized_r section rests on it. MetaApi's MetatraderDeal model says only: profit number REQUIRED 'deal profit', commission number 'deal commission', swap number 'deal swap' — the docs do not say whether profit includes the other two, and three SEPARATE fields argue it does not, since reporting a component separately from a total containing it is double-counting. THE WARNING SURVIVES EITHER WAY, THE DIRECTION DOES NOT: if profit INCLUDES costs the numerator gains components the denominator lacks and realized_r gets worse than the geometry says; if profit EXCLUDES them realized_r stays geometry-comparable and SILENTLY IGNORES REAL COSTS, so R looks fine while the account pays. A figure that quietly OVERSTATES performance is worse than one that understates it, and it is the branch the field layout points at — the document asserted the milder direction and did not mention the other. Settled by one read on the first closed MT5 deal: compare profit against the position's realised total. Not an MT5-only question — B286 established unrealized_pnl already has no single definition, and this is the same question on the REALISED side, reaching the number every trade result is judged by. PROCESS NOTE: I bid this id from the ledger then wrote 'Filed B288' when I had only BID it; the manager then asserted the entry existed in a commit message. Bid and filed are different states, and the wording that was wrong was mine first.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -18006,3 +18006,51 @@ Related: **B261**, **B221**, **B215**, **B240**.
 > this a vocabulary that was wrong in both directions. **It is emitted, at `:102`, and asserted by two
 > arms.** The vocabulary is missing `BOUND_MAX`; it is not carrying dead values.
 
+
+### B288. Whether MetaApi's close P&L includes swap and commission is UNVERIFIED — and the undocumented branch is the dangerous one
+
+**`T-0104`, attacking `MT5_READINESS.md`.** That document stated as fact: *"On MT5 the venue's close
+P&L includes swap and commission."* **Every conclusion in its `realized_r` section rests on it.**
+
+**MetaApi's `MetatraderDeal` model, fetched and quoted whole:**
+
+```
+profit       number   REQUIRED   "deal profit"
+commission   number              "deal commission"
+swap         number              "deal swap"
+```
+
+**The vendor documentation does not say whether `profit` includes the other two.** And **three
+separate fields argue that it does not** — reporting a component separately from a total that already
+contains it is double-counting.
+
+**THE WARNING SURVIVES EITHER WAY. THE DIRECTION DOES NOT, AND THE UNSTATED BRANCH IS WORSE:**
+
+```
+profit INCLUDES costs   numerator gains components the denominator lacks
+                        -> realized_r gets WORSE than the trade geometry says
+profit EXCLUDES costs   realized_r stays geometry-comparable and SILENTLY IGNORES REAL COSTS
+                        -> R looks FINE while the account pays swap and commission
+```
+
+> **A figure that quietly OVERSTATES performance on a live venue is worse than one that
+> understates it** — and it is the branch the field layout points at. **The document asserted the
+> milder direction and did not mention the other.**
+
+**THE CHECK THAT SETTLES IT, AND IT IS ONE READ:** on the first closed MT5 deal, compare `profit`
+against the position's realised total. **Nobody can run it until an account exists**, which is
+exactly why the direction must be marked unverified rather than assumed.
+
+**WHY THIS IS NOT ONLY AN MT5 QUESTION:** `B286` established that `unrealized_pnl` already has no
+single definition — `paper` computes gross price movement while CFT takes whichever of
+`profit`/`netProfit`/`openNetProfit` arrived. **This is the same question on the REALISED side, and
+it reaches `realized_r`, which is the number every trade result is judged by.**
+
+**PROCESS NOTE, RECORDED BECAUSE IT PRODUCED A FALSE CLAIM IN PUSHED HISTORY.** I bid this id
+correctly from the ledger and then wrote *"Filed B288"* in my own artefact and message **when I had
+only BID it.** The manager read that and asserted the entry existed in a commit message. **"Bid" and
+"filed" are different states**, and conflating them is the same shape as every finding in this
+register: **a state asserted because it was expected, over one a single `grep` would have shown.**
+The entry now exists; the wording that was wrong was mine first.
+
+Related: **B286**, **B261**, **B285**, **B215**.
