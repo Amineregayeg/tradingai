@@ -19045,8 +19045,8 @@ both seats were working.** At 19:24 I checked again:
 ```
 inbox/execute/  ...-0391-manager-WORK.md      STILL UNREAD
 inbox/review/   ...-0393, ...-0394            STILL UNREAD
-~/.claude/sessions/1345.json   mtime 17:30    <- execute, untouched for 2 hours
-~/.claude/sessions/1739.json   mtime 17:18    <- review, untouched for 2 hours
+~/.claude/sessions/1345.json   mtime 17:30    <- execute  (LOCAL time, = 16:30 UTC)
+~/.claude/sessions/1739.json   mtime 17:18    <- review   (LOCAL time, = 16:18 UTC)
 ListAgents:  tradingai-be  idle    tradingai-ae  waiting
 ```
 
@@ -19087,5 +19087,19 @@ indefinitely. Written into `PROMPT_MANAGER.md` in the same commit as this entry.
 *"Both seats are working."* **They were not.** The tasks were assigned and the work was real; the
 claim about what was happening at that moment was false, and I made it from a field that cannot
 carry it.
+
+## AMENDED SAME DAY — **I MIXED TWO CLOCKS INSIDE THE ENTRY ABOUT MISREADING AN INSTRUMENT**
+
+The table above compared `ls` mtimes against `bus.py` timestamps. **`ls` prints LOCAL time (UTC+1
+here); the bus writes UTC.** So the gap was **not two hours — it was two hours fifty-four minutes**,
+and I stated it as *"untouched for 2 hours"* by subtracting a local clock from a UTC one.
+
+**The direction is the tell:** mixing them made the seat look *more recently active than it was*,
+which is the same error the entry is about, one layer down. **An entry about reading a field that
+cannot carry the claim, containing a number computed across two units.**
+
+**Small and it changes nothing for a reader** — which is exactly why it is worth fixing here rather
+than left: this file is where the project's numbers are supposed to be right. Corrected in the table
+above; the conclusion is unchanged and slightly stronger.
 
 Related: **B215**, **B300**, **B304**, **B306**.
