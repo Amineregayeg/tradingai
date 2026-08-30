@@ -18790,6 +18790,25 @@ reason — *rotating means REPLACING it, not adding another above it.* **The hoo
 this can no longer be blind to it**, which is the same fix applied to the same file two days ago when
 it learned to refuse a commit claiming an id the diff does not add.
 
+## VERIFIED 2026-08-30, BY A CONTROL SET — **because the entry above asserted a fix and nothing had measured it**
+
+**The claim *"the hook now COUNTS"* was written into a pushed commit before it had been run against a
+duplicate.** Two commits passed through it afterwards, which proves only that it does not refuse
+correct files. **That is one half of an instrument.** `header_lag` monkeypatched over five blobs:
+
+```
+PASS  one header naming the newest entry           -> None        <- the NEGATIVE control
+PASS  one header naming an OLDER entry             -> refuses     <- the original check, intact
+PASS  two headers, THE FIRST ONE CORRECT           -> refuses, "THERE ARE 2"
+PASS  four headers, the first correct              -> refuses, "THERE ARE 4"   <- THIS ENTRY'S SHAPE
+PASS  no header at all                             -> refuses
+```
+
+**Case 4 is the exact configuration this entry documents**, and it is the one the old loop passed:
+the first line is correct, so a check that returns on the first match sees nothing wrong. **The
+negative control is what makes the other four mean anything** — a check that refused everything would
+score four out of five here.
+
 Related: **B298**, **B296**, **B287**, **B144**.
 
 ---
