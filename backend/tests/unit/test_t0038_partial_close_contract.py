@@ -57,10 +57,33 @@ def _all_adapters() -> list[type]:
     # lot_size and discard it. It is a test double, so it is not a production risk -- but a
     # strategy test that validated a partial-exit model against it would reproduce exactly the
     # defect this task closed, in a fixture. Recorded in the work report.
-    return [
-        cls for cls in BrokerAdapter.__subclasses__()
-        if cls.__module__.startswith("app.services.broker.")
-    ]
+    # TRANSITIVE. `B296`: this was `BrokerAdapter.__subclasses__()`, which returns DIRECT
+    # subclasses only, so `CFTBridgeAdapter` — which subclasses `CryptoFundTraderAdapter` to
+    # swap the transport, and is what `manager.py:70` returns whenever a bridge is configured —
+    # was never in the population. It could not fail the membership pin below either: a class
+    # that never enters the set cannot change it.
+    #
+    # **AND THE COUNT DID NOT MOVE.** The recursive derivation in
+    # `test_broker_contract.py::_concrete_broker_subclasses` returned FIVE adapters and this one
+    # returned FIVE, differing by two members in opposite directions — the bridge missing here,
+    # the abstract proxy missing there. Two populations of the same size and different
+    # membership, in the same suite, one of them advertised as the derived-not-enumerated fix.
+    #
+    # Measured before widening: the bridge overrides none of the contract methods today
+    # (`_parse_group`, `bridge_status`, `connect`, `disconnect`, `broker_name` only), so it
+    # passed on its parent's source the moment it was admitted. **The hole was latent, not
+    # live** — and an override lands uncovered and silent, which is the state this file exists
+    # to make impossible.
+    seen: list[type] = []
+
+    def _descend(cls: type) -> None:
+        for sub in cls.__subclasses__():
+            if sub.__module__.startswith("app.services.broker.") and sub not in seen:
+                seen.append(sub)
+            _descend(sub)
+
+    _descend(BrokerAdapter)
+    return seen
 
 
 def _reads_lot_size(cls: type) -> bool:
@@ -92,6 +115,11 @@ def test_there_are_adapters_to_check():
         # — this contract's exact defect, reintroduced at a layer the original arms could
         # not see. Verified: `_reads_lot_size` is True for it.
         "LiveLoopBrokerProxy",
+        # `B296`. Admitted when the derivation above became transitive. It reaches the SAME
+        # venue as `CryptoFundTraderAdapter` through a different transport (a real browser,
+        # because Cloudflare fingerprints the TLS handshake), inherits `close_position`
+        # unchanged, and is the class `manager.py:70` constructs when a bridge is configured.
+        "CFTBridgeAdapter",
     }, (
         f"the production adapter set changed: {sorted(names)}. A new adapter must be added here "
         "deliberately — joining the guarded set silently is how a member goes unwatched."
@@ -130,6 +158,30 @@ def test_the_reader_check_can_actually_fail():
     assert _reads_lot_size(__import__(
         "app.services.broker.paper", fromlist=["PaperBroker"]
     ).PaperBroker), "the reader check cannot see a parameter that IS read"
+
+
+def test_the_population_DESCENDS_and_is_not_merely_the_direct_children():
+    """CONTROL ON THE DERIVATION ITSELF, and it is a different instrument from the one above.
+
+    `test_the_reader_check_can_actually_fail` proves the PREDICATE can find something. It says
+    nothing about the POPULATION the predicate is applied to, and `B296` was entirely in the
+    population: `__subclasses__()` is not transitive, so an adapter that subclasses an adapter
+    was never handed to the predicate at all. **A guard is only as wide as its scanner**, and
+    every arm in this file was silently one member narrow.
+
+    Keyed to a REAL grandchild rather than a fixture, because a locally-defined subclass is
+    filtered out by the `app.services.broker.` restriction and would prove nothing here.
+    """
+    from app.services.broker.cft_bridge_adapter import CFTBridgeAdapter
+
+    assert CFTBridgeAdapter not in BrokerAdapter.__subclasses__(), (
+        "this control assumes CFTBridgeAdapter is a GRANDCHILD; if it became a direct subclass "
+        "the assertion below would pass under a non-transitive derivation and stop guarding"
+    )
+    assert CFTBridgeAdapter in _all_adapters(), (
+        "the population does not descend past the direct subclasses, so every contract arm in "
+        "this file skips the adapter manager.py builds when a bridge is configured"
+    )
 
 
 def test_the_abstract_contract_still_declares_partial_close():

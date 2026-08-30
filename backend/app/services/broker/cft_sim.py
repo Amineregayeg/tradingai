@@ -349,7 +349,11 @@ class SimPropFirmBroker(BrokerAdapter):
                 lot_size=Decimal(str(p.units)),
                 sl=Decimal(str(p.sl)) if p.sl else None,
                 tp=Decimal(str(p.tp)) if p.tp else None,
-                duration_seconds=0, open_time=p.open_time,
+                # `T-0105`. A SEPARATE SIMULATOR, swap-free exactly like `paper` and for the same
+                # reason. It fell outside an earlier wording of this rule that said "CFT and
+                # paper" — `B150`'s shape, a rule that enumerates its subjects.
+                produced_by="cft_sim", swap=None, commission=None,
+                duration_seconds=None, open_time=p.open_time,
             ))
         return out
 

@@ -181,7 +181,12 @@ class PaperBroker(BrokerAdapter):
                 lot_size=Decimal(str(p.units)),
                 sl=Decimal(str(p.sl)) if p.sl else None,
                 tp=Decimal(str(p.tp)) if p.tp else None,
-                duration_seconds=0, open_time=p.open_time,
+                # `T-0105`. SWAP-FREE BY CONSTRUCTION, so `None` and not `0`: this venue has no
+                # concept of a swap, and `0` would claim it charged none. Same fact makes
+                # `unrealized_pnl` gross here — paper cannot be gross OR net, having no costs.
+                produced_by="paper", swap=None, commission=None,
+                # NOT 0. It does not track duration, and a literal zero is a false claim.
+                duration_seconds=None, open_time=p.open_time,
             ))
         return out
 

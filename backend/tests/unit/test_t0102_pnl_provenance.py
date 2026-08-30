@@ -29,6 +29,10 @@ BASE = dict(
     entry_price=Decimal("70000"), current_price=Decimal("70100"),
     unrealized_pnl=Decimal("10"), lot_size=Decimal("0.1"),
     duration_seconds=60, open_time=datetime.now(timezone.utc),
+    # `T-0105` made `produced_by` required too. It is supplied HERE so the arms below isolate
+    # `pnl_source`: without it the unconstructible arm would raise for TWO missing fields and
+    # pass for the wrong reason, which is the failure this file is otherwise about.
+    produced_by="paper",
 )
 
 
@@ -37,7 +41,16 @@ def test_a_position_is_UNCONSTRUCTIBLE_without_its_provenance():
     ask, and would answer it the same way for every adapter."""
     with pytest.raises(ValidationError) as exc:
         Position(**BASE)
-    assert "pnl_source" in str(exc.value)
+    # READ THE STRUCTURED ERRORS, NOT THE MESSAGE STRING. The rendered message echoes the
+    # whole input dict, so `"produced_by" not in str(exc)` was false the moment BASE supplied
+    # it — a substring check over text that contains more than the claim, which is the shape
+    # this file keeps finding elsewhere.
+    missing = [e["loc"][0] for e in exc.value.errors() if e["type"] == "missing"]
+    assert missing == ["pnl_source"], (
+        f"exactly one field must be missing and it must be pnl_source; got {missing}. If "
+        "BASE stops supplying another required field this arm would pass because TWO are "
+        "missing, and would keep passing if pnl_source were made optional."
+    )
 
     assert Position(**BASE, pnl_source="computed").pnl_source == "computed"
 

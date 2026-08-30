@@ -81,9 +81,62 @@ class Position(BaseModel):
     #: **It must never default to `"profit"`.** That reintroduces the ambiguity one layer
     #: down, in a field whose entire purpose is to remove it.
     pnl_source: str | None
+    #: WHICH ADAPTER BUILT THIS ROW. **Required.**
+    #:
+    #: `B286` found two adapter-specific meanings while asking about P&L; `B289` found a third
+    #: while asking about staleness. **Neither was looking for the pattern.** They are not
+    #: three bugs: `Position` had no notion of who produced it, so every field was free to mean
+    #: something adapter-specific because nothing ever had to agree.
+    #:
+    #:     unrealized_pnl     paper = gross price movement | CFT = whichever key arrived
+    #:     r_multiple         paper = a price ratio        | CFT = derived from the P&L
+    #:     duration_seconds   oanda/CFT = computed         | paper/cft_sim = the literal 0
+    #:
+    #: **REQUIRED, because a provenance field that can be absent reintroduces the problem it
+    #: exists to solve.** Optional would mean nothing breaks and no adapter has to answer.
+    #:
+    #: **IT IS A POINTER, NOT A DEFINITION**, which is why `T-0102`'s `pnl_source` still
+    #: exists. `produced_by="cryptofundtrader"` says whose convention; it cannot say WHICH of
+    #: `profit` / `netProfit` / `openNetProfit` was read, and those are different quantities
+    #: chosen per response. Adapter provenance answers *whose convention*; only the field-level
+    #: record answers *which key*.
+    produced_by: str
+
+    #: MT5 reports swap and commission as first-class money fields; nothing here did.
+    #:
+    #: **`Decimal | None`, NEVER `Decimal = 0` (`B215`).** `None` means *this venue does not
+    #: report it*; `0` means *reported, and zero*. A default of `0` makes a venue that cannot
+    #: say indistinguishable from one that said nothing was charged.
+    #:
+    #: **A SWAP-FREE ADAPTER REPORTS `None`, NOT `0`** — and that is the same fact that makes
+    #: `unrealized_pnl` gross for those adapters rather than net: *gross-versus-net only exists
+    #: where costs exist, so `paper` and `cft_sim` are not gross rather than net — they cannot
+    #: be either.* Two decisions, one fact.
+    #:
+    #: **FOUR OF `B261`'S NINE MT5 MONEY FIELDS ARE DELIBERATELY DROPPED.** MT5 reports
+    #: profit, commission and swap each in TOTAL / REALIZED / UNREALIZED. A `Position` is an
+    #: OPEN position, so it has no realized component and no total — those belong to the closed
+    #: `Trade` record, and carrying them here would invite a reader to total an open row.
+    #: Taken: the unrealized profit (already `unrealized_pnl`), the swap accrued, and the
+    #: commission charged to open.
+    swap: Decimal | None = None
+    commission: Decimal | None = None
+
+    #: `unrealized_pnl` is GROSS — the components above stay inspectable rather than folded in.
+    #:
+    #: **It is the only option under which `None` still means "not reported".** Fold costs in
+    #: and a venue that reports no swap becomes indistinguishable from one that charges none,
+    #: which is `B215` again in the field that carries the money.
+    #:
+    #: **AND THE ASSERTION DEPENDS ON `T-0102`.** CFT's `unrealized_pnl` is whichever of three
+    #: keys arrived, so "gross" is either false for CFT or true only by accident — `pnl_source`
+    #: is what makes it checkable rather than assumed.
     r_multiple: Decimal | None = None
     lot_size: Decimal
     sl: Decimal | None = None
     tp: Decimal | None = None
-    duration_seconds: int
+    #: `int | None`. It was a required `int`, so `paper` and `cft_sim` — which do not track it
+    #: — passed the literal `0`, the only value the type allowed. **A row saying a position has
+    #: been open for zero seconds is a claim, and it was false on every one of them** (`B289`).
+    duration_seconds: int | None
     open_time: datetime

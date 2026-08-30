@@ -446,6 +446,15 @@ class CryptoFundTraderAdapter(BrokerAdapter):
                     current_price=current_price,
                     unrealized_pnl=unrealized_pnl,
                     pnl_source=pnl_source,
+                    # `T-0105`. The venue's own convention — and this is a POINTER, not a
+                    # definition: it says WHOSE convention the fields follow, while
+                    # `pnl_source` says WHICH key the P&L came from. Neither replaces the
+                    # other.
+                    produced_by=self.broker_name,
+                    # NOT REPORTED by this venue's open-positions payload, so `None` and not
+                    # `0` — `0` would claim it charged nothing (`B215`).
+                    swap=None,
+                    commission=None,
                     r_multiple=r_multiple,
                     lot_size=volume,
                     sl=sl_dec,

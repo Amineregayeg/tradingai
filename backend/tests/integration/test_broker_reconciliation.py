@@ -72,6 +72,11 @@ def position(pair="BTC/USD", pid="pos-1", direction=DirectionType.LONG, lots="0.
         # because this fixture derives the number itself; recording a KEY NAME here would
         # claim a payload that does not exist.
         pnl_source="computed",
+        # `T-0105`. A hand-built Position is a PRODUCER, and `produced_by` is required — a
+        # fixture that could omit it would be the one place the field is optional, which is
+        # what it exists to prevent. Named for what this fixture actually stands in for.
+        produced_by="paper",
+        swap=None, commission=None,
         duration_seconds=3600,
         open_time=datetime.now(timezone.utc),
     )

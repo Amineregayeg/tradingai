@@ -293,6 +293,12 @@ class OANDAAdapter(BrokerAdapter):
                     current_price=current_price.quantize(Decimal("0.000001")),
                     unrealized_pnl=unrealized_pnl,
                     pnl_source=pnl_source,
+                    # `T-0105`. Unreachable — `manager.py:33` records that this branch was
+                    # removed and the app is crypto-only — and it still has to compile, and it
+                    # is the template someone reads tomorrow.
+                    produced_by=self.broker_name,
+                    swap=None,
+                    commission=None,
                     r_multiple=r_multiple,
                     lot_size=Decimal(units),
                     sl=sl,
