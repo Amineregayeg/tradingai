@@ -634,3 +634,93 @@ Scripts committed so you can run them yourself.
 | **Reconstructing the 2026-08 audit window** | **Impossible.** No WAL archive, no statement log, no commit timestamps existed at the time. Nothing can recover it. |
 | **A human reviewer who is not Malek** (Q6.2, Q8.1 item 6) | **Cannot be fixed by me.** It is the only item on the list that tooling does not touch, and it is the one the rest of this document keeps pointing at. |
 | **Rotating the `tradingai` superuser password** | **Not done.** It is the literal string `tradingai`. Rotating it means updating the compose file and restarting — same blocker and same restart cost as above. **Flagged rather than actioned.** |
+
+---
+
+# Second addendum, same day — **a fourth reason this export is provisional, and it is the biggest**
+
+**Found after this document was sent, while chasing your own Q7.1.** It is not a correction to an
+answer here; it is something none of the answers knew.
+
+## THE ENGINE THAT PRODUCED THESE RUNS IS SEVEN COMMITS BEHIND `main`
+
+```
+GET /api/system/version         -> deployed commit dcfdc1f  (from /app/.build-sha)
+git log dcfdc1f..HEAD -- backend/app    -> 7 commits, none of them deployed
+production alembic_version      -> 0007        repo head -> 0008
+container StartedAt             -> 2026-08-24T15:37:13Z, and the code is NOT bind-mounted
+```
+
+**So `KNOWN_ISSUES.md` describes fixes that the engine producing your figures does not have.** A
+reader checking whether a defect is fixed finds a merged commit, resolved file:line citations and a
+green test suite — **and the running engine still has the defect.**
+
+## WHAT THIS DOES TO Q7.1 SPECIFICALLY — **the answer stands and it was incomplete**
+
+Q7.1 above says `B279` is a *recording* gap and no reported P&L moves. **That is still true.** What
+it did not say, because I did not know it:
+
+> **The gap is not closed. It is still open, today, in production.** `T-0084` added
+> `sizing_equity`, `sizing_risk_pct` and `sizing_price` to `decision_records` on 2026-08-24.
+> **Production has never had those columns.**
+
+```
+decision_records, production, right now:
+  id created_at symbol timeframe inputs_hash code_path_hash score abstained reasons
+  signal_dir signal_entry signal_sl signal_tp sized_units expected_r realized_r gap_r
+  outcome correction_json cohort fill_price run_id decided_by deciding_rule_id      -- 24 columns
+```
+
+**And this is why the export's 24 columns matched the table exactly** — a fact I reported to you as
+*completeness* without noticing what it implied. **The export is complete with respect to a table
+that is missing the columns the register says were added to it.**
+
+**The same applies to `rejection_reason`** (`B271` — *"never drop a generated signal silently"*).
+Production has no such column, so **every rejected signal since 2026-08-24 went into an in-memory
+`deque(maxlen=80)` that is cleared on start.** They are gone, and they are not in `runs/`.
+
+## AND ONE THING IS OBSERVABLY WRONG ON THE LIVE DASHBOARD RIGHT NOW
+
+```
+GET /api/positions
+  ETH/USD  open_time 2026-08-28T23:05:26Z   duration_seconds: 0
+  BTC/USD  open_time 2026-08-29T00:10:15Z   duration_seconds: 0
+```
+
+**Both have been open for over forty hours.** `main` has `duration_seconds=None` — *not computed* —
+and the container has a literal `0`. **The fix is merged and the wrong number is being served.**
+
+## Q7.3, REVISED — **a fourth reason, and it outranks the other three**
+
+The three reasons given above are about how the figures should be *read*. **This one is about
+whether the register can be used to interpret them at all.** Until the deploy happens, **every
+statement in `KNOWN_ISSUES.md` about engine behaviour needs checking against
+`/api/system/version` before it is believed.**
+
+## WHAT WAS DONE ABOUT IT, so this is not just a disclosure
+
+**`agents/deploy_preflight.py` now answers it in one command**, and prints the two new sections
+before the existing one, because a deploy that does not *work* outranks a deploy that *costs* a
+position:
+
+```
+CODE vs main         is what is running what was written?
+SCHEMA vs IMAGE      will this deploy WORK?
+DEPLOY PREFLIGHT     is this deploy FREE?
+```
+
+**And the next deploy is a trap that this check now names:** the undeployed code writes
+`rejection_reason` and `outcome=REJECTED`; the 0007 schema has no such column and its `CHECK`
+constraint refuses that value. **`alembic upgrade head` first, then the image** — recreating the
+image alone turns every rejected-signal write into an error.
+
+## THE PART THAT BELONGS IN YOUR Q8.1 ANSWER
+
+**The marker that makes this checkable already existed and nothing read it.** `build_info.py` was
+written months ago for exactly this — *"you cannot debug or roll back what you cannot identify"* —
+and it has been publishing the deployed sha at `/api/system/version` the entire time.
+
+> **This is the same failure your letter is about, one level up: a correct signal, produced
+> continuously, with no consumer.** It is also the answer to *"what would make this verifiable by a
+> third party"* — **you can now check the deployed commit yourself, over HTTP, without asking
+> anyone**, and compare it to `main` in one `git log`.
