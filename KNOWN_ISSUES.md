@@ -6,6 +6,8 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
+Last updated: 2026-08-30 (B296, B297 — the population was one member narrow, and the arm that exists to catch that is green by import order. B296: `_all_adapters()` derived its population with `BrokerAdapter.__subclasses__()`, which returns DIRECT children only, so `CFTBridgeAdapter` — a grandchild, and what manager.py:70 constructs when a bridge is configured — was never handed to any contract arm, including the one whose docstring is 'THE CONTRACT ARM IS OVER EVERY ADAPTER'. The membership pin could not catch it: a class that never enters the set cannot change it, so the pin guards ADDITIONS to the population and not OMISSIONS from it. Both derivations in the suite returned FIVE, differing by two members in opposite directions, so any check on cardinality passed. Latent rather than live — the bridge overrides none of the contract methods today — and the exposure is the next override. FIXED in T-0105, with a control on the DERIVATION rather than on the predicate: the existing control pair proves `_reads_lot_size` can find something and says nothing about whether the population it is applied to contains the member it needs to find. B297: `test_recursive_discovery_covers_every_concrete_adapter` recurses correctly over a population that is whatever happens to have been IMPORTED, so it is green only because test_broker_contract.py sorts before every module that imports the broker package — measured both ways, 38 passed alone and 1 failed when anything imports the package first. The failure is the TRUE state: LiveLoopBrokerProxy is concrete, registered with broker_manager at startup, and covered by none of the arms parametrised over that registry. NOT fixed, and not only for scope: the determinism fix is one line and turns the suite red, and the red cannot be cleared mechanically — the proxy is neither a SIM nor a LIVE adapter, its is_simulation forwards and answers False when unbound, so LIVE_ADAPTERS would pass it because it is UNBOUND rather than because it is live, which is B215's collapse inside the arm that would be certifying it. A registry entry chosen to clear a red is an assertion nobody decided.)
+
 Last updated: 2026-08-30 (B295 — two of T-0102's arms exercise a COPY of the rule instead of the adapter, and the commit's own docstring documents that exact defect. Nothing shipped is wrong: all four producers supply pnl_source, the field is required, oanda uses membership rather than a defaulted read, and cryptofundtrader:426 reads raw.get(pnl_source) so value and provenance come from ONE lookup and cannot diverge by construction. This is about what the suite would catch. pnl_key_present's docstring says it was extracted so 'the arm can import it rather than re-implement it', because an earlier test was 'exercising the copy' — found, fixed for CFT, recorded, and the same commit has two more instances. INSTANCE 1: test_the_recorded_key_is_the_one_ACTUALLY_PRESENT calls _cft_source in ISOLATION and never builds a Position, so mutating the read to raw.get('profit') leaves 13 passed — on {'netProfit':'4'} that records 'netProfit' while the value is _dec(None) -> 0, a zero P&L labelled as read from netProfit. INSTANCE 2: test_a_value_from_a_DEFAULT_does_not_record_a_key_name DEFINES _oanda_source inside itself and never touches oanda.py, so making oanda record 'unrealizedPL' unconditionally also leaves 13 passed. Fourth appearance of B290's family. PROCESS NOTE, SECOND TIME: I bid this id then wrote 'Filed B295' when I had only bid it. B288 records the identical error and its closing line is 'bid and filed are different states' — that note did not prevent this one. A lesson recorded in the artefact is not a change in behaviour; what closes it is the register hook now refusing a commit that claims an id the diff does not add.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
@@ -18449,3 +18451,101 @@ review and my message **when I had only bid it.** `B288` records the identical e
 > the resolution.
 
 Related: **B290**, **B288**, **B282**, **B256**, **B286**.
+
+---
+
+### B296. `_all_adapters()` derived its population with a NON-TRANSITIVE `__subclasses__()`, so a shipping adapter was never handed to any contract arm — and both populations were the same SIZE
+
+**Found while writing `T-0105`'s provenance arm**, whose plan says to name `_all_adapters()` rather
+than re-derive it, *"because `B267` measured that `pkgutil.iter_modules` is non-recursive and a
+fresh derivation re-enters that trap."* The instruction is right about the import step. **The
+helper fixes the pkgutil half and re-enters the identical trap one line further down:**
+
+```python
+return [cls for cls in BrokerAdapter.__subclasses__()          # DIRECT children only
+        if cls.__module__.startswith("app.services.broker.")]
+```
+
+`CFTBridgeAdapter` subclasses `CryptoFundTraderAdapter` to swap the transport — a real browser,
+because Cloudflare fingerprints the TLS handshake — and it is **what `manager.py:70` constructs
+whenever a bridge is configured.** It is a grandchild, so it was never in the set.
+
+**AND IT COULD NOT FAIL THE MEMBERSHIP PIN.** `test_there_are_adapters_to_check` exists to make a
+new adapter *"fail by name rather than join the guarded set silently"* — but a class that never
+enters the set cannot change it. **The pin guards additions to the population, not omissions from
+it**, and the omission is the failure mode that matters.
+
+**THE COUNT DID NOT MOVE, AND THAT IS THE WHOLE REASON THIS SURVIVED.** Measured:
+
+```
+_all_adapters()                                    5   Paper SimPropFirm OANDA CFT  LiveLoopProxy
+test_broker_contract::_concrete_broker_subclasses  5   Paper SimPropFirm OANDA CFT  CFTBridge
+```
+
+**Two derivations of one population, in one suite, the same size and different membership** —
+differing by two members in opposite directions (the bridge missing from one, the abstract proxy
+filtered out of the other). Any check on cardinality passes. And the smaller-by-membership one is
+the one whose docstring advertises it as the *derived, not enumerated* fix for `T-0032`.
+
+**Latent, not live — measured before widening.** `CFTBridgeAdapter` overrides only `_parse_group`,
+`bridge_status`, `connect`, `disconnect` and `broker_name`; `close_position`, `get_positions` and
+`place_order` all resolve to the parent, so it passed `_reads_lot_size` on its parent's source the
+moment it was admitted. **The exposure is the next override, which lands uncovered and silent.**
+
+**FIXED in `T-0105`.** The derivation now descends, the pin admits `CFTBridgeAdapter` with its
+reason, and a new arm — `test_the_population_DESCENDS_and_is_not_merely_the_direct_children` —
+controls the DERIVATION rather than the predicate: the existing control pair proves
+`_reads_lot_size` can find something, and says nothing about whether the population it is applied
+to contains the member it needs to find. Keyed to the real grandchild, because a locally-defined
+subclass is filtered out by the package restriction and would prove nothing. Mutation: reverting
+to `__subclasses__()` fails 2 (predicted 2).
+
+**`B250` on its own terms — a guard is only as wide as its scanner.** Every arm in
+`test_t0038_partial_close_contract.py` was one member narrow for the whole of its life, including
+the one whose docstring is *"THE CONTRACT ARM IS OVER EVERY ADAPTER, NOT THE TWO BEING FIXED."*
+
+Related: **B250**, **B267**, **B258**, **B221**.
+
+---
+
+### B297. The arm that exists to catch an uncovered adapter is ORDER-DEPENDENT — it is green because nothing alphabetically earlier imports the module, and `LiveLoopBrokerProxy` is uncovered right now
+
+**Surfaced by `T-0105`, not caused by it.** `test_broker_contract.py`'s
+`test_recursive_discovery_covers_every_concrete_adapter` compares discovered adapters against the
+contract registry, and its docstring is unambiguous: *"No concrete adapter may ship without being
+covered by this contract suite."* **Its recursion is correct.** Its POPULATION is not:
+
+```python
+_all_subclasses(BrokerAdapter)   # sees only what has already been IMPORTED
+```
+
+The module never imports the broker package, so `live_loop_proxy` is loaded only if some *other*
+test loaded it first. Measured, both directions:
+
+```
+pytest tests/unit/test_broker_contract.py                              38 passed
+pytest tests/unit/test_t0105_...py tests/unit/test_broker_contract.py  1 failed
+    Concrete BrokerAdapter subclasses not covered by the contract registry: ['LiveLoopBrokerProxy']
+```
+
+**The failure is the TRUE state.** `LiveLoopBrokerProxy` is concrete, is registered with
+`broker_manager` at startup by `T-0062`, and is absent from `ALL_ADAPTERS` — so it is checked by
+**none** of the `is_simulation`, credential or contract arms parametrised over that registry. It is
+green today only because `test_broker_contract.py` sorts before every module that imports the
+package. **`_all_adapters()`'s own docstring already wrote this rule down** — *"a guard whose
+denominator depends on what else ran is not a guard"* — and fixed it for its own helper.
+
+**NOT FIXED IN `T-0105`, and the reason is not scope alone.** Making discovery deterministic is one
+line and turns the suite red, and the red cannot be cleared mechanically: the registry is
+`SIM_ADAPTERS` + `LIVE_ADAPTERS`, and **the proxy is neither.** Its `is_simulation` forwards to
+whatever the loop holds and returns `False` when it holds nothing — *unknown must not read as
+safe*. Putting it in `SIM_ADAPTERS` asserts `True` for a value that is deliberately dynamic;
+putting it in `LIVE_ADAPTERS` makes `test_live_adapters_report_false` pass **because the proxy is
+unbound, not because it is live** — `B215`'s collapse inside the arm that would be certifying it.
+**A third category with an arm over the forwarding property is a design call on the registry**, and
+`ALL_ADAPTERS` is parametrised by several other arms that would then range over a proxy.
+
+Filed rather than half-fixed: a one-line determinism fix with the registry left alone is a red
+suite, and a registry entry chosen to clear the red is an assertion nobody decided.
+
+Related: **B296**, **B221**, **B215**, **B250**.
