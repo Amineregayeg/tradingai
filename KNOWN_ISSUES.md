@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-30 (B315 — the four dict-returning members have ONE common key between them, and B303 is three sites rather than two. T-0129 rebuilt with both controls passing first: 0 container disagreements (base.py declares dict/dict/list[dict]/list[dict] and all 20 signatures honour it, so THE CONTAINER IS DECLARED AND CONSISTENT and only the KEY SET is undeclared), and B303 found at both sites and disagreeing. get_recent_trades: union 11, common 11 — cryptofundtrader and oanda agree completely, so that member is safe for an MT5 adapter to copy. close_position: the only common key is `status` — paper/cft_sim report the failure in `reason`, live_loop_proxy in `error`, so a caller reading either gets None from the others and cannot tell it from 'no explanation given'. close_all_positions: cryptofundtrader AND oanda are per-POSITION (pair, position_id, result) while manager.py is per-ADAPTER (broker, connection_id) — B303 is three producers, sharing only error and status. place_order is a SILENCE not a finding: the instrument reads only live_loop_proxy and four of five build their result in ways it cannot follow. METHOD NOTE: both controls passed while the instrument was demonstrably wrong — it still reported OANDA's outbound request body as a response, because the exclusion checked ast.Assign and OANDA writes `order_body: dict = {...}`, an AnnAssign. Request-versus-response separation was a requirement with NO control, and a requirement without one is a hope. A control proves what it was designed to prove and nothing adjacent.)
+Last updated: 2026-08-30 (B316 — place_order has THREE regimes, two adapters have NO schema at all, and setdefault('status','FILLED') turns an unrecognised venue reply into a fill. B315 reported place_order as a SILENCE in four of five; read by hand, the silence was not absence from the instrument's reach but ABSENCE OF A SCHEMA. paper and cft_sim carry a local schema with UPPERCASE status (FILLED/REJECTED, failure in `reason`); live_loop_proxy carries a local schema with lowercase `rejected`; cryptofundtrader and oanda return the VENUE PAYLOAD UNCHANGED — not a different vocabulary, no vocabulary. That is a category the sweep's four answers did not have, since all four assume an adapter HAS a key set. AND THE CONTAINMENT IS A setdefault: execution/service.py does res.setdefault('status','FILLED') and crypto_loop.py:1518 checks `if res.get('status') == 'FILLED'`. A venue reply with no status key becomes a FILL — not unknown, not rejected — and the loop records a signal decision and pushes a position-open. The only thing between that and a false fill is the venue always reporting rejections as an HTTP error: _handle_response raises on 401/403, 429 and >=400, STATUS CODES ONLY, so a 200 carrying a business-level rejection is defaulted to FILLED. B221's shape on the order path. NOT MEASURED and it is the whole question: whether Match-Trader ever returns 200 with a business error — one live response, same class as B286's open question, on a venue we already trade.)
 
 ---
 
@@ -19944,3 +19944,56 @@ than leaving a tidy list of three inconsistencies.
 distinguishes them and nothing depends on the difference.
 
 Related: **B303**, **B302**, **B314**, **B215**, **B240**.
+
+### B316. `place_order` has three regimes, two adapters have NO schema at all, and `setdefault("status","FILLED")` turns an unrecognised venue reply into a fill
+
+**`B315` reported `place_order` as a SILENCE in four of five. Read by hand, four methods, so the
+`AnnAssign` class of miss cannot occur.** The silence was not absence of a schema in the instrument's
+reach — **it was absence of a schema.**
+
+```
+paper             {position_id, pair, direction, fill, units, sl, tp, client_order_id,
+                   status: "FILLED"}                                     LOCAL schema, UPPERCASE
+cft_sim           same, plus _reject -> {status: "REJECTED", reason,
+                   pair, direction, client_order_id}                     LOCAL schema, UPPERCASE
+live_loop_proxy   {status: "rejected", reason}                           LOCAL schema, lowercase
+cryptofundtrader  return self._handle_response(response, "place_order")  NO SCHEMA — venue payload
+oanda             raise ... (dead) then `return data`                    NO SCHEMA — venue payload
+```
+
+**THREE REGIMES, AND THE THIRD IS A CATEGORY THE SWEEP'S FOUR ANSWERS DID NOT HAVE.** Those four all
+assume an adapter *has* a key set. **Two do not — they forward the venue's reply unchanged, so their
+keys are whatever Match-Trader or OANDA sends.** *Not a different vocabulary: no vocabulary.*
+
+**And within the adapters that do have one, `status` is `"FILLED"`/`"REJECTED"` in the simulators and
+`"rejected"` in the proxy** — **the same field, different case, in one call path.**
+
+## ⚠ AND THE CONTAINMENT IS A `setdefault`
+
+```python
+execution/service.py   res = await self.broker.place_order(req)
+                       res.setdefault("status", "FILLED")
+crypto_loop.py:1518    if res.get("status") == "FILLED":
+```
+
+> **A venue reply with no `status` key becomes a FILL.** Not "unknown", not "rejected" — **`FILLED`,
+> and the loop then records a signal decision and pushes a position-open.**
+
+**The only thing between that and a false fill is the venue always reporting rejections as an HTTP
+error.** `_handle_response` raises on **401/403**, **429** and **`>= 400`** — **status codes only.**
+**A `200` carrying a business-level rejection** — *insufficient margin*, *market closed*, *symbol not
+tradable* — **has no `status` key, is defaulted to `FILLED`, and is indistinguishable from a fill.**
+
+**`B221`'s shape on the order path: reports success over an action that may not have happened.**
+
+**NOT MEASURED, AND IT IS THE WHOLE QUESTION: whether Match-Trader ever returns `200` with a
+business error.** That needs one live response — **the same class of open question as `B286`'s
+"which key does the venue send", on a venue we already trade.** The mechanism is present and
+reachable; **its reachability depends on a venue behaviour nobody has checked and nothing records
+the assumption.**
+
+**WHY IT MATTERS NOW:** `place_order` is the first member `T-0106` builds, **and the two adapters an
+implementer would read for it are the two with no schema.** A `setdefault` that means *"assume it
+worked"* is a defensible default for a simulator and a dangerous one for a venue.
+
+Related: **B221**, **B286**, **B315**, **B303**, **B215**.
