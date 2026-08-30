@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-30 (B282 — a must-hit that INSERTS the row it asserts, so it can never fail, and the producer can NULL every sizing column with the suite green. T-0084's test_MUST_HIT_at_least_one_row_carries_all_three_sizing_columns was added at Review's request to stop the reconstruction arm passing over an empty set; it inserts a row with all three sizing columns and then asserts a row with all three exists. B272's shape INSIDE the arm requested to prevent vacuity — the test_there_are_adapters_to_check pattern works because its population is DERIVED FROM THE TREE, and a population the arm writes itself is not a population. MEASURED: setting the producer's three sizing arguments to None at crypto_loop:1536-1540 (anchor unique, mutation confirmed applied) means every production row carries NULL in all three columns, and the two suites report 33 passed, 0 failed. NOTHING NOTICES. B256's class: every arm builds its own DecisionRecord, so all test the PREDICATE and none tests the PRODUCER. Consequence is B279's own failure mode one level up — if the call site regresses, reconstruction silently becomes impossible again and the arm guaranteeing it stays possible reports green. FIX: the instrument this codebase already uses, an AST arm asserting _record_signal_decision is called with all three sizing keywords. NOTHING SHIPPED IS WRONG.)
+Last updated: 2026-08-30 (B283 — BridgeTransport looks reusable for MT5 because its INTERFACE matches, and the mechanism underneath solves a problem MT5 does not have. cft_bridge_transport.py exposes `async def _call(self, method, path, body)`, exactly the shape a REST bridge needs — but its first line says it 'routes Crypto Fund Trader calls through a real browser' because CFT sits behind Cloudflare TLS fingerprinting, measured 403/403/403/403/200 with only fetch() inside a real browser page working. A cloud MT5 bridge is a plain REST API with a bearer token (quoted from the SDK's own metadata: 'MetaTrader REST API and MetaTrader websocket API'), so it does not have that problem, and reusing BridgeTransport would pull a ~400MB browser service into an ordinary HTTPS call. B259 WAS A NAME COLLISION; THIS IS A SHAPE COLLISION — the name collision is caught by reading one line of a docstring, but the shape collision survives that check because the docstring you would read is about the interface and the trap is in the implementation. Reusable instead: the _call shape, the BrokerAdapter interface, Position/Account normalisation subject to B261, observe_only, and the write gate. Nothing shipped is wrong.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -17711,3 +17711,76 @@ migration is reversible, the divisor is `sizing_price`. **This is about what the
 columns are populated on the live box, only that the code path passes them.**
 
 Related: **B272**, **B256**, **B279**, **B280**, **B258**.
+
+### B283. `BridgeTransport` looks reusable for MT5 because its INTERFACE matches — the mechanism underneath solves a problem MT5 does not have
+
+**`T-0096`.** `cft_bridge_transport.py` exposes
+`async def _call(self, method: str, path: str, body: Any = None)` — **exactly the shape a REST
+bridge needs, which is why it reads as the obvious starting point for an MT5 transport.**
+
+**It is not.** Its own first line: *"Transport that routes Crypto Fund Trader calls through a real
+browser"*, because CFT sits behind Cloudflare TLS fingerprinting. The module records the measurement
+that forced it:
+
+```
+httpx + token ............................. 403
+httpx + token + browser User-Agent ........ 403
+httpx + token + UA + all session cookies .. 403
+Playwright's own HTTP stack + token ....... 403
+fetch() executed INSIDE a real browser ..... 200   <- the only one that works
+```
+
+**A cloud MT5 bridge is a plain REST API with a bearer token** — quoted from the SDK's own metadata,
+*"MetaTrader REST API and MetaTrader websocket API"*, with the token obtained from a web UI and
+supplied to a constructor. **It does not have the problem `BridgeTransport` exists to solve.**
+Reusing it would pull a browser service — `~400MB` and minutes of download per deploy, by that
+module's own docstring — into an ordinary HTTPS call.
+
+**`B259` WAS A NAME COLLISION. THIS IS A SHAPE COLLISION.** `/mtr-api/` read as MetaTrader when it is
+Match-Trader; here the interface genuinely matches and **the mechanism underneath is solving a
+different problem.** The name collision is caught by reading one line of a docstring; **the shape
+collision survives that check, because the docstring you would read is about the interface and the
+trap is in the implementation.**
+
+**WHAT IS ACTUALLY REUSABLE, so this does not read as "start from nothing":** the
+`_call(method, path, body)` **shape**, the `BrokerAdapter` interface, `Position`/`Account`
+normalisation (**subject to `B261`** — no financing-cost field, and "lot" is a different quantity on
+MT5), `observe_only`, and the `ExecutionService` write gate.
+
+**NOT A DEFECT IN ANYTHING SHIPPED.** `BridgeTransport` is correct for the job it has. **This is
+recorded so the next seat does not adopt it for a job it is wrong for**, which is a decision that
+would look like reuse in the diff.
+
+Related: **B259**, **B167**, **B261**, **B275**.
+
+> ### MANAGER ADDENDUM — the price `T-0096` left unmeasured is NARROWED, not settled
+>
+> **Review declined to guess the cost and asked for someone with a browser to read the page. I ran
+> that and it is still not settled — but the shape of the answer changed, and the change matters to
+> the decision.**
+>
+> ```
+> https://metaapi.cloud/pricing/   -> 404          (review's finding, reproduced)
+> https://metaapi.cloud/           -> pricing section is JS-rendered; not in fetched content
+> ```
+>
+> **What IS established, from MetaApi's own SDK README — an authoritative source rather than an
+> aggregator:**
+>
+> > *"MetaApi is a paid service, however we may offer a free tier access in some cases."*
+>
+> **That sentence is the finding.** A free tier is **discretionary, not a published entitlement** —
+> *"in some cases"* is not something a plan can be built on. Any assumption that a free tier will
+> cover a demo account is an assumption about a decision someone else makes case by case.
+>
+> **What is NOT established, and is marked rather than estimated:** the actual figures. The model is
+> reported as a **flat monthly fee per connected account** and one aggregator cites a `$10–$850/month`
+> range, but **that range is from a third-party aggregator and the per-account model is described by a
+> COMPETITOR's marketing page** — neither is a source a cost decision should rest on, and both are
+> named here so nobody later mistakes them for measurements.
+>
+> **THE PRACTICAL ROUTE, and it removes the blocker rather than describing it:** Malek needs a MetaApi
+> account and token regardless of which tier he ends up on. **Signing up surfaces the real pricing**,
+> so the account he must create anyway is also the instrument that settles this. **It does not need a
+> separate investigation.**
+
