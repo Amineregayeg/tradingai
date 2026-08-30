@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-30. HIGHEST ENTRY IS B307 — EXECUTING on the board means ASSIGNED AND UNFINISHED, not BEING WORKED ON, and I reported two idle seats to Malek as busy because of it; both peer processes were alive and idle at a prompt for nearly three hours with my bus messages unread while the board said EXECUTING and was CORRECT. B215's shape on my own instrument — a state that names a phase cannot report an activity — made worse by corroboration, because a working file modified twelve minutes earlier is evidence of a turn that had already ended. Amended same day for mixing a LOCAL ls clock with UTC bus timestamps inside the entry about misreading an instrument. LANDED AFTER IT, OUT OF ID ORDER: B302 — OrderRequest.lot_size is UNITS OR LOTS DEPENDING ON THE ADAPTER AND ON THE DIRECTION, differing by 100000x. I bid it for a universal claim that the field holds units everywhere and REVIEW BROKE IT: oanda.py:401 and :471 multiply by a hardcoded 100_000 while oanda.py:303 writes raw units back into the same field, so OANDA is internally inconsistent by five orders of magnitude, and cryptofundtrader:549 passes the value RAW to the live venue as 'volume' — the same word MetaApi uses for LOTS. Latent not live: broker_connections holds ONE row, cryptofundtrader, so OandaAdapter is never constructed in production.
+Last updated: 2026-08-30 (B309 — SEVEN PRODUCT COMMITS AND MIGRATION 0008 ARE UNDEPLOYED. Measured inside the running container: tradingai-api-1 started 2026-08-24T15:37:13Z, the code is NOT bind-mounted, crypto_loop.py and decision_record.py contain ZERO occurrences of rejection_reason, /app/alembic/versions ends at 0007 and production alembic_version is 0007 — while 0008 landed in e8dd8da two hours after that container started, with no deploy since. So B271 reads as fixed and in production a rejected signal is still the deque(maxlen=80) cleared on start; B279 reads as fixed and production decision_records has no sizing_equity, sizing_risk_pct, sizing_price or rejection_reason; B286 part 1 and T-0105 read as landed and no production row carries pnl_source or produced_by. This project INVENTED the wired/executes/RUNNING/TRADING vocabulary and never applied it to the register's own claims. AND THE NEXT DEPLOY IS A TRAP: the undeployed code writes rejection_reason and outcome=REJECTED, both of which the 0007 schema refuses, so recreating the image without alembic upgrade head FIRST turns every rejected-signal write into an error. Found by chasing the owner's Q7.1, not by any check that exists — nothing compares main against the running image, so the gap could have been any size and would have looked identical.)
 
 ---
 
@@ -19214,3 +19214,75 @@ instrument and **there is no instrument list**.
 key.** The sweep checked arithmetic on `lot_size` specifically and found the three OANDA sites.
 
 Related: **B286**, **B289**, **B305**, **B167**, **B227**.
+
+---
+
+### B309. **SEVEN PRODUCT COMMITS AND MIGRATION `0008` ARE UNDEPLOYED** — and deploying them without the migration breaks every decision write
+
+**Nothing is broken in production right now. That is the problem.** The running engine is
+self-consistent with the schema it has; **the register is not consistent with either.**
+
+## MEASURED, INSIDE THE RUNNING CONTAINER
+
+```
+docker inspect tradingai-api-1  StartedAt  2026-08-24T15:37:13Z    up 6 days
+mounts: /data/backups, /data/dominance ONLY -- THE CODE IS NOT BIND-MOUNTED,
+        so the running code is whatever was baked in at that build
+/app/app/services/live/crypto_loop.py     grep -c rejection_reason  ->  0
+/app/app/models/decision_record.py        grep -c rejection_reason  ->  0
+/app/alembic/versions/                    ends at 0007. 0008 IS NOT IN THE IMAGE.
+production alembic_version                0007
+```
+
+**And in the repo:** `0008_decision_outcome_rejected.py` landed in `e8dd8da` on **2026-08-24 at
+19:37 local — two hours after the container started.** No deploy since.
+
+## THE SEVEN
+
+```
+dc4010b  T-0105  a Position names the adapter that built it        produced_by
+59681e3  T-0102  B286 part 1 — WHICH QUANTITY the adapter read     pnl_source
+630bff3  T-0103  B283 — three refusals reported volume_min
+92da152  T-0097  units -> MT5 lots as a pure function
+e8dd8da  T-0084  B271 rejected signals + B279/B280 sizing inputs   AND MIGRATION 0008
+e27588c  T-0068  B244 — shadow_health attested nothing
+78384e6  T-0080  B265 + B266 — the branch with no producer arm
+```
+
+## WHAT A READER OF THIS FILE CURRENTLY CONCLUDES, AND WHY IT IS WRONG
+
+**`B271` reads as fixed.** Its fix says a rejected signal is now a durable row instead of an entry in
+a `deque(maxlen=80)` cleared on start. **In production it is still the deque.** Every rejected signal
+since 2026-08-24 is gone.
+
+**`B279` reads as fixed** — *the equity a trade was sized against is now recorded.* **Production has
+no such column.** `decision_records` there is the 24-column 0007 shape: no `sizing_equity`, no
+`sizing_risk_pct`, no `sizing_price`, no `rejection_reason`.
+
+**`B286` part 1 and `T-0105` read as landed.** Neither is running, so **no production row carries
+`pnl_source` or `produced_by`.**
+
+> **This project has a vocabulary for exactly this — `wired` / `executes` / `RETAINED` / `RUNNING` /
+> `TRADING` — and nothing checks it against the deployed artefact.** The distinction was invented
+> here and then not applied to the register's own claims.
+
+## ⛔ AND THE NEXT DEPLOY IS A TRAP, WHICH IS THE URGENT HALF
+
+**The undeployed code writes `rejection_reason=str(reason)` and `outcome=OUTCOME_REJECTED`.** On the
+0007 schema **`rejection_reason` does not exist**, and `outcome` is guarded by a `CHECK` constraint
+that does not list `REJECTED` — *the migration's own docstring says that constraint "is the reason
+this migration exists"*.
+
+**So `docker compose up -d --force-recreate api` alone turns every rejected-signal write into an
+error.** The deploy must be **`alembic upgrade head` FIRST, then the image** — and a rollback then
+needs the code rolled back too, because 0008's `outcome` value cannot be written by 0007 code but
+0008 rows can exist.
+
+## THE HONEST BOUND
+
+**I did not measure whether the deployed engine has been TRADING since 2026-08-24**, only what code
+and schema it holds. **And I found this by chasing the owner's Q7.1** — *does `B279`'s gap affect the
+34 simulated trades?* — **not by any check that exists.** Nothing in this project compares `main`
+against the running image, so **the gap could have been any size and would have looked identical.**
+
+Related: **B271**, **B279**, **B286**, **B215**, **B305**.
