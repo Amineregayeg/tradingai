@@ -18933,6 +18933,43 @@ front of Malek**. The codebase already appeared to answer it — *CFT iterates a
 position* — and **that answer is only true when the failure is a `BrokerError`.** A ruling made by
 copying this precedent would have copied the hole.
 
+## ⇢ AMENDED — **THREE PRODUCERS, NOT TWO**, and one of them is unreachable (`B315`, 2026-08-30)
+
+`T-0129`'s rebuilt sweep measured the producers of this member's rows. The entry above names two.
+
+```
+cryptofundtrader:572   {pair, position_id, status, result | error}   per POSITION
+oanda.py:499           {pair,              status, result | error}   per POSITION
+manager.py:566         {broker, connection_id, status, error}        per ADAPTER
+                       shared keys across all three:  status, error  ONLY
+```
+
+**A caller cannot tell which shape it is holding without inspecting the keys** — and `status` and
+`error` are exactly the two that do not distinguish them.
+
+## AND OANDA'S IS DEAD CODE, WHICH MAKES IT WORSE RATHER THAN BETTER
+
+```python
+async def close_all_positions(self) -> list[dict]:
+    """Close all open positions.  Returns results list."""
+    raise BrokerError(
+        "OANDA real-money trading is disabled in this build "
+        "(close_all_positions refused before any network call)."
+    )
+    positions = await self.get_positions()          # <- UNREACHABLE
+    ...                                             # <- the whole per-position loop
+```
+
+**The raise is the first statement and unconditional**, so the per-position loop beneath it can
+never run. **The third shape is therefore not a live divergence — it is a shape sitting in the tree
+for someone to copy**, and `T-0106` builds this exact member for MT5 against a venue with **no
+close-all call**, where the member *must* iterate. **`B302`'s hardcoded `100_000` is the precedent:
+an unused adapter's unreviewed choice, waiting to be the nearest example.**
+
+**So the entry's original claim stands and its count did not**: `close_all_positions` is one defect
+across **two live producers and one dead template**, and the dead one is the one an implementer
+would read first, because it is the only iterating implementation whose venue resembles MT5.
+
 Related: **B221**, **B285**, **B292**, **B294**, **B215**.
 
 ---
