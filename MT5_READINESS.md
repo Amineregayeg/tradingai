@@ -131,6 +131,40 @@ now concluded that a cloud bridge is **the only route that runs on our Linux con
 no longer conditional. **It is a paid service and its free tier is discretionary**, so the cost is a
 decision only you can take. See *"The transport is settled"* below.
 
+
+### 3. A ruling — the kill switch, when it cannot close everything
+
+**Document:** `agents/tasks/T-0125/decision-for-malek.md`, about two minutes. **New 2026-08-30.**
+
+**Why it appears only now, which is the first thing worth saying:** it had existed for a week as a
+single prohibition sentence inside `T-0106`'s body — *do not build `close_all_positions`, that is
+Malek's decision.* **A decision recorded only inside another task's must-not-do clause is invisible**
+— nothing lists it, nothing ages it, nothing surfaces it. **It is a tracked task now**, whichever way
+you rule.
+
+**The situation:** MetaApi has **no close-all call** (`B285`), so the MT5 kill switch must **loop**,
+and a loop can **half-succeed**. Three closed, two not — what should it do and say?
+
+**I almost did not ask, because the codebase looked like it had answered.** CFT already loops and
+reports per position. **Measured today: it catches `BrokerError` only, and a network timeout is not
+one** — the loop aborts, the remaining positions are never attempted, and the per-position record is
+discarded with the frame. **Zero-closed and four-closed produce identical output** (`B303`, filed
+today, on the venue you trade **now**).
+
+**What I recommend is not one of the three designs — it is a property:** *the report must account for
+every position that was open when the switch was pulled — CLOSED, FAILED WITH A REASON, or NOT
+ATTEMPTED.* All three designs can satisfy it; today's CFT code violates it; and it is the only
+formulation that does not change when the transport does.
+
+### 4. Two live reads that need your say-so, not your judgement
+
+**`T-0114`** — one live CFT API call to settle **which P&L key the broker actually sends**. It is
+gated because it touches a live account, not because it is difficult. Everything about `B286`'s
+family stays provisional until it runs.
+
+**And `is_simulation` above is now a THREE-state question, not two** — MetaApi reports
+`DEMO | CONTEST | REAL` (`B284`). `CONTEST` has no ruling anywhere.
+
 ---
 
 ## What is being established now, without waiting for you
