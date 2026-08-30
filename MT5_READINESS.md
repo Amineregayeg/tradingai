@@ -35,9 +35,10 @@ letting the engine trade.
 **Nothing can connect without it, and it cannot be created on your behalf.** Required: a broker, a
 server name, a login, and a password.
 
-**And possibly a paid bridge.** MT5 has no native REST API. If the transport spike (below) concludes
-a third-party bridge is the only workable route, **that is a cost decision for you** — the spike is
-required to name the price and what a free tier does not cover.
+**And a MetaApi account with a token — plus whatever tier it turns out to require.** The spike has
+now concluded that a cloud bridge is **the only route that runs on our Linux container**, so this is
+no longer conditional. **It is a paid service and its free tier is discretionary**, so the cost is a
+decision only you can take. See *"The transport is settled"* below.
 
 ---
 
@@ -45,8 +46,61 @@ required to name the price and what a free tier does not cover.
 
 | task | what it settles | state |
 |---|---|---|
-| **T-0096** | **Which transport can actually reach MT5 from this box** — the MetaTrader5 Python package needs a *Windows terminal process*, which on our Linux container is a new service rather than an import. This is the critical path and it does not depend on your decision. | planned, next up |
+| **T-0096** | **Which transport can reach MT5 from this box.** **DONE — see below.** | settled |
 | **T-0097** | **Units-to-lots conversion** — the seam where a unit error is a money error. Buildable now, no broker needed. | planned |
+
+---
+
+## The transport is settled, and it costs money
+
+**Measured on this box — `Linux x86_64`, `python 3.12.3` — with nothing installed; every resolution
+was a dry run.**
+
+### The official MetaTrader 5 Python package cannot run here, and not for the usual reason
+
+```
+MetaTrader5  latest 5.0.6147   requires_python <4,>=3.6
+9 files. EVERY ONE win_amd64. No manylinux wheel and NO SDIST.
+```
+
+**Two things follow that "it needs Windows" does not say.** `requires_python` **is satisfied** by our
+3.12 — **the block is the platform, so pinning a different Python is a dead end.** And **no source
+distribution means there is no compile-from-source escape hatch**: a package with a tarball could at
+least be attempted on Linux; this cannot be attempted at all.
+
+*(The naive check is ambiguous and was not trusted: `pip index versions` reports "No matching
+distribution found" identically for "does not exist" and "no wheel for your platform". It was
+disambiguated against PyPI directly.)*
+
+### A cloud bridge is the only route that runs on this box
+
+**MetaApi** installs as a pure-Python wheel and resolves cleanly on Linux/3.12. It speaks REST and
+websockets and supports both MT4 and MT5. **A token is created at `app.metaapi.cloud/token`.**
+
+**The dependency cost nobody had priced:** production today is 21 packages with **one** HTTP client
+(`httpx`). MetaApi adds **19 packages, including both `aiohttp` and `requests`** — **three HTTP
+stacks in one image** — plus `python-socketio 4.6.1`, a pinned old major. **No conflict today. A
+plausible one later**, and worth knowing before it is a surprise during an incident.
+
+### It is a paid service, and the free tier is discretionary
+
+MetaApi's own SDK documentation: *"MetaApi is a paid service, however we may offer a free tier access
+in some cases."*
+
+**"In some cases" is not something a plan can be built on.** The published pricing page returns 404
+and the pricing section on the site is JavaScript-rendered, so **exact figures are unverified** — the
+per-account monthly model comes from a competitor's page and a `$10–$850` range from a third-party
+aggregator, **neither of which a cost decision should rest on.**
+
+**You do not need a separate investigation to settle it.** You need a MetaApi account and token
+whichever tier applies, and **signing up surfaces the real pricing.** The account you must create
+anyway is the instrument that answers this.
+
+### A third route exists and is untested rather than ruled out
+
+A broker-side MT-manager REST API would avoid the bridge entirely. **It requires a broker
+relationship that does not exist**, so it was not tested — and that is recorded as untested, not as
+unavailable.
 
 ---
 
