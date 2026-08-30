@@ -195,30 +195,24 @@ async def test_the_divisor_is_sizing_price_and_using_the_FILL_would_be_WRONG(db_
     assert error > 0.04, f"50 ticks should put it ~4.8% out, got {error:.4%}"
 
 
-async def test_MUST_HIT_at_least_one_row_carries_all_three_sizing_columns(db_session):
-    """**An arm over an empty set passes and guards nothing.**
-
-    Every pre-existing row is NULL in all three columns and is not backfilled, so the
-    reconstruction arm above is scoped to non-null rows — which means it would be green from
-    the moment it lands until the first trade, *and green for the wrong reason.* This is the
-    `test_there_are_adapters_to_check` pattern: prove the population is non-empty.
-    """
-    units = size_position(EQUITY, RISK_PCT, SIZING_PRICE, STOP)
-    await _insert(
-        db_session, outcome=OUTCOME_OPEN, abstained=False, signal_sl=Decimal(str(STOP)),
-        sized_units=Decimal(str(round(units, 6))),
-        sizing_equity=Decimal(str(EQUITY)), sizing_risk_pct=Decimal(str(RISK_PCT)),
-        sizing_price=Decimal(str(SIZING_PRICE)),
-    )
-
-    rows = (await db_session.execute(
-        select(DecisionRecord).where(
-            DecisionRecord.sizing_equity.is_not(None),
-            DecisionRecord.sizing_risk_pct.is_not(None),
-            DecisionRecord.sizing_price.is_not(None),
-        )
-    )).scalars().all()
-    assert rows, "no row carries all three — the reconstruction arm is guarding an empty set"
+# `T-0098`/`B282`. **A must-hit stood here and it could never fail.** It INSERTED the row it
+# then asserted existed — `assert rows` over a population the arm had just written — so it was
+# green by construction, inside the arm requested specifically to prevent vacuity. `B272`'s
+# fourth instance.
+#
+# **DELETED RATHER THAN RE-POINTED, and the reason is that re-pointing is not possible here.**
+# The model cited when it was written was `test_there_are_adapters_to_check`, and what makes
+# that arm work is that its population is DERIVED FROM THE TREE. This suite runs against a
+# fresh per-test database, so the only rows in existence are the ones the test creates: *there
+# are no rows it did not write to point at.*
+#
+# **Its job is done by an arm that CAN fail** — `test_decision_record_schema.py`'s
+# `test_the_producer_passes_ALL_THREE_sizing_inputs_at_its_call_site` and
+# `test_none_of_the_three_is_bound_to_a_LITERAL_None`, which read the producer's call site by
+# AST. Measured: the mutation that nulls all three sizing arguments left this suite at
+# `17 passed`, and fails the AST arm.
+#
+# *Recorded here so a later reader does not restore it.*
 
 
 async def test_the_precision_carries_the_FOURTH_decimal(db_session):

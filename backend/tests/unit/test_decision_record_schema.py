@@ -17,6 +17,7 @@ column added by an *earlier* revision drift unnoticed.
 """
 from __future__ import annotations
 
+import ast
 import importlib.util
 from pathlib import Path
 
@@ -287,4 +288,79 @@ def test_telemetry_records_migration_matches_model():
     assert mig_cols, "0005 did not create telemetry_records during the replay"
     assert mig_cols == model_cols, (
         f"drift: migration-only={mig_cols - model_cols}, model-only={model_cols - mig_cols}"
+    )
+
+
+# ======================================================================================
+# T-0098 / `B282` — THE CALL SITE, GUARDED STRUCTURALLY
+#
+# `T-0084` added a must-hit beside the sizing-reconstruction arm: *"assert at least one row
+# carries all three columns"*. **It inserted the row it then asserted existed, so it could
+# never fail** — `B272`'s shape, inside the arm requested specifically to prevent vacuity,
+# and its fourth instance.
+#
+# **The omission that caused it is the instructive part.** The model cited was
+# `test_there_are_adapters_to_check`, and what makes THAT arm work is that its population is
+# DERIVED FROM THE TREE. **A population the arm writes itself is not a population.**
+#
+# Measured by Review before this was written, and reproduced here before it was: set the
+# producer's three sizing arguments to `None` and the whole `T-0084` suite reports
+# `17 passed`. Nothing notices — and if the call site regresses, reconstruction silently
+# becomes impossible again while the arm that exists to keep it possible reports green.
+# *That is `B279`'s own failure mode one level up.*
+# ======================================================================================
+
+#: The three arguments `size_position` was called with. `signal_sl` is the fourth and was
+#: already stored, which is why it is not here.
+SIZING_KWARGS = ("sizing_equity", "sizing_risk_pct", "sizing_price")
+
+
+def _record_signal_decision_call() -> ast.Call:
+    """The one call site, located by AST rather than by line number, which would rot."""
+    loop_src = (
+        _VERSIONS.parents[1] / "app" / "services" / "live" / "crypto_loop.py"
+    ).read_text(encoding="utf-8")
+    calls = [
+        n for n in ast.walk(ast.parse(loop_src))
+        if isinstance(n, ast.Call)
+        and (getattr(n.func, "attr", None) or getattr(n.func, "id", None))
+        == "_record_signal_decision"
+    ]
+    assert len(calls) == 1, (
+        f"expected exactly one call site, found {len(calls)}. A second one is a second place "
+        "the sizing inputs can be forgotten, and this arm would only guard the first."
+    )
+    return calls[0]
+
+
+def test_the_producer_passes_ALL_THREE_sizing_inputs_at_its_call_site():
+    """`B282`. One arm, no database, and it guards the thing the value-level arm could not."""
+    call = _record_signal_decision_call()
+    passed = {kw.arg for kw in call.keywords if kw.arg}
+
+    missing = set(SIZING_KWARGS) - passed
+    assert not missing, (
+        f"the call site no longer passes {sorted(missing)}. Every production row would carry "
+        "NULL in those columns, `sized_units` would stop being reconstructible, and the "
+        "reconstruction arm — scoped to non-null rows — would report green over an empty set."
+    )
+
+
+def test_none_of_the_three_is_bound_to_a_LITERAL_None():
+    """**The half a keyword-presence check would miss, and it is the mutation Review ran.**
+
+    Review's probe KEPT the keywords and changed their values to `None`. An arm asserting
+    only that the argument is *passed* is satisfied by `sizing_equity=None` — so it would
+    have reported green over exactly the regression it was written to catch.
+    """
+    call = _record_signal_decision_call()
+    nulled = [
+        kw.arg for kw in call.keywords
+        if kw.arg in SIZING_KWARGS
+        and isinstance(kw.value, ast.Constant) and kw.value.value is None
+    ]
+    assert not nulled, (
+        f"{sorted(nulled)} is passed as a literal None. The keyword is present and the value "
+        "is absent — the column exists, the row is NULL, and the reconstruction is impossible "
+        "while every arm stays green."
     )
