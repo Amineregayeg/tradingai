@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-30 (B301 — KNOWN_ISSUES.md carried FOUR `Last updated:` lines, at 9, 11, 13 and 15, three of them stale and the oldest by SEVEN DAYS, because rotations INSERTED a line rather than replacing one. AND THE GUARD AGAINST EXACTLY THAT READ ONLY THE FIRST: the hook's HEADER BEHIND check loops the first forty lines and returns on the first match, so a check written to refuse a header naming something older passed while three such headers sat directly beneath the line it read. Same shape as B296 and B298 — an instrument whose scope is narrower than the claim it is read as making. Fixed both halves: the stale lines removed with all 284 headings verified identical before and after, and the hook now COUNTS and refuses more than one by name. FILED ALONGSIDE B300 (execute) — the proxy's three property reads bypass _target(), so is_simulation returns False on an unbound proxy while unavailable_reason stays None, collapsing could-not-ask into asked-and-fine on the one flag ExecutionService's refusal depends on.)
+Last updated: 2026-08-30 (B303 — the CFT kill switch's per-position result list is DISCARDED exactly when a partial failure occurs. close_all_positions catches BrokerError only, close_position ends in a bare httpx post on a client with no transport wrapper, so a ConnectTimeout or ReadTimeout is not caught: the loop ABORTS, the remaining positions are NEVER ATTEMPTED, and the results list dies with the frame. BrokerManager records ONE adapter-level error, so zero-closed and four-closed produce identical output on the control whose whole purpose is to leave nothing open. get_positions at :574 is outside the try as well. B221's family on the same control B221 was about — and it is the precedent the MT5 kill-switch ruling was about to be settled by copying.)
 
 ---
 
@@ -18791,3 +18791,65 @@ this can no longer be blind to it**, which is the same fix applied to the same f
 it learned to refuse a commit claiming an id the diff does not add.
 
 Related: **B298**, **B296**, **B287**, **B144**.
+
+---
+
+### B303. The CFT kill switch catches `BrokerError` only, so a network timeout aborts the loop and **throws away the per-position record of what it managed to close**
+
+**Live-money path. Measured, not inferred.**
+
+```python
+# cryptofundtrader.py:572
+async def close_all_positions(self) -> list[dict]:
+    self._guard_trading("close_all_positions")
+    positions = await self.get_positions()          # <- OUTSIDE any try
+    results: list[dict] = []
+    for pos in positions:
+        try:
+            result = await self.close_position(pos.id)
+            results.append({..., "status": "closed", ...})
+        except BrokerError as exc:                   # <- BrokerError ONLY
+            results.append({..., "status": "error", ...})
+    return results
+```
+
+`close_position` (`:563`) ends in `await self._client.post(...)`, and `self._client` is a plain
+`httpx.AsyncClient` built at `:165` with a 30s timeout, **no event hooks and no transport wrapper**.
+So `httpx.ConnectTimeout`, `ReadTimeout` and `ConnectError` **leave `close_position` as themselves**.
+`BrokerError` is this project's own class and nothing makes them instances of it.
+
+## WHAT ACTUALLY HAPPENS ON A TIMEOUT AT POSITION 1 OF 5
+
+```
+position 1   times out    -> not a BrokerError -> the except does NOT fire
+                          -> the loop ABORTS
+positions 2-5             -> NEVER ATTEMPTED
+`results`                 -> DISCARDED with the frame
+BrokerManager:566         -> catches Exception, appends ONE entry:
+                             {"broker": ..., "status": "error", "error": "..."}
+```
+
+**The per-position status vocabulary was built so a partial failure is visible, and it is discarded
+exactly when a partial failure occurs.** The caller learns *the adapter errored* and cannot learn
+**which positions are still open**, or **whether any closed at all** — on the control whose entire
+purpose is to leave nothing open.
+
+**And `get_positions()` at `:574` is outside the try as well**, so a timeout there aborts before a
+single close is attempted — reported identically to a timeout after four successful closes.
+**Zero-closed and four-closed produce the same output.**
+
+## WHY THE SHAPE MATTERS MORE THAN THE LINE
+
+This is not a missing `except Exception`. **The results list is the instrument, and it only survives
+the failures the loop anticipated.** A per-item record that is discarded whole on an unanticipated
+item is **a report that is accurate whenever it is not needed** — `B221`'s family, on the same
+control `B221` was about.
+
+**AND IT IS THE PRECEDENT THE MT5 ADAPTER WAS ABOUT TO INHERIT.** `T-0106` forbids implementing
+`close_all_positions` because MetaApi has **no close-all call** (`B285`) so the member must ITERATE,
+and whether a partial failure raises, reports per-symbol, or confirms by re-reading is **a ruling in
+front of Malek**. The codebase already appeared to answer it — *CFT iterates and reports per
+position* — and **that answer is only true when the failure is a `BrokerError`.** A ruling made by
+copying this precedent would have copied the hole.
+
+Related: **B221**, **B285**, **B292**, **B294**, **B215**.
