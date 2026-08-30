@@ -18976,6 +18976,27 @@ an unused adapter's unreviewed choice, waiting to be the nearest example.**
 across **two live producers and one dead template**, and the dead one is the one an implementer
 would read first, because it is the only iterating implementation whose venue resembles MT5.
 
+## ✅ THE RULING THAT GOVERNS THIS FIX — MALEK, 2026-08-31 (`T-0125`)
+
+**A PROPERTY, NOT A DESIGN:**
+
+> **The report must account for EVERY position that was open when the switch was pulled — each one
+> CLOSED, FAILED WITH A REASON, or NOT ATTEMPTED. A position in none of those three states is a bug
+> by construction.**
+
+**All three candidate designs can satisfy it and all three can violate it.** Raising satisfies it
+**only if the raise carries the partial record** — which is exactly what this entry measured does
+not happen.
+
+**IT HAS AN IMMEDIATE USE ON THE VENUE WE TRADE NOW, independent of MT5.** This entry's defect is a
+violation of it: on a `ConnectTimeout` at position 1 of 5 the loop aborts, positions 2–5 are **NOT
+ATTEMPTED**, and the report cannot say so — **`NOT ATTEMPTED` is precisely the state none of the
+four shapes in the tree can express.**
+
+**None of them can.** `cryptofundtrader:572` and `oanda:499` have `closed`/`error` per position;
+`manager.py:566` has `error` per adapter; the proxy returns `[]`. **A position never reached is
+invisible in all four.**
+
 Related: **B221**, **B285**, **B292**, **B294**, **B215**.
 
 ---
@@ -19078,6 +19099,32 @@ instrument, so none of them noticed that nothing does.** Found by checking wheth
 first-connection checklist tells Malek *which* symbols to run `get_symbol_specification` against.
 
 **It is a question for Malek and cannot be derived.** Filed rather than answered.
+
+## ✅ RULED BY MALEK 2026-08-31 — **CRYPTO CFDs (BTC/ETH)**
+
+**The question is answered and the answer is the one under which everything already queued is
+correctly scoped.**
+
+```
+crypto_loop.py                the only live loop        -> drives MT5 unchanged
+SYMBOLS BTC/USD, ETH/USD      Final                     -> unchanged
+binance / binance_perp        price and candle history  -> unchanged
+units_to_lots                 needs venue bounds        -> T-0106's ninth member fetches them
+```
+
+**What changes is one adapter.** `T-0106`, `T-0111`, `T-0112`, `T-0117`, `T-0124` and `T-0130` stay
+as written; **no feed, history, symbol map or loop work is implied.**
+
+**AND THE FINANCING QUESTION SURVIVES THE RULING, which is why it was worth asking rather than
+assuming:** MT5 **crypto CFDs charge swap** where spot does not. So `B261`'s *"no field for
+financing cost"* and the `profit`-includes-swap-and-commission question at
+`MT5_FIRST_CONNECTION.md` §3.1 are **still live and still the most important thing a closed trade
+settles.** The readiness document's *"MT5 is the first venue that charges"* was written implying
+forex and **is true under this ruling too.**
+
+**This entry is closed as a question. It stays open as a constraint:** the ruling is *crypto CFDs*,
+not *whatever the broker lists*, and an MT5 account offering forex does not widen it without a new
+decision.
 
 Related: **B302**, **B287**, **B284**.
 
