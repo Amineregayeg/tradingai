@@ -30,6 +30,49 @@ silently pass as safe"* — **is weaker than it reads.** Omitting the flag does 
 declaration and cannot force a true one**, and that declaration is the entire safety argument for
 letting the engine trade.
 
+**UPDATE 2026-08-30 — the decision has changed shape, and for the better.**
+
+**The check the document said was missing turns out to EXIST.** MetaApi reports MT5's own native
+account trade mode on the account-information response — **a required field, read from the broker,
+not a value we supply:**
+
+```
+type  string  REQUIRED
+  "account type. enum ACCOUNT_TRADE_MODE_DEMO, ACCOUNT_TRADE_MODE_CONTEST, ACCOUNT_TRADE_MODE_REAL"
+```
+
+**It arrives per call, so it is re-read on every reconnect** — which was the hard requirement. A
+value obtainable only once at construction would have been a class constant with extra steps.
+
+**That matters because demo and live are otherwise indistinguishable in code.** Account creation
+takes **no demo/live field at all**; the only hint is a substring in a broker-chosen server name.
+So without this read, the only thing standing between a demo and a live account is a config value
+being right — **which is exactly what we have already ruled a safety property must never depend on.**
+
+### ⚠ But it adds a state you have not been asked about
+
+**The venue reports THREE states and the flag has TWO:**
+
+| venue says | means |
+|---|---|
+| `DEMO` | no real money, real broker connection |
+| `REAL` | real money |
+| **`CONTEST`** | **neither** |
+
+**`CONTEST` is not a hypothetical.** A prop-firm challenge account is exactly that shape — and this
+platform already operates in that world: the engine's own run config records
+`"mode": "PROP_FIRM_SIM"`, and the one non-paper adapter in the tree is Crypto Fund Trader, a prop
+firm. **It is the state this project is most likely to meet and least likely to have planned for.**
+
+Failing closed puts `CONTEST` on the real-money side: no money at risk, but a **real broker
+connection whose records belong to a third party** — which is the *other* question this one flag is
+being asked. **That is a decision for you, not something to be derived.**
+
+**One implementation trap, recorded so it is not walked into:** the field is called `type`, and the
+same SDK uses `type` for something else entirely — `'cloud'`, the deployment kind, on the
+account-creation call. **Same name, same vendor, unrelated meanings, and only one of them is a
+safety property.**
+
 ### 2. An MT5 demo account
 
 **Nothing can connect without it, and it cannot be created on your behalf.** Required: a broker, a
