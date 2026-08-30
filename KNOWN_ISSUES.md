@@ -17182,6 +17182,26 @@ entry is about does not exist. The claim that no durable record exists was check
 
 Related: **B270**, **B268**, **B240**, **B238**, **B198**, **B215**.
 
+## ⛔ LANDED AND NOT RUNNING — 2026-08-30 (`B309`)
+
+**The fix above is in `main` and is not in the engine.** Measured on production, not inferred:
+
+```
+/api/system/version   deployed commit dcfdc1f
+git log dcfdc1f..HEAD -- backend/app    contains e8dd8da, THIS ENTRY'S FIX
+decision_records      the 24-column 0007 shape — THERE IS NO rejection_reason COLUMN
+alembic_version       0007;  repo head 0008
+```
+
+> **In production a rejected signal is still the `deque(maxlen=80)` cleared on start — the exact
+> thing this entry is about.** Every rejected signal since 2026-08-24 is gone, and the entry above
+> reads as though they are rows.
+
+**And the deploy that would fix it is a trap:** the undeployed code writes `rejection_reason` and
+`outcome=REJECTED`, and the 0007 schema has neither the column nor a `CHECK` constraint that admits
+the value. **Migration first, then the image** — `agents/deploy_preflight.py` now says so.
+
+
 ### B272. An assertion that carries a test's entire stated purpose and can never fail — `T-0070`'s lesson, third instance
 
 `test_t0080_idle_and_unavailable_are_DIFFERENT_INPUTS_to_the_same_producer` ends with the assertion
@@ -17662,6 +17682,31 @@ Related: **B278**, **B277**, **B240**, **B261**, **B275**.
 > Review's own framing, and it is the sharper one: *"the reconstruction is not the finer of two
 > routes — it is the only route, and it is the one about to break."*
 
+## ⛔ LANDED AND NOT RUNNING — 2026-08-30 (`B309`)
+
+**`T-0084` added `sizing_equity`, `sizing_risk_pct` and `sizing_price`. Production has none of
+them.** Measured:
+
+```
+decision_records columns (production):
+  id created_at symbol timeframe inputs_hash code_path_hash score abstained reasons
+  signal_dir signal_entry signal_sl signal_tp sized_units expected_r realized_r gap_r
+  outcome correction_json cohort fill_price run_id decided_by deciding_rule_id
+                                        -- 24. THE THREE SIZING COLUMNS ARE ABSENT.
+```
+
+> **So the answer this entry gives — *"the equity a trade was sized against is now recorded"* — is
+> false of every row the engine has written.** The inference this entry says is no longer necessary
+> is still the only option, on every run since 2026-08-24.
+
+**This is also the answer to the owner's `Q7.1`** — *does `B279`'s gap affect the sizing of the
+trades in `runs/`?* **It affects all of them, and it still does.** `runs/` was exported from a
+database that has never had these columns, which is why the export's 24 columns matched the table
+exactly.
+
+**Found by review; filed by the manager. Amended by the manager, who filed it.**
+
+
 ### B282. A must-hit that inserts the row it asserts — and the producer can NULL every sizing column with the suite green
 
 **`T-0084` review.** `test_MUST_HIT_at_least_one_row_carries_all_three_sizing_columns` was added at
@@ -17933,6 +17978,23 @@ identical: could-not-ask versus asked-and-fine, in a money field.**
 **BOUNDED:** source only, no live read; **I have not confirmed which key CFT's venue actually
 returns**, only that the adapter accepts three and distinguishes none. The frontend's use was not
 checked. `oanda.py:269` also derives from this field and is unreachable (`manager.py:33`).
+
+**⚠ LANDED AND NOT RUNNING, 2026-08-30 — measured by its author.** `T-0102` fixed this and
+**production does not have it.** `GET /api/system/version` publishes the deployed sha —
+`dcfdc1f11cbbdb3b0f6367fa4a40bec3cb57cb1f` — and:
+
+```
+git log dcfdc1f..HEAD -- backend/app backend/alembic     ->  7 commits, including
+    59681e3  T-0102: B286 part 1 -- the adapter must know WHICH QUANTITY it read
+```
+
+**So the fallback this entry describes is still the running behaviour**, and `pnl_source` exists in
+`main` and on no production row. **A reader checking whether this is fixed finds a green suite and a
+merged commit, and the engine is unchanged.**
+
+**No container needed to establish that** — the deployed sha is published over HTTP and the rest is
+`git log`. **That is the marker `T-0128` argues for, and it already existed** (`build_info.py`,
+written for `B3`): a correct signal, produced continuously, **with no consumer for six days.**
 
 Related: **B285**, **B215**, **B184**, **B261**, **B063**.
 
@@ -19380,9 +19442,15 @@ cft_sim.py:327             open_trade_count=len(self._positions),
 oanda.py:208               open_trade_count=int(acct.get("openTradeCount", 0)),
 ```
 
-**The literal is in `cryptofundtrader` — the only adapter connected in production**
-(`broker_connections`: one row, `cryptofundtrader / live / connected`) — **and it is consumed** at
+**The literal is in `cryptofundtrader`, which IS connected in production — and it is consumed** at
 `manager.py:542`, `"open_trade_count": int(acct.open_trade_count)`.
+
+> **CORRECTED BY ITS AUTHOR: I first wrote "the only adapter connected in production" and that is
+> wrong.** `GET /api/system/health`, fetched by me: **`"brokers":{"cryptofundtrader":"connected",
+> "cft_sim":"connected"}` — TWO are connected**, and `cft_sim` holds the live positions. **The
+> accurate phrase is "the only adapter with a `broker_connections` row."** The conclusion is
+> unaffected — `cryptofundtrader` is connected and the literal is consumed — **but the phrase was
+> load-bearing for severity, which is exactly why it could not stand.**
 
 > **So the live venue reports zero open trades, always, on an account summary that is read.**
 
