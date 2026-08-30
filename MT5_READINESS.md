@@ -249,6 +249,25 @@ actually addresses the failure being guarded against.** Raise and report-per-sym
 what the close calls told them. **Confirmation does not** — and "reported success, closed nothing"
 is precisely a case where the calls' own answers were the thing that lied.
 
+> ### ⚠ And confirmation has one precondition, or it becomes the *most* confident wrong answer
+>
+> **MetaApi reports two connection states, not one:** connected to *MetaApi*, and connected to the
+> *broker*. **"Connected to the cloud but not to the broker" is a real state — and it is the state in
+> which asking for your positions returns an empty list that means nothing.**
+>
+> **So confirmation would read that empty list and conclude the book is flat.** It reports the kill
+> switch succeeded, having closed nothing and having been unable to see anything. **The option chosen
+> because it verifies rather than trusts becomes the one that lies most confidently.**
+>
+> **This does not make confirmation the wrong choice** — the other two never look, so they cannot be
+> misled; they simply never had the information. **It makes it incomplete.** The repair is one line
+> of precondition: check the broker connection before treating an empty list as evidence. **An empty
+> list from a broker you are not connected to is "cannot see", not "nothing there"** — a distinction
+> this system already enforces elsewhere and would not have had here.
+>
+> **Inferred from the documented flag, not observed.** It is the first thing to test on your real
+> connection, and it is cheap: connect, break the broker link, read positions.
+
 **It costs an extra round trip and it is the only option that earns the claim.** Your own framing,
 turned back on itself: *"closed everything" stops being a return value and becomes a claim the
 adapter has to earn* — **earning it is what confirmation does.**
