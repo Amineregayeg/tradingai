@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-30 (B299 — two of the three sizing columns record what the PRODUCER says it used and the third records what the LOOP ASKED FOR. crypto_loop.py:1529 binds sizing_equity and sizing_price from the execution result while sizing_risk_pct comes from sig.risk_pct, and the third cannot be written the other way today because service.py never puts the risk it used into its result dict — there is no key to read, so the binding is the only expression available rather than a slip. It is CORRECT TODAY BY AN ACCIDENT OF WHAT execute() DOES NOT DO, which is exactly the shape that stops being true the moment the callee starts deciding. Found by Execute while writing T-0107's binding arm, whose brief asserted all three read from the matching key of the execution result — true of two.)
+Last updated: 2026-08-30 (B299 — one of the three sizing columns records the REQUEST rather than what the sizer used: crypto_loop.py:1529 binds sizing_risk_pct from sig.risk_pct because service.py never puts the risk it used into its result, so there is no key to read. Correct today by an accident of what execute() does not do. FILED ALONGSIDE B298 — the suite is green only because it is CHUNKED: `pytest tests/ -k recursive_discovery_covers` FAILS with LiveLoopBrokerProxy not covered while the same test alone passes, because collecting the tree imports the broker package. Six invocations each collect their own files and none collects the tree, so the green number depends on the chunk boundaries while being reported as the suite's state. B298's proposed one-flag fix is corrected in an addendum: --collect-only collects 2059 and exits 0, because it creates the condition and never runs the assertion — the working guard is one INVOCATION, `pytest tests/ -k recursive_discovery_covers`, sixteen seconds.)
 
 Last updated: 2026-08-30 (B295 — two of T-0102's arms exercise a COPY of the rule instead of the adapter, and the commit's own docstring documents that exact defect. Nothing shipped is wrong: all four producers supply pnl_source, the field is required, oanda uses membership rather than a defaulted read, and cryptofundtrader:426 reads raw.get(pnl_source) so value and provenance come from ONE lookup and cannot diverge by construction. This is about what the suite would catch. pnl_key_present's docstring says it was extracted so 'the arm can import it rather than re-implement it', because an earlier test was 'exercising the copy' — found, fixed for CFT, recorded, and the same commit has two more instances. INSTANCE 1: test_the_recorded_key_is_the_one_ACTUALLY_PRESENT calls _cft_source in ISOLATION and never builds a Position, so mutating the read to raw.get('profit') leaves 13 passed — on {'netProfit':'4'} that records 'netProfit' while the value is _dec(None) -> 0, a zero P&L labelled as read from netProfit. INSTANCE 2: test_a_value_from_a_DEFAULT_does_not_record_a_key_name DEFINES _oanda_source inside itself and never touches oanda.py, so making oanda record 'unrealizedPL' unconditionally also leaves 13 passed. Fourth appearance of B290's family. PROCESS NOTE, SECOND TIME: I bid this id then wrote 'Filed B295' when I had only bid it. B288 records the identical error and its closing line is 'bid and filed are different states' — that note did not prevent this one. A lesson recorded in the artefact is not a change in behaviour; what closes it is the register hook now refusing a commit that claims an id the diff does not add.)
 
@@ -18599,3 +18599,82 @@ that. **A binding chosen to make three things look alike is an assertion nobody 
 `GATE-032` lands rather than on the day someone edits this line.
 
 Related: **B280**, **B290**, **B279**, **B297**, **B150**.
+
+### B298. The suite is green only because it is CHUNKED — a single invocation that collects the tree is red
+
+**`T-0105` review.** `test_recursive_discovery_covers_every_concrete_adapter` fails whenever a run
+**collects** the whole test tree, and passes in every chunk. Measured both directions:
+
+```
+pytest tests/unit/test_broker_contract.py -k recursive_discovery      1 passed, 37 deselected
+pytest tests/ -k recursive_discovery                                  1 FAILED, 2058 deselected
+   AssertionError: Concrete BrokerAdapter subclasses not covered by the contract
+   registry: ['LiveLoopBrokerProxy']
+```
+
+**COLLECTION ALONE IS ENOUGH.** 2,058 tests deselected and it still fails — **collecting the tree
+imports the broker package, which makes `LiveLoopBrokerProxy` a subclass.** No test needs to run.
+
+**So `2057 passed … RECONCILED EXACT` is true of six invocations and false of one.** Six chunks each
+collect only their own files; **none collects the tree, so none can see it.**
+
+> **THE GREEN NUMBER DEPENDS ON THE CHUNK BOUNDARIES WHILE BEING REPORTED AS THE SUITE'S STATE.**
+
+**THIS IS NOT AN ARGUMENT AGAINST CHUNKING.** Chunking exists because a single long run does not
+survive this environment — `B211`'s own finding — and the reconciliation against `--collect-only` is
+real work that catches real things. **The defect is that a run split for one reason acquired a second
+property nobody chose: it cannot observe anything that depends on the whole tree being imported.**
+
+**`B211`'s family, from the other side.** That entry is about a measurement lost to how it was run;
+this is a measurement **created** by how it was run.
+
+**WHAT WOULD CARRY IT, and it is cheap:** one extra invocation that **collects** the full tree without
+running it — `pytest tests/ --collect-only -q` already runs for the reconciliation. **A collection-time
+failure would surface there**, so the guard exists and is one flag away from also being a check.
+
+**NOT BLOCKING.** The arm's failure is the true state (`B297`), the proxy is genuinely uncovered, and
+`T-0119` is scoped. **This is about what "the suite is green" is evidence of.**
+
+---
+
+**PROCESS NOTE — THIRD OCCURRENCE, AND THE PREVIOUS TWO NOTES DID NOT PREVENT IT.** I bid this id and
+announced it filed without writing it. `B288` records the first, `B295` the second, **and `B295`'s
+closing line is *"a lesson recorded in the artefact is not a change in behaviour."*** It was right,
+and it was not enough: **this is the third.**
+
+**What caught it was the manager's hook refusing the commit** — the first time the pattern was stopped
+by a guard rather than by luck.
+
+**The change on my side is an ORDER, not a resolution: bid → WRITE THE ENTRY → then reference it.**
+All three failures share one shape — the id was allocated, the finding was written into a review or a
+message, and the register entry was the step after the part that felt like the work. **Making it the
+step before removes the gap rather than watching it.**
+
+Related: **B211**, **B297**, **B296**, **B295**, **B288**.
+
+> ### MANAGER ADDENDUM — the cheap fix is one command, and it is NOT the flag this entry names
+>
+> **The entry proposes that `pytest tests/ --collect-only -q`, already run for the `B211`
+> reconciliation, is one flag away from also being this guard, since collection is what triggers the
+> condition. Measured:**
+>
+> ```
+> pytest tests/ --collect-only -q        2059 tests collected in 13.24s    exit 0
+> ```
+>
+> **It does not fail.** Collection causes the **import** that makes the proxy visible to
+> `__subclasses__()` — **but the assertion lives inside a test, and `--collect-only` does not run
+> tests.** The condition is created and never evaluated.
+>
+> **The working version is one invocation, not one flag:**
+>
+> ```
+> pytest tests/ -k recursive_discovery_covers
+>   FAILED ... not covered by the contract registry: ['LiveLoopBrokerProxy']
+>   1 failed, 2058 deselected in 16.16s
+> ```
+>
+> **Collect the whole tree, run exactly one test.** Sixteen seconds, and it is the check the six
+> chunks structurally cannot make. **The insight was right — the guard is one command away — and the
+> mechanism named would have been added, run green, and reported as coverage.**
+
