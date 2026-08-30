@@ -175,6 +175,28 @@ commission give account equity a second author — and nothing would have announ
 
 ---
 
+## One safety property changes on MT5, and it needs a decision
+
+**Your kill switch is `close_all_positions`. On MT5 it can no longer be one call.**
+
+**MetaApi has no close-all.** The only bulk close documented is *close positions for one symbol*. So
+the kill switch **must iterate** — and a loop can **partially fail.**
+
+> **"Closed everything" stops being a return value and becomes a claim the adapter has to earn.**
+
+That is the exact shape that has already cost this project once: an operation that **reported success
+over an action that did not happen**. On the paper broker the kill switch closes everything in one
+call and cannot half-succeed. On MT5 it can.
+
+**The decision to record — not to default:** when closing position 3 of 5 fails, does the kill switch
+**raise**, or **report per-symbol** and continue? Both are defensible. **Silently returning success
+is not**, and it is what happens if nobody chooses.
+
+**Worth knowing alongside it:** this member deliberately does *not* check `is_simulation` — that was
+settled earlier and on purpose, because a kill switch that refuses to close a real position is worse
+than the risk it avoids. **So this is the one path where an MT5 failure has no safety flag in front
+of it.**
+
 ## Honest risks
 
 **The strategy is not what you might assume it is.** Of your sixteen rulings, **one reaches a live
