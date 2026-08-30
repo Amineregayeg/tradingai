@@ -952,9 +952,33 @@ async def test_t0080_idle_and_unavailable_are_DIFFERENT_INPUTS_to_the_same_produ
     )
     cannot_ask = await dh.order_path_health(None)
 
-    assert stopped["status"] == "idle" and cannot_ask["status"] == "unavailable"
-    assert stopped["watching"] is True and cannot_ask["watching"] is False
-    assert stopped["status"] != cannot_ask["status"], (
-        "the two states must not share a status — one is allow-listed by the ruling and the "
-        "other is a problem, and folding them would make the flag unreadable either way"
+    # `B272`/`T-0086`. The last assertion here USED TO BE `stopped != cannot_ask`, and it
+    # could not fail: it fires only if the two are EQUAL, and the line above pins them to two
+    # DIFFERENT literals — so if they were ever equal, that line had already failed. The guard
+    # was not lost; **the DIAGNOSIS was**, because the sentence explaining `B215` sat on the
+    # dead assertion and never printed.
+    #
+    # Split so each state names its own failure, and the `B215` sentence moved onto an
+    # assertion that CAN fire — option (a): a property over inputs the literals do not pin.
+    assert stopped["status"] == "idle", (
+        "a stopped engine must report `idle` — the state Malek's ruling allow-lists"
+    )
+    assert cannot_ask["status"] == "unavailable", (
+        "a missing loop means the gate cannot be ASKED, which is a problem and not an absence "
+        "of news — collapsing it into `idle` is `B215` at the level of this component"
+    )
+    assert stopped["watching"] is True, "a stopped engine is one this check CAN see"
+    assert cannot_ask["watching"] is False, "and a missing loop is one it cannot"
+
+    # THE PROPERTY THE OLD SENTENCE NAMED, over inputs the literals above do not pin: one of
+    # these states is ALLOW-LISTED by the ruling and the other is a PROBLEM. That can break
+    # while both literals stay correct — admit `unavailable` to `OK_STATUSES` and the two
+    # statuses are still `idle` and `unavailable`, so the pins above pass and this fires.
+    assert stopped["status"] in dh.OK_STATUSES, (
+        f"{stopped['status']!r} left the allow-list — a stopped engine is not broken"
+    )
+    assert cannot_ask["status"] not in dh.OK_STATUSES, (
+        f"{cannot_ask['status']!r} joined the allow-list. A component we cannot SEE would read "
+        "as one that is fine — `B215`'s could-not-ask versus asked-and-fine, and it would make "
+        "the ok flag unreadable either way"
     )

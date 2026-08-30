@@ -557,10 +557,17 @@ def test_the_SAME_large_pool_loses_to_a_nearer_one_on_its_own_timeframe():
     within = NearestWithinTimeframe.evaluate(
         [small_near_1d, large_far_1d], same_timeframe=True
     )
-    assert across.values["selected"] == "large-1D", "size must rank across timeframes"
-    assert within.values["selected"] == "small-1D", "proximity must win within one"
-    assert across.values["selected"] != within.values["selected"], (
-        "the same candidate set produced the same winner at both levels — the two orderings "
+    # `B272`/`T-0086`. The `!=` line below used to carry the diagnosis and could not fail:
+    # both sides are pinned to different literals above, so if they were ever equal one of
+    # the pins had already failed and the sentence never printed. **The guard was not lost;
+    # the diagnosis was.** Option (b): the explanation moves onto the assertions that fire.
+    assert across.values["selected"] == "large-1D", (
+        "size must rank across timeframes — if this is 'small-1D' the same candidate set "
+        "produced the same winner at both levels and the two orderings have been collapsed "
+        "into one sort"
+    )
+    assert within.values["selected"] == "small-1D", (
+        "proximity must win within one timeframe — if this is 'large-1D' the two orderings "
         "have been collapsed into one sort"
     )
 

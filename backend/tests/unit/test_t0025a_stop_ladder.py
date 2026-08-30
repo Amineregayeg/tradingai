@@ -610,10 +610,16 @@ def test_case_b_the_tie_breaks_on_cushion_and_not_on_list_position():
     chosen = ClosestTo3RSelector.select(table)
 
     naive = min(table, key=lambda c: abs(c.rr - RR_PREFERRED))
-    assert naive.rung == 2, "the list-order implementation picks rung 2"
-    assert chosen.rung == 4, "the rule picks the larger cushion, which is rung 4"
-    assert chosen.rung != naive.rung, (
-        "if these ever agree this fixture has gone vacuous and proves nothing"
+    # `B272`/`T-0086`. The `!=` line below could not fail — both rungs are pinned to
+    # different literals above — so the vacuity warning it carried never printed. The
+    # warning is the valuable part, so it moves onto the assertions that fire.
+    assert naive.rung == 2, (
+        "the list-order implementation must pick rung 2; if it picks 4 this fixture no "
+        "longer separates the two selectors and proves nothing"
+    )
+    assert chosen.rung == 4, (
+        "the rule must pick the larger cushion, rung 4; if it agrees with the naive pick "
+        "this fixture has gone vacuous"
     )
     assert chosen.cushion > naive.cushion
 
