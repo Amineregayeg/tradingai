@@ -108,8 +108,31 @@ decision only you can take. See *"The transport is settled"* below.
 
 | task | what it settles | state |
 |---|---|---|
-| **T-0096** | **Which transport can reach MT5 from this box.** **DONE — see below.** | settled |
-| **T-0097** | **Units-to-lots conversion** — the seam where a unit error is a money error. Buildable now, no broker needed. | planned |
+| **T-0096** | Which transport can reach MT5 from this box | **done** |
+| **T-0099** | Demo vs live at the API level — found the broker-reported account type | **done** |
+| **T-0100** | All twelve adapter members mapped onto MetaApi, as an ordered checklist | **done** |
+| **T-0097** | Units-to-lots conversion — the seam where a unit error is a money error | **done** |
+| **T-0103** | Its refusal vocabulary, and publishing what the tests do *not* cover | in progress |
+| **T-0105** | `Position` schema for MT5 — three findings in one change, no migration | queued |
+| **T-0106** | **The adapter itself — the eight members that map cleanly, against a mock** | queued |
+
+**`T-0106` is the one that decides what your first hour looks like.** It writes the adapter from
+documentation that has already been read and quoted, so that **connecting becomes a test rather than
+a build.**
+
+**It deliberately stops short of three members**, and each for a reason that is yours rather than
+ours:
+
+* **`close_all_positions`** — the kill switch. Building it before you choose raise / report /
+  confirm would be choosing for you.
+* **`close_position`** — dispatches on size between two MetaApi calls, so it waits on the conversion
+  work landing.
+* **`disconnect`** — **not documented at all.** If none exists it becomes a no-op *with a docstring
+  saying why*, never a silent one.
+
+**And it reads the account-type field without acting on it.** The mapping from `DEMO` / `CONTEST` /
+`REAL` onto our safety flag **is the decision waiting on you** — so the adapter will expose the
+venue's answer and leave the wiring unbuilt, with a comment saying that is deliberate.
 
 ---
 
