@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-30 (B313 — landed_sweep's population is 5.2x its subject count and 37% of it has no entry to attribute to. The last of the four sweeps whose denominator nobody knew. B312 established it is unaffected by the heading defect BECAUSE it has no heading pattern: it scans lines for T-\d{4}, so its population is LINES not entries — a limit stated and never measured. REACH: 296 entries, 268 containing at least one T-id line (90%), 28 unreachable because they never cite a task — consistent with deferral_sweep's widened result of zero unowned. ATTRIBUTABILITY: 1385 T-id lines across everything it scans — 863 (62%) in KNOWN_ISSUES.md where an entry EXISTS and the tool does not use it, and 522 (37%) in backend/ and scripts/ across 122 files where NO entry exists. So 37% is unattributable BY CONSTRUCTION and the rest is attributable-but-not-attributed. AND THE RATIO IS THE FINDING: 1385 lines over 268 attributable entries is 5.2 potential findings per subject, and within the register alone 863 over 268 is 3.2 lines per entry — a reader sees line-shaped noise over an entry-shaped problem and cannot tell that three flags are one fact. Not a defect in what it reports; every line it flags is a real citation. The defect is that its denominator was never stated, the same shape as stale_sweep printing 319 beside 44. Fix needs no new scan: group register hits by containing entry and report entries-affected beside lines-flagged. BOUNDED: I measured the population, not the output — the fraction comes before the findings.)
+Last updated: 2026-08-30 (B314 — FOUR TIMES IN ONE DAY THE THING BEING BUILT OR MISSED WAS ALREADY IN THE TREE. B309: /api/system/version published the deployed sha for six days and nothing read it, while review proposed building that exact marker. B311: register_commit_check.py:61 has always used the correct heading pattern and I wrote a new one that swept 54% of the register. B302: units_to_lots exists, is correct and has ZERO CALLERS, while OANDA hardcoded 100_000 instead. T-0129: base.py DECLARES the four members' return shapes, two dict and two list[dict], and a returned-dict instrument was built for a subject that is half lists — verified independently, all twenty adapter signatures honour the container types, so only the KEY SET is undeclared. In all four the searcher was competent and the answer sat where the current question does not point: the deployed artefact rather than the source, a sibling tool solving a different question, a function whose lack of callers read as not-wired-yet, and return annotations in a file read for its abstract methods. The action is one line — before building an instrument, name what would already know the answer and say it was checked. BOUND: four instances, no sweep for counter-examples, so this says the pattern is frequent enough to act on and nothing about its rate.)
 
 ---
 
@@ -19720,3 +19720,71 @@ in.
 `B312`'s rule applies: **the fraction comes before the findings**, and this is the fraction.
 
 Related: **B312**, **B311**, **B240**, **B298**.
+
+---
+
+### B314. **Four times in one day, the thing being built or missed was already in the tree** — and the cheap first step is a search, not a design
+
+**Not a defect in any one place. A measured pattern**, filed because it has an action attached and
+because four instances in a day is enough to stop calling it luck.
+
+## THE FOUR, all measured today and all cited to their own entries
+
+```
+B309   /api/system/version has published the deployed sha for six days.
+       build_info.py was written for B3 -- "you cannot debug or roll back what you cannot
+       identify" -- and NOTHING READ IT. Review proposed building that marker; it existed.
+
+B311   register_commit_check.py:61 has always used `^### (B\d+)\b`.
+       I WROTE A NEW PATTERN with `\.` and swept 54% of the register -- having deliberately
+       copied stale_sweep.py's CITE pattern two functions earlier.
+
+B302   units_to_lots exists, is correct, and HAS ZERO CALLERS. The function written to stop
+       exactly the units/lots confusion sat unwired while OANDA hardcoded 100_000 instead.
+
+T-0129 base.py DECLARES the four members' return shapes -- `-> dict` twice, `-> list[dict]`
+       twice. A returned-dict instrument was built for a subject that is HALF LISTS, by the
+       seat auditing undeclared schemas all day. Both of its controls were knowable before
+       the first line of the sweep.
+```
+
+**Verified independently:** all twenty adapter signatures honour `base.py`'s container types.
+**So the CONTAINER is declared and consistent, and only the KEY SET is undeclared** — which is a
+sharper statement than *"a schema nobody declared"*, and it is the statement the declaration itself
+hands you for free.
+
+## WHY IT IS NOT JUST "SEARCH FIRST", WHICH EVERYBODY ALREADY BELIEVES
+
+**In all four the searcher was competent and the search was skipped for a specific reason:**
+
+* **`B309`** — the marker was in the *running artefact*, not in the source anyone was reading.
+  **Looking in the repo would not have found it; looking at the deployed thing did.**
+* **`B311`** — the pattern was in a **sibling file solving a different question**, so it was not
+  where the answer to *this* question would live.
+* **`B302`** — `units_to_lots` was found, repeatedly, **and its absence of callers was read as
+  "not wired yet" rather than as the finding.**
+* **`T-0129`** — the declaration was in the file the whole boundary is defined by, **which is
+  read for its abstract methods and not for its return annotations.**
+
+> **The thing already in the tree is reliably in the place the current question does not point
+> at.** Nobody failed to look; each looked where the question aimed.
+
+## THE ACTION, and it is one line rather than a practice
+
+**Before building an instrument, ask what would already know the answer** — the deployed artefact,
+the sibling tool, the base class's annotations, the function nobody calls. **Name the candidate and
+say it was checked, in the commit.** `B311`'s commit does this by accident (*"the correct pattern
+was in this directory the whole time"*) and it is the sentence that made this entry findable.
+
+**It is cheap because the answer is short either way.** *Checked `base.py`'s annotations — they
+declare the shape, so the subject splits in two* is one line. **So is nothing.**
+
+## THE HONEST BOUND
+
+**Four instances, one day, one project, three seats — and I did not sweep for counter-examples.**
+There is no measurement here of how often the tree did NOT already contain the answer, so **this
+says the pattern is frequent enough to act on and says nothing about its rate.** Naming that
+because a pattern entry without a denominator is `B240`'s shape, and this whole day was
+denominators.
+
+Related: **B309**, **B311**, **B302**, **B53**, **B240**.
