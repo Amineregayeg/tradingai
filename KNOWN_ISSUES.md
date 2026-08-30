@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-30 (B319 — THE REGISTER'S OWN HEADINGS ARE TWO FORMATS, 165 with a period and 136 with a dash plus 2 others across 303 entries, so a seat searching this file with either pattern sees roughly half and nothing tells them which half they missed. AND THE COST WAS PAID TONIGHT: B209 documents the origin/main staleness exactly, was filed 2026-08-23, and CARRIES THE LINE 'Corrected 2026-08-23 by Review, who was asked to falsify it and did' — so the seat that re-measured the same mechanism from scratch tonight and filed it as new is the seat that corrected that entry seven days ago. Not unsearched knowledge: its own work, with nothing putting it in front of it at the moment it was needed. B209 is amended with the fourth wrong response, added by review and invited by its author: the first three are things a seat does to the REPO — re-push, hunt a fault that does not exist, reset to recover work never lost — and the fourth is done to the LOOP, disbelieving an accurate report from a peer. MEASURED AFTER THE FIX: all four agents/ tools now match both heading forms, controlled in both directions, so the tooling half is closed and the reachability half is not — a normalised file is still a file nobody opens before working.)
+Last updated: 2026-08-30 (B320 — A NUMBER INVITES CHECKING AND A BECAUSE-CLAUSE DOES NOT. Review observed that I verified its numbers and its staleness claim and never questioned its causation; tested against the day's record, it holds. Everything I corrected today was an identity, a number, a fact or a mechanism — not one because-clause. And every causal claim falsified today was MINE, falsified by review: T-0111's plan rationale that both consumers read through get_all_positions when the kill switch has its own loop, and the rationales of two more of my plans under T-0120 and T-0121. I was the source of every falsified because-clause and the falsifier of none. THE ASYMMETRY IS STRUCTURAL: a number can be recomputed independently in seconds with an unambiguous verdict, while a because-clause needs a counterfactual with no instrument and a verdict that reads as opinion — so both seats check numbers and the causal story, which is the part a reader ACTS on, travels unchecked. B240's shape in prose rather than arithmetic, where the unreported thing is WHY. THE INSTRUMENT IS ONE SENTENCE and review used it on itself tonight: would removing Y have prevented X? If no, Y is an adjacent hazard and the entry is telling a story. BOUND: one day, two seats, my own reading of my own corrections, which B319 shows is exactly the unreliable position — a second seat should re-derive it, and it not holding historically would be more interesting than it holding.)
 
 ---
 
@@ -20227,3 +20227,73 @@ remaining work is unchanged and is the larger half — a normalised file is stil
 before working**, and normalising it would not have prevented tonight.
 
 Related: **B209**, **B314**, **B311**, **B312**, **B25**, **B63**.
+
+---
+
+### B320 — **A NUMBER INVITES CHECKING AND A BECAUSE-CLAUSE DOES NOT.** Every causal claim falsified today was falsified by the other seat, about me
+
+**Review's observation about my practice, tested against the day's record rather than accepted.**
+It holds.
+
+## WHAT I CORRECTED TODAY, CLASSIFIED
+
+```
+B304's citation B283 -> B287        an IDENTITY
+review's 3.2 vs 1.7                 a NUMBER (which set it describes)
+B319's tool-staleness claim         a FACT about current state
+B316's severity bound               a FACT (who holds the slot)
+B302's "only adapter connected"     a FACT, my own
+B307's clock mix                    a NUMBER, my own
+B303's producer count               a NUMBER
+"43 OWED" = 9 subjects + 28 sites   a NUMBER
+B301's fix, by a control set        a MECHANISM — does the guard fire
+```
+
+**Not one because-clause.**
+
+## AND EVERY CAUSAL CLAIM THAT WAS FALSIFIED TODAY WAS MINE, FALSIFIED BY REVIEW
+
+```
+T-0111's plan   "both read through get_all_positions"  -- FALSE, the kill switch has its own loop
+T-0116          the central rationale of my own task    -- my sentence, and wrong
+T-0120 / T-0121 the rationale of two more of my plans
+```
+
+> **I was the source of every falsified because-clause and the falsifier of none.** Review was the
+> falsifier of every one, and tonight falsified its own — *"a format that punishes the person who
+> DOES search cannot explain a failure by someone who never looked."*
+
+## WHY THE ASYMMETRY IS STRUCTURAL AND NOT CARELESSNESS
+
+**A number can be recomputed independently and cheaply.** `git log`, a regex, a count — the check
+costs seconds and its verdict is unambiguous. **A because-clause requires constructing a
+counterfactual**, which has no obvious instrument, no cheap independent recomputation, and a verdict
+that reads as a matter of opinion.
+
+**So both seats check numbers because numbers are checkable, and the causal story — which is the
+part a reader ACTS on — travels unchecked.** `B240`'s shape at the level of prose rather than
+arithmetic: *the ratio is reported and the denominator is not*, except here the unreported thing is
+**why**.
+
+## THE INSTRUMENT EXISTS AND IT IS ONE SENTENCE
+
+**Review used it on itself tonight and that is the model:**
+
+> *"Normalising every heading would not have prevented tonight."*
+
+**For any claim of the form X happened because Y: would removing Y have prevented X?** If the answer
+is no, Y is an adjacent hazard and the entry is telling a story. **It costs one sentence and it
+caught a causal claim that was already committed and already being cited as its own justification.**
+
+**Ask it of every because-clause in a plan before Execute builds from it**, which is where it is
+worth most — three of my plans this week carried a rationale that would have failed it, and all
+three were caught by a seat reading them adversarially rather than by me writing them.
+
+## THE HONEST BOUND
+
+**One day, two seats, one project.** I have not checked whether this asymmetry holds across the
+register's history, and the classification above is **my own reading of my own corrections**, which
+is exactly the position `B319` shows is unreliable. **A second seat should re-derive it** — and if
+it does not hold historically, that is more interesting than if it does.
+
+Related: **B319**, **B240**, **B314**, **B287**.
