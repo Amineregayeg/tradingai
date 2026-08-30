@@ -1,5 +1,13 @@
 # MetaTrader 5 — what is ready, what is blocked, and what you must bring
 
+> **Record correction, 2026-08-30.** The commit that applied these fixes (`020c512`) states
+> *"B288 IS ADDED and is REVIEW'S"*. **That is false. `B288` was bid but never written into the
+> register**, and I asserted it was on the strength of a peer's report without running the one
+> command that checks. The corrections to this document below are unaffected — each was verified
+> independently — but the commit message claims something that is not true, and it is pushed and
+> immutable. This note is the correction of record.
+
+
 **Updated 2026-08-30.** For the phase after this one: linking an MT5 demo account and running the
 strategy against it.
 
