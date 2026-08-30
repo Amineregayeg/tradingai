@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-30 (B288 — whether MetaApi's close P&L INCLUDES swap and commission is UNVERIFIED, and the undocumented branch is the dangerous one. MT5_READINESS.md stated it as fact and its whole realized_r section rests on it. MetaApi's MetatraderDeal model says only: profit number REQUIRED 'deal profit', commission number 'deal commission', swap number 'deal swap' — the docs do not say whether profit includes the other two, and three SEPARATE fields argue it does not, since reporting a component separately from a total containing it is double-counting. THE WARNING SURVIVES EITHER WAY, THE DIRECTION DOES NOT: if profit INCLUDES costs the numerator gains components the denominator lacks and realized_r gets worse than the geometry says; if profit EXCLUDES them realized_r stays geometry-comparable and SILENTLY IGNORES REAL COSTS, so R looks fine while the account pays. A figure that quietly OVERSTATES performance is worse than one that understates it, and it is the branch the field layout points at — the document asserted the milder direction and did not mention the other. Settled by one read on the first closed MT5 deal: compare profit against the position's realised total. Not an MT5-only question — B286 established unrealized_pnl already has no single definition, and this is the same question on the REALISED side, reaching the number every trade result is judged by. PROCESS NOTE: I bid this id from the ledger then wrote 'Filed B288' when I had only BID it; the manager then asserted the entry existed in a commit message. Bid and filed are different states, and the wording that was wrong was mine first.)
+Last updated: 2026-08-30 (B289 — duration_seconds is COMPUTED by oanda and cryptofundtrader and HARDCODED to 0 by paper and cft_sim, and it is a REQUIRED int on Position so the two that cannot compute it have no way to say so: zero is the only value satisfying the type. Nothing reads it, measured, so there is no live defect — it is filed because it is the THIRD instance of one pattern, after unrealized_pnl and r_multiple in B286: three fields, one schema, and in each case the meaning depends on which adapter built the row with nothing recording which. The schema is being used as a SHAPE and treated as a CONTRACT. It becomes MT5's problem because a fifth adapter must choose and there is no rule to choose by, and because 0 is B215's collapse again — this venue does not report an age and this position is zero seconds old are the same value, while open_time sits correctly on the same object. Found while investigating why the live engine had written no decision for 35 hours: it had not stopped, both symbols were held.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -18054,3 +18054,58 @@ register: **a state asserted because it was expected, over one a single `grep` w
 The entry now exists; the wording that was wrong was mine first.
 
 Related: **B286**, **B261**, **B285**, **B215**.
+
+---
+
+### B289. `duration_seconds` is computed by two adapters and hardcoded to `0` by two others — the third field in `Position` that means something different depending on who built it
+
+**Found while investigating why the live engine had written no decision for 35 hours** (it had not
+stopped — both symbols were held, see below). The positions endpoint returned two positions open
+since `2026-08-28` and `2026-08-29`, **both reporting `duration_seconds: 0`.**
+
+```
+oanda.py:155,274,288          _duration_seconds(open_time)  -> COMPUTED
+cryptofundtrader.py:226,417   _duration_seconds(open_time)  -> COMPUTED
+paper.py:179                  duration_seconds=0            -> HARDCODED
+cft_sim.py:347                duration_seconds=0            -> HARDCODED
+```
+
+**It is a REQUIRED field on `Position`** (`schemas/broker.py:61`, `duration_seconds: int`) — so the
+two adapters that do not compute it cannot omit it, and **zero is the only value that satisfies the
+type.** The schema forces an answer and two adapters have none to give.
+
+## Why it is filed despite having no consumer
+
+**Measured: nothing reads it.** `grep -rn duration_seconds app/ frontend/src` outside the four
+producers and the schema returns nothing. **So there is no live defect today**, and that is why this
+is not urgent.
+
+**It is filed because it is the THIRD instance of one pattern**, and the pattern is what matters:
+
+```
+unrealized_pnl     paper = gross price movement | CFT = whichever of three keys arrived   B286
+r_multiple         paper = a price ratio        | CFT = derived from unrealized_pnl        B286
+duration_seconds   oanda/CFT = computed         | paper/cft_sim = the literal 0            B289
+```
+
+**Three fields, one schema, and in each case the meaning depends on which adapter built the row with
+nothing recording which.** `B286` established the first two while asking a different question; this
+one turned up while asking a third. **The schema is being used as a shape and treated as a
+contract**, and those are not the same thing.
+
+## What makes it MT5's problem rather than a tidy-up
+
+**A fifth adapter has to choose, and there is no rule to choose by.** `T-0100` mapped MetaApi's
+position model; whether it reports an age, and what an adapter does when it cannot, is exactly the
+decision the four existing adapters made in two different directions without recording either.
+
+**And `0` is `B215`'s collapse in the same place we have now found it three times:** *"this venue
+does not report an age"* and *"this position was opened zero seconds ago"* are the same value.
+**The paper broker holds `open_time` correctly on the very same object**, so the information exists
+and the field beside it lies.
+
+**BOUNDED:** producers read from source; the no-consumer claim is a grep over `app/` and
+`frontend/src` and would miss a consumer that reads the field by string from a serialised payload
+(`B240` — a zero from a scanner is not evidence of absence).
+
+Related: **B286**, **B215**, **B261**, **B184**.
