@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-30 (B318 — _handle_response SWALLOWS THE PARSE EXCEPTION AND LOGS NOTHING ON EITHER DEGRADED PATH, so the condition B316 and B317 describe would leave NO TRACE if it has already happened: zero logger calls in that window and `except Exception: return {}` discarding the exception whole, with no type and no line. 'We have never seen one' is therefore not available as evidence — B215's shape and its sharper form, an absence where no evidence was ever COLLECTABLE, and none will be until that changes. It is its own entry because it OUTLIVES THE FIX: after T-0130's three-state UNKNOWN lands, an empty or malformed 200 becomes a correctly-handled UNKNOWN THAT STILL NOBODY CAN SEE. AND ITS TWO NEIGHBOURS: B317 — B316's setdefault is safe only because crypto_loop constructs ExecutionService(self.paper, ExecMode.PAPER) and self.paper is always a simulator, never the CFT adapter, an invariant NOTHING RECORDS while T-0106 exists to break it; B316 — cryptofundtrader and oanda forward the venue reply UNCHANGED so they have no schema at all, and service.py:168's res.setdefault('status', 'FILLED') turns an EMPTY or UNPARSEABLE 200 into a FILL that crypto_loop:1518 records as a position-open.)
+Last updated: 2026-08-30 (B319 — THE REGISTER'S OWN HEADINGS ARE TWO FORMATS, 165 with a period and 136 with a dash plus 2 others across 303 entries, so a seat searching this file with either pattern sees roughly half and nothing tells them which half they missed. AND THE COST WAS PAID TONIGHT: B209 documents the origin/main staleness exactly, was filed 2026-08-23, and CARRIES THE LINE 'Corrected 2026-08-23 by Review, who was asked to falsify it and did' — so the seat that re-measured the same mechanism from scratch tonight and filed it as new is the seat that corrected that entry seven days ago. Not unsearched knowledge: its own work, with nothing putting it in front of it at the moment it was needed. B209 is amended with the fourth wrong response, added by review and invited by its author: the first three are things a seat does to the REPO — re-push, hunt a fault that does not exist, reset to recover work never lost — and the fourth is done to the LOOP, disbelieving an accurate report from a peer. MEASURED AFTER THE FIX: all four agents/ tools now match both heading forms, controlled in both directions, so the tooling half is closed and the reachability half is not — a normalised file is still a file nobody opens before working.)
 
 ---
 
@@ -13027,6 +13027,12 @@ safely on the remote. The available responses are all wrong —
   Manager a full diagnostic pass this session, including a false "2 commits unpushed" reported into
   the loop before `ls-remote` corrected it;
 * worst, `git reset` or re-commit to "recover" work that was never lost.
+* **and the one that damages something git cannot repair — DISBELIEVE A CORRECT PEER.** Added
+  2026-08-30 by Review, **invited by this entry's author.** The three above are all things a seat
+  does to the repo. This one is done to the loop: the manager reported `735c6de` landed and pushed,
+  `git status` said `ahead 84`, and **I read the contradiction as evidence against them rather than
+  against the tool.** `ls-remote` settled it in one call. The other three cost work; this one
+  spends trust, and the next accurate report is believed a little less.
 
 **It has already produced a wrong claim inside a verification — and the FIRST VERSION OF THIS
 ENTRY GOT THE MECHANISM WRONG.** Corrected 2026-08-23 by Review, who was asked to falsify it and did.
@@ -20135,3 +20141,52 @@ have read.** Unmeasured, not clean.
 **Queued as `T-0131`**, which needs no authorisation and no venue cooperation.
 
 Related: **B316**, **B317**, **B215**, **B221**, **T-0130**, **T-0131**.
+
+### B319 — THE REGISTER'S OWN HEADINGS ARE TWO FORMATS, 165 AND 137, so a seat searching it sees HALF — and tonight an entry was re-derived from scratch by the person who had corrected it
+
+**`B319` was originally the `git status` finding. That was a RE-DERIVATION of `B209`** (filed
+2026-08-23 by the manager, still open, mechanism identical). The git half has been retired into
+`B209`, where a reader hitting `ahead 84` will land; **only its genuinely new part** — *disbelieve a
+correct peer* — **was added there, as a fourth bullet on a list `B209` already had.** This id now
+carries the reason the re-derivation happened, which is worth more than the re-derivation.
+
+**Measured 2026-08-30, with controls in both directions:**
+
+| heading shape | count | share |
+|---|---|---|
+| `### Bnnn.` (period) | **165** | 54% |
+| `### Bnnn ` + dash (space) | **137** | 45% |
+| other | 1 | — |
+| **total entry headings** | **303** | |
+
+**Controls:** `B209` (period form) matched by the period pattern — found. `B318` (dash form)
+matched by the period pattern — **correctly not found**. `B318` by the punctuation-agnostic pattern
+— found. *So the split is real and not an artefact of my regex, which is the failure mode I have
+filed twice.*
+
+**A seat who searches this file gets a HALF-BLIND ANSWER that depends on which pattern they
+happened to type**, and nothing tells them which half they missed. `deferral_sweep.py` is already
+known to be period-requiring at 53%; **that is not a bug in one sweep, it is the file's own
+inconsistency surfacing wherever anyone reads it.** My own entries — `B316`–`B319` — are in the
+**minority** format and are invisible to the period-requiring tools already in this repo.
+
+**The evidence that this is not theoretical, and it is about me.** `B209`'s own text reads:
+*"Corrected 2026-08-23 by Review, who was asked to falsify it and did."* **I falsified and corrected
+that entry seven days ago, and tonight I measured the same mechanism from scratch and filed it as
+new.** The diagnosis *nobody searched the register* is too kind: **this was not unsearched knowledge,
+it was MY OWN work, and neither memory nor tooling put it in front of me at the moment it was
+needed.**
+
+> **A register that cannot be consulted at the moment of work is a cost, not an asset.** 303 entries
+> and 20,181 lines are a liability if the lookup is a coin-flip: the project pays to write them and
+> re-derives them anyway.
+
+**Fix — two parts, and the second matters more.** (1) Normalise the headings to one shape, and
+make whatever writes entries emit that shape, so a single pattern reaches 100%. (2) **Nothing here
+gets consulted before work.** A normalised file is still a file nobody opens; the searchable form
+needs to be reachable at the moment of measuring, not merely correct.
+
+**NOT filed as a task.** Part (1) is mechanical but rewrites 137 headings in a file three seats
+write concurrently, so it belongs in a quiet window and is the manager's call, not mine.
+
+Related: **B209**, **B314**, **B25**, **B63**.
