@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-30 (B296, B297 — the population was one member narrow, and the arm that exists to catch that is green by import order. B296: `_all_adapters()` derived its population with `BrokerAdapter.__subclasses__()`, which returns DIRECT children only, so `CFTBridgeAdapter` — a grandchild, and what manager.py:70 constructs when a bridge is configured — was never handed to any contract arm, including the one whose docstring is 'THE CONTRACT ARM IS OVER EVERY ADAPTER'. The membership pin could not catch it: a class that never enters the set cannot change it, so the pin guards ADDITIONS to the population and not OMISSIONS from it. Both derivations in the suite returned FIVE, differing by two members in opposite directions, so any check on cardinality passed. Latent rather than live — the bridge overrides none of the contract methods today — and the exposure is the next override. FIXED in T-0105, with a control on the DERIVATION rather than on the predicate: the existing control pair proves `_reads_lot_size` can find something and says nothing about whether the population it is applied to contains the member it needs to find. B297: `test_recursive_discovery_covers_every_concrete_adapter` recurses correctly over a population that is whatever happens to have been IMPORTED, so it is green only because test_broker_contract.py sorts before every module that imports the broker package — measured both ways, 38 passed alone and 1 failed when anything imports the package first. The failure is the TRUE state: LiveLoopBrokerProxy is concrete, registered with broker_manager at startup, and covered by none of the arms parametrised over that registry. NOT fixed, and not only for scope: the determinism fix is one line and turns the suite red, and the red cannot be cleared mechanically — the proxy is neither a SIM nor a LIVE adapter, its is_simulation forwards and answers False when unbound, so LIVE_ADAPTERS would pass it because it is UNBOUND rather than because it is live, which is B215's collapse inside the arm that would be certifying it. A registry entry chosen to clear a red is an assertion nobody decided.)
+Last updated: 2026-08-30 (B299 — two of the three sizing columns record what the PRODUCER says it used and the third records what the LOOP ASKED FOR. crypto_loop.py:1529 binds sizing_equity and sizing_price from the execution result while sizing_risk_pct comes from sig.risk_pct, and the third cannot be written the other way today because service.py never puts the risk it used into its result dict — there is no key to read, so the binding is the only expression available rather than a slip. It is CORRECT TODAY BY AN ACCIDENT OF WHAT execute() DOES NOT DO, which is exactly the shape that stops being true the moment the callee starts deciding. Found by Execute while writing T-0107's binding arm, whose brief asserted all three read from the matching key of the execution result — true of two.)
 
 Last updated: 2026-08-30 (B295 — two of T-0102's arms exercise a COPY of the rule instead of the adapter, and the commit's own docstring documents that exact defect. Nothing shipped is wrong: all four producers supply pnl_source, the field is required, oanda uses membership rather than a defaulted read, and cryptofundtrader:426 reads raw.get(pnl_source) so value and provenance come from ONE lookup and cannot diverge by construction. This is about what the suite would catch. pnl_key_present's docstring says it was extracted so 'the arm can import it rather than re-implement it', because an earlier test was 'exercising the copy' — found, fixed for CFT, recorded, and the same commit has two more instances. INSTANCE 1: test_the_recorded_key_is_the_one_ACTUALLY_PRESENT calls _cft_source in ISOLATION and never builds a Position, so mutating the read to raw.get('profit') leaves 13 passed — on {'netProfit':'4'} that records 'netProfit' while the value is _dec(None) -> 0, a zero P&L labelled as read from netProfit. INSTANCE 2: test_a_value_from_a_DEFAULT_does_not_record_a_key_name DEFINES _oanda_source inside itself and never touches oanda.py, so making oanda record 'unrealizedPL' unconditionally also leaves 13 passed. Fourth appearance of B290's family. PROCESS NOTE, SECOND TIME: I bid this id then wrote 'Filed B295' when I had only bid it. B288 records the identical error and its closing line is 'bid and filed are different states' — that note did not prevent this one. A lesson recorded in the artefact is not a change in behaviour; what closes it is the register hook now refusing a commit that claims an id the diff does not add.)
 
@@ -18549,3 +18549,53 @@ Filed rather than half-fixed: a one-line determinism fix with the registry left 
 suite, and a registry entry chosen to clear the red is an assertion nobody decided.
 
 Related: **B296**, **B221**, **B215**, **B250**.
+
+---
+
+### B299. Two of the three sizing columns record what the producer says it USED; the third records what was ASKED — and `execute()` returns no risk for it to read
+
+**Found while writing `T-0107`'s binding arm**, whose brief says to assert that
+`sizing_equity`, `sizing_risk_pct` and `sizing_price` *"each read from the matching key of the
+execution result."* **That is true of two of them.** Measured at `crypto_loop.py:1529`:
+
+```
+sizing_equity   = res.get("equity_at_entry")   <- what the producer REPORTS it sized against
+sizing_price    = res.get("sizing_price")      <- what the producer REPORTS it divided by
+sizing_risk_pct = sig.risk_pct                 <- what the LOOP ASKED FOR
+```
+
+**And the third cannot be written the other way today**: `service.py` puts `equity_at_entry` and
+`sizing_price` into its result dict and **never puts the risk it used**, so there is no key to
+read. The binding is not a slip — it is the only expression available.
+
+**IT IS CORRECT TODAY, BY AN ACCIDENT OF WHAT `execute()` DOES NOT DO.** `service.py:151` calls
+`size_position(acct.equity, sig.risk_pct, sizing_price, sig.sl)` and never clamps, rescales or
+re-derives the risk, so the value the loop supplied is the value the call used. **The two
+coincide only while that stays true.**
+
+**The change everybody is planning is the one that breaks it.** `T-0084`'s own plan says the
+ledger's top recommendation to Malek is to wire `GATE-032`, *"which makes it per-trade
+variable"* — and a per-trade risk that a prop-firm rule can clamp is exactly the case where the
+requested risk and the used risk differ. On that day the row records the request, the
+reconstruction `sized_units == sizing_equity × sizing_risk_pct / |sizing_price − sl|` stops
+holding on real rows, **and nothing says so** — the same silent-degradation shape as `B280`,
+which is why the third column exists at all.
+
+**AND NO ARM WOULD SEE IT.** `T-0107`'s new binding arm pins `sig.risk_pct` as correct, which it
+is; the reconstruction arm builds its own internally-consistent row, so it can never observe a
+producer recording a value the producer did not use. **Nothing in the suite reconstructs from a
+row production actually wrote** — stated in `T-0107`'s brief about `sizing_price` and true of all
+three.
+
+**NOT FIXED, AND THE DECISION IS NOT MECHANICAL.** The obvious fix — `execute()` reports the risk
+it used, the loop reads it back — makes all three symmetric and is a handful of lines. But it
+answers a question nobody has asked: **is the column supposed to hold the risk REQUESTED or the
+risk USED?** If a future `execute` clamps, those are different facts and a reader may want both,
+which is a second column rather than a rebinding of this one. `T-0107` is scoped to *"one more
+assertion in the instrument already there"* and adding a field to the execution result is not
+that. **A binding chosen to make three things look alike is an assertion nobody decided.**
+
+**Recommended as a task.** It is small, it is specified above, and it becomes wrong on the day
+`GATE-032` lands rather than on the day someone edits this line.
+
+Related: **B280**, **B290**, **B279**, **B297**, **B150**.
