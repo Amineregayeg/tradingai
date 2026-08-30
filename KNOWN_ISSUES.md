@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-30 (B309 — SEVEN PRODUCT COMMITS AND MIGRATION 0008 ARE UNDEPLOYED. Measured inside the running container: tradingai-api-1 started 2026-08-24T15:37:13Z, the code is NOT bind-mounted, crypto_loop.py and decision_record.py contain ZERO occurrences of rejection_reason, /app/alembic/versions ends at 0007 and production alembic_version is 0007 — while 0008 landed in e8dd8da two hours after that container started, with no deploy since. So B271 reads as fixed and in production a rejected signal is still the deque(maxlen=80) cleared on start; B279 reads as fixed and production decision_records has no sizing_equity, sizing_risk_pct, sizing_price or rejection_reason; B286 part 1 and T-0105 read as landed and no production row carries pnl_source or produced_by. This project INVENTED the wired/executes/RUNNING/TRADING vocabulary and never applied it to the register's own claims. AND THE NEXT DEPLOY IS A TRAP: the undeployed code writes rejection_reason and outcome=REJECTED, both of which the 0007 schema refuses, so recreating the image without alembic upgrade head FIRST turns every rejected-signal write into an error. Found by chasing the owner's Q7.1, not by any check that exists — nothing compares main against the running image, so the gap could have been any size and would have looked identical.)
+Last updated: 2026-08-30. HIGHEST ENTRY IS B309 — SEVEN PRODUCT COMMITS AND MIGRATION 0008 ARE UNDEPLOYED, measured inside the running container: it started 2026-08-24T15:37:13Z, the code is NOT bind-mounted, grep -c rejection_reason returns 0, /app/alembic/versions ends at 0007 and production alembic_version is 0007, while 0008 landed two hours after that container started. DEMONSTRATED ON THE PUBLIC API rather than merely inventoried: GET /api/positions returns two positions open for over forty hours with duration_seconds: 0, because the container has cft_sim.py duration_seconds=0 where main has B289's None — the fix is in main and the wrong number is on the dashboard. No produced_by or pnl_source key appears either. AND THE NEXT DEPLOY IS A TRAP: the undeployed code writes rejection_reason and outcome=REJECTED, which the 0007 schema refuses, so alembic upgrade head must run FIRST. NEWEST LANDED, LOWER ID: B308 (review) — Account.open_trade_count is a hardcoded 0 in the only adapter connected in production, consumed at manager.py:542, verified present in both the repo and the running container.
 
 ---
 
@@ -19285,4 +19285,77 @@ and schema it holds. **And I found this by chasing the owner's Q7.1** — *does 
 34 simulated trades?* — **not by any check that exists.** Nothing in this project compares `main`
 against the running image, so **the gap could have been any size and would have looked identical.**
 
+## ⇢ DEMONSTRATED THE SAME DAY, ON THE PUBLIC API — **this is no longer an inventory**
+
+The entry above lists what is undeployed. **Here is one of them being served to the dashboard right
+now.** `GET /api/positions`, 2026-08-30:
+
+```json
+{"id":"cftsim-3c3e72a027","pair":"ETH/USD","open_time":"2026-08-28T23:05:26Z","duration_seconds":0}
+{"id":"cftsim-20294155e9","pair":"BTC/USD","open_time":"2026-08-29T00:10:15Z","duration_seconds":0}
+```
+
+**Both positions have been open for over forty hours and the API reports `duration_seconds: 0`.**
+
+```
+repo       cft_sim.py:356   duration_seconds=None,   <- B289's fix: None means NOT COMPUTED
+CONTAINER  cft_sim.py:347   duration_seconds=0,      <- a LITERAL ZERO, and it is what is running
+```
+
+> **`B289`'s fix is in `main` and the wrong number is on the dashboard.** The register reads as
+> though `duration_seconds` now distinguishes *not computed* from *zero seconds*. **In production it
+> does not, and the value it serves is false rather than merely uninformative.**
+
+**Three more things the same payload settles, all read from the running system rather than the tree:**
+
+* **No `produced_by` and no `pnl_source` key appears on any position.** `T-0105` and `T-0102` are
+  in `main`. **The API surface confirms the gap independently of the container grep.**
+* **The open positions carry `cftsim-` ids** (`cft_sim.py:58`), so the engine is trading through the
+  **SIMULATOR** while `broker_connections` holds a `cryptofundtrader / live / connected` row. **Those
+  are two different claims and should not be collapsed** — a live connection row is not a live
+  execution path.
+* **`lot_size` reads `0.81321477` for ETH and `0.02374166` for BTC** — 0.81 ETH and 0.024 BTC.
+  **UNITS**, on live data, exactly as `B302` says the producer binds them.
+
 Related: **B271**, **B279**, **B286**, **B215**, **B305**.
+
+### B308. `Account.open_trade_count` is a hardcoded `0` in the only connected adapter, and it is consumed
+
+**Found by `T-0127`'s boundary sweep — the fourth instance of the pattern and the first found by
+LOOKING rather than by accident.**
+
+```python
+cryptofundtrader.py:379    open_trade_count=0,                                   # a LITERAL
+paper.py:159               open_trade_count=len(self._positions),
+cft_sim.py:327             open_trade_count=len(self._positions),
+oanda.py:208               open_trade_count=int(acct.get("openTradeCount", 0)),
+```
+
+**The literal is in `cryptofundtrader` — the only adapter connected in production**
+(`broker_connections`: one row, `cryptofundtrader / live / connected`) — **and it is consumed** at
+`manager.py:542`, `"open_trade_count": int(acct.open_trade_count)`.
+
+> **So the live venue reports zero open trades, always, on an account summary that is read.**
+
+**`B215` in the value.** The adapter **does not ask** and records `0`, which is indistinguishable from
+**asking and being told none**. The CFT payload carries `margin`, `freeMargin` and `profit`, so the
+venue does return account fields — **whether it returns a trade count is unknown, because nothing
+tries.**
+
+**`B289`'s shape on a field that HAS a consumer.** That entry's `duration_seconds` was hardcoded by
+two simulators and read by nothing; **this is hardcoded by the live adapter and read by the account
+summary.**
+
+**VERIFIED IN THE CONTAINER, not only the repo** (manager's measurement, 2026-08-30): the literal is
+at `/app/.../cryptofundtrader.py:356` and the consumer at `/app/.../manager.py:542`. **Present in
+both — this is running, not merely committed.**
+
+**FIX IS A DECISION, NOT A LINE.** Either read a count the venue supplies, **or** make the field
+`int | None` and record `None` for *"this adapter does not ask"* — **`0` is the one answer that
+cannot be right**, because it asserts a fact the adapter never checked.
+
+**NOT MEASURED:** whether CFT's account payload contains a trade count at all. **That needs one live
+response and it is the same class of question as `B286`'s** — a read against a venue we already
+trade.
+
+Related: **B289**, **B286**, **B302**, **B215**, **B300**.
