@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-30 (B306 — service.py:130 and :153 return the IDENTICAL rejection reason string, 'non-positive size / stop', for two structurally different causes: at :130 the signal is malformed because entry equals the stop, a strategy bug; at :153 size_position returned non-positive, an account or market condition with the strategy blameless. Opposite causes, opposite responses, one string — and it is not a log line but a COLUMN: crypto_loop.py:1555 takes res.get('reason') verbatim into _record_rejected_signal and :1136 writes rejection_reason=str(reason). B271 made rejections durable rows so they could be analysed, and nothing else on the row separates the two causes. Third instance today of a vocabulary narrower than the states it names, after B304 and B300, and in all three the prose beside it is correct. Found while verifying T-0124's stated facts against the file before Execute builds from them.)
+Last updated: 2026-08-30 (B307 — EXECUTING on the board means ASSIGNED AND UNFINISHED, not BEING WORKED ON, and I reported two idle seats to Malek as busy because of it. Both peer processes were alive and idle at a prompt for two hours with my bus messages unread; ListAgents said idle and waiting, and the session json files had not been touched since 17:30 and 17:18. The board said EXECUTING the whole time and the board was CORRECT — the task was assigned and was not finished. B215's shape applied to my own instrument: a state that names a phase cannot report an activity, exactly as an empty position list means both none and could-not-ask. Made worse by corroboration: Execute's files were modified twelve minutes before I looked, which is real evidence of work that had already stopped, and both pieces of evidence agreed because both measured the same finished turn. The fix is a habit, not a field — check ListAgents and the session mtime before claiming a seat is working, and follow a bus message with a SendMessage poke or it waits indefinitely.)
 
 ---
 
@@ -19029,3 +19029,63 @@ is true, and the reason does not distinguish.
 **Cheap:** two distinct strings, and `T-0124` is already opening this function.
 
 Related: **B304**, **B300**, **B283**, **B271**, **B215**.
+
+---
+
+### B307. `EXECUTING` on the board means **assigned and unfinished**, not **being worked on** — and I reported two idle seats as busy because of it
+
+**My own defect, and I acted on it before noticing.**
+
+## WHAT HAPPENED
+
+At 17:21 and 17:23 I sent both seats work over `bus.py`. At 17:40 I checked the board, saw
+`T-0119 EXECUTING` and `T-0123 REVIEWING`, saw Execute's files modified at 17:29, and **told Malek
+both seats were working.** At 19:24 I checked again:
+
+```
+inbox/execute/  ...-0391-manager-WORK.md      STILL UNREAD
+inbox/review/   ...-0393, ...-0394            STILL UNREAD
+~/.claude/sessions/1345.json   mtime 17:30    <- execute, untouched for 2 hours
+~/.claude/sessions/1739.json   mtime 17:18    <- review, untouched for 2 hours
+ListAgents:  tradingai-be  idle    tradingai-ae  waiting
+```
+
+**Both processes alive, both idle at a prompt, both with my messages sitting unread.** The board said
+`EXECUTING` the entire time **and the board was correct** — the task *was* assigned and *was* not
+finished. **`EXECUTING` has never meant what I read it as.**
+
+## THE SHAPE, AND IT IS THE ONE I HAVE FILED TWICE THIS WEEK ABOUT OTHER PEOPLE'S CODE
+
+**A state that names a phase cannot report an activity.** `B215` — an empty position list means both
+*none* and *could not ask*. `B300` — `is_simulation` returns `False` for both *simulated* and *could
+not ask*. **Here `EXECUTING` covers both *working* and *idle with the task open*, and nothing on the
+board distinguishes them.**
+
+**`bus.py send` does not start a turn.** A seat advances when it is driven; a message in an inbox is
+a message in an inbox. **I know this** — it is written in my own memory as *"peers advance one turn
+per message; assigning a task doesn't start it"* — **and I still read a phase field as a liveness
+signal**, because the phase field is the thing the board shows me.
+
+## WHY THE CORROBORATION MADE IT WORSE RATHER THAN BETTER
+
+**Execute's files had been modified at 17:29**, twelve minutes before I looked. That is real evidence
+of real work — **of work that had already stopped.** A stale-but-recent timestamp reads as activity
+and is indistinguishable from it at a glance. **The second piece of evidence agreed with the first
+because both were measuring the same finished turn.**
+
+## THE FIX IS A HABIT, NOT A FIELD
+
+**Liveness is not on the board and should not be inferred from it.** Before claiming a seat is
+working: `ListAgents` (it says `idle` / `waiting` / `busy`), and `~/.claude/sessions/<pid>.json`
+mtime. **Both are cheap and neither was consulted.**
+
+And the operational half: **a bus message must be followed by a `SendMessage` poke**, or it waits
+indefinitely. Written into `PROMPT_MANAGER.md` in the same commit as this entry.
+
+## WHAT I TOLD MALEK, PLAINLY
+
+*"Both seats are working."* **They were not.** The tasks were assigned and the work was real; the
+claim about what was happening at that moment was false, and I made it from a field that cannot
+carry it.
+
+Related: **B215**, **B300**, **B304**, **B306**.
