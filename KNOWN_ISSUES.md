@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-30 (B290 — T-0098's new sizing arms guard PRESENCE, not PROVENANCE: binding sizing_price to the fill reintroduces B280 with the suite green. The two arms are a real improvement and meet their acceptance condition twice — setting the three sizing arguments to None fires test_none_of_the_three_is_bound_to_a_LITERAL_None, and REMOVING the keywords entirely (same NULL columns via parameter defaults, no literal None to find) fires test_the_producer_passes_ALL_THREE_sizing_inputs_at_its_call_site. BUT NEITHER CHECKS WHAT THE KEYWORDS ARE BOUND TO. Measured: sizing_price=res.get('sizing_price') -> res.get('fill') gives 18 passed, 0 failed. That is B280 exactly, reintroduced — and B280 is why the column exists, size_position dividing by |sizing_price - sl| and never |fill - sl|, measured at 4.76% out at fifty ticks. The reconstruction arm cannot save it because it builds its own row with internally consistent values; a real row would be internally INCONSISTENT and no arm reconstructs from a row the PRODUCER wrote. FIX in the same instrument: the arms already parse the call site and check the keyword SET; one more assertion checks the bound EXPRESSION. GENERAL FORM: a structural arm over a call site can check that a keyword is present, that it is not obviously empty, and that it holds the right value — these do the first two, and the third is where the defect the column exists for lives.)
+Last updated: 2026-08-30 (B291 — MetatraderDeal is 6-of-22 required: swap, commission, volume, price and positionId are all OPTIONAL, and connection is TWO booleans not one. Census from MetaApi's published models: Position 21 required/7 optional, AccountInformation 16/3, Deal 6/16. A deal without volume or price is not malformed, it is a BALANCE ENTRY — MT5's ledger carries credits, corrections and commission postings beside fills — so an adapter mapping deals to our trades will KeyError on the first non-trade deal and a mock that always supplies them will never show it. positionId being optional breaks the join get_recent_trades needs. AND IT ADDS A THIRD CASE TO B288: that entry asks whether profit INCLUDES swap and commission; they are OPTIONAL, so they may be ABSENT, and absent is not zero — B215 in the vendor's own schema, on the fields realized_r will inherit. CONNECTION IS TWO BOOLEANS: terminalState.connected and terminalState.connected_to_broker. 'Connected to the cloud but not to the broker' is the state in which get_positions() returns an empty list that means nothing. RATE LIMITS read for the first time: TooManyRequests/429, three limit kinds over 1s/1min/1hr/6hr, quotas in CPU CREDITS (1000 per 1s, multiplied by accounts deployed), a separate per-server limit across 12 front-end servers, 5 concurrent historical requests per account — and the 429 carries recommendedRetryTime, so a mock modelling the status and not the payload teaches the adapter to invent a backoff.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -18149,3 +18149,56 @@ guard would catch**, and the guard is strictly better than what preceded it.
 These arms do the first two. **The third is where the defect the column exists for lives.**
 
 Related: **B280**, **B282**, **B279**, **B256**.
+
+### B291. `MetatraderDeal` is 6-of-22 required — `swap`, `commission`, `volume`, `price` and `positionId` are all OPTIONAL, and connection is two booleans not one
+
+**`T-0108`, from MetaApi's published models. Nothing executed.**
+
+```
+MetatraderPosition            21 required,  7 optional
+MetatraderAccountInformation  16 required,  3 optional
+MetatraderDeal                 6 required, 16 OPTIONAL
+```
+
+**A deal without `volume` or `price` is not malformed — it is a BALANCE ENTRY.** MT5's deal ledger
+carries credits, corrections and commission postings beside trade fills. **An adapter mapping deals
+to our `trades` that assumes those fields exist will `KeyError` on the first non-trade deal, and a
+mock that always supplies them will never show it** (`B285` established deals are not our `trades`).
+
+**`positionId` OPTIONAL breaks the join `get_recent_trades` needs** — one position produces several
+deals and the key linking them is not guaranteed present.
+
+**AND IT ADDS A THIRD CASE TO `B288`.** That entry asks whether `profit` includes `swap` and
+`commission`. **They are OPTIONAL, so they may be ABSENT — and absent is not zero.** `B215` in the
+vendor's own schema, on the fields `realized_r` will inherit.
+
+**CONNECTION IS TWO BOOLEANS.** From `streamingApi.rst`:
+
+```python
+print(terminalState.connected)             # connected to MetaApi
+print(terminalState.connected_to_broker)   # connected to the BROKER
+```
+
+***"Connected to the cloud but not to the broker"* is a real state**, and it is the state in which
+`get_positions()` returns an empty list that means nothing. **An adapter treating `connect()`
+returning as "connected" is correct against any mock and wrong against a venue.**
+
+**RATE LIMITS, READ FOR THE FIRST TIME** (`rateLimits.rst` is a five-line pointer; content at
+`docs/client/rateLimiting/`): `TooManyRequests` / **HTTP 429**, three limit kinds over
+**1s / 1min / 1hr / 6hr** windows, quotas denominated in **CPU credits** — *"allows 1000 cpu credits
+per 1s"*, multiplied by accounts deployed — a separate per-front-end-server limit across **12
+servers**, and **5 concurrent historical market data requests per account**.
+
+> **The payload matters more than the status: the 429 carries `recommendedRetryTime`.** A mock
+> modelling the status code and not the payload **teaches the adapter to invent its own backoff**
+> against a cost model nobody has measured — **nothing tells us what a `get_positions()` costs in
+> credits.**
+
+**ERROR VOCABULARY:** `E_SRV_NOT_FOUND` (wrong server name) and `E_AUTH` (wrong credentials) are the
+two a first connection meets — **different problems, identical symptom.** A mock returning one
+generic failure collapses them.
+
+**NOT A DEFECT. This is the boundary of what a mock can teach**, recorded because `T-0106` builds the
+adapter against one and **a mock is a hand-built corpus for an adapter** (`B256`).
+
+Related: **B288**, **B285**, **B284**, **B256**, **B215**.
