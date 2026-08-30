@@ -6,11 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-30 (B299 — one of the three sizing columns records the REQUEST rather than what the sizer used: crypto_loop.py:1529 binds sizing_risk_pct from sig.risk_pct because service.py never puts the risk it used into its result, so there is no key to read. Correct today by an accident of what execute() does not do. FILED ALONGSIDE B298 — the suite is green only because it is CHUNKED: `pytest tests/ -k recursive_discovery_covers` FAILS with LiveLoopBrokerProxy not covered while the same test alone passes, because collecting the tree imports the broker package. Six invocations each collect their own files and none collects the tree, so the green number depends on the chunk boundaries while being reported as the suite's state. B298's proposed one-flag fix is corrected in an addendum: --collect-only collects 2059 and exits 0, because it creates the condition and never runs the assertion — the working guard is one INVOCATION, `pytest tests/ -k recursive_discovery_covers`, sixteen seconds.)
-
-Last updated: 2026-08-30 (B295 — two of T-0102's arms exercise a COPY of the rule instead of the adapter, and the commit's own docstring documents that exact defect. Nothing shipped is wrong: all four producers supply pnl_source, the field is required, oanda uses membership rather than a defaulted read, and cryptofundtrader:426 reads raw.get(pnl_source) so value and provenance come from ONE lookup and cannot diverge by construction. This is about what the suite would catch. pnl_key_present's docstring says it was extracted so 'the arm can import it rather than re-implement it', because an earlier test was 'exercising the copy' — found, fixed for CFT, recorded, and the same commit has two more instances. INSTANCE 1: test_the_recorded_key_is_the_one_ACTUALLY_PRESENT calls _cft_source in ISOLATION and never builds a Position, so mutating the read to raw.get('profit') leaves 13 passed — on {'netProfit':'4'} that records 'netProfit' while the value is _dec(None) -> 0, a zero P&L labelled as read from netProfit. INSTANCE 2: test_a_value_from_a_DEFAULT_does_not_record_a_key_name DEFINES _oanda_source inside itself and never touches oanda.py, so making oanda record 'unrealizedPL' unconditionally also leaves 13 passed. Fourth appearance of B290's family. PROCESS NOTE, SECOND TIME: I bid this id then wrote 'Filed B295' when I had only bid it. B288 records the identical error and its closing line is 'bid and filed are different states' — that note did not prevent this one. A lesson recorded in the artefact is not a change in behaviour; what closes it is the register hook now refusing a commit that claims an id the diff does not add.)
-
-Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
+Last updated: 2026-08-30 (B301 — KNOWN_ISSUES.md carried FOUR `Last updated:` lines, at 9, 11, 13 and 15, three of them stale and the oldest by SEVEN DAYS, because rotations INSERTED a line rather than replacing one. AND THE GUARD AGAINST EXACTLY THAT READ ONLY THE FIRST: the hook's HEADER BEHIND check loops the first forty lines and returns on the first match, so a check written to refuse a header naming something older passed while three such headers sat directly beneath the line it read. Same shape as B296 and B298 — an instrument whose scope is narrower than the claim it is read as making. Fixed both halves: the stale lines removed with all 284 headings verified identical before and after, and the hook now COUNTS and refuses more than one by name. FILED ALONGSIDE B300 (execute) — the proxy's three property reads bypass _target(), so is_simulation returns False on an unbound proxy while unavailable_reason stays None, collapsing could-not-ask into asked-and-fine on the one flag ExecutionService's refusal depends on.)
 
 ---
 
@@ -18678,3 +18674,120 @@ Related: **B211**, **B297**, **B296**, **B295**, **B288**.
 > chunks structurally cannot make. **The insight was right — the guard is one command away — and the
 > mechanism named would have been added, run green, and reported as coverage.**
 
+
+---
+
+### B300. The proxy's three property reads bypass `_target()`, so `unavailable_reason` is never set on them — and `is_simulation is False` means *live* or *nothing held*, with nothing distinguishing them
+
+**Found while writing `T-0119`'s arm over the unbound proxy.** `LiveLoopBrokerProxy` carries a
+field whose docstring states its whole purpose:
+
+> *"Why the last forward found no broker, or `None`. **A positive statement.** [...] This field
+> lets a caller tell 'the loop held no broker' apart from the other causes without widening the
+> return type."*
+
+`_target()` sets it on every call. **Three properties do not go through `_target()`:**
+
+```
+broker_name    getattr(self._loop, "paper", None)   <- direct read, unavailable_reason untouched
+default_pairs  getattr(self._loop, "paper", None)   <- direct read
+is_simulation  getattr(self._loop, "paper", None)   <- direct read, AND it is the safety flag
+```
+
+Measured on an unbound proxy: `is_simulation` returns `False` and `unavailable_reason` is still
+`None` afterwards.
+
+**THE FAIL-CLOSED DIRECTION IS CORRECT AND IS NOT WHAT THIS ENTRY IS ABOUT.** The property's own
+docstring says *"with no broker the answer is `False`, not `True`: unknown must not read as
+safe"*, and that is right — `T-0119` asserts it. **The defect is that the two states behind that
+`False` are collapsed.** A caller reading `is_simulation is False` and then consulting
+`unavailable_reason` — the field built for exactly this question — is told `None`, which its own
+docstring defines as *the forward found a broker*. **So the collapse is not merely unresolved; the
+field actively reports the wrong one of the two.**
+
+`broker_name` is unaffected in practice because its unbound answer announces itself
+(`"paper-proxy(unbound)"`, and `T-0119` asserts no venue can claim that string). `default_pairs`
+returns `[]`, which is the same collapse in a quieter place: *held nothing* and *held a broker with
+no pairs* are one value.
+
+**`B215`'s shape on the safety flag**, in a class that already contains the mechanism for avoiding
+it and does not use it on the read that matters most.
+
+**FIXED IN `T-0119`, AND THE FIX IS NEITHER OPTION THIS ENTRY FIRST WEIGHED.** I filed it as a
+two-way trade — set the field without the warning (two code paths writing one fact) or accept a log
+line at chokepoint rate — and review found the third option by reading what `_target()` actually
+does:
+
+```
+target = getattr(self._loop, "paper", None)             1. RESOLVE
+self.unavailable_reason = None if target ... else ...   2. RECORD
+if target is None: logger.warning(...)                  3. LOG
+```
+
+**Resolution and recording were already together; only the LOGGING was coupled to them.** So
+`_resolve()` does 1 and 2 and is silent, `_target()` calls `_resolve()` and adds 3, and the three
+properties call `_resolve()`. **One writer of the field**, and no warning at chokepoint rate. It is
+one resolution path with two logging policies, which neither of the options I weighed described.
+
+**The trade I posed was real and the framing was wrong** — I treated a three-statement method as
+atomic and traded away one of its properties to keep another.
+
+Arms: a control pair on the field (unbound records the reason; **bound leaves it `None`**, because
+a reason set unconditionally explains every state and distinguishes none), and an arm that the
+property path records **without** logging while the async path **still** logs — the loud path is
+why `T-0062` added the warning, and quieting the property read must not quiet that. Mutations
+predicted first, application confirmed: property reads reverted to the direct `getattr` fails 2;
+the reason set unconditionally fails 2; `_resolve` made loud fails 1.
+
+Related: **B215**, **B221**, **B297**.
+
+---
+
+### B301. `KNOWN_ISSUES.md` carried FOUR `Last updated:` lines, three of them stale, and the guard against exactly that read only the first
+
+**Found while investigating why the register hook refused a commit** — not by looking for it.
+
+```
+line  9   Last updated: 2026-08-30 (B300 ...)   <- correct
+line 11   Last updated: 2026-08-30 (B299 ...)   <- stale
+line 13   Last updated: 2026-08-30 (B295 ...)   <- stale
+line 15   Last updated: 2026-08-23 (B214, B215, B216 ...)   <- stale by SEVEN DAYS
+```
+
+**Three of them accumulated because rotations INSERTED a line rather than replacing one**, and
+nothing noticed for a week.
+
+## The guard existed and could not see it
+
+`register_commit_check.py` has a `HEADER BEHIND` check whose entire purpose is to refuse a header
+naming something older than the newest entry. Its docstring says a header that claims to name what
+is newest and names something older is **worse than no header — a reader who trusts it stops
+looking.**
+
+**It looped over the first forty lines and `return`ed on the FIRST match.**
+
+> **So the check designed to stop one stale header passed while three stale headers sat directly
+> beneath the line it read.** A reader scrolling past line 9 meets three confident, dated, wrong
+> claims about what is newest — **and the oldest is exactly the failure the guard was written for,
+> seven days old, under the guard.**
+
+## Why it is this week's shape rather than a typo
+
+**A guard that reads the first instance cannot see a second.** `B296` was a population that omitted
+a member; `B298` was a green number true of six invocations and false of one; this is a check whose
+verdict is correct about the line it inspects and silent about the ones it does not.
+
+**All three are the same error in different clothes: an instrument whose scope is narrower than the
+claim it is read as making.**
+
+## Fixed in this commit, both halves
+
+**The file:** three stale lines and their trailing blanks removed; **all 284 entry headings verified
+identical before and after.**
+
+**The guard:** it now counts. **More than one `Last updated:` line is refused by name**, with the
+reason — *rotating means REPLACING it, not adding another above it.* **The hook that could not see
+this can no longer be blind to it**, which is the same fix applied to the same file two days ago when
+it learned to refuse a commit claiming an id the diff does not add.
+
+Related: **B298**, **B296**, **B287**, **B144**.
