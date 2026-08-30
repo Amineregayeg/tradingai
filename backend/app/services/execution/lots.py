@@ -171,7 +171,7 @@ def units_to_lots(
         stepped = (vmax / vstep).to_integral_value(rounding=ROUND_FLOOR) * vstep
         clamped = True
         if stepped < vmin:
-            # `B283`. THE CAUSE IS THE MAXIMUM. This reported `BOUND_MIN` while its own
+            # `B287`. THE CAUSE IS THE MAXIMUM. This reported `BOUND_MIN` while its own
             # reason string named `volume_max` — **the accurate prose hid the inaccurate
             # field**, so a reader who checked the message found the right cause and never
             # looked at the field. It survives a careful read and fails only where a caller
@@ -189,7 +189,7 @@ def units_to_lots(
     if lots <= 0.0:
         # UNREACHABLE while volume_min > 0, and asserted anyway: a zero-lot order is a
         # success report over an action that did not happen.
-        # `B283`. THE CAUSE IS THE STEP, not the minimum: the size was rounded down to zero
+        # `B287`. THE CAUSE IS THE STEP, not the minimum: the size was rounded down to zero
         # by `volume_step`. **Re-keyed even though this branch is UNREACHABLE while
         # `volume_min > 0`** — a one-line fix to the branch above would leave the identical
         # defect sitting here for the day an instrument reports a zero minimum, and the

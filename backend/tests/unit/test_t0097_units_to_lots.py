@@ -208,7 +208,7 @@ def test_size_position_is_UNTOUCHED_by_this_module():
 
 
 # ======================================================================================
-# T-0103 / `B283` — A REFUSAL MUST CARRY THE BOUND THAT *CAUSED* IT
+# T-0103 / `B287` — A REFUSAL MUST CARRY THE BOUND THAT *CAUSED* IT
 #
 # Three branches refused with `bound=BOUND_MIN` and only one was minimum-caused. **The
 # accurate prose hid the inaccurate field:** the `volume_max` branch's reason string names

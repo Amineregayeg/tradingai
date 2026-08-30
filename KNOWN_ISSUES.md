@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-30. HIGHEST ENTRY IS B309 — SEVEN PRODUCT COMMITS AND MIGRATION 0008 ARE UNDEPLOYED, measured inside the running container: it started 2026-08-24T15:37:13Z, the code is NOT bind-mounted, grep -c rejection_reason returns 0, /app/alembic/versions ends at 0007 and production alembic_version is 0007, while 0008 landed two hours after that container started. DEMONSTRATED ON THE PUBLIC API rather than merely inventoried: GET /api/positions returns two positions open for over forty hours with duration_seconds: 0, because the container has cft_sim.py duration_seconds=0 where main has B289's None — the fix is in main and the wrong number is on the dashboard. No produced_by or pnl_source key appears either. AND THE NEXT DEPLOY IS A TRAP: the undeployed code writes rejection_reason and outcome=REJECTED, which the 0007 schema refuses, so alembic upgrade head must run FIRST. NEWEST LANDED, LOWER ID: B308 (review) — Account.open_trade_count is a hardcoded 0 in the only adapter connected in production, consumed at manager.py:542, verified present in both the repo and the running container.
+Last updated: 2026-08-30 (B311 — 135 OF 292 REGISTER HEADINGS HAVE NO TRAILING PERIOD, so every tool keyed on '### B<n>.' silently skips them. The instance is the tool I wrote today: running_sweep.py, whose entire purpose is finding entries an instrument cannot see, swept 157 of 292 — 54% — while printing an UNREACHABLE count as though that were its only blind spot. A tool that states its own bounds and states the WRONG ones is worse than one that states none, because the stated bound is what stops the reader looking for the unstated one. Caught by B266 surfacing as a KeyError while diagnosing an unrelated miss. register_commit_check.py:61 has used the correct pattern all along, ten metres away. FILED WITH B310 — lots.py:174, lots.py:192 and test_t0097_units_to_lots.py:211 cite B283 three times for what is B287, B283 being about BridgeTransport and MT5 reusability; I repeated the wrong citation into B304 this afternoon without opening the entry, and it propagated again into another seat's T-0128 triage. One wrong citation in a code comment produced a wrong citation in a register entry and a wrong member in another seat's triage in the same day. A file:line citation is checkable; AN ID IS NOT A LOCATION and nothing resolves it.)
 
 ---
 
@@ -18937,7 +18937,7 @@ Related: **B221**, **B285**, **B292**, **B294**, **B215**.
 
 ---
 
-### B304. `lots.py` has SIX `bound=` sites and the arm's table has FIVE — and the uncovered one is **`B283` still live**, sharing a token with a different cause
+### B304. `lots.py` has SIX `bound=` sites and the arm's table has FIVE — and the uncovered one is **`B287` still live**, sharing a token with a different cause
 
 **Found by checking `T-0112`'s own instruction against the file before Execute built from it.** The
 task said *"assert the number of `bound=` sites equals the number of cases in the arm's table."*
@@ -18959,13 +18959,13 @@ units_to_lots(0.0,   **FX).bound  ->  'non_positive'   reason: "non-positive siz
 requested_lots                    ->  0.0 in BOTH, so that does not separate them either
 ```
 
-## THIS IS `B283` VERBATIM, IN THE BRANCH `B283`'s ARM DOES NOT REACH
+## THIS IS `B287` VERBATIM, IN THE BRANCH `B287`'s ARM DOES NOT REACH
 
-`B283` was *three branches refused with `BOUND_MIN` and only one was minimum-caused.* **Here two
+`B287` was *three branches refused with `BOUND_MIN` and only one was minimum-caused.* **Here two
 branches refuse with `BOUND_NON_POSITIVE` and only one is non-positive-caused.** The other is an
 input the function **could not parse** — a caller's programming error, not a size at all.
 
-**And the same thing that made `B283` survive review is here too:** the reason strings are both
+**And the same thing that made `B287` survive review is here too:** the reason strings are both
 **correct and distinct**, so a reader who checks the message finds the right cause and never looks at
 the field. `T-0097` states what the field is for — *"a caller that cannot tell TOO SMALL from TOO
 LARGE cannot report either honestly"* — **and it fails exactly where a caller BRANCHES rather than
@@ -19476,3 +19476,102 @@ response and it is the same class of question as `B286`'s** — a read against a
 trade.
 
 Related: **B289**, **B286**, **B302**, **B215**, **B300**.
+
+---
+
+### B310. `lots.py` cites **`B283`** three times for what is **`B287`** — and I repeated the wrong citation into `B304` this afternoon
+
+**`B283` is about `BridgeTransport` and MT5 reusability.** It has nothing to do with refusal bounds.
+
+```
+  B283  ->  "BridgeTransport looks reusable for MT5 because its INTERFACE matches …"
+  B287  ->  "A refusal caused by volume_max is labelled bound=BOUND_MIN — the prose is
+             right and the machine-readable field is not"
+```
+
+*(Quoted without their `###`, deliberately. **A heading quoted at line-start IS a heading** to every
+tool that parses this file — the commit hook read the first draft of this block as two new entries
+being added. `B311`'s family, in the entry about `B311`'s family.)*
+
+**Three citations in code and its arm point at the wrong one:**
+
+```
+app/services/execution/lots.py:174      # `B283`. THE CAUSE IS THE MAXIMUM. …reported `BOUND_MIN`…
+app/services/execution/lots.py:192      # `B283`. THE CAUSE IS THE STEP, not the minimum…
+tests/unit/test_t0097_units_to_lots.py:211   # T-0103 / `B283` — A REFUSAL MUST CARRY THE BOUND…
+```
+
+**All three describe `B287` exactly.**
+
+## AND IT PROPAGATED, WHICH IS THE PART WORTH THE ENTRY
+
+**`B304`, filed by me this afternoon, says *"This is `B283` verbatim"* and restates `B283`'s content
+as three-branches-reported-`BOUND_MIN`.** I took that from `lots.py`'s comments and **did not open
+the entry.** `B304`'s finding is unaffected and its citation is wrong.
+
+**And it propagated a second time, to a second seat.** `T-0128`'s triage lists `B283` among the
+landed-and-not-running candidates — **inherited from the same comments**, since `B283`'s actual
+subject is not in the undeployed diff at all.
+
+> **One wrong citation in a code comment produced a wrong citation in a register entry and a wrong
+> member in another seat's triage, in the same day.** Nobody opened the entry; everybody read the
+> comment.
+
+**A file:line citation is checkable and was checked all week. AN ID IS NOT A LOCATION and nothing
+resolves it.**
+
+## HOW IT WAS FOUND, because the method is the useful part
+
+**By a control, not by reading.** `running_sweep.py` was measured against another seat's twelve-entry
+list and `B283` came back NOT FOUND. **The instinct is to widen the instrument until the known
+answer appears.** Opening the entry showed the instrument was right and the list was wrong — and
+that **`B287`, the real entry, is found as a STRONG hit.**
+
+**Fixed:** the three code citations, and `B304`'s.
+
+Related: **B287**, **B304**, **B245**, **B301**.
+
+---
+
+### B311. **135 of 292 register headings have no trailing period**, so every tool keyed on `### B<n>.` silently skips them — including the one I wrote to find silent skips
+
+```
+^### (B\d+)\.      matches  157
+^### (B\d+)\b      matches  292
+INVISIBLE TO THE DOTTED PATTERN:  135 entries — B61-B99, B100-B197, B266
+```
+
+**`### B266` has no period.** Neither does most of the register's first two-thirds — the
+punctuation changed somewhere around `B197` and nothing noticed, because **nothing was keyed on it
+until something was.**
+
+## THE INSTANCE, AND IT IS THE ONE I WROTE TODAY
+
+`running_sweep.py` — **the tool whose entire purpose is finding entries an instrument cannot see** —
+used `^### (B\d+)\.` and swept **157 of 292 entries, 54%**, **while printing an `UNREACHABLE`
+count as though that were its only blind spot.** It reported *"UNREACHABLE: 30"* and was silently
+skipping 135 more.
+
+> **A tool that states its own bounds, and states the wrong ones, is worse than one that states
+> none** — the stated bound is what stops the reader looking for the unstated one. **That is
+> `B301`'s guard reading only the first header, rebuilt in the file written about `B309`.**
+
+**It was caught by `B266` surfacing as a `KeyError` while I diagnosed an unrelated miss.** Not by
+review, not by the control set — **by an exception, in a diagnostic, for a different question.**
+
+## THE CORRECT PATTERN WAS TEN METRES AWAY
+
+```
+agents/register_commit_check.py:61      HEADING = re.compile(r"^### (B\d+)\b", re.M)
+```
+
+**The hook has been right the whole time**, which is why `max(headings)` and the duplicate-header
+check have never misbehaved. **I wrote a new pattern instead of copying the one in the same
+directory that had already solved this**, having copied `stale_sweep.py`'s `CITE` pattern
+deliberately two functions earlier.
+
+**Fixed in `running_sweep.py`. The other sweeps are unaudited** — `stale_sweep.py`,
+`deferral_sweep.py` and `landed_sweep.py` each parse this file and **none has been checked against
+the 135**, which is a task and not a claim.
+
+Related: **B301**, **B296**, **B267**, **B310**.
