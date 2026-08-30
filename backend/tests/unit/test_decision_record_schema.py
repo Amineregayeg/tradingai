@@ -346,6 +346,85 @@ def test_the_producer_passes_ALL_THREE_sizing_inputs_at_its_call_site():
     )
 
 
+#: WHAT EACH KEYWORD MUST BE BOUND TO, and the three are NOT the same shape.
+#:
+#: `B299`: an earlier wording of this rule said all three *"read from the matching key of the
+#: execution result"*, which is true of two of them. `sizing_risk_pct` reads `sig.risk_pct` —
+#: the value the loop SUPPLIED — because `execute()` does not report the risk it used. So two
+#: of the three record what the producer says it USED and the third records what was ASKED,
+#: and they coincide only while `execute` passes `sig.risk_pct` through untouched. Pinned as
+#: correct-for-now with the asymmetry recorded rather than smoothed over.
+EXPECTED_BINDING: dict[str, tuple[str, ...]] = {
+    # (kind, name) — "res_key" reads a key of the execution result, "sig_attr" reads the signal
+    "sizing_equity": ("res_key", "equity_at_entry"),
+    "sizing_price": ("res_key", "sizing_price"),
+    "sizing_risk_pct": ("sig_attr", "risk_pct"),
+}
+
+
+def _binding_of(value) -> tuple[str, ...] | None:
+    """Classify the expression a keyword is bound to, STRUCTURALLY rather than by its text.
+
+    `ast.unparse` would work and would also fail on a reformat, a renamed local or a differing
+    quote style — a call-site pin that breaks on whitespace gets deleted rather than fixed.
+    """
+    if (
+        isinstance(value, ast.Call)
+        and isinstance(value.func, ast.Attribute)
+        and value.func.attr == "get"
+        and isinstance(value.func.value, ast.Name)
+        and len(value.args) == 1
+        and isinstance(value.args[0], ast.Constant)
+    ):
+        return ("res_key", value.args[0].value)
+    if isinstance(value, ast.Attribute) and isinstance(value.value, ast.Name):
+        return ("sig_attr", value.attr)
+    return None
+
+
+def test_each_sizing_keyword_is_bound_to_THE_RIGHT_SOURCE():
+    """**A structural arm over a call site can check THREE things, and the two above check two.**
+
+    That general form belongs here because this is the third time the project has needed it:
+
+        1. the keyword is PRESENT              `test_the_producer_passes_ALL_THREE...`
+        2. it is not obviously EMPTY           `test_none_of_the_three_is_bound_to_a_LITERAL_None`
+        3. it holds the RIGHT VALUE            this arm
+
+    **The first two are satisfied by a keyword bound to the wrong source**, and the wrong source
+    is the whole reason the third column exists. Measured before this was written, and measured
+    over every test that names these columns rather than over one file:
+
+        sizing_price=res.get("sizing_price")  ->  res.get("fill")     34 passed -> 34 passed
+
+    `size_position` divides by the SIZING price and never by the fill — `B280`, measured at
+    4.76% out at fifty ticks of slippage — so that mutation reintroduces the exact defect the
+    column was added to make impossible, and **nothing notices.**
+
+    **AND THE RECONSTRUCTION ARM STRUCTURALLY CANNOT CATCH IT.** It builds its own row with
+    internally consistent values, so it can never observe a PRODUCER binding the wrong source.
+    A real row would be internally INCONSISTENT — `sized_units` computed from one price while
+    `sizing_price` holds another — and no arm reconstructs from a row the producer wrote.
+    """
+    call = _record_signal_decision_call()
+    bound = {kw.arg: kw.value for kw in call.keywords if kw.arg in EXPECTED_BINDING}
+
+    wrong = []
+    for name, expected in EXPECTED_BINDING.items():
+        value = bound.get(name)
+        if value is None:
+            continue          # absence is the FIRST arm's subject, and it fails there by name
+        actual = _binding_of(value)
+        if actual != expected:
+            wrong.append(f"{name} is bound to `{ast.unparse(value)}` and must read {expected}")
+
+    assert not wrong, (
+        "the producer records a value it did not size with: " + "; ".join(wrong) + ". The "
+        "keyword is present and non-None, so both other arms stay green while the stored "
+        "column no longer describes the call that produced the row."
+    )
+
+
 def test_none_of_the_three_is_bound_to_a_LITERAL_None():
     """**The half a keyword-presence check would miss, and it is the mutation Review ran.**
 
