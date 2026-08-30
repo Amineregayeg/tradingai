@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-30 (B284 — MetaApi DOES report a broker-read account type, with THREE values, and the SDK reuses the field name `type` for something else entirely. Closes the gap T-0076 Amendment 1 opened: the abstract is_simulation member forces a DECLARATION and cannot force a TRUE one, so ExecutionService:96 rests on a value the adapter asserts about itself. Quoted from metaapi.cloud/docs/client/models/metatraderAccountInformation/: `type  string  Required` — 'account type. enum ACCOUNT_TRADE_MODE_DEMO, ACCOUNT_TRADE_MODE_CONTEST, ACCOUNT_TRADE_MODE_REAL'. MT5's native ACCOUNT_TRADE_MODE, on the account-information RESPONSE, so re-read per call rather than fixed at construction. THE FLAG IS BINARY AND THE VENUE REPORTS THREE STATES: CONTEST is neither demo nor real — the shape of a prop-firm challenge, and this platform already trades one venue of that kind. Under fail-closed it must map to is_simulation=False. THE TRAP IS THE FIELD NAME: create_account takes 'type': 'cloud' (deployment type) while get_account_information returns 'type': 'ACCOUNT_TRADE_MODE_DEMO' (trade mode). Same name, same SDK, unrelated meanings, only one a safety property — B283 was a shape collision and B259 a name collision across platforms; this is a name collision INSIDE one vendor's API. Also measured: the registration payload has NO demo/live field, so the same code path serves demo and live with only credentials differing. BOUNDED: documentation only, nothing executed; failure/unrecognised behaviour is NOT documented and was not guessed.)
+Last updated: 2026-08-30 (B285 — MetaApi has NO close-all call so the KILL SWITCH must iterate, and MetatraderPosition carries NINE required money fields where ours has one. T-0100, documentation-only. (1) The only bulk close documented is close_positions_by_symbol(symbol=...); there is no close-all, so close_all_positions must iterate — and that is manager.py:569, the kill switch T-0067/B238 established deliberately does not check is_simulation. A loop can PARTIALLY FAIL, so 'closed everything' stops being one call's return value and becomes a claim the adapter must earn; B221's trap is reports-success-closed-nothing. (2) B261 measured and worse than estimated: profit/realizedProfit/unrealizedProfit, commission/realizedCommission/unrealizedCommission, swap/realizedSwap/unrealizedSwap — three quantities x three realisation states, all Required, where B261 predicted three. Forces a question that does not arise today: is unrealized_pnl `profit` alone or profit+swap+commission. (3) close_position is TWO calls — close_position(ticket only) and close_position_partially(volume=) — so the T-0038 arm transfers for a NEW reason: the body must read lot_size to DISPATCH. It still proves only that the value is read, never converted, which is the B258 row-1 amendment. AND A THIRD `type` COLLISION: deployment type, trade mode, and MetatraderPosition.type = position DIRECTION. Three meanings, one SDK, one of them the safety property.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -17833,3 +17833,54 @@ guess it** — the fail-closed rule is ours to impose regardless. Whether a prop
 reports `CONTEST` is unverified and broker-specific.
 
 Related: **B252**, **B241**, **B283**, **B259**, **B167**.
+
+### B285. MetaApi has NO close-all call, so the KILL SWITCH must iterate — and `MetatraderPosition` carries nine required money fields where ours has one
+
+**`T-0100`, documentation-only, nothing executed.** Three measured findings from mapping the twelve
+`BrokerAdapter` members (derived: 11 abstract + `reference_price`).
+
+**1 — `close_all_positions` HAS NO EQUIVALENT.** The only bulk close documented in `rpcApi.rst` /
+`streamingApi.rst` is `close_positions_by_symbol(symbol='EURUSD')`. **There is no close-all.** So the
+member must **iterate** over symbols or over `get_positions()`.
+
+> **This is the kill switch** — `manager.py:569`, which `T-0067`/`B238` established deliberately does
+> **not** check `is_simulation`. **A loop can partially fail, so "closed everything" stops being one
+> call's return value and becomes a claim the adapter must earn.** `B221` is the trap it walks into:
+> *reports success, closed nothing.* **Whether a partial failure raises or reports per-symbol is a
+> decision that must be recorded, not defaulted.**
+
+**2 — `B261` MEASURED, AND WORSE THAN IT ESTIMATED.** `MetatraderPosition` carries **nine required
+money fields** where our `Position` has one (`unrealized_pnl`):
+
+```
+profit  realizedProfit  unrealizedProfit          all Required
+commission  realizedCommission  unrealizedCommission
+swap  realizedSwap  unrealizedSwap
+```
+
+**Three quantities × three realisation states. `B261` predicted three.** And it forces a question
+that does not arise today: **is `unrealized_pnl` `profit` alone, or `profit + swap + commission`?**
+**On MT5 that must be answered explicitly or it is answered by accident.**
+
+**3 — `close_position` IS TWO CALLS, AND THE CONTRACT ARM TRANSFERS FOR A NEW REASON.**
+
+```
+close_position(position_id=...)                    whole. TICKET ONLY.
+close_position_partially(position_id=..., volume=) partial. BY VOLUME.
+```
+
+The `T-0038` arm asserts `lot_size` is read **in the body** — and here the body *must* read it, to
+**dispatch** between the two calls. **It passes for dispatch rather than pass-through.** But it still
+proves only that the value is **read, never that it is converted**: MetaApi's `volume` is MT5 lots
+and our `lot_size` is paper/CFT units. **A green arm over a wrong unit is exactly what the `B258`
+row-1 amendment describes.**
+
+**AND A THIRD `type` COLLISION.** `B284` recorded two — deployment type (`'cloud'`) and trade mode.
+**`MetatraderPosition.type` is position DIRECTION.** *Three unrelated meanings for one field name
+inside one SDK*, one of which is the safety property. **Never pass a bare `type` between layers.**
+
+**BOUNDED:** published docs and models only; **the SDK source was not read**, so a member absent from
+the docs may still exist. **`disconnect` is not documented at all and was left unanswered rather than
+invented.**
+
+Related: **B261**, **B284**, **B238**, **B221**, **B258**.
