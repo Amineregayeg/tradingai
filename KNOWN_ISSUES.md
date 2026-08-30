@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-30 (B303 — the CFT kill switch's per-position result list is DISCARDED exactly when a partial failure occurs. close_all_positions catches BrokerError only, close_position ends in a bare httpx post on a client with no transport wrapper, so a ConnectTimeout or ReadTimeout is not caught: the loop ABORTS, the remaining positions are NEVER ATTEMPTED, and the results list dies with the frame. BrokerManager records ONE adapter-level error, so zero-closed and four-closed produce identical output on the control whose whole purpose is to leave nothing open. get_positions at :574 is outside the try as well. B221's family on the same control B221 was about — and it is the precedent the MT5 kill-switch ruling was about to be settled by copying.)
+Last updated: 2026-08-30 (B304 — lots.py has SIX bound= sites and the refusal-cause arm's table has FIVE, so T-0112's own instruction to assert the two counts are equal was unsatisfiable as written; and the sixth is B283 STILL LIVE. Measured by running it: units_to_lots('abc', ...) and units_to_lots(0.0, ...) both return bound='non_positive' with requested_lots 0.0, so a caller that BRANCHES cannot tell an unparseable input from a request for zero units. The reason strings are both correct and distinct, which is precisely what let B283 survive a careful read. There is no BOUND_UNREADABLE constant — the state has no name, so this is a missing token rather than a mis-chosen one. And the derived form T-0112 rejected would be BLIND to it while looking straight at it: all four BOUND_ constants ARE emitted; it is the SITE count that is short.)
 
 ---
 
@@ -18872,3 +18872,57 @@ position* — and **that answer is only true when the failure is a `BrokerError`
 copying this precedent would have copied the hole.
 
 Related: **B221**, **B285**, **B292**, **B294**, **B215**.
+
+---
+
+### B304. `lots.py` has SIX `bound=` sites and the arm's table has FIVE — and the uncovered one is **`B283` still live**, sharing a token with a different cause
+
+**Found by checking `T-0112`'s own instruction against the file before Execute built from it.** The
+task said *"assert the number of `bound=` sites equals the number of cases in the arm's table."*
+**The two numbers are not equal today**, so the instruction as written was unsatisfiable — and the
+reason they differ is a defect, not a miscount.
+
+```
+lots.py `bound=` sites                       6
+test_every_refusal_..._DISTINCT_and_CORRECT   5 cases
+```
+
+**The uncovered site is `:131`** — the `except (InvalidOperation, ValueError, TypeError)` arm, which
+refuses **unreadable inputs**. **Measured by running it, not by reading it:**
+
+```python
+units_to_lots("abc", **FX).bound  ->  'non_positive'   reason: "unreadable inputs: units='abc'..."
+units_to_lots(0.0,   **FX).bound  ->  'non_positive'   reason: "non-positive size: 0.0 units"
+                                       ^^^^^^^^^^^^ THE SAME TOKEN
+requested_lots                    ->  0.0 in BOTH, so that does not separate them either
+```
+
+## THIS IS `B283` VERBATIM, IN THE BRANCH `B283`'s ARM DOES NOT REACH
+
+`B283` was *three branches refused with `BOUND_MIN` and only one was minimum-caused.* **Here two
+branches refuse with `BOUND_NON_POSITIVE` and only one is non-positive-caused.** The other is an
+input the function **could not parse** — a caller's programming error, not a size at all.
+
+**And the same thing that made `B283` survive review is here too:** the reason strings are both
+**correct and distinct**, so a reader who checks the message finds the right cause and never looks at
+the field. `T-0097` states what the field is for — *"a caller that cannot tell TOO SMALL from TOO
+LARGE cannot report either honestly"* — **and it fails exactly where a caller BRANCHES rather than
+reads.**
+
+## THE VOCABULARY HAS NO TOKEN FOR THIS STATE, WHICH IS WHY IT IS NOT A SLIP
+
+There is no `BOUND_UNREADABLE`. **The author was not choosing badly among available tokens; the state
+had no name**, so the nearest one was used. That is why the fix is a token and not a re-key, and why
+`T-0103`'s repair could not have caught it by re-keying.
+
+## WHY THE COUNT ARM IS THE RIGHT INSTRUMENT AND ITS OWN NUMBER WAS WRONG
+
+`T-0112` reasoned correctly that the fully derived form — *assert every `BOUND_` constant is emitted
+somewhere* — **passes on a branch that reuses a wrong token**, which is this exact defect. **It is
+therefore blind to `B304` while looking straight at it:** all four constants ARE emitted, and the
+arm's four causes are complete. **It is the SITE count that is short, not the TOKEN count.**
+
+**So the cheap count arm finds this and the derived one does not** — the opposite of the usual
+ordering, and worth writing down.
+
+Related: **B283**, **B240**, **B215**, **B301**.
