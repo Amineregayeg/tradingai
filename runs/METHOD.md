@@ -15,8 +15,10 @@ select run_id, record_type, count(*), min(created_at), max(created_at)
   from telemetry_records group by run_id, record_type        ->  per-run counts only
 ```
 
-**The extract script is not committed, because it embeds a database connection.** Everything it read
-is above; the transformation is described below and its output is in this folder.
+**CORRECTED 2026-08-30: the extract script IS committed, at [`export/`](export/), and the reason
+given here for withholding it was false.** This file previously said it "embeds a database
+connection". It does not — every script reads `os.environ["DATABASE_URL"]`. Nothing was embedded;
+the scripts were simply not committed. Everything the extract read is listed above.
 
 ## What is READ and what is DERIVED
 

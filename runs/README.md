@@ -79,11 +79,23 @@ start and no history disappears."* It is a container for pre-run history, it has
 recorded, and **245 of its 249 trades are tagged `Backtest replay`** — only 4 are live. Its figures
 are neither one session nor one kind of activity.
 
-**The `positions` column is meaningless for Run 01, and that is `B225`.** All 249 of its trade rows
-carry the literal `broker_id = "paper"`, because `broker_id` was written as a constant before the
-fix. Grouping by it therefore reports **one** position for 249 trades. Every other run has real
+**THE `positions` COLUMN IS MEANINGLESS FOR 12 OF THE 14 RUNS THAT HAVE TRADES, and that is
+`B225`.** `broker_id` was written as the literal string `"paper"` until the fix landed on
+**2026-08-24** (`981bc16`), so grouping by it collapses every trade in a run into one "position".
+Measured:
+
+```
+runs whose broker_id is the literal 'paper'   12   (every run before 2026-08-24)
+runs with real per-position ids                2   (f8b40671 and fe837dd1, both 2026-08-24)
+```
+
+**CORRECTION, 2026-08-30.** An earlier version of this file said *"Every other run has real
 per-position ids (5 distinct across runs 02-24), so the column means what it says from Run 02
-onward.
+onward."* **That was false.** The "5 distinct" count is real but it is 4 genuine ids belonging to
+two runs plus the literal `'paper'` shared by twelve — a measured number attached to a conclusion
+that was never checked. Trade counts, P&L and decision figures are unaffected; only the grouping of
+trades into positions is wrong. Found while answering the owner's audit
+([AUDIT_RESPONSE_2026-08-30.md](AUDIT_RESPONSE_2026-08-30.md), Q7.2b).
 
 **The last run had not ended when this was exported.** Its `ended_at` is null and its figures are
 in flight; every other run is closed.
