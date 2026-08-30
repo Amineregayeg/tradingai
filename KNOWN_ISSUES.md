@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-30 (B320 — A NUMBER INVITES CHECKING AND A BECAUSE-CLAUSE DOES NOT. Review observed that I verified its numbers and its staleness claim and never questioned its causation; tested against the day's record, it holds. Everything I corrected today was an identity, a number, a fact or a mechanism — not one because-clause. And every causal claim falsified today was MINE, falsified by review: T-0111's plan rationale that both consumers read through get_all_positions when the kill switch has its own loop, and the rationales of two more of my plans under T-0120 and T-0121. I was the source of every falsified because-clause and the falsifier of none. THE ASYMMETRY IS STRUCTURAL: a number can be recomputed independently in seconds with an unambiguous verdict, while a because-clause needs a counterfactual with no instrument and a verdict that reads as opinion — so both seats check numbers and the causal story, which is the part a reader ACTS on, travels unchecked. B240's shape in prose rather than arithmetic, where the unreported thing is WHY. THE INSTRUMENT IS ONE SENTENCE and review used it on itself tonight: would removing Y have prevented X? If no, Y is an adjacent hazard and the entry is telling a story. BOUND: one day, two seats, my own reading of my own corrections, which B319 shows is exactly the unreliable position — a second seat should re-derive it, and it not holding historically would be more interesting than it holding.)
+Last updated: 2026-08-30 (B321 — B320 IS FALSIFIED, the same night, by the register's own history. B320 claimed a because-clause has NO INSTRUMENT: no cheap independent recomputation and a verdict that reads as opinion. B140, filed 2026-08-17, IS that instrument and names the class — 'a claim about code derived from READING it rather than RUNNING it: right conclusion, wrong mechanism, three seats in one day.' A misdiagnosed mechanism is not opinion; running the code settles it in seconds with an unambiguous verdict, the property B320 assigned exclusively to numbers. Three more counterexamples, all quoting the register's own text: B209's 'the first version of this entry got the mechanism wrong', a CORRECTED BY REVIEW section reading 'MY REASON WAS WRONG EVEN THOUGH THE CONCLUSION HELD' refuted QUANTITATIVELY, and a DIAGNOSIS CORRECTED within the hour on 2026-08-19. Review states the ratio is soft and leans on none of it — at least four, unambiguous, not a percentage, because its classifier keys on the corrector's own vocabulary and leaves 63 lines unclassified. WHAT SURVIVES: B320's narrow dated claim about 2026-08-30 probably holds, and the generalisation into a structural law is the step that breaks. THE SYMMETRY IS EXACT — B319 welded a real hazard onto a cause it did not have, B320 welds a real practice onto a premise the register contradicts, and in both the recommendation survives and the reason does not. PROMPT_MANAGER.md is rewritten: B140 first, RUN IT rather than reason about it, with the counterfactual reserved for rationales that are not empirically settleable — as written it risked teaching a seat to reason about a mechanism it could have executed, which is B140 verbatim.)
 
 ---
 
@@ -20296,4 +20296,84 @@ register's history, and the classification above is **my own reading of my own c
 is exactly the position `B319` shows is unreliable. **A second seat should re-derive it** — and if
 it does not hold historically, that is more interesting than if it does.
 
+## ⛔ FALSIFIED THE SAME NIGHT BY `B321` — **THE PREMISE IS WRONG AND THE REGISTER ALREADY SAID SO**
+
+**This entry's recommendation survives. Its reason does not.** Review closed the bound above rather
+than leaving it, on the correct grounds that it stopped being optional the moment the classification
+went into `PROMPT_MANAGER.md` and began steering how every plan is reviewed before dispatch.
+
+**What I wrote:** *a because-clause requires a counterfactual, which has no obvious instrument, no
+cheap independent recomputation, and a verdict that reads as opinion.*
+
+**`B140`, filed 2026-08-17, IS that instrument and names the class:**
+
+> *"a claim about code derived from READING it rather than RUNNING it: right conclusion, wrong
+> mechanism, three seats in one day."* **THE MOVE: read the code, form a claim about what it does,
+> publish the claim as a mechanism.**
+
+**A misdiagnosed mechanism is not opinion.** It is a claim about behaviour, and **running the code
+settles it in seconds with an unambiguous verdict** — the exact property I assigned exclusively to
+numbers. Three more counterexamples in `B321`, all quoting the register's own text.
+
+**WHAT SURVIVES, NARROWED:** on **2026-08-30**, the corrections logged were identities, numbers and
+facts, and no because-clause was among them. **That is a fact about one day.** Generalising it into
+a structural law is the step that breaks.
+
+> **`B319` welded a real hazard onto a cause it did not have. This entry welds a real practice onto
+> a premise the register contradicts.** In both, the recommendation survives and the reason does
+> not — **and both were written by a seat that had just been told reasons travel unchecked.**
+
+**`PROMPT_MANAGER.md` is rewritten accordingly**: `B140` first — *if the rationale is a claim about
+what code does, RUN IT* — and the counterfactual reserved for rationales that are not empirically
+settleable. **As originally written it risked teaching a seat to reason about a mechanism it could
+have executed, which is `B140` verbatim.**
+
 Related: **B319**, **B240**, **B314**, **B287**.
+
+### B321 — `B320`'s UNIVERSAL IS FALSIFIED BY THIS REGISTER'S OWN HISTORY: because-clauses ARE corrected here, repeatedly, and `B140` is a NAMED SHAPE for exactly that
+
+**`B320` recorded its own bound** — *"the classification is my own reading of my own corrections… a
+second seat should re-derive it, and it NOT holding would be more interesting than it holding."*
+**Re-derived. It does not hold.** *(Bound recorded by the manager; this measurement is mine.)*
+
+**The claim under test**, from `B320`: a number recomputes in seconds with an unambiguous verdict,
+**a because-clause has no instrument**, so causal claims travel unchecked while numbers get checked.
+
+**DECISIVE COUNTEREXAMPLES — unambiguous, and none depends on my counting:**
+
+| where | what was corrected |
+|---|---|
+| `B209` | *"THE FIRST VERSION OF THIS ENTRY GOT THE MECHANISM WRONG. Corrected 2026-08-23 by Review, **who was asked to falsify it and did**."* |
+| §`CORRECTED BY REVIEW` | *"**MY REASON WAS WRONG EVEN THOUGH THE CONCLUSION HELD**"* — and refuted **quantitatively**: the claim *no word list can separate the cases* was met with *a marker list gets 3 of the 4*. |
+| 2026-08-19 | *"**DIAGNOSIS CORRECTED** by Review, within the hour, and the dump I produced is what disproved it."* |
+| `B140` | *"a claim about code derived from READING it rather than RUNNING it: **right conclusion, wrong mechanism**, three seats in one day — and the fix for a misdiagnosed mechanism LOOKS correct"* |
+
+**`B140` IS THE POINT AND IT DEFEATS THE PREMISE, NOT JUST THE TALLY.** `B320` says a because-clause
+has **no instrument**. **`B140` IS the instrument, and it is already named here: RUN IT RATHER THAN
+READ IT.** A misdiagnosed mechanism is not a matter of opinion — it is a claim about what code does,
+and executing the code settles it. The register did not merely check causal claims occasionally; it
+**named the class, named the method, and recorded three seats failing it in one day.**
+
+**THE RATIO IS SOFT AND I WILL NOT LEAN ON IT.** 97 correction-marker lines; my classifier keys on
+**the corrector's own vocabulary** — the hazard I have filed twice — and leaves **63 unclassified**.
+I can see false positives in my own REASON bucket: three lines use *because* or *reason*
+incidentally rather than as the corrected object. **So: counterexamples decisive, ratio indicative
+only, and the honest figure is "at least four, unambiguous" rather than a percentage.**
+
+**WHAT SURVIVES OF `B320`.** The narrow, dated claim may well hold — *on 2026-08-30, the corrections
+logged were identities, numbers and facts, and no because-clause was among them.* **That is a fact
+about one day, not a structural law**, and `B320` generalised it into one. What does not survive is
+the premise that no instrument exists.
+
+**CONSEQUENCE FOR `PROMPT_MANAGER`, which is why this is not academic.** `B320`'s counterfactual test
+— *would removing Y have prevented X?* — **is good and should stay**; it is mine and I still think it
+works. **But it was shipped with a wrong justification** (*because nothing else can check a
+because-clause*), and the better instruction is the one already in the register: **when a rationale
+is about what code does, RUN THE CODE — `B140`.** The counterfactual is for rationales that are not
+empirically settleable; it should not displace the ones that are.
+
+> **The shape of my own error, one entry earlier, is the shape of this one:** `B319` welded a real
+> hazard onto a cause it did not have. **`B320` welds a real practice — ask the counterfactual — onto
+> a premise the register contradicts.** In both, the recommendation survives and the reason does not.
+
+Related: **B320**, **B140**, **B209**, **B319**, **B240**.
