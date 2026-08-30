@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-30 (B291 — MetatraderDeal is 6-of-22 required: swap, commission, volume, price and positionId are all OPTIONAL, and connection is TWO booleans not one. Census from MetaApi's published models: Position 21 required/7 optional, AccountInformation 16/3, Deal 6/16. A deal without volume or price is not malformed, it is a BALANCE ENTRY — MT5's ledger carries credits, corrections and commission postings beside fills — so an adapter mapping deals to our trades will KeyError on the first non-trade deal and a mock that always supplies them will never show it. positionId being optional breaks the join get_recent_trades needs. AND IT ADDS A THIRD CASE TO B288: that entry asks whether profit INCLUDES swap and commission; they are OPTIONAL, so they may be ABSENT, and absent is not zero — B215 in the vendor's own schema, on the fields realized_r will inherit. CONNECTION IS TWO BOOLEANS: terminalState.connected and terminalState.connected_to_broker. 'Connected to the cloud but not to the broker' is the state in which get_positions() returns an empty list that means nothing. RATE LIMITS read for the first time: TooManyRequests/429, three limit kinds over 1s/1min/1hr/6hr, quotas in CPU CREDITS (1000 per 1s, multiplied by accounts deployed), a separate per-server limit across 12 front-end servers, 5 concurrent historical requests per account — and the 429 carries recommendedRetryTime, so a mock modelling the status and not the payload teaches the adapter to invent a backoff.)
+Last updated: 2026-08-30 (B292 — the CONFIRM kill-switch option is defeated by connected_to_broker=False. B285 established MetaApi has no close-all so the kill switch must iterate, and three options went to Malek: raise, report-per-symbol, or CONFIRM by re-reading positions — CONFIRM recommended as the only one that does not trust the thing that failed. B291 measured that connection is TWO booleans, connected and connected_to_broker, and that connected-to-cloud-but-not-to-broker is the state in which get_positions() returns an empty list that means nothing. So confirmation reads [] and concludes the book is FLAT — reporting success having closed nothing and having been unable to see anything. B215 exactly, on the path where it costs most, and B221's shape through a door nobody watched. It does NOT make CONFIRM wrong: the other two never look, so they cannot be misled, they simply never had the information. The repair is one precondition — establish connected_to_broker before treating an empty list as evidence, because an empty list from a broker we are not connected to is UNAVAILABLE, not FLAT, a distinction order_path_health already enforces elsewhere. BOUNDED: inferred from the documented flag, no connection has been made, and it is cheap to test on the first one.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -18202,3 +18202,64 @@ generic failure collapses them.
 adapter against one and **a mock is a hand-built corpus for an adapter** (`B256`).
 
 Related: **B288**, **B285**, **B284**, **B256**, **B215**.
+
+---
+
+### B292. The CONFIRM kill-switch option is defeated by `connected_to_broker=False` — an empty position list reads as a flat book
+
+**Derived from `B291`, and it changes a decision currently in front of Malek** rather than being a
+note for whoever implements later.
+
+`B285` established that MetaApi has **no close-all call**, so `close_all_positions` — **the kill
+switch** — must iterate, and a loop can partially fail. Three options were put to Malek:
+
+```
+raise               stop at the first failure          trusts the close calls' answers
+report per-symbol   continue, return what closed       trusts the close calls' answers
+CONFIRM             close, then RE-READ POSITIONS      trusts nothing -- it checks
+```
+
+**`CONFIRM` was recommended as the only option that does not trust the thing that failed.**
+`B291` breaks it.
+
+## The mechanism
+
+`B291` measured that connection is **two booleans**, not one:
+
+```
+terminalState.connected             connected to MetaApi
+terminalState.connected_to_broker   connected to the BROKER
+```
+
+**"Connected to the cloud but not to the broker" is a real state, and it is the state in which
+`get_positions()` returns an empty list that means nothing.**
+
+**So the confirmation step reads `[]` and concludes the book is flat.** It reports the kill switch
+succeeded — **having closed nothing, and having been unable to see anything.** The option chosen
+*because* it verifies instead of trusting is the one that produces the most confident wrong answer.
+
+**This is `B215` exactly, on the path where it costs most.** `B215` was `GET /api/positions`
+returning `[]` while positions were open, and its lesson was that **an empty list is a claim.** Here
+the same empty list is consumed by the one operation whose entire job is to leave nothing open.
+
+**And it is `B221`'s shape arriving through a door nobody was watching** — *reports success, closed
+nothing* — reached not through a broken close call but through a **healthy-looking connection to the
+wrong thing.**
+
+## What it does NOT do
+
+**It does not make `CONFIRM` the wrong choice.** It makes it **incomplete as stated**. The other two
+options are worse here, not better: they never look, so they cannot be misled — **they simply never
+had the information.**
+
+**The repair is one precondition, and it is cheap:** confirmation must establish
+`connected_to_broker` is **true** before treating an empty list as evidence of anything. **An empty
+list from a broker we are not connected to is `unavailable`, not `flat`** — the distinction this
+codebase already enforces in `order_path_health` and does not yet have here.
+
+**BOUNDED:** derived from the documented field pair in `B291`; **no MetaApi connection has been
+made, so the behaviour of `get_positions()` in that state is inferred from what the flag means
+rather than observed.** It is the first thing to test on a real connection, and it is cheap: connect,
+break the broker link, read positions.
+
+Related: **B291**, **B285**, **B221**, **B215**.
