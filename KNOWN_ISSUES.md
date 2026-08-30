@@ -19690,6 +19690,22 @@ lines mentioning a T-id across everything it scans          1385
 **3.2 lines per entry.** **A reader triaging its output sees line-shaped noise over an entry-shaped
 problem**, and cannot tell that three flags are one fact.
 
+**⚠ AMENDED BY ITS AUTHOR — I QUOTED THE POPULATION RATIO AS THOUGH IT DESCRIBED THE OUTPUT.**
+
+**3.2 lines per entry is true of the POPULATION and is not what a reader of the report meets.** On
+the **reported** set — measured by the manager once the attribution fix landed — it is **15 register
+lines across 9 entries: 1.7.** The `DEFER` word-list filters before anything reaches the reader, so
+the compression is real and **milder than I stated.**
+
+**Both numbers are true of different sets and I named only the more striking one.** The finding's
+shape survives and is confirmed by the same run: **`43 OWED` collapses to 9 register subjects plus 28
+code sites, and a reader could not have told.** *(Their measurement, not re-run by me.)*
+
+**AND THE DENOMINATOR OF THE FIX BELONGS HERE TOO: 28 of the 43 are CODE lines**, which have no
+subject but themselves. **So grouping by entry improves the MINORITY of the output** — 15 of 43.
+That is not an argument against it; **it is the fix's own reach, and after `B312` it is exactly the
+number that has to be stated beside the improvement.**
+
 **NOT A DEFECT IN WHAT IT REPORTS.** Every line it flags is a real citation. **The defect is that its
 denominator was never stated**, so *"N findings"* has never been readable — the same shape as
 `stale_sweep` printing `319` beside `44` (`B312`), where the honest headline was `44 of 49 examined`.
