@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-30 (B314 — FOUR TIMES IN ONE DAY THE THING BEING BUILT OR MISSED WAS ALREADY IN THE TREE. B309: /api/system/version published the deployed sha for six days and nothing read it, while review proposed building that exact marker. B311: register_commit_check.py:61 has always used the correct heading pattern and I wrote a new one that swept 54% of the register. B302: units_to_lots exists, is correct and has ZERO CALLERS, while OANDA hardcoded 100_000 instead. T-0129: base.py DECLARES the four members' return shapes, two dict and two list[dict], and a returned-dict instrument was built for a subject that is half lists — verified independently, all twenty adapter signatures honour the container types, so only the KEY SET is undeclared. In all four the searcher was competent and the answer sat where the current question does not point: the deployed artefact rather than the source, a sibling tool solving a different question, a function whose lack of callers read as not-wired-yet, and return annotations in a file read for its abstract methods. The action is one line — before building an instrument, name what would already know the answer and say it was checked. BOUND: four instances, no sweep for counter-examples, so this says the pattern is frequent enough to act on and nothing about its rate.)
+Last updated: 2026-08-30 (B315 — the four dict-returning members have ONE common key between them, and B303 is three sites rather than two. T-0129 rebuilt with both controls passing first: 0 container disagreements (base.py declares dict/dict/list[dict]/list[dict] and all 20 signatures honour it, so THE CONTAINER IS DECLARED AND CONSISTENT and only the KEY SET is undeclared), and B303 found at both sites and disagreeing. get_recent_trades: union 11, common 11 — cryptofundtrader and oanda agree completely, so that member is safe for an MT5 adapter to copy. close_position: the only common key is `status` — paper/cft_sim report the failure in `reason`, live_loop_proxy in `error`, so a caller reading either gets None from the others and cannot tell it from 'no explanation given'. close_all_positions: cryptofundtrader AND oanda are per-POSITION (pair, position_id, result) while manager.py is per-ADAPTER (broker, connection_id) — B303 is three producers, sharing only error and status. place_order is a SILENCE not a finding: the instrument reads only live_loop_proxy and four of five build their result in ways it cannot follow. METHOD NOTE: both controls passed while the instrument was demonstrably wrong — it still reported OANDA's outbound request body as a response, because the exclusion checked ast.Assign and OANDA writes `order_body: dict = {...}`, an AnnAssign. Request-versus-response separation was a requirement with NO control, and a requirement without one is a hope. A control proves what it was designed to prove and nothing adjacent.)
 
 ---
 
@@ -19788,3 +19788,77 @@ because a pattern entry without a denominator is `B240`'s shape, and this whole 
 denominators.
 
 Related: **B309**, **B311**, **B302**, **B53**, **B240**.
+
+### B315. The four dict-returning members have one common key between them, and `B303` is three sites rather than two
+
+**`T-0129` rebuilt, and this time both controls pass before anything below was read.**
+
+```
+NEGATIVE CONTROL  container disagreements across all adapters : 0
+                  (base.py declares dict / dict / list[dict] / list[dict] and all 20 signatures honour it)
+POSITIVE CONTROL  B303 found at BOTH sites, and disagreeing   : yes
+```
+
+**THE CONTAINER IS DECLARED AND CONSISTENT. ONLY THE KEY SET IS UNDECLARED** — which is sharper than
+*"a schema nobody declared"*, and it hands the subject split to the instrument for free.
+
+**`get_recent_trades` — SAME KEYS EVERYWHERE, and that is the useful answer:**
+
+```
+cryptofundtrader  close_price close_time direction financing id open_price open_time pair raw realized_pl units
+oanda             (identical, 11 of 11)
+```
+
+**Union 11, common 11.** **This member is safe for an MT5 adapter to copy** — the one of the four
+where the vocabulary is already agreed.
+
+**`close_position` — THE COMMON KEY IS `status`, AND NOTHING ELSE:**
+
+```
+paper / cft_sim    position_id, reason, status
+live_loop_proxy    error, status
+```
+
+> **The failure explanation is `reason` in two adapters and `error` in the third.** A caller reading
+> `reason` gets `None` from the proxy and a caller reading `error` gets `None` from the simulators —
+> **and both are indistinguishable from "no explanation given".** `B215` in a field whose only job is
+> to explain.
+
+**`close_all_positions` — `B303` IS THREE SITES, NOT TWO:**
+
+```
+cryptofundtrader   error pair position_id result status     per POSITION
+oanda              error pair            result status     per POSITION
+manager.py         error       broker connection_id status  per ADAPTER
+```
+
+**`B303` reported cryptofundtrader against `manager`. `oanda` has the same per-position shape**, so
+the divergence is **per-position versus per-adapter across three producers**, and the two shapes share
+only `error` and `status`. **A caller cannot tell which shape it holds without inspecting the keys.**
+
+**`place_order` — NOT A FINDING, A SILENCE.** The instrument reads only `live_loop_proxy`
+(`reason`, `status`); **four of five build their result in ways it cannot follow.** Stated so the
+absence is not read as agreement.
+
+---
+
+**⚠ AND THE METHOD NOTE, WHICH IS THE PART THAT GENERALISES: BOTH CONTROLS PASSED WHILE THE
+INSTRUMENT WAS DEMONSTRABLY WRONG.**
+
+The first trustworthy run still reported `place_order/oanda` as
+`clientExtensions, stopLossOnFill, takeProfitOnFill` — **OANDA's outbound HTTP request body, read as
+a response.** The exclusion rule checked `ast.Assign` and OANDA writes `order_body: dict = {...}`,
+an **`AnnAssign`**.
+
+> **Two passing controls and a wrong table, because the wrongness was in a property NEITHER control
+> tested.** One covered container-reading; one covered `B303`. **Request-versus-response separation
+> was a requirement with no control, and a requirement without one is a hope.**
+
+**A control proves what it was designed to prove and nothing adjacent.** Caught by recognising the
+same three key names from the discarded v1 — **the output, again, not the logic.**
+
+**`B302` IS OUT OF SCOPE, NOT A FAILED CONTROL.** It is a **consumed input**; a production-side
+instrument has the wrong subject for it by construction. **Stated as scope so the exclusion is not
+read as a miss.**
+
+Related: **B303**, **B302**, **B314**, **B215**, **B240**.
