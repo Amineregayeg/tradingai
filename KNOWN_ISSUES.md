@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-30 (B285 — MetaApi has NO close-all call so the KILL SWITCH must iterate, and MetatraderPosition carries NINE required money fields where ours has one. T-0100, documentation-only. (1) The only bulk close documented is close_positions_by_symbol(symbol=...); there is no close-all, so close_all_positions must iterate — and that is manager.py:569, the kill switch T-0067/B238 established deliberately does not check is_simulation. A loop can PARTIALLY FAIL, so 'closed everything' stops being one call's return value and becomes a claim the adapter must earn; B221's trap is reports-success-closed-nothing. (2) B261 measured and worse than estimated: profit/realizedProfit/unrealizedProfit, commission/realizedCommission/unrealizedCommission, swap/realizedSwap/unrealizedSwap — three quantities x three realisation states, all Required, where B261 predicted three. Forces a question that does not arise today: is unrealized_pnl `profit` alone or profit+swap+commission. (3) close_position is TWO calls — close_position(ticket only) and close_position_partially(volume=) — so the T-0038 arm transfers for a NEW reason: the body must read lot_size to DISPATCH. It still proves only that the value is read, never converted, which is the B258 row-1 amendment. AND A THIRD `type` COLLISION: deployment type, trade mode, and MetatraderPosition.type = position DIRECTION. Three meanings, one SDK, one of them the safety property.)
+Last updated: 2026-08-30 (B286 — `unrealized_pnl` ALREADY means two different things across two adapters, and `r_multiple` is computed two different ways. B285 asked whether our single field is profit alone or profit+swap+commission; the answer is that it has never had one definition. paper.py:36-38 is `sign * (price - entry) * units`, GROSS price movement. cryptofundtrader.py:389 is `_dec(raw.get('profit', raw.get('netProfit', raw.get('openNetProfit'))))` — profit and netProfit are NOT the same quantity, and the adapter takes whichever key the venue sent while recording nothing about which. This is live now, not an MT5 problem. AND r_multiple is computed two ways: paper.py:170-171 is a PRICE RATIO not derived from pnl, while cryptofundtrader.py:402 is `(unrealized_pnl / volume) / risk`. If CFT's number is net, its r_multiple is already smaller than the price ratio gives — B184's shape on a dashboard figure. T-0063 IS SAFE: realized_r comes from the decision's stored geometry (crypto_loop.py:1253) and never reads Position.unrealized_pnl; Position.r_multiple is display-only. BUT THE SAME QUESTION EXISTS ONE LAYER OVER AND THERE IT IS REAL — realized_r is pnl/(|entry-sl|*units), denominator our geometry and numerator the pnl at close, so on MT5 the numerator gains swap and commission the denominator does not have and realized_r shifts with NO schema change. Schema: swap and commission as Decimal|None, never Decimal=0 — B215 decides the type. And CFT must stop falling back across profit/netProfit before any definition can be honoured.)
 
 Last updated: 2026-08-23 (B214, B215, B216 — found while building T-0057's order-path liveness signal. B216 is the one that matters: the control pair came back RED and REFUTES the task's own design claim, because every position this engine has ever opened has tp NULL, so 'blocked by a target-less position' is true of 5 of 5 blocks and separates nothing — three of them cleared on their own. The separation is carried entirely by a constant labelled ARBITRARY noise suppression. B214: the one existing has-target test merges 'no target' with 'degenerate risk leg'. B215: GET /api/positions returns [] while the engine holds two.)
 
@@ -17884,3 +17884,56 @@ the docs may still exist. **`disconnect` is not documented at all and was left u
 invented.**
 
 Related: **B261**, **B284**, **B238**, **B221**, **B258**.
+
+### B286. `unrealized_pnl` already means two different things across two adapters, and `r_multiple` is computed two different ways
+
+**`T-0101`.** `B285` asked whether our single field is profit alone or profit plus swap and
+commission. **The answer is that it has never had one definition — not across venues, and not
+today.**
+
+```
+paper.py:36-38    sign * (price - entry) * units            GROSS price movement
+cryptofundtrader.py:389
+    unrealized_pnl = _dec(raw.get("profit", raw.get("netProfit", raw.get("openNetProfit"))))
+```
+
+**`profit` and `netProfit` are not the same quantity** — one conventionally gross, the other net of
+costs. **The adapter takes whichever key the venue sent and records nothing about which**, so on CFT
+the meaning is decided per response, invisibly. **This is live now; it is not an MT5 problem.**
+
+**AND `r_multiple` IS COMPUTED TWO WAYS, ONE COUPLED TO THE FIELD AND ONE NOT:**
+
+```
+paper.py:170-171          rmult = sign * (mark - entry) / risk        A PRICE RATIO
+cryptofundtrader.py:402   r_multiple = (unrealized_pnl / volume) / risk   FROM the field
+```
+
+**If CFT's number is net, its `r_multiple` is already smaller than the price ratio would give** —
+the same field name meaning slightly different things per adapter, with nothing declaring it
+(`B184`'s shape, on a dashboard figure). **Any change to the field's contents moves CFT's `r_multiple`
+and leaves paper's untouched.**
+
+**`T-0063`'s RESULT IS SAFE FROM THIS.** `realized_r` comes from *"the decision's own stored geometry
+— pnl over the dollar risk it was sized to"* (`crypto_loop.py:1253`) and never reads
+`Position.unrealized_pnl`. **`Position.r_multiple` is display-only**; the persisted one is on `Trade`
+(`models/trade.py:67`). **Blast radius is a dashboard number.**
+
+> ⚠ **THE SAME QUESTION EXISTS ONE LAYER OVER AND THERE IT IS REAL.** `realized_r` is
+> `pnl / (|entry-sl| * units)` — **denominator our geometry, numerator the pnl at close.** On MT5 the
+> venue's close pnl includes swap and commission, **so the numerator gains components the
+> denominator does not have and `realized_r` shifts with no schema change and nothing announcing
+> it.** That is `T-0063`'s verified result at risk by a route the `Position` schema does not touch.
+
+**WHAT THE SCHEMA NEEDS, AND `B215` DECIDES THE TYPE:** `swap` and `commission` as
+`Decimal | None`, **never `Decimal = 0`** — `None` means *this venue does not report it*, `0` means
+*reported and zero*. **Defaulting to `0` makes "swap-free by construction" and "zero today"
+identical: could-not-ask versus asked-and-fine, in a money field.**
+
+**AND ONE THING IS REQUIRED BEFORE ANY DEFINITION CAN BE HONOURED: CFT must stop falling back across
+`profit`/`netProfit`.** No definition survives an adapter that does not know which quantity it read.
+
+**BOUNDED:** source only, no live read; **I have not confirmed which key CFT's venue actually
+returns**, only that the adapter accepts three and distinguishes none. The frontend's use was not
+checked. `oanda.py:269` also derives from this field and is unreachable (`manager.py:33`).
+
+Related: **B285**, **B215**, **B184**, **B261**, **B063**.
