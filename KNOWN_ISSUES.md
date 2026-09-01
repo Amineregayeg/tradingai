@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-08-31 (B323 — after a restart the engine status payload reports a BALANCE AND A TRADE COUNT WITH NO RUN BEHIND THEM. Measured on a stopped engine right after the 0008 deploy: running false, started_at null, closed_trades 48, balance 6973.87 — against 13 trades for the run that had just ended and 293 in the whole table, so 48 is neither. Mechanism as far as traced: crypto_loop.py:296 counts self.paper._closed excluding reason=='replay', and SimPropFirmBroker restores nothing on construction, so a warmup seeds those rows. NOT DETERMINED and stated rather than glossed: the 48 are non-replay, so something in warmup closes under other reasons and I did not confirm what — stopped because four ruled items were waiting, not because it was answered. Worth an id anyway because a dashboard reader meets the two fields that look like results and has no reason to consult started_at, whose null reads as unknown rather than as none — B229's family, a value correct for the object it was computed from presented where a reader attributes it to something else. And it bears on runs/: a run document's opening balance comes from this payload, and a figure from a warmed never-started loop would be indistinguishable from one from a real run.)
+Last updated: 2026-09-01 (B324 — the 2026-08-31 deploy worked and BOTH OF MY OWN GUARDRAILS FOR IT WERE WRONG. One: 'migration first, then the image' would have run alembic in the OLD image, whose alembic/versions stops at 0007 — it upgrades to the old head, does nothing, exits 0 and prints success. A CONFIDENT NO-OP in the step written to prevent a silent failure, harmless only because the entrypoint it misdescribes already clones GIT_REF, runs deploy_migrate.py and then uvicorn, in that order. B140 exactly: the ordering was reasoned from a general principle, schema before code, and the compose file settles it one command away. Two: I recreated api and not web-build, and the compose file warns about precisely that in a comment I read afterwards — api is on 99849e9 and web on dcfdc1f, harmless BY LUCK because no frontend/ commit falls between them, and /srv/current is a symlink naming the built commit so the signal was there unread. B53's shape for the third time in this one file after alembic_version and /api/system/version. FIXED: deploy_preflight.py gains a WEB vs API section that reports both commits and whether any frontend/ commit is actually between them, since divergence alone is not the finding; and the ordering is corrected in the preflight and the runbook, each citing B140 and each saying what the wrong version would have done. Both errors were in guardrails written the day before, in the same week as B314.)
 
 ---
 
@@ -20535,3 +20535,77 @@ are not from a run* is a null that reads as "unknown" rather than as "none".
 taken from a warmed, never-started loop would be indistinguishable from one taken from a real run.**
 
 Related: **B229**, **B215**, **B308**, **B309**.
+
+---
+
+### B324 — the deploy worked, and **both of my own guardrails for it were wrong**: the ordering was a confident no-op, and the web half diverged with its commit sitting unread
+
+**The 2026-08-31 deploy succeeded. This is about the two things I had written down to make it safe,
+which would not have.**
+
+## ONE — **"MIGRATION FIRST, THEN THE IMAGE" WOULD HAVE DONE NOTHING AND LOOKED LIKE IT WORKED**
+
+`B309` and the runbook both said:
+
+```
+1.  docker compose run --rm api alembic upgrade head     <- MIGRATION FIRST
+2.  docker compose up -d --force-recreate api
+```
+
+**THE MIGRATION LIVES IN THE IMAGE.** The `api` service is `python:3.12-slim` with **no code
+mount**; its entrypoint clones `GIT_REF`, copies `backend/` into `/app`, writes `/app/.build-sha`,
+**then runs `deploy_migrate.py` — `alembic upgrade head` on an existing DB — then `uvicorn`.**
+
+**So step 1 runs alembic in the OLD image, whose `alembic/versions/` stops at `0007`.** It upgrades
+to the old head, **does nothing, exits 0, and prints success.**
+
+> **A confident no-op, in the step written to prevent a silent failure.** The operator then runs
+> step 2 believing the schema is ready — **which it would have been anyway**, because the entrypoint
+> does it. The instruction was harmless only because the mechanism it misdescribed is correct.
+
+**`B140` exactly: a claim about what code does, derived from READING rather than RUNNING.** I
+reasoned the ordering from a general principle — *schema before code* — which is right in general
+and wrong here. **The compose file settles it and is one command away.** I read it before deploying
+only because the deploy forced me to.
+
+## TWO — **THE WEB HALF DIVERGED, AND ITS COMMIT WAS DISCOVERABLE THE WHOLE TIME**
+
+I recreated `api` and not `web-build`. **The compose file warns about precisely this, in a
+comment:**
+
+> *"Keep in step with the api's `GIT_REF`. Recreating one container and not the other is how the
+> two halves end up on different commits — the specific thing `B3` says nobody could detect."*
+
+**I read that comment afterwards.**
+
+```
+api serving   99849e972
+web serving   dcfdc1f11      /srv/current -> rel-dcfdc1f11cbb…
+frontend/ commits between them:   NONE
+```
+
+**Harmless — and harmless BY LUCK, not by method.** Nothing in the deployed range touched
+`frontend/`, so the served bundle is byte-for-byte what a rebuild would produce.
+
+**AND THE SIGNAL WAS THERE:** `/srv/current` is a symlink naming the built commit. **`B53`'s shape
+for the third time in this one file** — after `alembic_version` and `/api/system/version`, a
+correct signal produced continuously with no consumer.
+
+## WHAT CHANGED, so this is not just a confession
+
+**`deploy_preflight.py` has a third section, `WEB vs API`**, and it answers the question that
+matters rather than raising an alarm on the mismatch: **divergence alone is not the finding** — it
+reports both commits and then whether any `frontend/` commit actually falls between them. Verified
+against the live state, which is how the numbers above were produced.
+
+**The ordering guidance is corrected in both places**, `deploy_preflight.py` and the runbook, each
+citing `B140` and each saying what the wrong version would have done rather than silently replacing
+it.
+
+## THE UNCOMFORTABLE PART
+
+**Both errors were in guardrails I wrote yesterday, in the same week I filed `B314`** — *the thing
+already in the tree is reliably in the place the current question does not point at.* **Here it was
+in a comment in the file I was about to act on**, and in a symlink named after the answer.
+
+Related: **B309**, **B140**, **B3**, **B53**, **B314**.
