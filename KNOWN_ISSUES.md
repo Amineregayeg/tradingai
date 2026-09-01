@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-01 (B326 — 'the arms whose population changes' is DIRECTION-AGNOSTIC and a reader defaults to ACCOMMODATE. In T-0119's correction I named four arms in one file plus two other files; measured after the change, T-0119 touched test_broker_contract.py ONLY, t0038 and t0105 were untouched, and the proxy was already in t0038's population — so two of three files needed nothing, which is the safe direction and cost nothing. THE DIRECTION ERROR IS THE FINDING: three arms GAINED a proxy case and :245 test_adapter_declares_identity LOST one, because it is the arm the proxy was scoped OUT of, and I signed it identically to the others. Execute: 'if I had read your list as four arms to make pass, the identity arm is exactly where I would have added an EXPECTED_BROKER_NAME entry and asserted that a string describing an ABSENT broker is an adapter's name' — precisely the trap Review had defended in writing, since a proxy has no identity of its own. Caught only because Execute measured the list instead of building from it. AND THE EMPIRICAL CASE, Execute's measurement: filing the proxy under LIVE leaves BOTH live-specific arms green for two different wrong reasons — report_false passes because it is unbound, and the credentials arm passes because cls() raises TypeError for want of a LOOP rather than of credentials. Two arms certifying nothing, and only the disjointness assertion catches it. THE RULE: sign every named arm WIDENS or NARROWS, because they imply opposite actions and only one is 'make it pass'.)
+Last updated: 2026-09-01 (B328 — T-0119's discovery walk IS load-bearing, measured against Execute's own open question, but it has TWO BOUNDS: it does not descend into subpackages and it swallows a broken adapter module silently. AND B327 — test_live_adapter_write_methods_need_explicit_credentials asserts a BARE TypeError and so certifies nothing: credentials can be made fully optional on a real-money venue and the arm stays green, measured by mutating OANDA and getting 3 PASSED. That is the SILENT half of B325 — an arm whose expected-set comes from its subject's own population — and B327 is its first measured instance, where B325 stated the direction with no example. Both filed by review while reviewing T-0119, which landed at 14b4502 with the suite reconciled 2070/2070 across six chunks and B300 FIXED by review's reading that only the LOGGING was coupled in _target(), dissolving a two-way trade Execute had accepted as forced.
 
 ---
 
@@ -20735,3 +20735,110 @@ actions, and only one of them is *make it pass*. **An arm that narrows is an arm
 REMOVED from**, and a builder who accommodates it instead writes an assertion nobody decided.
 
 Related: **B325**, **B296**, **B215**, **B320**.
+
+### B327 — `test_live_adapter_write_methods_need_explicit_credentials` ASSERTS A BARE `TypeError` AND SO CERTIFIES NOTHING: credentials can be made fully optional on a live venue and the arm stays green
+
+**Found reviewing `T-0119`.** Execute measured that filing the proxy under `LIVE_ADAPTERS` leaves
+this arm green *"because `cls()` raises `TypeError` for want of a **loop**, not credentials."*
+**That is right, and the defect is not about the proxy — it is in the arm, and it is live today over
+three real venues.**
+
+```python
+with pytest.raises(TypeError):
+    cls()  # no credentials -> un-constructible
+```
+
+**No `match=`. Any `TypeError` satisfies it.** The arm's name claims *credentials are required*; what
+it actually asserts is *the constructor takes at least one required positional argument*.
+
+**MEASURED — what each live adapter raises today:**
+
+```
+oanda                    missing 2 required positional arguments: 'api_key' and 'account_id'
+cryptofundtrader         missing 2 required positional arguments: 'email' and 'password'
+cryptofundtrader_bridge  missing 2 required positional arguments: 'email' and 'password'
+live_loop_proxy          missing 1 required positional argument: 'loop'     <- NOT a credential
+```
+
+**It is correct today by COINCIDENCE OF THREE SIGNATURES, not by assertion.**
+
+**MUTATION — the arm shown to survive the exact inversion it exists to prevent:**
+
+```
+OANDAAdapter.__init__(self, session, api_key="", account_id="", environment="practice")
+  -> OANDAAdapter(session=None) CONSTRUCTS a live adapter with NO api_key and NO account_id
+  -> pytest -k explicit_credentials   ==>  3 PASSED
+```
+
+**Credentials became optional on a live-money venue and the safety arm did not move.** `B272`'s
+shape — an assertion that cannot fail for the reason it names — **on the credential-gating arm,
+which is the safety-most arm in this file.**
+
+> **Why it matters more than the proxy question that surfaced it:** the proxy was *excluded* from
+> this arm, so the proxy is fine. **The three adapters still inside it are the ones being
+> certified by an assertion that does not check the thing it is named for.**
+
+**Fix — derive, do not match on a message string.** Inspect the signature and assert **every
+required positional parameter is in a declared credential set** for that adapter. A `match=` on the
+parameter names would also work and is weaker: it re-encodes the names in a second place, which is
+`B184`. **The arm must be shown to FAIL under the mutation above before it is claimed fixed.**
+
+**NOT Execute's defect and not introduced by `T-0119`** — the arm predates it. `T-0119` is what made
+it visible, by putting a member in front of it whose `TypeError` has a different cause.
+
+Related: **B272**, **B221**, **B184**, **B325**, **B328**.
+
+### B328 — `T-0119`'s discovery walk IS load-bearing (measured, against Execute's own open question) but it has TWO BOUNDS: it does not descend into subpackages, and it swallows a broken adapter module silently
+
+**Execute published a measurement undercutting their own fix** — *delete the walk and the suite
+still reports `63 passed`, PREDICTED 0 GOT 0* — and asked directly whether that makes the walk
+**decorative rather than latent.** *(The question and the honesty of publishing it are Execute's.)*
+
+**ANSWER: LATENT, AND NOW DEMONSTRATED RATHER THAN ARGUED.** Execute's mutation shows the walk is
+inert **on the current population**; it could not show whether the walk works on the population it
+was built for, because that population is empty. So I created one: a concrete `ZzProbeAdapter` in
+`app/services/broker/`, **not imported by name** in the test module.
+
+```
+WITH the walk      FAILED — "not covered by the contract registry: ['ZzProbeAdapter']"
+WITHOUT the walk   PASSED — blind to it
+```
+
+**Two-directional, on the exact property claimed.** The walk earns its place: it protects the next
+adapter nobody thinks to import. **Not decorative.**
+
+**BOUND 1 — `pkgutil.iter_modules` DOES NOT RECURSE.** Same probe, moved to
+`app/services/broker/sub/zz_probe.py`: **PASSED — invisible.** `iter_modules` lists a package's
+immediate modules only. `_all_subclasses()` *is* properly recursive over classes, so a
+subclass-of-a-subclass is caught; **the gap is in MODULE discovery, not class discovery.** This is
+`B296`'s trap surviving in the fix that cites `B296`. **No subpackages exist under `broker/` today,
+so this is latent, not live.**
+
+**BOUND 2 — A BROKEN ADAPTER MODULE IS SILENTLY INVISIBLE.**
+
+```python
+except Exception:  # noqa: BLE001 - an unimportable adapter is not this test's subject
+    continue
+```
+
+Probe with a failing top-level import (a missing dependency), left at top level: **PASSED.**
+Positive control — `iter_modules` **does** list `zz_probe`, so it is inside the walk's population
+and the arm still passes. **A new adapter whose module does not import ships invisible to the arm
+built to catch new adapters**, and nothing is logged. `B318`'s swallow-and-continue shape, on a
+guard.
+
+> **My own misprediction, reported as one.** I first appended the `raise` **after** the class
+> statement and predicted PASS; it **FAILED**, because the class object is created before the raise
+> executes and is already in `__subclasses__()`. The realistic form — failure *before* the class
+> statement — is the one that passes. **A partially-imported module still leaks its classes; a
+> module that dies earlier does not.**
+
+**Neither bound is a defect Execute introduced** — the walk is strictly better than what preceded
+it, which depended on import order. **They are the edges of what it buys**, and the docstring
+currently claims the protection without naming them.
+
+**Fix:** `pkgutil.walk_packages` for bound 1; for bound 2, collect the failures and assert the list
+is empty, or log at `WARNING` — **an adapter that cannot be imported is exactly this arm's
+subject**, contrary to the comment.
+
+Related: **B296**, **B318**, **B297**, **B327**.
