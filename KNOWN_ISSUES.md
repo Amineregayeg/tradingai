@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-01 (B331 — MT5_FIRST_CONNECTION.md section 3.1 said ALL THREE DEAL FIELDS ARE OPTIONAL and profit is REQUIRED. Two documents I wrote disagreed about the primary source and the CHECKLIST, the one an operator follows with a live account, was the wrong one: MT5_READINESS:425 renders MetatraderDeal correctly with profit marked required, while 3.1 claimed all three optional. Settled against T-0104/attack-01.md's full quote of the model, where only profit carries Yes in the required column. NOT COSMETIC: 3.1's third outcome, the fields are absent, is correct for swap and commission and IMPOSSIBLE for profit, so an adapter built to it carries a path that can never execute while the real absent-is-not-zero problem sits on the two fields the same sentence lumps in — B291 measured those optional in 6 of 22. And it narrows what 3.1 settles: the question is only ever gross-versus-net, never whether the number is there. FOUND BY EXECUTE reading the three MT5 documents as a T-0106 prerequisite and checking them against the primary source instead of building from them, and it did NOT edit either file — correcting another seat's file from your own is how a correction becomes something they never made. The contradiction had stood since both were written, on the item the checklist itself calls the single most consequential unknown on the list.)
+Last updated: 2026-09-01 (B332 — MY ACCEPTANCE ARM FOR THE KILL SWITCH SPECIFIED B303'S DEFECT AS THE REQUIRED BEHAVIOUR. T-0106/plan.md:354 said to raise a non-BrokerError on the second of four positions and assert one closed, one failed, TWO NOT ATTEMPTED — and 1+1+2=4 only occurs if the loop STOPS after position 2, which is exactly B303's defect relabelled. A loop that abandons positions 3 and 4 because position 2 timed out MANUFACTURES unattempted positions we could have closed, and it satisfies Malek's ruled property perfectly. THE GENERAL FORM: the property is satisfied by BOTH the fix and the defect, so it cannot decide between them, and the acceptance arm is where that gets decided silently by whoever writes it — a ruling that names an invariant does not name a behaviour. Execute's split is the correct specification: a PER-POSITION failure is FAILED WITH A REASON and the loop CONTINUES, while the LOOP ITSELF dying gives NOT ATTEMPTED rows, with asyncio.CancelledError as the instrument because it inherits from BaseException not Exception — verified — so no except Exception catches it. Caught because Execute worked out what behaviour my arm implied instead of building it. FILED ALONGSIDE B330 (execute), which found and fixed the other half: kill_switch.py:72 counted a NOT ATTEMPTED row as CLOSED, now excluded from both totals with positions_not_attempted reported as its own number AND named in the operator's message, because a third state that appears only in details is a third state nobody sees.)
 
 ---
 
@@ -20890,3 +20890,116 @@ read one or the other, never both against the source. **Two of my own documents,
 the item the checklist itself calls "the single most consequential unknown on the list."**
 
 Related: **B291**, **B288**, **B322**, **B314**.
+
+---
+
+### B330 — Malek's three-state kill-switch property is DEFEATED AT THE CONSUMER: a `NOT ATTEMPTED` position is counted as CLOSED and reported to the operator as one
+
+**Found while building `T-0106`'s `close_all_positions` to the ruling.** Malek ruled the kill
+switch as a property on 2026-08-31:
+
+> **Every position open when the switch was pulled must be reported as CLOSED, FAILED WITH A
+> REASON, or NOT ATTEMPTED. A position in none of those three states is a bug by construction.**
+
+**The adapter can emit three states. The aggregator collapses two of them, and it collapses them
+in the dangerous direction.** `kill_switch.py:71`:
+
+```python
+positions_closed = sum(1 for r in close_results if r.get("status") not in ("error", "failed"))
+positions_failed = sum(1 for r in close_results if r.get("status") in ("error", "failed"))
+```
+
+**A `not_attempted` row is neither `error` nor `failed`, so it lands in `positions_closed`.** The
+operator is told a position was closed when nothing touched it — **on the control whose entire
+purpose is to leave nothing open.**
+
+**IT IS WORSE THAN THE AGGREGATE FAILURE IT WOULD REPLACE.** An error prompts a look; a
+closed-count does not. Emitting the third state and stopping there converts a *visible* failure
+into a *confident wrong number* — which is the whole reason the ruling is a property rather than a
+return shape.
+
+**AND THE OBVIOUS IMPLEMENTATION IS THE ONE THAT TRIPS IT.** `NOT_ATTEMPTED` reads like a status,
+so the natural row is `{"status": "not_attempted"}`. That is the value this counter mis-reads.
+
+**FIXED, in both halves, because either alone is insufficient:**
+
+* **Consumer** — the count now excludes rows whose `disposition` is `NOT_ATTEMPTED` from *both*
+  totals and reports `positions_not_attempted` as its own number, **named in the operator's
+  message and not only in the payload.** A third state that appears only in `details` is a third
+  state nobody sees at 3am.
+* **Producer** — the MT5 member carries **both** keys: `disposition` is the ruled three-state
+  answer, and `status` maps `NOT_ATTEMPTED` onto the **safe side of a two-state consumer**. A
+  position nobody reached is not closed, and any older reader must see it that way.
+
+**A row with no `disposition` keeps exactly its previous meaning**, so the vocabulary widens
+without reinterpreting the three adapter shapes that cannot express the third state (`B303`,
+`B315`). That must-miss is asserted: a run with nothing unattempted does not mention the state.
+
+**NOT FIXED, IN THE SAME FUNCTION, AND NAMED SO IT IS NOT FOUND TWICE.** `kill_switch.py:67-69`
+catches `Exception` and sets `close_results = []`, so a `close_all_positions` that RAISES yields
+**`0 closed, 0 failed`** — which reads as *nothing to close*. That is the same collapse one layer
+up: total failure and an empty book produce identical output. It is outside `T-0106`'s scope and
+it is the next thing to fix on this path.
+
+Related: **B303**, **B315**, **B221**, **B215**, **B292**.
+
+---
+
+### B332 — **my acceptance arm for the kill switch specified `B303`'s DEFECT as the required behaviour**, wearing the new vocabulary
+
+**Malek ruled the property. I wrote the arm that would have proved it. The arm asserted the abort.**
+
+`tasks/T-0106/plan.md:354`, verbatim:
+
+> *"feed it an adapter double that raises a NON-`BrokerError` on the second of four positions, and
+> assert the report names all four — one closed, one failed with a reason, **two NOT ATTEMPTED**."*
+
+**Count it: 1 + 1 + 2 = 4.** That result **only occurs if the loop stops after position 2.**
+
+## AND STOPPING IS THE DEFECT `B303` IS ABOUT
+
+`B303`: CFT catches `BrokerError` only, so a `ConnectTimeout` **kills the loop** and the remaining
+positions are never attempted. **My arm required exactly that**, and relabelled the casualties
+`NOT ATTEMPTED`.
+
+> **A loop that abandons positions 3 and 4 because position 2 timed out MANUFACTURES unattempted
+> positions we could have closed** — and it satisfies the ruled property perfectly. Every position
+> is accounted for. Nothing is missing. **The report is honest about an outcome that should never
+> have happened.**
+
+## THE GENERAL FORM, WHICH IS WHY THIS IS AN ENTRY AND NOT A TYPO
+
+> **The property is satisfied by BOTH the fix and the defect, so the property alone cannot decide
+> between them — and the acceptance arm is where that gets decided, silently, by whoever writes it.**
+
+**A ruling that names an invariant does not name a behaviour.** *Every position is CLOSED, FAILED,
+or NOT ATTEMPTED* is true of a loop that continues and true of a loop that gives up. **I read the
+property as sufficient, wrote the first arm that satisfied it, and did not ask what else satisfied
+it.**
+
+## EXECUTE'S SPLIT, WHICH IS THE CORRECT SPECIFICATION
+
+```
+a PER-POSITION failure (TimeoutError, not a BrokerError)
+    -> that row is FAILED WITH A REASON, the loop CONTINUES, 3 closed
+
+the LOOP ITSELF dies (asyncio.CancelledError)
+    -> 1 closed, 2 NOT ATTEMPTED, and the report SURVIVES
+```
+
+**Only the second is the arm I was describing**, and `CancelledError` is the right instrument for it:
+**it inherits from `BaseException`, not `Exception`** — verified, `issubclass(CancelledError,
+Exception)` is `False` — so **no `except Exception` catches it.** That is precisely the abnormal exit
+`B303` is about, and it is a real 3am scenario rather than a contrived one.
+
+**The report is published on the adapter BEFORE the loop starts and also attached to the raised
+error**, so a caller holding only the exception still has all four rows.
+
+## WHAT SAVED IT
+
+**Execute did not build the arm I wrote.** It worked out what behaviour the arm implied, found that
+the implied behaviour was the defect, and split it. **The plan was the authority and it was wrong**,
+which is the second time this week a plan of mine aimed a builder at the thing two seats had
+reasoned about (`B326` was the first).
+
+Related: **B303**, **B326**, **B320**, **B215**.
