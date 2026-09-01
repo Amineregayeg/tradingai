@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-01 (B324 — the 2026-08-31 deploy worked and BOTH OF MY OWN GUARDRAILS FOR IT WERE WRONG. One: 'migration first, then the image' would have run alembic in the OLD image, whose alembic/versions stops at 0007 — it upgrades to the old head, does nothing, exits 0 and prints success. A CONFIDENT NO-OP in the step written to prevent a silent failure, harmless only because the entrypoint it misdescribes already clones GIT_REF, runs deploy_migrate.py and then uvicorn, in that order. B140 exactly: the ordering was reasoned from a general principle, schema before code, and the compose file settles it one command away. Two: I recreated api and not web-build, and the compose file warns about precisely that in a comment I read afterwards — api is on 99849e9 and web on dcfdc1f, harmless BY LUCK because no frontend/ commit falls between them, and /srv/current is a symlink naming the built commit so the signal was there unread. B53's shape for the third time in this one file after alembic_version and /api/system/version. FIXED: deploy_preflight.py gains a WEB vs API section that reports both commits and whether any frontend/ commit is actually between them, since divergence alone is not the finding; and the ordering is corrected in the preflight and the runbook, each citing B140 and each saying what the wrong version would have done. Both errors were in guardrails written the day before, in the same week as B314.)
+Last updated: 2026-09-01 (B325 — an arm whose EXPECTED-SET is derived from the same population as its SUBJECT reports a self-reference as a finding. Found by a T-0119 mutation and findable no other way: it takes a change that puts the subject INTO the fixture. test_the_unbound_proxy_reports_a_name_that_is_VISIBLY_NOT_A_VENUE built its comparison set from VENUE_ADAPTERS = SIM + LIVE, so the mutation that files the proxy under LIVE_ADAPTERS made the unbound sentinel collide with ITSELF and the arm failed for a reason unrelated to what it asserts — a reader would go looking for a venue that had taken the name, and there is none. PREDICTED 1 failure and GOT 3, and the two extra were the finding; a prediction adjusted after seeing the result would have shown three expected failures and nothing to report. The general form: when an arm's SUBJECT and its EXPECTED-SET come from one population, the verdict is a function of that population's membership rather than of the property asserted, so a membership change moves the verdict with no defect behind it — here a false positive, and the same construction gives a SILENT false negative when the subject's presence makes the assertion trivially true. Fixed where found, by excluding PROXY_ADAPTERS explicitly rather than relying on test_LIVE_and_PROXY_are_DISJOINT holding: an arm whose correctness depends on another arm passing is not independent either. NOT DONE and the larger half: nothing scans for the class, and every contract arm here derives populations that way on purpose — recommended as a task where the scan is the deliverable.)
 
 ---
 
@@ -20609,3 +20609,61 @@ already in the tree is reliably in the place the current question does not point
 in a comment in the file I was about to act on**, and in a symlink named after the answer.
 
 Related: **B309**, **B140**, **B3**, **B53**, **B314**.
+
+---
+
+### B325 — an arm whose EXPECTED-SET is derived from the same population as its SUBJECT reports a **self-reference** as a finding
+
+**Found by a mutation in `T-0119`, and it could not have been found any other way** — it takes a
+change that puts the subject INTO the fixture, which is not a thing anyone writes on purpose.
+
+`test_the_unbound_proxy_reports_a_name_that_is_VISIBLY_NOT_A_VENUE` asserts that the string an
+unbound proxy answers with cannot collide with a name a real venue reports:
+
+```python
+claimed = {factory().broker_name for _n, _c, factory in VENUE_ADAPTERS}
+assert unbound not in claimed
+```
+
+`VENUE_ADAPTERS` is `SIM_ADAPTERS + LIVE_ADAPTERS`. **The mutation that files the proxy under
+`LIVE_ADAPTERS` therefore puts the SUBJECT into the COMPARISON SET**, the sentinel collides with
+itself, and the arm fails — **for a reason that has nothing to do with what it asserts.** A reader
+seeing that failure would go looking for a venue that had taken the sentinel name. There is none.
+
+**PREDICTED 1 FAILURE AND GOT 3, AND THE TWO EXTRA WERE THE FINDING.** One was legitimate
+(`test_adapter_declares_identity`, because `VENUE_ADAPTERS` derives from `LIVE_ADAPTERS`, so the
+miscategorisation drags the proxy back into the arm it was scoped out of). The other was this.
+**A prediction adjusted after seeing the result would have shown three expected failures and no
+finding at all.**
+
+**THE GENERAL FORM.** An arm has a SUBJECT and an EXPECTED-SET. When both are derived from one
+population, the arm's verdict is a function of that population's membership rather than of the
+property being asserted — so a membership change produces a verdict change **with no defect
+behind it**, in either direction. Here it produced a false positive. **The same construction
+produces a false NEGATIVE when the subject's presence in the set makes the assertion trivially
+true**, and that direction is silent.
+
+It is the *populations* sibling of the rule this register already carries about derivation: a
+guard is only as falsifiable as the independence of its fixture from its subject. **That clause
+was about a test writing its own population. This is about two things reading the SAME population
+where one of them must not.**
+
+**FIXED where it was found.** The comparison set now excludes `PROXY_ADAPTERS` members explicitly:
+
+```python
+proxy_classes = {cls for _n, cls, _f in PROXY_ADAPTERS}
+claimed = {factory().broker_name for _n, cls, factory in VENUE_ADAPTERS
+           if cls not in proxy_classes}
+```
+
+**Explicitly, and NOT by relying on `test_LIVE_and_PROXY_are_DISJOINT` holding** — an arm whose
+correctness depends on another arm passing is not independent either, and the two would fail
+together on the day it mattered.
+
+**WHAT IS NOT DONE, AND IT IS THE LARGER HALF.** Only the instance found by this mutation is
+fixed. **Nothing scans for the class.** The shape is mechanical enough to look for — an arm whose
+expected-set comprehension iterates a registry that its subject can belong to — and every
+contract arm in this project derives populations that way on purpose. **Recommended as a task**,
+and the scan is the deliverable rather than any fix it turns up.
+
+Related: **B250**, **B296**, **B265**, **B211**.
