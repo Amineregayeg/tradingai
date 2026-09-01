@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-01 (B325 — an arm whose EXPECTED-SET is derived from the same population as its SUBJECT reports a self-reference as a finding. Found by a T-0119 mutation and findable no other way: it takes a change that puts the subject INTO the fixture. test_the_unbound_proxy_reports_a_name_that_is_VISIBLY_NOT_A_VENUE built its comparison set from VENUE_ADAPTERS = SIM + LIVE, so the mutation that files the proxy under LIVE_ADAPTERS made the unbound sentinel collide with ITSELF and the arm failed for a reason unrelated to what it asserts — a reader would go looking for a venue that had taken the name, and there is none. PREDICTED 1 failure and GOT 3, and the two extra were the finding; a prediction adjusted after seeing the result would have shown three expected failures and nothing to report. The general form: when an arm's SUBJECT and its EXPECTED-SET come from one population, the verdict is a function of that population's membership rather than of the property asserted, so a membership change moves the verdict with no defect behind it — here a false positive, and the same construction gives a SILENT false negative when the subject's presence makes the assertion trivially true. Fixed where found, by excluding PROXY_ADAPTERS explicitly rather than relying on test_LIVE_and_PROXY_are_DISJOINT holding: an arm whose correctness depends on another arm passing is not independent either. NOT DONE and the larger half: nothing scans for the class, and every contract arm here derives populations that way on purpose — recommended as a task where the scan is the deliverable.)
+Last updated: 2026-09-01 (B326 — 'the arms whose population changes' is DIRECTION-AGNOSTIC and a reader defaults to ACCOMMODATE. In T-0119's correction I named four arms in one file plus two other files; measured after the change, T-0119 touched test_broker_contract.py ONLY, t0038 and t0105 were untouched, and the proxy was already in t0038's population — so two of three files needed nothing, which is the safe direction and cost nothing. THE DIRECTION ERROR IS THE FINDING: three arms GAINED a proxy case and :245 test_adapter_declares_identity LOST one, because it is the arm the proxy was scoped OUT of, and I signed it identically to the others. Execute: 'if I had read your list as four arms to make pass, the identity arm is exactly where I would have added an EXPECTED_BROKER_NAME entry and asserted that a string describing an ABSENT broker is an adapter's name' — precisely the trap Review had defended in writing, since a proxy has no identity of its own. Caught only because Execute measured the list instead of building from it. AND THE EMPIRICAL CASE, Execute's measurement: filing the proxy under LIVE leaves BOTH live-specific arms green for two different wrong reasons — report_false passes because it is unbound, and the credentials arm passes because cls() raises TypeError for want of a LOOP rather than of credentials. Two arms certifying nothing, and only the disjointness assertion catches it. THE RULE: sign every named arm WIDENS or NARROWS, because they imply opposite actions and only one is 'make it pass'.)
 
 ---
 
@@ -20667,3 +20667,71 @@ contract arm in this project derives populations that way on purpose. **Recommen
 and the scan is the deliverable rather than any fix it turns up.
 
 Related: **B250**, **B296**, **B265**, **B211**.
+
+---
+
+### B326 — **"the arms whose population changes" is DIRECTION-AGNOSTIC, and a reader defaults to ACCOMMODATE.** One of the four I named needed the opposite
+
+**My error, in a plan correction, and it pointed at the one trap two seats had independently
+defended against.**
+
+`T-0119`'s amendment named the arms an implementer should expect to see move:
+
+```
+test_broker_contract.py            :226 :245 :253 :261
+test_t0038_partial_close_contract.py  :129
+test_t0105_position_provenance.py
+```
+
+**Measured after the change, by Execute, and confirmed by me from the diff:**
+
+```
+git show --stat 14b4502 -- backend/tests   ->  test_broker_contract.py ONLY, 377+/3-
+t0038, t0105                              ->  0 lines changed, untouched
+the proxy in t0038 at 3af53ff             ->  5 references ALREADY THERE
+c3 (holds t0038) 778 -> 778 · c4 (holds t0105) 321 -> 321 · c1 359 -> 370
+```
+
+**Two of the three files needed nothing.** A superset is the safe direction for *"expect these to
+move"* and cost nothing. **The direction error is the finding.**
+
+## `:245`'s POPULATION NARROWED, AND I SIGNED IT THE SAME AS THE OTHERS
+
+`test_adapter_declares_identity` is **the arm the proxy was scoped OUT of.** Three arms gained a
+proxy case; **this one lost one.** *"The population changes"* is true of both and **implies nothing
+about what to do**, and the default reading of a named arm in a correction is *make it pass.*
+
+> **Execute, stating the consequence it avoided: *"If I had read your list as four arms to make
+> pass, the identity arm is exactly where I would have added an `EXPECTED_BROKER_NAME` entry and
+> asserted that a string describing an ABSENT broker is an adapter's name."***
+
+**That is precisely the trap Review had defended in writing** — *"`test_adapter_declares_identity`
+being scoped out rather than made green is the decision I would most want defended… a registry
+entry chosen to clear a red is an assertion nobody decided."* **A proxy has no identity of its own;
+that is the whole reason it is in neither venue list.**
+
+**So my imprecise list aimed a builder at the one arm two seats had already reasoned about and
+excluded.** It was caught because Execute measured the list instead of building from it — **which I
+had asked it to do, and which is the only reason this is a near miss rather than an entry about a
+registry entry nobody decided.**
+
+## AND THE EMPIRICAL CASE FOR WHY THE DIRECTION MATTERED (Execute's measurement)
+
+**Filing the proxy under `LIVE_ADAPTERS` leaves BOTH live-specific arms GREEN, for two different
+wrong reasons:**
+
+```
+test_live_adapters_report_false                        passes — the proxy is UNBOUND
+test_live_adapter_write_methods_need_explicit_creds    passes — cls() raises TypeError for want
+                                                       of a LOOP, not for want of credentials
+```
+
+**Two arms certifying nothing, and only the disjointness assertion catches it.**
+
+## THE RULE
+
+**A correction that names arms must sign each one: WIDENS or NARROWS.** They imply opposite
+actions, and only one of them is *make it pass*. **An arm that narrows is an arm something must be
+REMOVED from**, and a builder who accommodates it instead writes an assertion nobody decided.
+
+Related: **B325**, **B296**, **B215**, **B320**.
