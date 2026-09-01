@@ -41,29 +41,48 @@ class LiveLoopBrokerProxy(BrokerAdapter):
         self.unavailable_reason: str | None = None
 
     # ------------------------------------------------------------------
-    def _target(self) -> Any | None:
-        """The broker the loop is holding RIGHT NOW, or `None`.
+    def _resolve(self) -> Any | None:
+        """Resolve the held broker AND record why, with no logging. **One writer of the field.**
 
-        **Never raises.** `manager.py:373` and `:571` swallow per-adapter exceptions and
-        continue, so a proxy that threw when the loop had no broker would reproduce `[]` —
-        the same symptom this class exists to remove, with a new cause.
+        `B300`: `broker_name`, `default_pairs` and `is_simulation` each did their own
+        `getattr(self._loop, "paper", None)` and never touched `unavailable_reason`, so on an
+        unbound proxy `is_simulation` answered `False` while the field still read `None` — and
+        `None` is defined above as *the forward found a broker*. **The field did not merely fail
+        to tell the two states apart; it asserted the wrong one**, on the flag `ExecutionService`,
+        the kill switch and position-close routing all read.
+
+        **RESOLUTION AND RECORDING BELONG TOGETHER; ONLY THE LOGGING WAS COUPLED TO THEM.**
+        Splitting here keeps a SINGLE writer of `unavailable_reason` — two places encoding one
+        fact is its own defect — while letting a property read stay silent. A property is read at
+        safety chokepoints, and routing it through the loud path would emit a warning at whatever
+        rate those chokepoints run.
         """
         target = getattr(self._loop, "paper", None)
         self.unavailable_reason = (
             None if target is not None else "the live loop is holding no broker"
         )
+        return target
+
+    def _target(self) -> Any | None:
+        """The broker the loop is holding RIGHT NOW, or `None`. **The loud path, unchanged.**
+
+        **Never raises.** `manager.py:373` and `:571` swallow per-adapter exceptions and
+        continue, so a proxy that threw when the loop had no broker would reproduce `[]` —
+        the same symptom this class exists to remove, with a new cause.
+        """
+        target = self._resolve()
         if target is None:
             logger.warning("Broker proxy: the live loop is holding no broker")
         return target
 
     @property
     def broker_name(self) -> str:  # type: ignore[override]
-        target = getattr(self._loop, "paper", None)
+        target = self._resolve()
         return getattr(target, "broker_name", "paper-proxy(unbound)")
 
     @property
     def default_pairs(self) -> list[str]:  # type: ignore[override]
-        target = getattr(self._loop, "paper", None)
+        target = self._resolve()
         return list(getattr(target, "default_pairs", []) or [])
 
     # ------------------------------------------------------------------
@@ -79,7 +98,7 @@ class LiveLoopBrokerProxy(BrokerAdapter):
 
         With no broker the answer is `False`, not `True`: *unknown must not read as safe.*
         """
-        target = getattr(self._loop, "paper", None)
+        target = self._resolve()
         if target is None:
             return False
         return bool(target.is_simulation)
