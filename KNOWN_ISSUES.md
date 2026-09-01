@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-01 (B328 — T-0119's discovery walk IS load-bearing, measured against Execute's own open question, but it has TWO BOUNDS: it does not descend into subpackages and it swallows a broken adapter module silently. AND B327 — test_live_adapter_write_methods_need_explicit_credentials asserts a BARE TypeError and so certifies nothing: credentials can be made fully optional on a real-money venue and the arm stays green, measured by mutating OANDA and getting 3 PASSED. That is the SILENT half of B325 — an arm whose expected-set comes from its subject's own population — and B327 is its first measured instance, where B325 stated the direction with no example. Both filed by review while reviewing T-0119, which landed at 14b4502 with the suite reconciled 2070/2070 across six chunks and B300 FIXED by review's reading that only the LOGGING was coupled in _target(), dissolving a two-way trade Execute had accepted as forced.
+Last updated: 2026-09-01 (B331 — MT5_FIRST_CONNECTION.md section 3.1 said ALL THREE DEAL FIELDS ARE OPTIONAL and profit is REQUIRED. Two documents I wrote disagreed about the primary source and the CHECKLIST, the one an operator follows with a live account, was the wrong one: MT5_READINESS:425 renders MetatraderDeal correctly with profit marked required, while 3.1 claimed all three optional. Settled against T-0104/attack-01.md's full quote of the model, where only profit carries Yes in the required column. NOT COSMETIC: 3.1's third outcome, the fields are absent, is correct for swap and commission and IMPOSSIBLE for profit, so an adapter built to it carries a path that can never execute while the real absent-is-not-zero problem sits on the two fields the same sentence lumps in — B291 measured those optional in 6 of 22. And it narrows what 3.1 settles: the question is only ever gross-versus-net, never whether the number is there. FOUND BY EXECUTE reading the three MT5 documents as a T-0106 prerequisite and checking them against the primary source instead of building from them, and it did NOT edit either file — correcting another seat's file from your own is how a correction becomes something they never made. The contradiction had stood since both were written, on the item the checklist itself calls the single most consequential unknown on the list.)
 
 ---
 
@@ -20842,3 +20842,51 @@ is empty, or log at `WARNING` — **an adapter that cannot be imported is exactl
 subject**, contrary to the comment.
 
 Related: **B296**, **B318**, **B297**, **B327**.
+
+---
+
+### B331 — `MT5_FIRST_CONNECTION.md` §3.1 said **all three deal fields are optional**. `profit` is REQUIRED, and my other MT5 document said so correctly
+
+**Two documents I wrote disagreed about the primary source, and the checklist — the one an operator
+follows with a live account — was the wrong one.**
+
+```
+MT5_READINESS.md:425          profit  number  REQUIRED        <- correct
+MT5_FIRST_CONNECTION.md §3.1  "all three are optional on a deal"   <- WRONG
+```
+
+**Settled against the primary source rather than by preferring one of mine.** MetaApi's
+`MetatraderDeal`, quoted in full at `agents/tasks/T-0104/attack-01.md`:
+
+```
+commission   number         "deal commission"
+swap         number         "deal swap"
+profit       number   Yes   "deal profit"      <- the required column
+```
+
+## WHY IT IS NOT COSMETIC — **it invented a branch that cannot occur and hid the one that can**
+
+§3.1's third outcome read *"the fields are absent — absent is not zero, and nothing downstream
+currently distinguishes them."*
+
+> **That is correct for `swap` and `commission` and IMPOSSIBLE for `profit`.** An adapter built to
+> the instruction carries an absent-profit path that can never execute, **while the real
+> absent-is-not-zero problem sits on the two fields the same sentence lumps in with it** — and
+> `B291` measured those two as optional in 6 of 22 cases.
+
+**And it changes what §3.1 settles.** The question is **only ever whether `profit` is gross or
+net** — never whether the number is there. The corrected version says so, and the three-branch
+table is kept with its third branch re-scoped.
+
+## HOW IT WAS FOUND, which is the part that generalises
+
+**Execute read the three MT5 documents as a prerequisite before building `T-0106`, and checked them
+against the primary source instead of building from them.** It found the contradiction, resolved it
+by opening `T-0104`'s quote, and **did not edit either file** — *"they are yours, and correcting
+your file from my seat is how a correction becomes something you never made."*
+
+**The contradiction had existed since both documents were written**, and every reader until now had
+read one or the other, never both against the source. **Two of my own documents, disagreeing, on
+the item the checklist itself calls "the single most consequential unknown on the list."**
+
+Related: **B291**, **B288**, **B322**, **B314**.

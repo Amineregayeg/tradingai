@@ -152,8 +152,21 @@ mean "not reported", never zero.**
 
 ### 3.1 ⚠ Does a closed deal's `profit` include `swap` and `commission`? `B288` `B291`
 
-**Question:** **three-way, and no branch is documented.** The docs say only *"deal profit"*, *"deal
-swap"*, *"deal commission"* — and all three are **optional on a deal.**
+**Question:** **is `profit` gross or net?** The docs say only *"deal profit"*, *"deal swap"*, *"deal
+commission"* and never say whether the first contains the other two.
+
+**CORRECTED 2026-09-01 (`B331`), and the correction narrows the question.** This read *"and all
+three are optional on a deal"* — **wrong, and it disagreed with `MT5_READINESS.md:425` which was
+right.** MetaApi's `MetatraderDeal`, quoted in full in `agents/tasks/T-0104/attack-01.md`:
+
+```
+commission   number         "deal commission"
+swap         number         "deal swap"
+profit       number   Yes   "deal profit"      <- REQUIRED
+```
+
+**So `profit` is REQUIRED and only `swap` and `commission` are optional.** The question here is
+**only ever gross-versus-net, never whether the number is there.**
 
 **Call:** close one position, `get_deals_by_position(position_id=...)`, and **compare `profit`
 against the position's realised total.**
@@ -162,7 +175,7 @@ against the position's realised total.**
 |---|---|
 | `profit` **includes** costs | `realized_r`'s numerator gains components its denominator lacks — **every R reads worse than the geometry** |
 | `profit` **excludes** costs | `realized_r` stays geometry-comparable and **silently ignores real costs — R looks fine while the account pays** |
-| the fields are **absent** | absent is not zero, and nothing downstream currently distinguishes them |
+| **`swap`/`commission`** are **absent** | absent is not zero, and nothing downstream distinguishes them — **`B291` measured 6 of 22 optional.** This branch is about those two fields ONLY: **`profit` cannot be absent** |
 
 **Unblocks:** whether `realized_r` — **the number every trade result is judged by** — still means what
 it meant on the paper broker. **This is the single most consequential unknown on the list.**
