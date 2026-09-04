@@ -123,6 +123,29 @@ not the status** — it carries `recommendedRetryTime`.
 **Implication:** the adapter's backoff either uses the server's recommendation or invents one.
 **Only the payload tells us which is possible.**
 
+> ### ⚠ AMENDED 2026-09-04 — **also capture `type(exc).__name__`** `B334`
+>
+> **This item was cited by an arm it could not settle, and Review measured that.** The adapter
+> deliberately does not import the SDK, so it recognises a rate limit by **matching the exception's
+> CLASS NAME as a string**. The arm asserting that says it is *"settled by checklist item 1.5,
+> which provokes a real 429 and captures the payload"* — and **this item asked for the payload and
+> never asked for the name.** The one datum the dispatch depends on was not on the list, so running
+> the checklist would have left that arm exactly as unsettled as it is today, **while the citation
+> made it look settled.**
+>
+> **So: print `type(exc).__name__` and `type(exc).__mro__` alongside the payload.** It costs
+> nothing extra — the exception is already in hand at the moment the payload is captured.
+>
+> **THE GENERAL BOUND THIS EXPOSES, and it applies to every `ASSUMES:` marker in the adapter's
+> test file:** an arm names the checklist item that would falsify it, and **one arm checks that
+> those references RESOLVE. Nothing checks that the item on the other end can actually falsify the
+> assumption.** A marker pointing at an inadequate item is worse than a marker pointing at nothing,
+> because it reads as discharged.
+>
+> **Item 1.1 is the counter-example and shows the machinery works when the item is right:** it
+> prints `terminalState.connected`, so running it *would* expose the attribute-spelling question
+> that `B335` is about. **The instrument is real; this is its bound.**
+
 ---
 
 ## STAGE 2 — **NEEDS AN OPEN POSITION** *(one trade required)*

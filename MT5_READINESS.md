@@ -212,6 +212,29 @@ tree can express**, and it is the one that matters at 3am.
 property as its specification; `B303`'s CFT defect is fixed under it; and an arm asserts it over
 every implementation.
 
+> ### An OPTIONAL refinement, offered rather than asked — and nothing waits on it `B337`
+>
+> **Your three states are being used as ruled and this is not a blocker.** Recorded here because it
+> is your vocabulary and you should know the one place it strains.
+>
+> Review found that the position whose close **was actually sent** — and whose loop then died before
+> the answer came back — was being reported `NOT ATTEMPTED`, with the reason *"the close loop never
+> reached this position."* **That sentence is affirmatively false about our own action**, and it is
+> the row the covering test did not look at.
+>
+> **I ruled the fix without you and here is the reasoning, so you can overrule it.** You ruled
+> *"FAILED **WITH A REASON**"* — not *"FAILED"*. The reason clause is part of the state, and it is
+> where *outcome unknown* belongs; that is what makes three states sufficient. So the in-flight row
+> becomes **FAILED, reason: the close was sent and the outcome was never observed** — which uses
+> your vocabulary rather than widening it. **The conservative action was the fix, not the wait:**
+> waiting for a ruling would have kept a false sentence in front of an operator at 3am.
+>
+> **What is genuinely yours: whether you want a FOURTH state** — *attempted, outcome unknown* — as
+> its own disposition rather than living in a FAILED row's reason. It would let an operator sort
+> *"we tried and it failed"* from *"we tried and we do not know"* at a glance. **It changes the
+> state set, which is why it is yours, and it is an improvement rather than a gap.** Say so
+> whenever; the fix above holds either way.
+
 ---
 
 #### The question as it was put, kept for the reasoning
