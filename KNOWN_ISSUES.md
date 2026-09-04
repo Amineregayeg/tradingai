@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-04 (B333 — MT5_READINESS.md TELLS MALEK THE ADAPTER IS THE LAST PIECE AND TWO UNBUILT PIECES STAND BEHIND IT. Measured on the day he asked to start setting MT5 up, which is the only reason it was measured: metaapi_cloud_sdk is absent from requirements AND from the venv, and mt5.py deliberately does not import it — the injected client is right, B267 says an unimportable adapter module is skipped IN SILENCE by the contract arm — so 130 tests pass and the dependency's absence is unobservable by construction. THE GENERAL FORM: the design choice that makes a component testable before its dependency exists is the choice that makes the dependency's absence invisible, so a green suite is not readiness. And _make_adapter at manager.py:25 branches only on _CFT_ALIASES and ends raise ValueError Unsupported broker, so a broker_connections row naming mt5 RAISES and the 671-line adapter is reachable from its own test file and nowhere else — not a missing line either, since the factory passes email/password/base_url while the adapter takes an injected client. WHY NOBODY SAW IT: seven MT5 tasks, every one about the adapter's INSIDE, none had to name its callers — B305's shape one layer out, where a run of tasks sharing a frame cannot find what the frame excludes. Filed as T-0133 and T-0134. Includes a DELIBERATELY SEPARATE second instance in the same document with a different cause — the summary still says THREE things wait on Malek while the body marks two of them RULED, a count left behind by 84fe547 which updated the body — and records that is_simulation does NOT gate connecting, because mt5.py:147 returns False explicitly, so his ruling gates TRADING and a reader would have waited in the wrong order.)
+Last updated: 2026-09-04 (B339 — A SECOND AXIS ON WHICH "THE SUITE IS GREEN" DEPENDS ON HOW IT WAS RUN. test_t0011_census.py::test_no_rule_id_is_ever_fabricated FAILS from the repo root and PASSES from backend/, because line 352 resolves Path('app/services/telemetry/census.py') RELATIVE TO THE WORKING DIRECTORY. Measured both directions with nothing else running. NOT B298 and I claimed it was, in the same message telling Execute that 'probably the known one' is not a result: B298 is a different test, cause (collecting the tree imports the broker package) and axis (collection scope, not cwd), and ITS REMEDY — one whole-tree --collect-only — DOES NOT DETECT THIS ONE, since a collection from the wrong cwd never evaluates the path. Recorded as a second instance of B298's class and deliberately NOT merged into it, because the unification is the tidier claim and the mechanisms share no code, no test and no fix. THE NEGATIVE RESULT IS THE USEFUL HALF: the dangerous version is a guard that GLOBS a cwd-relative path, finds zero files from the wrong directory and PASSES over nothing — checked, and all four instances in the tree read NAMED files and fail loudly, so the failure direction is safe everywhere. Stated positively because 'no vacuous guards found' and 'nobody looked' are otherwise the same sentence. Not blocking T-0106, whose rootdir is backend/.)
 
 ---
 
@@ -21112,6 +21112,80 @@ without the property reading it.
 for a decision before creating an account, which is the wrong order.
 
 Related: **B305**, **B267**, **B309**, **B324**.
+
+---
+
+### B339. A SECOND AXIS ON WHICH "THE SUITE IS GREEN" DEPENDS ON HOW IT WAS RUN — one census guard resolves a CWD-RELATIVE path, so the repo root is red and `backend/` is green
+
+**Found 2026-09-04 while measuring T-0106's suite, and misattributed by me before it was measured.**
+I told Execute the failure was *"probably the known one"*, meaning `B298`, in the same message that
+told it *"probably the known one" is not a result.* It is not `B298`.
+
+## THE MEASUREMENT, BOTH DIRECTIONS, NOTHING ELSE RUNNING
+
+```
+cwd = repo root   pytest backend/tests/unit                     1 failed, 1901 passed, 1 xfailed
+    FAILED backend/tests/unit/test_t0011_census.py::test_no_rule_id_is_ever_fabricated
+    FileNotFoundError: [Errno 2] No such file or directory: 'app/services/telemetry/census.py'
+
+cwd = backend/    pytest tests/unit/...::test_no_rule_id_is_ever_fabricated    1 passed in 0.99s
+```
+
+`test_t0011_census.py:352`:
+
+```python
+for path in (Path("app/services/telemetry/census.py"),
+             Path("app/services/live/crypto_loop.py")):
+```
+
+**The path is relative to the working directory, not to the repository.**
+
+## WHY IT IS NOT `B298`, WHICH MATTERS BECAUSE I CLAIMED IT WAS
+
+| | `B298` | this |
+|---|---|---|
+| test | `test_recursive_discovery_covers_every_concrete_adapter` | `test_no_rule_id_is_ever_fabricated` |
+| cause | collecting the tree imports the broker package | a cwd-relative `Path` |
+| axis | **collection scope** | **invocation directory** |
+
+**Same conclusion, unrelated mechanisms.** `B298` says the green number depends on the chunk
+boundaries; this says it also depends on the directory you stood in. **Both are properties of HOW
+the suite was run, reported as properties of the CODE** — and `B298`'s own words are that *"a run
+split for one reason acquired a second property nobody chose."* **This is a third property, and
+nothing announced it either.**
+
+> **Stated as a second instance of that class and NOT merged into it.** The unification is real and
+> it is also the tidier claim, which is the one to recheck: the mechanisms share no code, no test
+> and no fix. `B298`'s remedy — one extra whole-tree `--collect-only` — **does not detect this one**,
+> because a collection from the wrong cwd does not evaluate the path either.
+
+## THE NEGATIVE RESULT IS THE USEFUL HALF
+
+**The dangerous version of this defect is a guard that GLOBS a cwd-relative path**: from the wrong
+directory it finds zero files, asserts over nothing, and **passes**. That is a guard that certifies
+nothing while reporting green, which is the failure this register keeps finding.
+
+**Checked, and it does not exist here.** All four cwd-relative path guards in the tree read named
+files rather than globbing:
+
+```
+test_t0011_census.py:352-353          Path(...).read_text  -> FileNotFoundError, loud
+test_shadow_stage_a.py:192            Path(...).read_text  -> loud
+test_conformance_gate_037.py:50-51    assert path.exists(), f"decision path moved: {path}"  -> loud
+```
+
+**The failure direction is safe in every instance.** The defect is noise from one cwd, not a silent
+pass from the other — **and that is worth stating positively, because "no vacuous guards found" and
+"nobody looked" are otherwise the same sentence.**
+
+## NOT BLOCKING T-0106
+
+The failing test is unrelated to the MT5 adapter and the change does not touch it. **Execute's
+rootdir is `backend/` and its result stands on its own** — the entry exists so that a future reader
+of *"1 failed"* in `runs/suite/full_20260904T1945Z.log` finds the cause rather than re-deriving it,
+and so that the next seat who reports a suite figure says which directory produced it.
+
+Related: **B298**, **B211**, **B267**, **B333**.
 
 ---
 
