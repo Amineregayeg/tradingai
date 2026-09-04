@@ -21185,6 +21185,29 @@ rootdir is `backend/` and its result stands on its own** — the entry exists so
 of *"1 failed"* in `runs/suite/full_20260904T1945Z.log` finds the cause rather than re-deriving it,
 and so that the next seat who reports a suite figure says which directory produced it.
 
+## AMENDMENT — WHY THE WRONG STEER WAS A PLAUSIBLE ONE, which is Execute's point and better than mine
+
+**The entry above treats my misattribution as carelessness. Execute named the structural reason,
+and it is the more useful half:**
+
+> *"the register indexes these by their symptom and there are now two unrelated causes wearing it.
+> A third will look like both."*
+
+**`B298`'s headline and this one are the same sentence** — *the suite's greenness depends on how it
+was invoked.* That sentence is what a seat greps for, what a seat remembers, and what a seat
+matches a new observation against. **So the register's own index pointed me at `B298`**, and it will
+point the next seat there too, with a cause that is neither of these.
+
+**This is not an argument for merging them.** It is the reason they must stay separate *and* be
+findable from the shared symptom: a reader arriving with a third invocation-dependent failure needs
+to see that the symptom has two known causes and that neither is presumptive.
+
+**And Execute withdrew its own half of the comparison, unprompted.** It had offered *"dots at 41%
+in my run versus `F` at 41% in yours"*; `-q` progress output block-buffers into a redirected file,
+so the two percentages were flushed at different boundaries and **were never comparable
+observations.** The rootdir measurement is the whole answer; the percentage agreement was an
+artefact of two log files, not evidence.
+
 Related: **B298**, **B211**, **B267**, **B333**.
 
 ---
