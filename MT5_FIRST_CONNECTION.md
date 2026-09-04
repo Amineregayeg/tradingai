@@ -137,10 +137,24 @@ not the status** — it carries `recommendedRetryTime`.
 > nothing extra — the exception is already in hand at the moment the payload is captured.
 >
 > **THE GENERAL BOUND THIS EXPOSES, and it applies to every `ASSUMES:` marker in the adapter's
-> test file:** an arm names the checklist item that would falsify it, and **one arm checks that
-> those references RESOLVE. Nothing checks that the item on the other end can actually falsify the
-> assumption.** A marker pointing at an inadequate item is worse than a marker pointing at nothing,
-> because it reads as discharged.
+> test file:** an arm names the checklist item that would falsify it, and **nothing checks that the
+> item on the other end can actually falsify the assumption.** A marker pointing at an inadequate
+> item is worse than a marker pointing at nothing, because it reads as discharged.
+>
+> **CORRECTED 2026-09-04, same day — I overstated the meta-arm in the sentence above `B344`.** This
+> paragraph first said *"one arm checks that those references RESOLVE."* **It does not.** Measured
+> at `test_t0106_mt5_adapter.py:200`:
+>
+> ```python
+> names_item = "checklist" in marker.lower() or "nothing about the venue" in marker.lower()
+> ```
+>
+> **It checks that the WORD "checklist" occurs in the marker text.** A marker citing
+> *"checklist item 99.9"* passes. A marker saying *"settled by the checklist"* and naming no item at
+> all passes. **So the join is weaker than the bound I was describing** — I wrote that an inadequate
+> item reads as discharged while describing an inadequate arm as adequate, in the same breath, from
+> reading it rather than running it. Review found three markers whose cited items cannot falsify
+> them (`B343`), which is what an audit finds when the guard checks a word.
 >
 > **Item 1.1 is the counter-example and shows the machinery works when the item is right:** it
 > prints `terminalState.connected`, so running it *would* expose the attribute-spelling question
