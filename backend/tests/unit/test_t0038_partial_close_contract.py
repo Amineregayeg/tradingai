@@ -120,6 +120,12 @@ def test_there_are_adapters_to_check():
         # because Cloudflare fingerprints the TLS handshake), inherits `close_position`
         # unchanged, and is the class `manager.py:70` constructs when a bridge is configured.
         "CFTBridgeAdapter",
+        # `T-0106`. Named deliberately, which is what this pin is for — the arm FIRED AS
+        # INTENDED when the module landed rather than being broken and repaired. Its
+        # `close_position` refuses in this phase and READS `lot_size` to say which request it
+        # refused: a caller asking for 30% and a caller asking for everything must not get the
+        # identical message, which is the ambiguity this contract exists to prevent.
+        "MetaTrader5Adapter",
     }, (
         f"the production adapter set changed: {sorted(names)}. A new adapter must be added here "
         "deliberately — joining the guarded set silently is how a member goes unwatched."

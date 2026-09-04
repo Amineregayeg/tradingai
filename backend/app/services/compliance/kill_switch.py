@@ -68,20 +68,48 @@ class KillSwitch:
             logger.error("Kill switch: error calling close_all_positions", error=str(exc))
             close_results = []
 
+        # ------------------------------------------------------------------
+        # THREE STATES, NOT TWO — `B330`, and Malek ruled the property on 2026-08-31:
+        #
+        #   Every position open when the switch was pulled must be reported as CLOSED,
+        #   FAILED WITH A REASON, or NOT ATTEMPTED.
+        #
+        # THIS COUNT USED TO DEFEAT THAT RULING AT THE LAST STEP. `positions_closed` was
+        # `status not in ("error", "failed")`, so a row saying NOBODY REACHED THIS POSITION was
+        # counted as a position successfully CLOSED — on the control whose entire purpose is to
+        # leave nothing open. **That is worse than an error, because an error prompts a look and
+        # a closed-count does not.**
+        #
+        # A row without a `disposition` is one of the older shapes that cannot express the third
+        # state; it keeps exactly its previous meaning, so this widens the vocabulary without
+        # reinterpreting any adapter that has not adopted it.
+        not_attempted_rows = [r for r in close_results if r.get("disposition") == "NOT_ATTEMPTED"]
+        accounted = [r for r in close_results if r.get("disposition") != "NOT_ATTEMPTED"]
+
         positions_closed = sum(
-            1 for r in close_results if r.get("status") not in ("error", "failed")
+            1 for r in accounted if r.get("status") not in ("error", "failed")
         )
         positions_failed = sum(
-            1 for r in close_results if r.get("status") in ("error", "failed")
+            1 for r in accounted if r.get("status") in ("error", "failed")
+        )
+        positions_not_attempted = len(not_attempted_rows)
+
+        # NAMED IN THE OPERATOR'S MESSAGE, not only in the payload. The number a human reads at
+        # 3am is this sentence, and a third state that appears only in `details` is a third state
+        # nobody sees.
+        not_attempted_clause = (
+            f", {positions_not_attempted} NOT ATTEMPTED (still open)"
+            if positions_not_attempted else ""
         )
 
         result = {
             "positions_closed": positions_closed,
             "positions_failed_to_close": positions_failed,
+            "positions_not_attempted": positions_not_attempted,
             "details": close_results,
             "message": (
                 f"Kill switch triggered: {positions_closed} position(s) closed, "
-                f"{positions_failed} failed. Reason: {effective_reason}"
+                f"{positions_failed} failed{not_attempted_clause}. Reason: {effective_reason}"
             ),
         }
 

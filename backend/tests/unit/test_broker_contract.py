@@ -32,6 +32,7 @@ from app.services.broker.cft_sim import PropFirmRules, SimPropFirmBroker
 from app.services.broker.cft_bridge_adapter import CFTBridgeAdapter
 from app.services.broker.cryptofundtrader import CryptoFundTraderAdapter
 from app.services.broker.live_loop_proxy import LiveLoopBrokerProxy
+from app.services.broker.mt5 import MetaTrader5Adapter
 from app.services.broker.oanda import OANDAAdapter
 from app.services.broker.paper import PaperBroker
 
@@ -128,6 +129,19 @@ PROXY_ADAPTERS = [
 # joins no list fails there by name. **A pin over a derived population guards ADDITIONS to it
 # and never OMISSIONS from it** — the discovery arm is the one that guards omissions, and it
 # only does so now that its population no longer depends on what else was imported.
+# `T-0106`. MT5 is a LIVE venue: `is_simulation` is `False` and it is real-money capable in
+# principle, so this is the honest category.
+#
+# ⚠ AND IT IS A SECOND INSTANCE OF `B327`, RECORDED RATHER THAN LEFT TO BE FOUND.
+# `test_live_adapter_write_methods_need_explicit_credentials` asserts a bare `TypeError` on
+# `cls()`. `MetaTrader5Adapter()` raises for want of `client` — **which is not a credential**,
+# exactly as `live_loop_proxy` raised for want of `loop`. The arm will be green for this adapter
+# for a reason unrelated to credentials, and `B327`'s fix (derive the required positional
+# parameters and assert each is in a declared credential set) must cover it.
+LIVE_ADAPTERS = LIVE_ADAPTERS + [
+    ("mt5", MetaTrader5Adapter, lambda: MetaTrader5Adapter(client=object())),
+]
+
 ALL_ADAPTERS = SIM_ADAPTERS + LIVE_ADAPTERS + PROXY_ADAPTERS
 
 # EVERY ADAPTER THAT IS A VENUE. Used by the arms below that are about venue behaviour, where

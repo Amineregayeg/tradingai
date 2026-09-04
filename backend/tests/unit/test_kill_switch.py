@@ -71,6 +71,68 @@ async def test_trigger_closes_all_positions():
 
 
 @pytest.mark.asyncio
+async def test_a_NOT_ATTEMPTED_position_is_counted_as_NEITHER_closed_NOR_failed():
+    """`B330`. Malek ruled the kill switch as a PROPERTY on 2026-08-31:
+
+    > Every position open when the switch was pulled must be reported as CLOSED, FAILED WITH A
+    > REASON, or NOT ATTEMPTED.
+
+    **This counter used to defeat that ruling at the last step.** `positions_closed` was
+    `status not in ("error", "failed")`, so a row saying NOBODY REACHED THIS POSITION was counted
+    as a position successfully closed — on the control whose whole purpose is to leave nothing
+    open. **Worse than an error, because an error prompts a look and a closed-count does not.**
+    """
+    db = _db()
+    close_results = [
+        {"position_id": "p1", "disposition": "CLOSED", "status": "closed"},
+        {"position_id": "p2", "disposition": "FAILED", "status": "failed",
+         "reason": "TimeoutError"},
+        {"position_id": "p3", "disposition": "NOT_ATTEMPTED", "status": "failed",
+         "reason": "the close loop never reached this position"},
+        {"position_id": "p4", "disposition": "NOT_ATTEMPTED", "status": "failed",
+         "reason": "the close loop never reached this position"},
+    ]
+    with patch("app.services.broker.manager.broker_manager.close_all_positions",
+               new=AsyncMock(return_value=close_results)):
+        result = await kill_switch.trigger(db=db, user_id="system", reason="Test")
+
+    assert result["positions_closed"] == 1, (
+        f"an unattempted position was counted as closed: {result['positions_closed']}"
+    )
+    assert result["positions_failed_to_close"] == 1
+    assert result["positions_not_attempted"] == 2
+    assert "NOT ATTEMPTED" in result["message"], (
+        "the third state must reach the sentence a human reads at 3am, not only the payload — "
+        f"got {result['message']!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_rows_WITHOUT_a_disposition_keep_their_old_meaning():
+    """MUST-MISS. The three older shapes cannot express the third state, so widening the
+    vocabulary must not reinterpret any adapter that has not adopted it.
+
+    Without this, a counter that treated every unlabelled row as unattempted would satisfy the
+    arm above and silently rewrite what every existing adapter reports.
+    """
+    db = _db()
+    close_results = [
+        {"pair": "EUR/USD", "status": "closed"},
+        {"pair": "USD/JPY", "status": "error", "error": "timeout"},
+    ]
+    with patch("app.services.broker.manager.broker_manager.close_all_positions",
+               new=AsyncMock(return_value=close_results)):
+        result = await kill_switch.trigger(db=db, user_id="system", reason="Test")
+
+    assert result["positions_closed"] == 1
+    assert result["positions_failed_to_close"] == 1
+    assert result["positions_not_attempted"] == 0
+    assert "NOT ATTEMPTED" not in result["message"], (
+        "a run with nothing unattempted must not mention the state at all"
+    )
+
+
+@pytest.mark.asyncio
 async def test_trigger_writes_audit_log():
     db = _db()
     with patch("app.services.broker.manager.broker_manager.close_all_positions",

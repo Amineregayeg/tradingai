@@ -125,6 +125,11 @@ def test_there_are_producers_to_check():
         "SimPropFirmBroker",
         "CryptoFundTraderAdapter",
         "OANDAAdapter",
+        # `T-0106`. THE FIFTH PRODUCER, NAMED DELIBERATELY — which is what this pin exists for.
+        # It fired when the MT5 module landed, in the FULL suite rather than in `T-0106`'s own
+        # baseline command, which named only `test_broker_contract` and
+        # `test_t0038_partial_close_contract`. A new adapter touches three populations, not two.
+        "MetaTrader5Adapter",
     }, (
         f"the set of Position producers changed: {sorted(c.__name__ for c in _PRODUCERS)}. "
         f"Discovered adapters: {sorted(c.__name__ for c in _all_adapters())}"
