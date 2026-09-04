@@ -39,11 +39,37 @@ needs no working account, and it is free.**
 
 ### 1.1 ⚠ Connection state — **this gates everything below it** `B292`
 
-**Question:** can `connected` be `True` while `connected_to_broker` is `False`, and what does
-`get_positions()` return in that state?
+> ### ⚠ REWRITTEN 2026-09-04 — **THE MEMBERS THIS ITEM TOLD YOU TO PRINT DO NOT EXIST** `B341`
+>
+> **Anyone following the previous wording would have got an `AttributeError` and no answer.** The
+> SDK is now installed and introspected, and there is no `terminalState` on the object our adapter
+> reads: `get_rpc_connection()` returns nine of the ten members the adapter expects and **no
+> connection state at all.**
+>
+> **The datum is on a different object, and the vendor's version is better than the one this item
+> invented.** `MetatraderAccount.connection_status` is a **three-valued enum**:
+>
+> ```
+> CONNECTED  |  DISCONNECTED  |  DISCONNECTED_FROM_BROKER
+> ```
+>
+> **`DISCONNECTED_FROM_BROKER` is this item's whole question, named by MetaApi.** *Connected to the
+> cloud but not to the broker* is not a state we have to infer from two booleans — it is one of
+> three documented values. The two-boolean pair was ours, and `B335` is what believing in it cost.
 
-**Call:** `connect()`, then `wait_synchronized()`, printing `terminalState.connected` and
-`terminalState.connected_to_broker` at each step.
+**Question:** what does `connection_status` report at each step, and what does `get_positions()`
+return while it reads `DISCONNECTED_FROM_BROKER`?
+
+**Call:** `connect()`, then `wait_synchronized()`, printing `account.connection_status` at each
+step.
+
+**AND SETTLE THIS WHILE YOU ARE HERE, because it is new and unresolved:** we call `connect()` then
+`wait_synchronized()`. The SDK also documents **`wait_connected()`**, described as waiting until the
+API server has connected to the terminal **AND the terminal has connected to the broker**. **Whether
+`wait_synchronized()` alone implies a broker link is unsettled** — if it does not, then every
+adapter method can run against a synchronised connection with no broker behind it, which is the
+state this item exists to catch. Print `connection_status` after each of the three calls and the
+answer falls out.
 
 **Why it is first:** **an empty position list from a broker we cannot see is `unavailable`, not
 `flat`.** Every reading below is uninterpretable until this distinction is confirmed — **and the
@@ -119,6 +145,11 @@ Nothing says what our calls cost.
 
 **Call:** poll at our real cadence and watch for `TooManyRequests` / 429; **capture the full payload,
 not the status** — it carries `recommendedRetryTime`.
+
+**AND CAPTURE ITS TYPE, not just its presence `B342`.** The adapter's translator does `int()` on
+that field, and `recommendedRetryTime` is an **absolute date** rather than a number of seconds — so
+a real 429 raises `ValueError` **from inside the rate-limit handler**, which is the one place a
+retry must not fail. Record the literal value and its format.
 
 **Implication:** the adapter's backoff either uses the server's recommendation or invents one.
 **Only the payload tells us which is possible.**
