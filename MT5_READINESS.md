@@ -11,12 +11,25 @@
 **Updated 2026-08-30.** For the phase after this one: linking an MT5 demo account and running the
 strategy against it.
 
-**Short version: THREE things wait on you. Everything else is either done or in progress.**
-
-**The third is easy to miss and this document previously buried it** — the kill-switch behaviour
-below. It is named in the body as a decision only you can make, and it was absent from this
-summary. **A reader who acted on the short version would settle two and ship the third as a
-default — the one outcome this document says nobody should choose.**
+> ## CORRECTED 2026-09-04, the day you asked to start setting MT5 up — `B333`
+>
+> **This summary said THREE things wait on you, and had said it since two of the three were
+> RULED in the body of this same document on 2026-08-31.** `84fe547` recorded the rulings and left
+> the count. **TWO things wait on you, and only one of them blocks anything today:**
+>
+> | | what | blocks |
+> |---|---|---|
+> | **1** | **A MetaApi account and token** — `app.metaapi.cloud/token` | **everything.** Nothing can reach MT5 without it |
+> | **2** | **An MT5 broker demo account whose demo lists BTC/ETH CFDs** | the first connection. See the constraint in item 0 |
+>
+> **And the `is_simulation` decision does NOT gate connecting** — the document listed it as
+> though it did. `mt5.py:147` returns `False` explicitly and every write refuses, so **your ruling
+> gates TRADING, not CONNECTING.** A reader of the old summary would have waited for a decision
+> before creating an account, which is the wrong order.
+>
+> **What the summary did not say at all: two unbuilt pieces stand between the finished adapter and
+> a connection**, and nothing tracked either until `T-0133` and `T-0134` were opened on 2026-09-04.
+> See *"The adapter is not the last piece"* below. **Neither waits on you.**
 
 ---
 
@@ -55,8 +68,12 @@ account exists.
 
 **You ruled this. Everything below in this item is kept as the reasoning behind the question, not
 as an open question.** Under this answer the existing loop, the Binance feed and the candle history
-drive MT5 unchanged, **what changes is one adapter**, and every queued MT5 task is correctly scoped
-already.
+drive MT5 unchanged and every queued MT5 task is correctly scoped already.
+
+**One phrase here was wrong and is corrected rather than deleted (`B333`):** this item said
+*"what changes is one adapter"*. **The adapter is written and green and nothing can connect** —
+the MetaApi SDK is in no requirements file and `_make_adapter` raises for `mt5`. What changes is an
+adapter, a pinned dependency, and a factory branch. The ruling itself is unaffected.
 
 **It stays a CONSTRAINT after being closed as a question:** crypto CFDs, **not** whatever the broker
 lists. An MT5 account offering forex does not widen it without a new decision.
@@ -243,6 +260,69 @@ family stays provisional until it runs.
 | **T-0103** | Its refusal vocabulary, and publishing what the tests do *not* cover | in progress |
 | **T-0105** | `Position` schema for MT5 — three findings in one change, no migration | queued |
 | **T-0106** | **The adapter itself — the eight members that map cleanly, against a mock** | queued |
+
+## The adapter is not the last piece — two things stand behind it `B333`
+
+**Measured 2026-09-04, and the only reason it was measured is that you asked.** `T-0106` is
+written: 671 lines, 130 tests green. **Nothing in the application can connect with it.**
+
+### 1. The MetaApi SDK is installed nowhere — and the suite cannot say so `T-0133`
+
+```
+grep -rn metaapi backend/requirements*.txt backend/pyproject.toml   ->  no hits
+python -c "import metaapi_cloud_sdk"   ->  ModuleNotFoundError
+```
+
+**`mt5.py` deliberately does not import it.** The client is injected, and that is correct: `B267`
+measured that an adapter module which cannot be imported is **skipped in silence** by the contract
+arm that walks the broker package, so an SDK import at module scope would turn a missing dependency
+from a loud failure into an invisible gap in the test suite.
+
+> **The design choice that lets an adapter be written before its venue exists is the same choice
+> that makes its missing dependency unobservable.** *"The adapter is done and green"* and
+> *"nothing can connect"* are both true, and the suite reports only the first. **A green suite here
+> is not readiness.**
+
+**And the dependency has a price already measured but never confirmed against a real install:** 19
+packages, including both `aiohttp` and `requests` on top of our `httpx` — **three HTTP stacks in
+one image** — plus `python-socketio 4.6.1`, a pinned old major. Those figures come from a
+`--dry-run`, which proves only that pip can compute a set. `T-0133` installs it for real and says
+which of the three numbers was wrong.
+
+### 2. Nothing can construct the adapter `T-0134`
+
+`manager.py:25`, the only construction path:
+
+```python
+key = broker.lower()
+if key in _CFT_ALIASES:
+    ...
+    return CryptoFundTraderAdapter(**common)
+raise ValueError(f"Unsupported broker: {broker!r}")
+```
+
+**A `broker_connections` row naming `mt5` raises.** The adapter is reachable from its own test file
+and nowhere else. **Not a missing line, either** — the factory passes `email / password /
+base_url / account_id / environment / observe_only`; the adapter takes an **injected client** and a
+keyword `account_id`. The shapes do not meet.
+
+**The part of this that must not be got wrong:** the CFT branch forces `observe_only=True` unless
+`ALLOW_LIVE_TRADING` is set server-side, and says on itself that this runs on **every** construction
+path. An `mt5` branch returning before that guard would be a new unguarded real-money path —
+**which is exactly why the OANDA branch was deleted from this function.**
+
+### Why seven MT5 tasks did not find this
+
+Every one of them was about the adapter's **inside** — which SDK runs here, demo versus live, the
+twelve members mapped, units to lots, the refusal vocabulary, the schema, the adapter. **None had
+to name its callers, so none noticed it has none.**
+
+**That is `B305`'s shape one layer out.** There, six MT5 tasks were all about the transport, none
+had to name an instrument, and none noticed nothing did. **A run of tasks that share a frame cannot
+find what the frame excludes**, and the frame is invisible because every task in the run respects
+it.
+
+---
 
 **`T-0106` is the one that decides what your first hour looks like.** It writes the adapter from
 documentation that has already been read and quoted, so that **connecting becomes a test rather than

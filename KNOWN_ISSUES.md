@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-01 (B332 — MY ACCEPTANCE ARM FOR THE KILL SWITCH SPECIFIED B303'S DEFECT AS THE REQUIRED BEHAVIOUR. T-0106/plan.md:354 said to raise a non-BrokerError on the second of four positions and assert one closed, one failed, TWO NOT ATTEMPTED — and 1+1+2=4 only occurs if the loop STOPS after position 2, which is exactly B303's defect relabelled. A loop that abandons positions 3 and 4 because position 2 timed out MANUFACTURES unattempted positions we could have closed, and it satisfies Malek's ruled property perfectly. THE GENERAL FORM: the property is satisfied by BOTH the fix and the defect, so it cannot decide between them, and the acceptance arm is where that gets decided silently by whoever writes it — a ruling that names an invariant does not name a behaviour. Execute's split is the correct specification: a PER-POSITION failure is FAILED WITH A REASON and the loop CONTINUES, while the LOOP ITSELF dying gives NOT ATTEMPTED rows, with asyncio.CancelledError as the instrument because it inherits from BaseException not Exception — verified — so no except Exception catches it. Caught because Execute worked out what behaviour my arm implied instead of building it. FILED ALONGSIDE B330 (execute), which found and fixed the other half: kill_switch.py:72 counted a NOT ATTEMPTED row as CLOSED, now excluded from both totals with positions_not_attempted reported as its own number AND named in the operator's message, because a third state that appears only in details is a third state nobody sees.)
+Last updated: 2026-09-04 (B333 — MT5_READINESS.md TELLS MALEK THE ADAPTER IS THE LAST PIECE AND TWO UNBUILT PIECES STAND BEHIND IT. Measured on the day he asked to start setting MT5 up, which is the only reason it was measured: metaapi_cloud_sdk is absent from requirements AND from the venv, and mt5.py deliberately does not import it — the injected client is right, B267 says an unimportable adapter module is skipped IN SILENCE by the contract arm — so 130 tests pass and the dependency's absence is unobservable by construction. THE GENERAL FORM: the design choice that makes a component testable before its dependency exists is the choice that makes the dependency's absence invisible, so a green suite is not readiness. And _make_adapter at manager.py:25 branches only on _CFT_ALIASES and ends raise ValueError Unsupported broker, so a broker_connections row naming mt5 RAISES and the 671-line adapter is reachable from its own test file and nowhere else — not a missing line either, since the factory passes email/password/base_url while the adapter takes an injected client. WHY NOBODY SAW IT: seven MT5 tasks, every one about the adapter's INSIDE, none had to name its callers — B305's shape one layer out, where a run of tasks sharing a frame cannot find what the frame excludes. Filed as T-0133 and T-0134. Includes a DELIBERATELY SEPARATE second instance in the same document with a different cause — the summary still says THREE things wait on Malek while the body marks two of them RULED, a count left behind by 84fe547 which updated the body — and records that is_simulation does NOT gate connecting, because mt5.py:147 returns False explicitly, so his ruling gates TRADING and a reader would have waited in the wrong order.)
 
 ---
 
@@ -21003,3 +21003,115 @@ which is the second time this week a plan of mine aimed a builder at the thing t
 reasoned about (`B326` was the first).
 
 Related: **B303**, **B326**, **B320**, **B215**.
+
+---
+
+### B333. MT5_READINESS TOLD MALEK THE ADAPTER IS THE LAST PIECE. MEASURED TODAY, TWO UNBUILT PIECES STAND BEHIND IT AND NEITHER WAS TRACKED
+
+**Filed 2026-09-04 by manager, on the day Malek asked to start setting up MT5** — which is the only
+reason it was measured. The document he would have read to answer that question is the one that is
+wrong.
+
+`MT5_READINESS.md`, item 0, on the crypto-CFD branch of his own ruling:
+
+> *"the existing loop and feed drive it unchanged, **the adapter really is the last piece**, and
+> everything queued below is correctly scoped"*
+
+And its table of in-progress work ends on `T-0106`, described as *"the one that decides what your
+first hour looks like"*.
+
+**T-0106 is written and green — 671 lines, 130 tests passing — and nothing can connect.** Two
+things stand between them, both measured today, neither of them tracked by any task until
+`T-0133` and `T-0134` were opened this afternoon.
+
+## ONE — THE SDK IS NOT INSTALLED ANYWHERE, AND THE SUITE CANNOT SAY SO
+
+```
+grep -rn metaapi backend/requirements*.txt backend/pyproject.toml   ->  no hits
+/home/docz/.venvs/tradingai/bin/python -c "import metaapi_cloud_sdk"
+    ->  ModuleNotFoundError: No module named 'metaapi_cloud_sdk'
+```
+
+**`mt5.py` deliberately does not import it.** The client is injected — the module's own docstring
+says so, and the reason is `B267`: an adapter module that cannot be imported is **skipped in
+silence** by the contract arm that walks the broker package, so an SDK import at module scope
+converts a missing dependency from a loud failure at construction into an invisible gap in the
+suite.
+
+**That decision is right and it is also why nobody noticed.** The injected client is what lets an
+adapter be written and tested before its venue exists — the entire premise of `T-0106`. It is the
+same property that makes *"the adapter is done and green"* and *"nothing can connect"*
+simultaneously true, **with the suite reporting only the first.**
+
+> **The general form: the design choice that makes a component testable before its dependency
+> exists is the choice that makes the dependency's absence unobservable.** Not a defect in the
+> choice. A defect in reading a green suite as readiness.
+
+## TWO — NOTHING IN THE APPLICATION CAN BUILD THE ADAPTER
+
+`manager.py:25`, `_make_adapter`, is the only construction path:
+
+```python
+key = broker.lower()
+if key in _CFT_ALIASES:
+    ...
+    return CryptoFundTraderAdapter(**common)
+raise ValueError(f"Unsupported broker: {broker!r}")
+```
+
+**A `broker_connections` row naming `mt5` raises.** The 671-line adapter is reachable from its own
+test file and from nowhere else. And it is not a missing line: the factory passes
+`email / password / base_url / account_id / environment / observe_only`, while
+`MetaTrader5Adapter.__init__` takes **an injected client** plus a keyword `account_id`. The shapes
+do not meet.
+
+**The docstring at `manager.py:31` states the current truth and will become the stale claim:**
+*"this app is crypto-only and OANDA was the only unguarded real-money path. Only CryptoFundTrader
+(crypto prop firm) is constructible here."*
+
+## WHY THE DOCUMENT SAID "LAST PIECE", WHICH IS THE PART WORTH KEEPING
+
+**Every MT5 task so far was about the TRANSPORT or the ADAPTER** — which SDK runs here (`T-0096`),
+demo versus live at the API level (`T-0099`), the twelve members mapped (`T-0100`), units to lots
+(`T-0097`), the refusal vocabulary (`T-0103`), the schema (`T-0105`), the adapter (`T-0106`).
+
+**Not one of them had to ask what CONSTRUCTS the adapter or what SHIPS its dependency, so not one
+of them noticed that nothing does.**
+
+**That is `B305`'s shape exactly, one layer out.** `B305`: six queued MT5 tasks, all about the
+transport, none had to name an instrument, so none noticed nothing did. Here: seven MT5 tasks, all
+about the adapter's INSIDE, none had to name its callers, so none noticed it has none. **A run of
+tasks that share a frame cannot find what the frame excludes** — and the frame is invisible
+precisely because every task in the run respects it.
+
+## A SECOND INSTANCE IN THE SAME DOCUMENT, AND IT IS A DIFFERENT MECHANISM
+
+**Marked as separate on purpose.** `MT5_READINESS.md`'s summary still reads *"THREE things wait on
+you"* and names the kill-switch behaviour as the third — while the body of the same document marks
+items 0 and 3 **`✅ RULED 2026-08-31`**. The count was not updated when the rulings were.
+
+`84fe547` — *"MT5_READINESS: both rulings recorded as answers, with the questions kept as their
+reasoning"* — did the body and left the count.
+
+**It would be tidier to call this one finding with the first, and it is not.** The first is a claim
+nobody ever checked because no task asked the question. This is a claim that was true when written
+and went stale in a commit that touched the same file. **Same document, same reader misled, two
+unrelated causes** — and the register-hook rule about `KNOWN_ISSUES.md:9` exists because a document
+carrying both a count and a body will have exactly this failure.
+
+## WHAT DOES *NOT* WAIT ON MALEK, WHICH THE DOCUMENT ALSO OBSCURES
+
+`is_simulation` (`T-0076`) is listed under *"What only you can supply"*. **It does not gate
+connecting.** `mt5.py:147` returns `False` explicitly, with a docstring arguing that *"leave it
+unwired" is not an available state* — the member is abstract, a defined member returns something,
+and **every value it can return IS the unruled mapping**, so it returns the refusing one. All built
+members are reads, `place_order` refuses, and `venue_account_type` carries the venue's answer
+without the property reading it.
+
+**So his ruling gates TRADING, not CONNECTING** — and a reader of the document would have waited
+for a decision before creating an account, which is the wrong order.
+
+Related: **B305**, **B267**, **B309**, **B324**.
+
+---
+
