@@ -137,7 +137,10 @@ class _RpcConnection:
         if error is not None:
             raise error
         self._owner.closed.append(position_id)
-        return {"positionId": position_id, "status": "closed"}
+        # `MetatraderTradeResponse` shape: `stringCode` is REQUIRED on the vendor's model, and the
+        # mock returning a response WITHOUT one is how `B367` stayed invisible.
+        return {"positionId": position_id, "numericCode": 10009,
+                "stringCode": self._owner.close_string_code}
 
 
 class MetaApiMock:
@@ -158,6 +161,7 @@ class MetaApiMock:
         connection_status: str | None = "CONNECTED",
         replica_statuses: list | None = None,
         synchronizing: bool = False,
+        close_string_code: str = "TRADE_RETCODE_DONE",
         deals_payload_override: Any = None,
         status_after_reload: str | None = None,
         connect_error: Exception | None = None,
@@ -184,6 +188,7 @@ class MetaApiMock:
         self.replicas = [
             SimpleNamespace(connection_status=st) for st in (replica_statuses or [])
         ]
+        self.close_string_code = close_string_code
         self.synchronizing = synchronizing
         #: For the arms that feed a shape the SDK does not declare, so the refusal can be probed.
         self.deals_payload_override = deals_payload_override
@@ -381,23 +386,26 @@ def test_a_balance_entry_is_SKIPPED_and_the_skip_is_COUNTED():
     **there was no deal-side item to cite** until 3.0 was written.
 
     A balance entry is a credit, a correction or a commission posting. **It is not a fill.**
-    Mapping it as a trade with zeroes puts a fabricated fill in the record; raising `KeyError`
-    makes a normal venue event look like a bug.
+    Mapping it as a trade with zeroes puts a fabricated fill in the record.
+
+    **`B365` REWROTE THIS ARM'S FIXTURE, AND THE OLD FIXTURE WAS THE FINDING.** It described
+    balance entries by OMITTING `volume` / `price` / `positionId`, because that is how the adapter
+    detected them — so the arm encoded the adapter's wrong reading and could never contradict it
+    (`B334`'s class). Deals now carry `type`, which is REQUIRED on the vendor's model and states
+    what the deal IS.
     """
     adapter, _ = _adapter(deals=[
-        {"id": "d1", "positionId": "p1", "symbol": "BTCUSD", "volume": 0.5, "price": 100.0,
-         "profit": 5.0, "time": "2026-08-31T10:00:00.000Z"},
-        {"id": "d2", "profit": -3.0, "time": "2026-08-31T11:00:00.000Z"},   # balance entry
-        {"id": "d3", "symbol": "BTCUSD", "volume": 0.5, "profit": 1.0},      # no price
-        {"id": "d4", "symbol": "BTCUSD", "volume": 0.5, "price": 90.0},      # no positionId
+        {"id": "d1", "type": "DEAL_TYPE_BUY", "positionId": "p1", "symbol": "BTCUSD",
+         "volume": 0.5, "price": 100.0, "profit": 5.0, "time": "2026-08-31T10:00:00.000Z"},
+        {"id": "d2", "type": "DEAL_TYPE_BALANCE", "profit": -3.0},
+        {"id": "d3", "type": "DEAL_TYPE_COMMISSION", "symbol": "BTCUSD", "profit": 1.0},
+        {"id": "d4", "type": "DEAL_TYPE_CORRECTION", "profit": 0.0},
     ])
     trades = asyncio.run(adapter.get_recent_trades())
 
     assert [t["id"] for t in trades] == ["d1"], "only the real fill is a trade"
-    assert adapter.last_trades_skipped == 3, (
-        "the skip count is the difference between 'this venue sends no balance entries' and "
-        f"'three were dropped and nobody said so'; got {adapter.last_trades_skipped}"
-    )
+    assert adapter.last_trades_non_fill == 3
+    assert adapter.last_trades_unjoinable == 0 and adapter.last_trades_unrecognised == []
 
 
 def test_swap_and_commission_are_None_when_ABSENT_and_never_zero():
@@ -412,10 +420,10 @@ def test_swap_and_commission_are_None_when_ABSENT_and_never_zero():
     makes a venue that cannot say indistinguishable from one that charged nothing (`B215`).
     """
     adapter, _ = _adapter(deals=[
-        {"id": "d1", "positionId": "p1", "symbol": "BTCUSD", "volume": 0.5, "price": 100.0,
-         "profit": 5.0},
-        {"id": "d2", "positionId": "p2", "symbol": "BTCUSD", "volume": 0.5, "price": 100.0,
-         "profit": 5.0, "swap": 0.0, "commission": -1.5},
+        {"id": "d1", "type": "DEAL_TYPE_BUY", "positionId": "p1", "symbol": "BTCUSD",
+         "volume": 0.5, "price": 100.0, "profit": 5.0},
+        {"id": "d2", "type": "DEAL_TYPE_SELL", "positionId": "p2", "symbol": "BTCUSD",
+         "volume": 0.5, "price": 100.0, "profit": 5.0, "swap": 0.0, "commission": -1.5},
     ])
     absent, present = asyncio.run(adapter.get_recent_trades())
 
@@ -1342,7 +1350,8 @@ def test_get_recent_trades_IS_GUARDED_like_the_other_two_reads():
     indistinguishable from a quiet period — `B292`'s collapse on the reconciliation path.
     """
     adapter, _ = _adapter(
-        deals=[{"id": "d1", "positionId": "p1", "volume": 1.0, "price": 10.0, "profit": 1.0}],
+        deals=[{"id": "d1", "type": "DEAL_TYPE_BUY", "positionId": "p1", "volume": 1.0,
+                "price": 10.0, "profit": 1.0}],
         connection_status="DISCONNECTED_FROM_BROKER",
     )
     with pytest.raises(MT5BrokerUnreachable):
@@ -1365,7 +1374,8 @@ def test_the_deals_read_is_UNWRAPPED_and_not_iterated_as_a_mapping():
     handler. Fifty arms were green because the mock returned a list.
     """
     adapter, _ = _adapter(deals=[
-        {"id": "d1", "positionId": "p1", "volume": 1.0, "price": 10.0, "profit": 2.0},
+        {"id": "d1", "type": "DEAL_TYPE_BUY", "positionId": "p1", "volume": 1.0,
+         "price": 10.0, "profit": 2.0},
     ])
     trades = asyncio.run(adapter.get_recent_trades())
     assert [t["id"] for t in trades] == ["d1"]
@@ -1396,7 +1406,8 @@ def test_SYNCHRONIZING_is_carried_and_an_incomplete_list_is_not_presented_as_com
     reconciling counts needs the flag, not an exception.
     """
     adapter, _ = _adapter(
-        deals=[{"id": "d1", "positionId": "p1", "volume": 1.0, "price": 10.0, "profit": 2.0}],
+        deals=[{"id": "d1", "type": "DEAL_TYPE_BUY", "positionId": "p1", "volume": 1.0,
+                "price": 10.0, "profit": 2.0}],
         synchronizing=True,
     )
     trades = asyncio.run(adapter.get_recent_trades())
@@ -1662,3 +1673,141 @@ def test_the_dispatch_EXISTS_IN_ONE_PLACE_and_the_copies_are_gone():
         f"answers a different question — and found {comparisons}. B340 is about SEVEN copies of "
         "this line, five of them unexercised."
     )
+
+
+# ======================================================================================
+# B365 — the balance-entry predicate reduced over the wrong set, wrong in BOTH directions
+# ======================================================================================
+
+
+def test_a_FILL_WITHOUT_A_positionId_IS_KEPT_and_never_dropped_as_a_balance_entry():
+    """ASSUMES: `positionId` is OPTIONAL on `MetatraderDeal` while `type` is REQUIRED. Read from
+    the installed model (`T-0133`) and settled by checklist item 3.0, which prints raw deal
+    payloads including balance entries.
+
+    **`B365`, first direction: A REAL FILL WAS BEING DROPPED FROM THE TRADE RECORD.** The old
+    predicate inferred *balance entry* from `volume`/`price`/`positionId` being absent, so a
+    `DEAL_TYPE_BUY` that simply lacked an optional `positionId` disappeared — and
+    `last_trades_skipped` counted it as a balance entry, which is the counter that exists so a
+    silent skip cannot happen reporting the wrong fact confidently.
+
+    It is kept, with `position_id=None` rather than an invented string (`B338`), and the count is
+    published so a caller joining by position knows the join is incomplete.
+    """
+    adapter, _ = _adapter(deals=[
+        {"id": "d1", "type": "DEAL_TYPE_BUY", "symbol": "BTCUSD", "volume": 0.5, "price": 100.0,
+         "profit": 5.0},
+    ])
+    trades = asyncio.run(adapter.get_recent_trades())
+    assert [t["id"] for t in trades] == ["d1"], "a real fill was dropped from the trade record"
+    assert trades[0]["position_id"] is None
+    assert adapter.last_trades_unjoinable == 1
+    assert adapter.last_trades_non_fill == 0, (
+        "an unjoinable FILL is not a balance entry — conflating them is B215 inside the counter"
+    )
+
+
+@pytest.mark.parametrize("deal_type", [
+    "DEAL_TYPE_BALANCE", "DEAL_TYPE_COMMISSION", "DEAL_TYPE_CREDIT",
+    "DEAL_TYPE_CORRECTION", "DEAL_TYPE_INTEREST", "DEAL_TYPE_BUY_CANCELED",
+])
+def test_a_NON_FILL_carrying_every_field_is_STILL_not_a_trade(deal_type):
+    """ASSUMES: the vendor documents nineteen `type` values of which only `DEAL_TYPE_BUY` and
+    `DEAL_TYPE_SELL` are fills. Read from the installed model; settled by checklist item 3.0.
+
+    **`B365`, second direction: A COMMISSION POSTING WAS ENTERING THE TRADE RECORD.** Nothing
+    stops a balance-class deal carrying `volume`, `price` and `positionId`, and the old predicate
+    then had no reason to exclude it. `DEAL_TYPE_BUY_CANCELED` is in this list deliberately — it
+    ends in nothing but *contains the word BUY*, which is the shape that defeated the direction
+    mapping in `B336`.
+    """
+    adapter, _ = _adapter(deals=[
+        {"id": "x1", "type": deal_type, "positionId": "p1", "symbol": "BTCUSD",
+         "volume": 0.5, "price": 100.0, "profit": -1.0},
+    ])
+    assert asyncio.run(adapter.get_recent_trades()) == [], (
+        f"{deal_type} entered the trade record because it carried the optional fields"
+    )
+    assert adapter.last_trades_non_fill == 1
+
+
+def test_an_UNRECOGNISED_deal_type_is_EXCLUDED_AND_NAMED_rather_than_guessed():
+    """ASSUMES: the vendor may add a type. NO CHECKLIST ITEM enumerates them against a live
+    account — 3.0 prints what a broker sends, which is a subset.
+
+    Excluded rather than raised, because `B349` is the standing lesson that one unreadable row
+    must not cost the whole read — and NAMED, because an unread value silently counted as either
+    a fill or a balance entry is the collapse both counters exist to prevent.
+    """
+    adapter, _ = _adapter(deals=[
+        {"id": "d1", "type": "DEAL_TYPE_BUY", "positionId": "p1", "volume": 1.0, "price": 10.0},
+        {"id": "d2", "type": "DEAL_TYPE_SOMETHING_NEW", "positionId": "p2"},
+    ])
+    trades = asyncio.run(adapter.get_recent_trades())
+    assert [t["id"] for t in trades] == ["d1"]
+    assert adapter.last_trades_non_fill == 1, "a documented-looking new type counts as a non-fill"
+
+    adapter2, _ = _adapter(deals=[{"id": "d9", "profit": 1.0}])   # no `type` at all
+    assert asyncio.run(adapter2.get_recent_trades()) == []
+    assert adapter2.last_trades_unrecognised == ["None"], (
+        "a deal with no type was silently classified rather than named"
+    )
+
+
+# ======================================================================================
+# B367 — a response is not a close
+# ======================================================================================
+
+
+@pytest.mark.parametrize("code,fragment", [
+    ("TRADE_RETCODE_DONE_PARTIAL", "PARTIALLY closed"),
+    ("TRADE_RETCODE_NO_CHANGES", "NO CHANGES"),
+])
+def test_a_PARTIAL_or_NO_CHANGES_close_is_NOT_reported_as_CLOSED(code, fragment):
+    """ASSUMES: the SDK raises `TradeException` only for codes outside its success list, and that
+    list INCLUDES `TRADE_RETCODE_DONE_PARTIAL` and `TRADE_RETCODE_NO_CHANGES`. Read from the
+    installed client (`T-0133`); NO CHECKLIST ITEM covers close response codes, because no item
+    closes a position.
+
+    **`B367`.** The call returns for both codes, so the row was marked CLOSED without anything
+    being read. **A position that half-closed still has exposure and the report said it was
+    closed** — `B337`'s shape by a different cause: a row satisfying Malek's ruled property while
+    stating something false. And *no changes* on a close request is not a close.
+    """
+    adapter, mock = _adapter(positions=[_position("p1")], close_string_code=code)
+    report = asyncio.run(adapter.close_all_positions())
+
+    assert report[0]["disposition"] == "FAILED", f"{code} was reported as CLOSED"
+    assert fragment in report[0]["reason"]
+    assert mock.closed == ["p1"], "the close WAS sent — this is about how it is reported"
+
+
+def test_a_GENUINE_close_is_still_reported_CLOSED():
+    """ASSUMES: `TRADE_RETCODE_DONE` is the ordinary success code (installed client; NO CHECKLIST
+    ITEM covers it).
+
+    **The must-MISS.** Reading `stringCode` is one edit from reporting nothing as closed, and a
+    kill switch that can never say CLOSED is as useless as one that always does.
+    """
+    adapter, _ = _adapter(positions=[_position("p1")])
+    assert asyncio.run(adapter.close_all_positions())[0]["disposition"] == "CLOSED"
+
+
+def test_a_response_with_NO_stringCode_FAILS_CLOSED():
+    """ASSUMES: `stringCode` is REQUIRED on `MetatraderTradeResponse` — a plain `TypedDict`, not
+    `total=False`. Read from the installed model; NO CHECKLIST ITEM covers it.
+
+    Its absence is a contract violation, and **the safe reading of *we cannot tell whether this
+    closed* is not CLOSED.** This is also the shape the mock had before `B367`: a response with no
+    `stringCode` at all, which is how the defect stayed invisible.
+    """
+    adapter, mock = _adapter(positions=[_position("p1")])
+
+    async def _no_code(position_id: str):
+        mock.closed.append(position_id)
+        return {"positionId": position_id}
+
+    mock._connection.close_position = _no_code
+    report = asyncio.run(adapter.close_all_positions())
+    assert report[0]["disposition"] == "FAILED"
+    assert "NO stringCode" in report[0]["reason"]

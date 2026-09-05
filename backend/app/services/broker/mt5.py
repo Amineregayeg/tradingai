@@ -57,6 +57,26 @@ POSITION_TYPES = {
     "POSITION_TYPE_SELL": DirectionType.SHORT,
 }
 
+#: The only two `MetatraderDeal.type` values that are FILLS. `type` is REQUIRED on the model and
+#: **states what a deal IS**; the vendor documents nineteen values, of which these two are trades
+#: and the rest are balance, credit, charge, correction, bonus, commission, interest, cancellation,
+#: dividend and tax entries (`B365`).
+DEAL_FILL_TYPES = ("DEAL_TYPE_BUY", "DEAL_TYPE_SELL")
+
+#: `stringCode` values on a `MetatraderTradeResponse` that mean the close ACTUALLY HAPPENED.
+#: **The SDK's success list is wider than this on purpose and that is the trap** (`B367`): it also
+#: returns — rather than raising `TradeException` — for `TRADE_RETCODE_DONE_PARTIAL` and
+#: `TRADE_RETCODE_NO_CHANGES`. *Partially closed* still has exposure and *no changes* on a close
+#: request is not a close, so neither may be reported as CLOSED.
+CLOSE_SUCCEEDED_CODES = ("TRADE_RETCODE_DONE", "TRADE_RETCODE_PLACED", "ERR_NO_ERROR")
+
+#: Returned by the SDK without raising, and NOT a completed close. Named separately so the row's
+#: reason can say which one happened rather than *the venue said something we did not expect*.
+CLOSE_INCOMPLETE_CODES = {
+    "TRADE_RETCODE_DONE_PARTIAL": "the venue PARTIALLY closed this position — exposure remains",
+    "TRADE_RETCODE_NO_CHANGES": "the venue reported NO CHANGES, so nothing was closed",
+}
+
 #: The three values MetaApi documents for `MetatraderAccount.connection_status` — read from the
 #: installed package (`T-0133`): *"one of CONNECTED, DISCONNECTED, DISCONNECTED_FROM_BROKER"*.
 #: **`DISCONNECTED_FROM_BROKER` is `B292`'s distinction named by the vendor** — connected to
@@ -242,6 +262,18 @@ class MetaTrader5Adapter(BrokerAdapter):
         #: How many deals the last `get_recent_trades` SKIPPED as balance entries. **A positive
         #: statement**: a silent skip and a venue with no balance entries are otherwise identical.
         self.last_trades_skipped: int = 0
+
+        #: `B365`. Deals excluded because their `type` says they are not fills — balance, credit,
+        #: commission, correction, dividend and the rest. **A normal venue fact, not a problem.**
+        self.last_trades_non_fill: int = 0
+
+        #: Fills that carry NO `positionId`, so they are in the record and cannot be joined to a
+        #: position. **Counted rather than dropped**: dropping a real fill is the corruption.
+        self.last_trades_unjoinable: int = 0
+
+        #: Deal `type` values outside the vendor's documented set, by name. Excluded and NAMED —
+        #: an unread value must not be silently counted as either a fill or a balance entry.
+        self.last_trades_unrecognised: list[str] = []
 
         #: Whether the venue said it was still SYNCHRONIZING on the last `get_recent_trades`
         #: (`B356`). **A short list during synchronisation is not a short history**, and the two
@@ -766,18 +798,47 @@ class MetaTrader5Adapter(BrokerAdapter):
                 "be INCOMPLETE. Do not reconcile a count against it."
             )
 
+        # `B365`. **CLASSIFY ON `type`, WHICH SAYS WHAT THE DEAL IS.** This used to infer
+        # *balance entry* from three OPTIONAL fields being absent together, and that proxy is
+        # wrong in BOTH directions at once:
+        #
+        #     type=DEAL_TYPE_BUY, no positionId   -> SKIPPED as a balance entry (a FILL DROPPED)
+        #     type=DEAL_TYPE_BALANCE, all present -> counted as a TRADE
+        #     type=DEAL_TYPE_COMMISSION           -> counted as a TRADE
+        #
+        # A fill leaves the trade record and a commission posting enters it. `type` is REQUIRED on
+        # the vendor's model and enumerates nineteen values; three absent optional fields separate
+        # none of them.
         trades: list[dict] = []
-        skipped = 0
+        non_fill = 0
+        unjoinable = 0
+        unrecognised: list[str] = []
         for deal in deals:
-            if deal.get("volume") is None or deal.get("price") is None or deal.get("positionId") is None:
-                skipped += 1
+            deal_type = deal.get("type")
+            if deal_type is None or not str(deal_type).startswith("DEAL"):
+                # NOT DROPPED AND NOT COUNTED AS A FILL. Raising here would be `B349` again — one
+                # unreadable row must not cost the whole read — so it is recorded by name and a
+                # caller reconciling counts can see exactly what was not understood.
+                unrecognised.append(str(deal_type))
                 continue
+            if deal_type not in DEAL_FILL_TYPES:
+                non_fill += 1
+                continue
+
+            # A FILL. `positionId` is optional on the model, so a fill can arrive unjoinable —
+            # and **dropping it would be the defect this fix exists to remove.** It is kept, its
+            # `position_id` is None rather than an invented string (`B338`), and the count is
+            # published so a caller joining by position knows the join is incomplete.
+            position_id = deal.get("positionId")
+            if position_id is None:
+                unjoinable += 1
             trades.append({
                 "id": str(deal.get("id", "")),
-                "position_id": str(deal["positionId"]),
+                "position_id": None if position_id is None else str(position_id),
                 "pair": str(deal.get("symbol", "UNKNOWN")),
-                "volume": float(deal["volume"]),
-                "price": float(deal["price"]),
+                "deal_type": str(deal_type),
+                "volume": _dec(deal.get("volume"), "volume"),
+                "price": _dec(deal.get("price"), "price"),
                 # REQUIRED on the venue's model — `profit number Yes` — so its absence would be a
                 # contract violation rather than an optional field. `swap` and `commission` are
                 # optional and stay `None` when absent.
@@ -788,9 +849,23 @@ class MetaTrader5Adapter(BrokerAdapter):
                 ),
                 "time": deal.get("time"),
             })
-        self.last_trades_skipped = skipped
-        if skipped:
-            logger.info(f"MT5 get_recent_trades skipped {skipped} balance entr(y/ies)")
+        # THREE COUNTERS, NOT ONE. `last_trades_skipped` conflated *this venue posts balance
+        # entries* with *we could not join these fills* — `B215` inside the instrument built to
+        # prevent `B215`. They are different facts and only one of them is a problem.
+        self.last_trades_non_fill = non_fill
+        self.last_trades_unjoinable = unjoinable
+        self.last_trades_unrecognised = unrecognised
+        self.last_trades_skipped = non_fill          # retained: the count that IS a clean skip
+        if non_fill:
+            logger.info(f"MT5 get_recent_trades: {non_fill} non-fill deal(s) (balance, "
+                        f"commission, correction and the like) excluded from the trade record")
+        if unjoinable:
+            logger.warning(f"MT5 get_recent_trades: {unjoinable} FILL(s) carry no positionId and "
+                           f"are in the record with position_id=None — a join by position is "
+                           f"INCOMPLETE, and dropping them would lose real fills")
+        if unrecognised:
+            logger.warning(f"MT5 get_recent_trades: deal type(s) not understood and excluded: "
+                           f"{unrecognised}")
         return trades
 
     @staticmethod
@@ -917,6 +992,44 @@ class MetaTrader5Adapter(BrokerAdapter):
             "refusal is deliberate and is not a TODO: it is wrong only by being too strict, and "
             "the alternative is a wrong size on a live venue."
         )
+
+    def _classify_close(self, result: Any) -> dict:
+        """Read `stringCode`. **A response is not a close** (`B367`).
+
+        The SDK raises `TradeException` only for codes outside its success list, and that list
+        includes `TRADE_RETCODE_DONE_PARTIAL` and `TRADE_RETCODE_NO_CHANGES` — so the call
+        RETURNS for both and the row was marked CLOSED without anything being read. **A position
+        that half-closed still has exposure and the report said it was closed**, which is `B337`'s
+        shape by a different cause: a row satisfying Malek's ruled property while stating
+        something false.
+
+        `stringCode` is REQUIRED on `MetatraderTradeResponse` — a plain `TypedDict`, not
+        `total=False` — so its absence is a contract violation and fails closed rather than being
+        read as success.
+        """
+        code = None
+        if isinstance(result, dict):
+            code = result.get("stringCode")
+        if code is None:
+            return {
+                "disposition": self.FAILED, "status": "failed",
+                "reason": "the venue's close response carried NO stringCode, which is REQUIRED on "
+                          "MetatraderTradeResponse — so whether this position closed is UNKNOWN "
+                          "and it must be checked at the venue",
+            }
+        if code in CLOSE_INCOMPLETE_CODES:
+            return {
+                "disposition": self.FAILED, "status": "failed",
+                "reason": f"{code}: {CLOSE_INCOMPLETE_CODES[code]}. The SDK returns rather than "
+                          f"raising for this code, so it reads as success and is not one.",
+            }
+        if code not in CLOSE_SUCCEEDED_CODES:
+            return {
+                "disposition": self.FAILED, "status": "failed",
+                "reason": f"the venue returned {code!r}, which is not a code this adapter reads as "
+                          f"a completed close. Failing closed rather than guessing.",
+            }
+        return {"disposition": self.CLOSED, "status": "closed", "reason": None}
 
     async def close_position(self, position_id: str, lot_size: float | None = None) -> dict:
         """**DEFINED, NOT IMPLEMENTED.** It dispatches on size between two MetaApi calls, so it
@@ -1071,10 +1184,7 @@ class MetaTrader5Adapter(BrokerAdapter):
                         reason=f"{type(exc).__name__}: {exc}",
                     )
                     continue
-                row.update(
-                    disposition=self.CLOSED, status="closed", reason=None, result=result,
-                    _in_flight=False,
-                )
+                row.update(**self._classify_close(result), result=result, _in_flight=False)
         except BaseException as exc:  # noqa: BLE001 - CancelledError is not an Exception
             # THE LOOP ITSELF DIED. Rows still `NOT_ATTEMPTED` genuinely were not attempted; the
             # row carrying the in-flight reason above was SENT and is not among them.
