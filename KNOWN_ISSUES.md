@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-05 (B355 — A REGISTER ID QUOTED IN PRODUCT CODE IS DEFENDED BY NOTHING. The register defends its own consistency twice — an entry can carry an AMENDMENT, and register_commit_check REFUSES a commit modifying an entry its message does not name — and a register id quoted in a CODE COMMENT has neither, so a correction lands in KNOWN_ISSUES.md and every quotation of it goes stale IN SILENCE. Found because manager.py's new MT5 branch quoted B346 and restated its mechanism, which B350 had corrected hours before that branch landed. MEASURED with agents/citation_check.py, written with this entry: 183 files, 314 citation sites, 120 distinct ids, 334 register entries, 46 of 120 flagged — and NOT ONE of those sites was checked by anything before today. THE FOUR MISSING CANNOT BE ARGUED WITH: B6, B10, B90 and B253 are cited in product code and have NO ENTRY AT ALL, never written rather than superseded, with the headings jumping B3 to B8 and B9 to B11 — B10 alone is cited five times in code and eight times inside the register, so a maintainer following it from either direction finds nothing. That is B329's family with product code depending on it. AND THE SCANNER'S OWN FALSE POSITIVE IS THIS REGISTER'S FAVOURITE SHAPE: v1 reported B018, which is a flake8-bugbear noqa code — two vocabularies sharing one form, so a rule keyed on the form returns a confident wrong answer, which is B211's and B349's family in the INSTRUMENT rather than the subject. Fixed with two guards rather than one because either alone is a single point of failure on a FALSE POSITIVE, and this register already records that a guard crying wolf gets loosened under time pressure. It says RE-READ and never WRONG except for MISSING, and NOT FLAGGED IS NOT VERIFIED. AMENDED SAME DAY: I called the four MISSING ids 'never written' on the strength of no heading existing, which is INFERRED FROM AN ABSENCE and is wrong for B90. This register records its own deletion in two places predating today — 33a3951 carried away a removal of B90 and left main claiming it fixed for twenty minutes, and B90 is Review's finding that EXIT-001's NOT_APPLICABLE has no denominator. The product code citing it still states that subject at exit_001_v1_model.py:533, so THE COMMENT IS NOW THE ONLY SURVIVING STATEMENT OF THE FINDING: the register lost the entry, the code kept the sentence, and a maintainer cleaning up the dangling reference would have destroyed the last record of a real defect. That inverts B355's own assumption — the citation was not stale, the ENTRY was missing — and it kills the one signal I called a verdict rather than a prompt. The scanner now says a MISSING id is A BROKEN LINK WHOSE BROKEN END IT CANNOT IDENTIFY. B10 is recoverable since B157's heading says B157 IS B10 GENERALISED; B253 is a dangling cross-reference on both ends; B6 has no trace anywhere. AND THE GENERAL FORM IS WORSE THAN THE ONE FILED: a hook guards every MODIFICATION to the entries the register still has, so DELETION IS THE UNGUARDED OPERATION.)
+Last updated: 2026-09-05 (B358 — THE REDACTION SCRUBBER IN agents/mt5_first_connection.py LEAKED ON JSON ESCAPING, and the MT5 PASSWORD is the exposure rather than the token. Everything printed goes through json.dumps first, so the scrubber compared RAW bytes against text already escaped: a secret containing a backslash, quote, newline or non-ASCII character stopped matching. The token is a JWT and survives encoding unchanged; the password travels in the POST body and an error payload echoing submitted credentials is exactly what stage0 prints. Fixed by also registering json.dumps(s)[1:-1], verified with a must-hit/must-miss pair where the must-miss LEAKS all four escaped cases without the second registration. And main() caught Exception, so KeyboardInterrupt — a BaseException, and Ctrl-C during a network call is the likeliest interruption there is — never reached the traceback scrubber at all. FILED WITH B356, where get_deals_by_time_range returns a WRAPPER, MetatraderDeals{deals, synchronizing}, and mt5.py ITERATES IT — yielding its keys, so 'deals'.get(...) raises AttributeError OUTSIDE the try, caught by neither handler, with all 50 arms green because the mock returns a list; exactly one of six reads is wrapped and it is the one the adapter iterates, and synchronizing is dropped by both the adapter and the script. B357, stage0 claims to be free while posting an account-CREATION body to the creation endpoint with a correct server on its second case, and its inventory check ran AFTER the POSTs — could-not-ask treated as permission to proceed with the irreversible act, now a refusal before them. B353, the link guard fails CLOSED on a missing connection_status and OPEN on a missing reload, seven lines apart. And B354, Review's own mutation harness adopted a surviving mutant as its baseline after an interrupted run, so B340's 50.7% — WHICH I QUOTED TO MALEK IN MT5_PROGRAMME.md — is really 57.3%.)
 
 ---
 
@@ -22911,6 +22911,312 @@ operation** — and `33a3951` is the instance, recorded in this file, twenty min
 claiming a fix that had been carried away.
 
 Related: **B346**, **B350**, **B329**, **B310**, **B140**.
+
+---
+
+### B353 — THE LINK GUARD FAILS **CLOSED** ON A MISSING `connection_status` AND **OPEN** ON A MISSING `reload`, SEVEN LINES APART. Execute asked for another field whose vocabulary was taken without its lifetime; this is the lifetime of the refresh itself
+
+`T-0134` fixed `B335`'s first half — an account with no `connection_status` used to be treated as
+reachable and now fails closed — and fixed `B341`'s addendum, that `connection_status` is a **cached
+field** served from `self._data` and refreshed only by `await reload()`. Both corrections are right.
+
+**There are exactly two duck-typed member lookups on `self._account` in that function, and they have
+opposite failure directions:**
+
+```python
+reload_ = getattr(self._account, "reload", None)
+if reload_ is not None:                       # <-- FAILS OPEN. No reload -> no refresh ->
+    result = reload_()                        #     the cached value is trusted anyway
+    if inspect.isawaitable(result):
+        await result
+self.last_link_check_at = datetime.now(timezone.utc)
+
+status = getattr(self._account, "connection_status", None)
+if status is None:                            # <-- FAILS CLOSED, correctly (the B335 fix)
+    raise MT5BrokerUnreachable(...)
+```
+
+## MEASURED
+
+Two account objects with identical vocabulary, one carrying `reload` and one not. Adapter connects
+while `CONNECTED`, then the broker link drops:
+
+```
+AccountWithReload   reload calls=1     status now='DISCONNECTED_FROM_BROKER'   RAISED MT5BrokerUnreachable
+AccountNoReload     reload calls=n/a   status now='CONNECTED'                  RETURNED []   <-- guard did not fire
+```
+
+**`get_positions()` returns `[]` from a broker that cannot be reached** — `B292`'s collapse, back
+again, through the refresh being optional rather than the attribute being absent. The guard reads
+the value captured at connect time and reports the link up, arbitrarily long after it dropped, which
+is the precise failure this guard's own docstring says it exists to prevent: *"a guard that lies …
+worse because it looks like it works."*
+
+## SECOND FACE: THE FRESHNESS TIMESTAMP INHERITS THE SAME FAIL-OPEN
+
+`self.last_link_check_at` is set **unconditionally**, outside the `if`. When no reload happened it
+still advances, so a field whose only purpose is to say *how fresh this answer is* records a check
+that refreshed nothing. Anything downstream treating it as a staleness bound is misled by the one
+field added to measure staleness.
+
+## WHY THIS IS WORTH AN ENTRY WHEN THE REAL SDK HAS `reload`
+
+**It is latent, not live** — stated plainly: `MetatraderAccount.reload` exists, the test double
+carries it, and `test_the_link_check_RELOADS_before_it_trusts_the_cached_status` asserts
+`reloads >= 1`. Nothing is broken today.
+
+**It is worth filing because this exact guard already had one member-presence assumption that turned
+out false against the real object.** `B335` was dismissible as hypothetical — *the real client will
+have `terminal_state`* — until `B341` measured the object graph and found the only object serving
+the reads does not carry it. **The lesson of B335 is that "the real object always has it" is an
+assumption that was already wrong once here, in this function, for this adapter.** Applying
+fail-closed reasoning to one duck-typed member and not to the other, seven lines apart, is that
+reasoning repeated rather than learned from.
+
+**The fix is one line and matches what is already there:** treat a missing `reload` exactly as a
+missing `connection_status` — an account that cannot refresh its link state has not established that
+the link is up — and move `last_link_check_at` to after a refresh that actually happened.
+
+## WHAT IS RIGHT AND SHOULD NOT BE CHANGED IN THE FIX
+
+The reasoning for **not** taking the guard from `TerminalState` is correct and worth keeping: those
+booleans are push-updated and genuinely live, and the adapter's original names were right — but
+`StreamingMetaApiConnectionInstance` carries none of the six reads, so using it means holding a
+second connection permanently to answer one boolean pair. Naming that as the upgrade once checklist
+1.5 prices a call, rather than doing it now, is the right call and the cost is stated rather than
+hidden.
+
+Related: **B335**, **B341**, **B292**, **B215**, **B349**.
+
+---
+
+### B354 — MY OWN MUTATION HARNESS: an interrupted run leaves a SURVIVING mutant on disk, and the next run adopts it as its baseline. A surviving mutant passes every arm, so "the baseline is green" cannot detect it — and the number it produced is quoted to Malek in `MT5_PROGRAMME.md`
+
+`B340`'s *"33 of 67 mutations survive"* is quoted in Gate 1 of the programme document. Re-measuring
+it at `e897d90` exposed a defect in the instrument that produced it.
+
+## THE MECHANISM
+
+`mutate.py` read its baseline from the working file and restored it **only after the last mutant**:
+
+```python
+ORIG = SRC.read_text()      # whatever is on disk RIGHT NOW
+for idx in range(N):
+    SRC.write_text(mutant)
+    run_pytest()
+SRC.write_text(ORIG)        # only reached on a clean finish
+```
+
+A first run was killed by a tool timeout at two minutes. **It never reached the restore, so it left
+a mutant on disk.** The next run read that file as `ORIG` and measured 75 mutations against a
+baseline that already carried one.
+
+```
+git show e897d90:...mt5.py | ast.unparse   vs   the sweep's baseline
+-  margin_used=float(info.get('margin', 0.0) or 0.0)
++  margin_used=float(info.get('margin', 1.0) or 0.0)
+```
+
+## WHY THE OBVIOUS CHECK DOES NOT CATCH IT
+
+The leftover was a **survivor** — `B338`'s amendment measured that every default in that constructor
+can be changed with the suite green. **So the contaminated baseline passed all 50 arms.** *"The
+baseline is green"* is exactly the check a careful person runs, and it is **structurally incapable**
+of detecting a leftover survivor: surviving is the definition of not changing any test outcome.
+
+**The only check that works is textual, against the source of truth:**
+
+```
+ast.unparse(ast.parse(git show <sha>:path))  ==  the file the sweep actually ran on
+```
+
+## WHAT IT COST, STATED HONESTLY
+
+**Nothing, this time.** The clean re-run returns the identical figure — 75 sites, 43 killed, 32
+survived, **57.3%** — because the leftover mutation does not interact with any other site. **That is
+luck and not a defence.** A leftover on a comparison operator or a boolean guard would shift kill
+counts, and the log would have looked exactly as well-formed: `TOTAL 75 killed 43 SURVIVED 32
+mutation score = 57.3%` is a sentence with no way of telling you what it was measured against.
+
+## THE FIX
+
+```python
+ORIG = git_show(f"{SHA}:{path}")          # baseline from the object store, never from disk
+SRC.write_text(ORIG)                      # heal any leftover before starting
+atexit.register(restore); SIGTERM -> SystemExit
+```
+
+Reading the baseline from git makes the harness immune to its own leftovers rather than merely
+tidy about them, which is the difference between the two halves of `B345`'s fix (`B348`): removing
+what you installed helps when you finish, and not depending on the disk state helps when you do not.
+
+## THE CLASS
+
+**`B345` with the roles reversed.** There, a test installed a stub into `sys.modules` and did not
+remove it, and the next consumer inherited it. Here a harness installs a mutant into a source file
+and does not remove it, and the next *run of itself* inherits it. Both are global state a tool
+writes and does not own the lifetime of; both were invisible because the inherited state was benign
+enough to keep everything green.
+
+**And the reviewer's version of the lesson:** this is the instrument I use to judge other seats'
+arms, so it is the one I am least likely to point at itself. `B340`'s number went into a document
+Malek is acting on before anyone checked what produced it.
+
+Related: **B345**, **B348**, **B340**, **B338**.
+
+---
+
+### B356 — `get_recent_trades` CANNOT READ THE REAL SDK. `get_deals_by_time_range` returns a WRAPPER dict and the adapter iterates it, so every deal read raises `AttributeError` against the venue — and the mock returns a list, so all 50 arms are green
+
+`B334` said no arm here can fail on a fact the adapter and its mock encode the same way. **This is
+the third confirmed instance and the first that is a hard failure on a read path.**
+
+## MEASURED, against the adapter pinned at `e897d90`
+
+```
+the MOCK's shape         (a list)                   -> 1 trade(s)  [{...}]
+the SDK's DECLARED shape (MetatraderDeals dict)     -> RAISED AttributeError: 'str' object has no attribute 'get'
+```
+
+Iterating `{"deals": [...], "synchronizing": false}` yields its KEYS — the strings `"deals"` and
+`"synchronizing"` — and `"deals".get("volume")` is an `AttributeError`. **It is raised outside the
+`try`**, which wraps only the client call, so it escapes as a bare `AttributeError` caught by
+neither the `BrokerRateLimitError` handler nor the `BrokerError` one. `B342`'s shape exactly.
+
+## EXACTLY ONE OF THE SIX READS IS WRAPPED, AND IT IS THE ONE THE ADAPTER ITERATES
+
+Return annotations read from the installed package, not inferred:
+
+```
+get_account_information   -> MetatraderAccountInformation          bare      adapter OK
+get_positions             -> List[MetatraderPosition]              bare      adapter OK
+get_orders                -> List[MetatraderOrder]                 bare      adapter OK
+get_symbol_price          -> MetatraderSymbolPrice                 bare      adapter OK
+get_symbol_specification  -> MetatraderSymbolSpecification         bare      adapter OK
+get_deals_by_time_range   -> MetatraderDeals {deals, synchronizing} WRAPPED  adapter BROKEN
+```
+
+The convention is consistent and discoverable: the **time-range query** methods wrap.
+`get_history_orders_by_time_range -> MetatraderHistoryOrders {historyOrders, synchronizing}` is the
+same shape. **Five of six correct is what a careful reading of documentation produces; the sixth is
+what only the package can tell you.**
+
+## AND THE SECOND FIELD IS A SAFETY PROPERTY THAT BOTH THE ADAPTER AND THE SCRIPT DROP
+
+```python
+class MetatraderDeals(TypedDict):
+    deals: List[MetatraderDeal]
+    synchronizing: bool
+    """Flag indicating that deal initial synchronization is still in progress
+       and thus search results MAY BE INCOMPLETE."""
+```
+
+**`synchronizing=True` means the answer is partial**, and neither reader looks at it. For the
+adapter that is a short trade list presented as complete — `B292`'s collapse on the reconciliation
+path, where a missing trade is a missing fill. **For `mt5_first_connection.py` it is worse**,
+because item 3.0's entire purpose is to record which fields this broker omits: a partially
+synchronised first deal makes `absent on the first deal: [...]` report fields as missing that are
+merely not yet synced, and that answer gets written into `MT5_FIRST_CONNECTION.md` as settled.
+
+`agents/mt5_first_connection.py:320` handles the wrapper correctly —
+`deals.get("deals", deals) if isinstance(deals, dict) else deals`. **The script is right and the
+adapter is wrong**, so running Gate 3 would produce a correct deal listing and the adapter would
+still fail on the same call.
+
+Related: **B334**, **B342**, **B292**, **B341**, **B215**.
+
+---
+
+### B357 — `stage0` PRINTS *"free, creates nothing"* AND POSTS AN ACCOUNT-CREATION BODY WITH A VALID SERVER. It also runs those POSTs when its own inventory measurement has already failed
+
+The two requests are structurally identical:
+
+```
+provision  (gated by --yes-this-costs-money, banner "THIS COSTS MONEY")
+    POST PROVISION_URL  {login, password, name, server, platform: "mt5", magic: 0}
+
+stage0     (no gate, banner "free, creates nothing", CLI help "Free, creates nothing.")
+    POST PROVISION_URL  {login, password, name: "tradingai-probe", server, platform: "mt5", magic: 0}
+```
+
+Same URL, method, headers and body keys. **Case 1 uses `server + "-DOES-NOT-EXIST"`. Case 2 uses the
+CORRECT server with a wrong password** — and it must, because item 0.1 exists precisely to
+distinguish a bad server from a bad password. Whether that provisions depends on whether MetaApi
+validates credentials before or after creating the record, **which is one of the unknowns this
+script was written to settle.**
+
+**The author knew.** The verdict section carries a handler for it:
+
+> `** N ACCOUNT(S) WERE CREATED: [...]` — *"A call designed to FAIL provisioned something. That is
+> itself a finding, and it is billable."*
+
+**So the file contains both the claim that nothing can be created and the code that runs when
+something was.** `B184`'s shape — two places encoding one fact — with the operator-facing half being
+the wrong one, and the money gate applied to the honest subcommand and not to this one.
+
+## THE SHARPER HALF: IT PROCEEDS WHEN IT CANNOT MEASURE
+
+`inventory()` returns `f"UNREADABLE: ..."` on any exception, and **nothing checks `before` before the
+POST loop runs.** So when the measurement fails, the script still issues both creation requests and
+reports afterwards:
+
+> *"COULD NOT MEASURE the inventory, so 'nothing was created' is UNVERIFIED here."*
+
+That sentence is honest and it arrives **after the irreversible act**. This adapter's own doctrine
+is that *could not ask* must never be treated as *asked and fine* (`B292`, `B215`) — and here a
+failed measurement is treated as permission to proceed with the billable one.
+
+**Fix, using the file's own vocabulary:** if `before` is not a list, refuse — the same shape as
+`--yes-this-costs-money`, and strictly better than detecting afterwards. And change the banner and
+the CLI help: *creates nothing* is not a property of a request whose only difference from the
+billable one is a deliberately wrong password.
+
+Related: **B292**, **B215**, **B184**, **B351**.
+
+---
+
+### B358 — THE REDACTION MATCHES RAW SECRETS WHILE EVERYTHING IT GUARDS IS PRINTED JSON-ENCODED. Any password containing a quote, a backslash, a newline or a non-ASCII character is printed in full
+
+The scrubber is a single choke point, which is the right design —
+*"a redaction applied at N call sites is a redaction missing from N+1."* **The escape is not a missed
+call site. It is that `say()` compares raw bytes to text that has already been encoded.**
+
+Measured in-process, with no network call:
+
+```
+secret                     printed as                              redacted?
+tok-ABC123                 "***REDACTED***"                        yes
+tok\ABC123                 "tok\\ABC123"                           NO  -- LEAK
+tok"ABC123                 "tok\"ABC123"                           NO  -- LEAK
+tok<newline>ABC123         "tok\nABC123"                           NO  -- LEAK
+tok-Ãpwd                   "tok-Ãpwd"                         NO  -- LEAK
+```
+
+Every printed payload goes through `json.dumps(...)` first —
+`say(f"      payload: {json.dumps(payload, default=str)[:400]}")` — so the moment a secret contains
+a character JSON escapes, `line.replace(secret, ...)` no longer matches.
+
+**Whose secret is at risk:** the MetaApi token is a JWT and base64url-safe, so it survives encoding
+unchanged and IS redacted. **The MT5 password is the exposure**, it is submitted in the POST body,
+and an API error payload echoing the submitted credentials is exactly the case `stage0` prints.
+MT5 passwords routinely contain punctuation.
+
+**Fix:** register the encoded forms alongside the raw one — for each secret also scrub
+`json.dumps(s)[1:-1]` — or scrub after encoding rather than before. One line in `read_secret`.
+
+## SECOND PATH, AND IT IS THE ONE THE AUTHOR GUESSED AT
+
+`main()` catches `Exception`. **`KeyboardInterrupt` is a `BaseException`, so it never reaches the
+traceback scrubber at all** — and Ctrl-C during a network call is the single most likely
+interruption when running this tool interactively. The traceback is printed by the default handler,
+entirely unscrubbed. `except BaseException` there costs nothing; the `SystemExit` re-raise above it
+already shows the pattern.
+
+**What is NOT a leak, checked:** only two `print()` calls exist and both scrub; the four `sys.exit`
+messages carry paths and argument names, never credentials; and `provision` correctly redacts the
+password when echoing its own request body.
+
+Related: **B215**, **B334**.
 
 ---
 
