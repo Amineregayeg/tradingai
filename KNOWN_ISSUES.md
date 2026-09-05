@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-05 (B376 — EVERYTHING UNRECOGNISED BECOMES A LONG ON THE VENUE THAT TRADES REAL MONEY. cryptofundtrader reduces direction with `if s in {SELL, SHORT, S}: return SHORT` then `return LONG`, so empty string, None, 0, 1, ASK, BID, MARKET, LIMIT and SELL_LIMIT all become LONG, as does a payload carrying no side and no type at all. B336's TWIN WITH THE DEFAULT POINTING THE OTHER WAY, and worse in three ways: MT5 defaulted to SHORT while this defaults to LONG, which agrees with the common case and is therefore harder to notice; MT5's writes REFUSE and CFT TRADES; and the key falls back onto `type`, the field B291 recorded as carrying three unrelated meanings, which this adapter reads as a fourth. SELL_LIMIT to LONG is the MIRROR of MT5's bug rather than a repeat — endswith over-matched, set-membership under-matches — and both are the absence of a mapping, so B336's fix applies unchanged: map what is known and RAISE on the rest, turning an unknown into a question instead of a LONG. FILED WITH B377, THE ONE THAT MOVES MONEY: `equity` falls back to `balance` and they are not the same quantity, so when the key is absent the account asserts open P&L is zero while unrealized_pl on the same object may not be — and it is not a display field, because execution/service.py passes acct.equity into size_position, so A SILENT FALLBACK TO BALANCE CHANGES HOW LARGE EVERY POSITION IS. Also in B377: volume/lots/size into lot_size is B302's units-or-lots ambiguity ACQUIRED AT THE VENUE BOUNDARY, and the account-level profit/netProfit is B286's exact pair still unfixed, since T-0114 fixed the position field and left its sibling twelve lines above. FROM A DELIBERATE PREDICATE SWEEP OF THE LIVE ADAPTER: 7 reductions examined, 5 defective, B308 CONFIRMED STILL LIVE with open_trade_count a hardcoded 0 that manager.py puts on the wire and BrokerAccountsPanel renders as 'Open positions: 0' while every simulator counts its own. THE GROUND TRUTH WAS STATED FIRST AND HONESTLY: there is none of the kind MT5 had — no SDK, no capture corpus, no vendor documentation — so nothing is claimed about what CFT actually sends, and the sweep asked the answerable question instead, DOES THE REDUCTION DISCARD WHICH INPUT IT SAW, since a reduction that cannot be recovered is defective whatever the venue sends. One reduction was CORRECT and is the model: pnl_key_present tests PRESENCE rather than a defaulted read, so the provenance names a key the payload actually carried.)
+Last updated: 2026-09-05 (B378 — THE PROP-FIRM BREACH MONITOR SWALLOWS THE EXCEPTION, so B377's loud fix stops the drawdown updating instead of reporting it wrong. Six consumers of CFT's get_account were traced: manager.get_all_accounts and reconciliation.reconcile_all both HANDLE it, carrying reachable:false and the reason while the panel shows the error text and NO FIGURES with a comment saying that a last-known balance would be indistinguishable from a current one — the best-behaved consumer in the tree, and my worry about it did not land. Three more are not CFT at all, since ExecutionService and the loop and the proxy all hold the simulator. THE ONE THAT SWALLOWS IS observe_sync, whose per-adapter `except Exception` logs a warning and writes NO PropFirmSnapshot, so compute_compliance_state never runs — and because the surface reads snapshot HISTORY, a missing snapshot is INDISTINGUISHABLE FROM A QUIET PERIOD, every two minutes, on the drawdown monitor for the funded account. Before B377 an absent equity gave a WRONG drawdown; after it the drawdown STOPS UPDATING, so the consumer is the defect and the repair is to record an UNAVAILABLE state rather than skip. AND B376 MUST LAND WITH B372 RATHER THAN BEFORE IT: B376's raise sits in position normalisation, so it surfaces in manager.get_all_positions — the swallow B372 measured — and until that lands B376 turns a wrongly-LONG position into a position that is NOT THERE. AND REVIEW CORRECTED ITS OWN B377, WHICH I HAD REPEATED TO MALEK: 'a silent fallback to balance changes how large every position is' is TRUE OF THE CODE AND FALSE OF CFT, because ExecutionService is only ever constructed with the loop's simulator per B350, which Review established itself — so CFT's equity reaches the compliance monitor and the dashboard and nothing else. The fix matters MORE than B377 argued rather than less, since a prop-firm breach closes the account, but the mechanism was wrong and it was wrong because a call site was traced instead of what is passed to it.)
 
 ---
 
@@ -24456,6 +24456,99 @@ venue sends, and that is the whole of what is claimed here. **Which spelling CFT
 remains unobserved and is not asserted anywhere above.**
 
 Related: **B286**, **B308**, **B302**, **B376**, **B375**.
+
+---
+
+### B378 — `B377`'s NEW EXCEPTION IS SWALLOWED ON THE ONE PATH THAT MATTERS: the prop-firm compliance monitor writes NO SNAPSHOT and logs a warning. And my own `B377` named the wrong consumer — `ExecutionService` holds a simulator, so CFT's equity never reaches `size_position`
+
+`B376` and `B377` convert silent wrong values into exceptions. **That is only an improvement where
+the exception survives to a human.** Traced every consumer of CFT's `get_account()`.
+
+## THE SIX CONSUMERS
+
+```
+manager.get_all_accounts        HANDLED   reachable:false + error carried; the panel renders
+                                          "Cannot reach this account" with the reason and
+                                          DELIBERATELY no figures
+reconciliation.reconcile_all    HANDLED   per-adapter catch -> {"reachable": False, "error": ...}
+observe_sync.sync_all_...       SWALLOWED per-adapter `except Exception` -> WARNING, no snapshot
+execution/service.py:102        NOT CFT   self.broker is the loop's PaperBroker/SimPropFirmBroker
+crypto_loop.py:253 / :508       NOT CFT   self.paper
+live_loop_proxy.py:124          NOT CFT   delegates to the loop's simulator
+```
+
+## THE SWALLOW, AND WHY IT IS THE WORST ONE TO HAVE
+
+```python
+try:
+    await sync_account_compliance(adapter, db, user_id, profile)
+    synced += 1
+except Exception as exc:  # transport/auth/etc -- monitoring is best-effort
+    logger.warning("Observe-only sync skipped", broker=..., account_id=..., error=str(exc))
+```
+
+`sync_account_compliance` computes the prop-firm drawdown from the value `B377` now guards:
+
+```python
+total_loss = max(0.0, initial_balance - account.equity)
+daily_loss = max(0.0, -account.unrealized_pl)
+state = compute_compliance_state(rules, initial_balance, daily_loss, total_loss)
+```
+
+**So on a raise, no `PropFirmSnapshot` is written and the compliance state is not updated.** The
+surface reads snapshot HISTORY, and **a missing snapshot is indistinguishable from a quiet period** —
+could-not-ask rendered as nothing, on the breach monitor for the funded account, every two minutes.
+
+**`B377`'s fix is right and this is where it stops being visible.** Before it, an absent `equity` gave
+a wrong drawdown; after it, the drawdown simply does not update. **Both are silent; the second is at
+least recoverable, and it should not have to be.** The consumer is the defect, exactly as `B372`
+found — the repair is to record an UNAVAILABLE compliance state rather than skip, so the monitor can
+say *could not evaluate* instead of showing the last good value indefinitely.
+
+## AND A CORRECTION TO `B377`, WHICH I FILED TWO HOURS AGO
+
+`B377` says the `equity` fallback *"changes how large every position is"*, citing
+`size_position(acct.equity, ...)`. **That is true of the code and false of CFT.** `ExecutionService`
+is constructed only as `ExecutionService(self.paper, ExecMode.PAPER)` at `crypto_loop.py:168` and
+`:794` — `B350`'s finding, which I established myself — so the equity it sizes from is the
+SIMULATOR's, never the live adapter's.
+
+**CFT's equity reaches the compliance monitor and the dashboard, and nothing else.** The fix matters
+more than `B377` argued, not less — a prop-firm breach is the account being closed — but the
+mechanism I gave was wrong, and it was wrong because I traced a call site instead of tracing what is
+passed to it.
+
+## `B376` DEPENDS ON `B372` LANDING WITH IT
+
+`B376`'s raise happens in position normalisation, so it reaches `manager.get_all_positions` — **which
+`B372` measured as swallowing adapter errors into a silently short list.** Until that lands,
+`B376` converts *a position with a wrongly-LONG direction* into *a position that is not there*.
+**Better, and not what the fix intends.** The kill-switch path is already correct: an enumeration
+failure raises with no `partial_report`, and post-`B366` the switch logs that the state of every open
+position is UNKNOWN.
+
+## THE GROUND TRUTH EXISTS, AND `B377` SHOULD CITE IT
+
+`backend/tests/unit/test_cryptofundtrader_adapter.py` — *"The login + endpoint shapes mirror the live
+`trading.cryptofundtrader.com` API captured during discovery."*
+
+```python
+BALANCE_RESP = {"balance": "5000.00", "equity": "5012.00", "margin": "0.00",
+                "freeMargin": "5000.00", "marginLevel": "0",
+                "profit": "12.00", "netProfit": "12.00",
+                "currency": "USD", "currencyPrecision": 2}
+```
+
+**`equity` IS present in the only recorded payload**, so requiring it is consistent with the
+evidence — and the fix should say so rather than leave the requirement unmotivated.
+
+**And it settles the second half of `B377` more sharply than I could:** the venue sends **both**
+`profit` and `netProfit`. So `acct.get("profit", acct.get("netProfit"))` is not *whichever arrived* —
+`profit` always wins and `netProfit` is never read. In this sample they agree at `"12.00"`, so the
+gross-versus-net ambiguity is **latent, not observed**, and nothing records which was chosen. That is
+a stronger statement than the one I filed, and it comes from the tree rather than from reasoning.
+
+Related: **B377**, **B376**, **B372**, **B350**, **B286**, **B366**.
 
 ---
 
