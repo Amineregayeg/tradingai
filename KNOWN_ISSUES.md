@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-05 (B380 — THE FIX WHOSE SUBJECT IS 'ABSENCE MUST BE VISIBLE' RENDERS ABSENCE AS A CLEAN BILL OF HEALTH. B378 writes a PropFirmSnapshot with state=UNAVAILABLE and nullable figures, correctly; the surface a human reads then turns it back into numbers. StatusBadge renders UNAVAILABLE honestly and the equity and balance tiles render an em-dash HONESTLY BY LUCK, escaping only because a `value > 0` truthiness guard happens to reject zero — an accident rather than a decision. But PropFirmPage does Number(s.equity), Number(s.daily_loss) and Number(s.total_loss), each of which is 0 for null, while initialBalance falls through `|| balance || 1` to ONE, so BOTH LOSS PERCENTAGES COMPUTE TO ZERO and the drawdown bars render '0% OF LIMIT USED'. AN UNEVALUATED ACCOUNT RENDERS AS ONE USING NONE OF ITS DRAWDOWN ALLOWANCE, which is the most reassuring reading available on a breach monitor. The TypeScript types also now lie about the payload: ComplianceState has no UNAVAILABLE member and the figures are `number` rather than `number | null`, while the API schema was correctly widened to Decimal | None with a comment saying callers must handle absence — and B369's frontend-subset-of-backend invariant CANNOT catch this, because the frontend is not offering something the backend refuses, it is FAILING TO REPRESENT something the backend now sends, which is the other direction of the same one-directional invariant. WHY THE ARM PASSED: it asserts rows[0].state is ComplianceState.UNAVAILABLE against the DATABASE and calls that the surface. B366 once more — produced, persisted, served, and turned back into a number by the consumer a human reads — so a fix whose whole subject is absence needs its witness driven from the layer where the absence is READ. NOT DEPLOYABLE: the third hold condition exists because a stale monitor shows a healthy account, and shipping this replaces STALE HEALTHY with FRESH HEALTHY, which is worse because it carries a current timestamp.)
+Last updated: 2026-09-05 (B383 — MY WATCHER MATCHED ITSELF, and a self-matching watcher is indistinguishable from the thing it watches. `until ! pgrep -f "pytest -q tests/unit"` — pgrep -f matches FULL COMMAND LINES and the watcher's own shell command line contains the pattern, so it matched itself, never exited, and spun at 7.7% CPU for 2h17m. WHY IT WENT UNNOTICED IS THE ENTRY: every check CONFIRMED it, because ps showed a process matching the pattern the whole time, which is exactly what a running suite looks like, and I reported 'suite still running' to Malek twice on that evidence. A self-matching watcher does not fail — it reports the state it was built to detect, forever, and the POSITIVE signal is the malfunction. The real suite had finished at 14:05 with 2009 passed; nothing ran for three hours while Execute held a run it believed would contend and Review sat idle by explicit agreement, on the last gate before an already-authorised live-money deploy. SECOND INSTANCE TODAY: pkill -f matched its own shell earlier and returned exit 144, and it taught me nothing BECAUSE IT WAS HARMLESS — the suite had already finished, so killing my own shell cost nothing. THE FIX IS NOT 'BE CAREFUL': match the interpreter's own argv[0], anchored, since a bash -c wrapper has /bin/bash as argv[0] and cannot match — A WATCHER MUST NOT BE EXPRESSIBLE IN ITS OWN PREDICATE. Third seat in one day for scans over a wrong population, after Review's wait_connected and Execute's B157 grep and my own names_item read — all three of those were CAUGHT, and the difference is direction: they returned a false NEGATIVE, which invites a second look, and this returned a confirming POSITIVE, which does not.)
 
 ---
 
@@ -24691,6 +24691,68 @@ registered was *"an arm asserting the compliance SURFACE reports not-evaluated"*
 layer where the absence is read.**
 
 Related: **B378**, **B366**, **B369**, **B215**, **B338**.
+
+---
+
+### B383 — MY WATCHER MATCHED ITSELF, AND A SELF-MATCHING WATCHER IS INDISTINGUISHABLE FROM THE THING IT WATCHES. Two seats idle for three hours
+
+**Filed 2026-09-05 by manager, against myself, and the cost was other seats' time rather than a
+wrong sentence.** Review asked to be told when the CPU freed so its mutation runs would not contend
+— the right protocol, and it made me the single point. I set:
+
+```bash
+until ! pgrep -f "pytest -q tests/unit" >/dev/null; do :; done
+```
+
+**`pgrep -f` matches FULL COMMAND LINES, and the watcher's own shell command line contains the
+pattern.** So it matched itself, the condition was never false, and it spun at 7.7% CPU for
+**2h17m**.
+
+## WHY I DID NOT NOTICE, WHICH IS THE WHOLE ENTRY
+
+**Every check I ran confirmed it.** `ps` showed *a process matching `pytest -q tests/unit`* the
+entire time — **which is exactly what a running suite looks like.** I reported "suite still running"
+to Malek twice on that evidence.
+
+> **A self-matching watcher does not fail. It reports the state it was built to detect, forever.**
+> There is no error, no timeout, no empty result — the positive signal is the malfunction.
+
+**The real suite had finished at 14:05**: `2009 passed, 1 xfailed, exit 0`. Nothing ran for three
+hours while both seats waited: Execute holding a run it believed would contend, Review idle by
+explicit agreement, on the last gate before a live-money deploy that was already authorised.
+
+## SECOND INSTANCE TODAY, AND THE FIRST TAUGHT ME NOTHING BECAUSE IT WAS HARMLESS
+
+```
+earlier   pkill -f 'pytest backend/tests/unit'   -> matched its own shell, exit 144
+now       pgrep -f "pytest -q tests/unit"        -> matched its own shell, 2h17m
+```
+
+**The first was survivable — the real suite had already finished, so killing my own shell cost
+nothing and I recorded it as a curiosity.** A failure that does no damage does not get a fix, and
+this is what the unfixed version costs when the conditions differ.
+
+## THE FIX, AND IT IS NOT "BE CAREFUL"
+
+**Match on something a shell wrapper cannot contain.** The interpreter's own argv, anchored:
+
+```bash
+ps -eo args --no-headers | awk '$1 ~ /python/ && /pytest/'     # the BINARY is argv[0]
+pgrep -x python                                                # or match the process NAME
+```
+
+**A `bash -c` wrapper has `/bin/bash` as `argv[0]`, so an anchored match on the interpreter cannot
+match the observer.** The general rule: **a watcher must not be expressible in its own predicate.**
+
+## THE FAMILY, AND THIS IS ITS THIRD SEAT IN ONE DAY
+
+**A scan over a population that includes the wrong members** — Review's `wait_connected` over the
+connection instances, Execute's `B157` grep over the entry's opening, my `names_item` read of a
+docstring. **All three were caught before being reported.** This one was not caught, and the
+difference is the direction of the error: **those returned a false NEGATIVE, which invites a second
+look. This returned a confirming POSITIVE, which does not.**
+
+Related: **B354**, **B362**, **B359**, **B364**.
 
 ---
 
