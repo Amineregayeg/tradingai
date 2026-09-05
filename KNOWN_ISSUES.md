@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-05 (B361 — 'GATE 2 IS DONE' IS THE ONLY CLAIM IN MT5_PROGRAMME.md THAT UN-DOES ITSELF, and it already has: the api serves e897d903c while B356's fix landed in 0abc534, so the DEPLOYED adapter is the one that iterates the deals wrapper and a demo linked now raises on the first real deals read. Three gates latch and GATE 2 does not — 'the server runs this code' is falsified by every commit — so the fix is to the CLAIM: Gate 2 splits into T-0134, done and latched, and THE DEPLOY as a PRECONDITION OF GATE 3. FILED WITH REVIEW'S B359 and B360 from its end-to-end audit of that document. B359: wait_connected EXISTS on MetatraderAccount and settles checklist item 1.1's open question TODAY and for free — and reading it found a LIVE ADAPTER DEFECT, since the SDK counts an account connected when the PRIMARY OR ANY REPLICA is CONNECTED while _require_broker_link checks only the primary, so a replicated account with a healthy replica makes the adapter raise on every read while the vendor considers it connected, which is B349's consequence by a second route. Review also records nearly filing the opposite: its first check asked the two connection-instance classes, got False from both, and a negative from a scan over the WRONG POPULATION reads exactly like a negative about the package. B360: T-0134's own requirement to DECIDE AND RECORD where the MetaApi token comes from was half met — decided as the credential blob at manager.py:117, recorded NOWHERE, with no METAAPI_TOKEN anywhere in backend/app — and a DONE marker closed it, in a section whose surrounding paragraph is still present-tense text describing the world BEFORE the task it marks complete.)
+Last updated: 2026-09-05 (B362 — citation_check.py REVIEWED, and it corrects the entry that built it. Its SUPERSEDED signal is NOT noise: 6 of 9 are real corrections, 2 are live recurrence signals and exactly 1 is bookkeeping, so my own blind spot UNDERSTATED the tool. Its file-order chronology is lossy in exactly one direction — 73 of 342 adjacent pairs violate commit order because a region of the file was written in REVERSE id order, and over the 27 heading-name pairs it misses 8 and FABRICATES NONE, so it under-reports supersession and never invents it — and it costs zero reports today BY LUCK, since none of the eight missed ids is cited under backend/app. AND B355's REPAIR RULE IS WRONG AS GENERALISED: nine entries have been lost rather than four, EIGHT OF NINE were DELIBERATE CLOSURES under an early convention of deleting an entry once its defect was fixed, and B90 is the only collateral one — so 'restore the entry rather than touch the comment' was generalised from the single atypical case, and following it for B10 or B24 would re-open entries the register decided to close. B10's correct repair is the OPPOSITE: repoint its five code citations at B157, whose heading says B157 IS B10 GENERALISED. B253 never existed at all. B6 is a FALSE POSITIVE — a broker group name realRLCusd-B6 in a live API response, 1 of 4 MISSING rows, in the signal B355 made most consequential. AND THE HOLE THE SCANNER CANNOT SEE IS THE ONE IT WAS BUILT FOR: a citation naming a real, current, un-superseded but WRONG id is invisible, which is B310 exactly — lots.py cited B283 three times for what is B287, all resolving, and running this scanner over that tree would have returned clean. Third instance of one family with B343 and B347: each verifies a reference EXISTS and cannot verify it is the RIGHT one. B90 RESTORED as history rather than as an open defect, its fix having landed.)
 
 ---
 
@@ -22932,6 +22932,63 @@ guards every modification to the entries it still has, means **deletion is the u
 operation** — and `33a3951` is the instance, recorded in this file, twenty minutes of `main`
 claiming a fix that had been carried away.
 
+## AMENDMENT 2 — MY REPAIR RULE IS WRONG, AND IT WAS GENERALISED FROM THE ONE CASE THAT IS NOT TYPICAL
+
+**This entry says: *"the correct action is to restore the entry rather than to touch the
+comment."*** Review swept the whole history instead of the four ids product code happens to cite,
+and that rule does not survive it.
+
+```
+ids ever added  352      present now  343      LOST  9
+
+B2 B5   "narrow B1/B2 to the one thing still missing"        deliberate
+B4      "Brokers: recover automatically from a failed..."    deliberate
+B6      "Engine: a run history panel..."                     deliberate
+B7      "close B7, record F8"                                deliberate
+B10     "Delete the forbidden premium/discount gate..."      deliberate
+B24     "T-0004 ... B24 closed"                              deliberate
+B37     "B37 closed, B33 gains the instance it predicted"    deliberate
+B90     "B94: why the announce-your-writes obligation..."    DOES NOT MENTION B90
+```
+
+> **Eight of nine were deliberate closures under an early convention of deleting an entry once its
+> defect was fixed. `B90` is the only collateral one — and I derived a general rule from it.**
+> Restoring `B10` or `B24` would re-open entries the register decided to close.
+
+**`B10`'s repair is the OPPOSITE of the rule above and is the correct one:** it was closed on
+purpose, `B157`'s heading says *"`B157` IS `B10` GENERALISED"*, so the five code citations have a
+live successor and should be **repointed at `B157`** rather than have `B10` resurrected.
+
+**`B253` cannot be restored because it never existed** — zero `+### B253` in the entire history. It
+is a dangling reference on both ends: one `Related:` line and one code comment, both naming an id
+nobody ever wrote.
+
+**`B6` is a FALSE POSITIVE of this entry's own scanner**, and in the signal this entry made most
+consequential:
+
+```
+cft_bridge_adapter.py:135   {"id": "realRLCusd-B6", "currency": "USD", ...}
+```
+
+**A broker group name in a live API response.** The hyphen makes `\b` match, so the regex fires on
+the tail of an identifier — **1 of 4 MISSING rows, and the failure direction is the expensive one**:
+someone chases git history for an entry that never existed.
+
+## AND THE HOLE THIS ENTRY DOES NOT LIST, WHICH IS THE ONE IT WAS BUILT TO CATCH
+
+**The scanner answers *does it resolve* and *has the register moved*. It cannot answer whether the
+citation points at the RIGHT entry.** A comment citing a real, current, un-superseded id that is
+simply the **wrong** id is not MISSING, not SUPERSEDED, not AMENDED — **it is invisible.**
+
+**`B310` is the recorded instance:** *"`lots.py` cites `B283` three times for what is `B287`"*, and
+`B283` has nothing to do with refusal bounds. **Three wrong citations, all resolving, none
+flaggable. Running this scanner over the tree that contained it would have returned clean.**
+
+**Third instance of one family**, with `B343` (an arm checks a marker names an item; nothing checks
+the item can falsify it) and `B347` (a must-hit control whose single fixture cannot distinguish the
+two forms it covers). **Each verifies that a reference EXISTS and cannot verify it is the RIGHT
+one.**
+
 Related: **B346**, **B350**, **B329**, **B310**, **B140**.
 
 ---
@@ -23375,6 +23432,166 @@ and a completion marker that closes the invisible half with it.
 Related: **B334**, **B352**, **B346**.
 
 ---
+
+---
+
+### B90 — EXIT-001's `NOT_APPLICABLE` has no denominator, and the ratification question needs a rate
+
+> **RESTORED 2026-09-05 by review.** Removed from the register by `33a3951`, a commit whose subject is
+> *"B94: why the announce-your-writes obligation is absolute"* and **which does not mention B90 at
+> all.** Of the nine entries ever lost from this file, **it is the only one removed by a commit that
+> does not say it was closing it** — the other eight were deliberate closures under the register's
+> early convention of deleting an entry once its defect was fixed.
+>
+> **Restored rather than left to its code comment, because `B355` is right about this case:**
+> `exit_001_v1_model.py:533` and `:743` were the only surviving statement of the finding, so
+> *"clean up the dangling reference"* would have destroyed the last record of it.
+>
+> **The fix LANDED — this is history, not an open defect.** `ExitSimulation` now carries the tick
+> count: `exit_001_v1_model.py:530`, *"HOW MANY TICKS THE MODEL ACTUALLY SAW. The denominator
+> (B90)"*, with the differential below reproduced in the comment. Text is verbatim from `33a3951^`.
+
+
+**Filed by Review 2026-08-15 from the T-0022 verdict at `e9ad0df`. MEASURED, not argued. The task
+PASSED — every numbered criterion is satisfied — and this is the gap the wiring task must not
+inherit silently.**
+
+**Two simulations of the same plan:**
+
+    A   zero ticks                                 verdict=NOT_APPLICABLE  events=0  runner_open=True  remaining=1.0
+    B   500 ticks over 4h09m, nothing ever fires   verdict=NOT_APPLICABLE  events=0  runner_open=True  remaining=1.0
+
+    verdicts identical : True
+    values identical   : True     <- the whole telemetry dict, byte for byte
+
+**`ExitSimulation` carries `plan, events, runner_open, remaining_fraction, session_close_active` and
+no tick count or path span.** So *"the path ran out"* and *"there was no path"* produce one record.
+
+**The module sets the standard and stops one case short.** Its docstring: *"`runner_open`
+DISTINGUISHES 'the path ran out' FROM 'the runner ended'."* **That is true, and neither is
+distinguished from "nothing was observed."** The claim is incomplete, not false.
+
+### Why it bites
+
+**Criterion 5's rationale:** *"produces a measurable record of **how often** a runner would have been
+cut and what it would have cost."* **How often is a rate.**
+
+**The numerator is present and well built** — `runner_cut_by_session_close` and
+`runner_r_at_session_close`, named rather than implied, exactly as `5-ii` requires. **The denominator
+is not recoverable**, because every `NOT_APPLICABLE` reads the same whether it observed a full
+session or nothing. **"47 runners were cut" cannot ratify a parameter without "out of how many."**
+
+**And the 19:00 close is exactly the parameter awaiting ratification** (`B87`, unanswered by Salim
+since 2026-08-15). The shadow evidence is the whole argument for implementing the close rather than
+defaulting it off — **so evidence that cannot carry a rate weakens the reason the close was built.**
+
+### The remedy is one field, and this codebase already applies it next door
+
+**`LadderOffForV1.evaluate([])` returns PASS — correct, an open position has zero tranches — and
+reports `tranche_count: 0` alongside it**, so an empty PASS is distinguishable from a conformant one.
+**That is `B84`'s prescribed remedy, implemented in EXIT-002 and absent from EXIT-001.**
+
+Add `ticks_seen` to `ExitSimulation` and its `values`, and the path span (`first_ts`/`last_ts`) if
+the rate is ever to be conditioned on whether the observation window contained a 19:00 boundary at
+all. **Then `NOT_APPLICABLE over 0 ticks` and `NOT_APPLICABLE over 500` stop being the same fact.**
+
+**Standing family:** an output that does not discriminate between working and broken — here, between
+never measured and measured and empty. Related: **B84**, **B87**, **B81**.
+
+---
+
+### B362 — `citation_check.py` REVIEWED. Its SUPERSEDED signal is 6/9 real corrections and NOT noise; its file-order chronology is lossy in exactly one direction and costs zero reports today by luck; and it has a FIFTH blind spot it does not list — a citation pointing at the WRONG but EXISTING entry
+
+The tool asserted two things about itself that had not been measured. Both are now measured.
+
+## 1. IS THE SUPERSEDED SIGNAL NOISE? NO — 6 OF 9 ARE CORRECTIONS
+
+The heuristic is *"a later entry names this id in its own heading"*, which cannot distinguish a
+correction from agreement. **Classified by reading each namer's heading:**
+
+```
+CORRECTIONS -- a comment citing the id may now mislead                                    6
+  B188 <- B191 "catches one of three" / B192 "B188 is three gaps, not one"    scope corrected
+  B217 <- B237 "the fix for B217 would have REPRODUCED B217"                  remedy corrected
+  B287 <- B310 "lots.py cites B283 three times for what is B287"              citation corrected
+  B303 <- B315 "B303 is three sites rather than two"                          scope corrected
+  B338 <- B349 "B338's fix raises uniformly across field classes"             remedy corrected
+  B346 <- B350 "B346's CONCLUSION IS RIGHT AND ITS MECHANISM IS WRONG"        mechanism corrected
+
+LIVE SIGNAL, NOT A CORRECTION -- the entry stands and something is at risk                2
+  B198 <- B263 "B198 has RECURRED"
+  B280 <- B290 "reintroduces B280 with the suite green"
+
+PURE TAXONOMY -- an instance of the cited entry's class, nothing corrected                1
+  B215 <- B338 "in the file that cites B215 throughout"
+```
+
+**8 of 9 carry something a reader should act on and exactly 1 is bookkeeping.** The concern that the
+signal is *"noise wearing a verdict's clothes"* is not borne out — and the blind spot as documented
+(*"it cannot tell a correction from agreement, both are flagged, deliberately"*) understates the
+tool: in practice the population it flags is dominated by corrections.
+
+## 2. FILE ORDER AS CHRONOLOGY — LOSSY IN ONE DIRECTION, AND THE LOSS LANDS OUTSIDE ITS POPULATION
+
+Blind spot 4 says *"a good proxy and a proxy… an entry inserted out of order would be misjudged"*,
+which implies error in both directions. **Measured against `git log` over `KNOWN_ISSUES.md`:**
+
+```
+adjacent-pair violations of file-order-as-chronology     73 of 342   (21%)
+```
+
+and they cluster in descending runs, so a region of the file was written in **reverse** id order
+rather than appended. What that costs, measured over every pair where one heading names another id:
+
+```
+heading-name pairs total                    27
+  'later' by FILE ORDER                     19
+  'later' by COMMIT TIME                    27
+  MISSED by file order                       8      <- truly later, appears earlier
+  FALSELY 'later' by file order              0      <- never fabricates a supersession
+```
+
+**So it is SOUND in direction and LOSSY in coverage: it never invents a supersession and it misses
+30% of them.** That is a better and narrower statement than the blind spot makes.
+
+**And it costs zero reports today — by luck rather than by design.** None of the eight missed ids
+(`B116 B124 B171 B18 B180 B25 B34`) is cited anywhere under `backend/app`, so every loss falls
+outside the population the tool reports on. **That is a fact about which entries happened to get
+cited, not a property of the tool**: one new comment citing `B25` and the under-report becomes
+silent and real.
+
+**The fix is cheap and I measured it while measuring the defect:** one `git log --reverse -p --
+KNOWN_ISSUES.md` pass builds the true first-added ordering for all 343 entries in about two seconds.
+There is no reason to keep the proxy.
+
+## 3. THE BLIND SPOT IT DOES NOT LIST: A CITATION POINTING AT THE WRONG *EXISTING* ENTRY
+
+The tool answers *does the citation RESOLVE* and *has the register MOVED under it*. **It cannot
+answer whether the citation points at the RIGHT entry.** A comment citing a real, current,
+un-superseded id that is simply the wrong id is invisible — it is not MISSING, not SUPERSEDED, not
+AMENDED.
+
+**The register already records an instance.** `B310`: *"`lots.py` cites `B283` three times for what
+is `B287`"* — and `B283` *"is about `BridgeTransport` and MT5 reusability. It has nothing to do with
+refusal bounds."* Three wrong citations, all resolving, none flagged. Checked today: those sites now
+correctly cite `B287` and `B283` appears nowhere in `backend/app`, **so the instance is closed and
+the hole is not.** Running the tool over the tree that contained it would have returned clean.
+
+**Third instance of one family**, and worth naming as such: `B343` — an arm checks that an `ASSUMES:`
+marker names a checklist item, and nothing checks the item can falsify the assumption. `B347` — a
+must-hit control covers two import forms with one fixture that cannot distinguish them.
+**Each is an instrument that verifies a reference EXISTS and cannot verify that it is the RIGHT
+one.** That is the shape to look for in the next one.
+
+## WHAT IS RIGHT AND SHOULD NOT CHANGE
+
+The MISSING section's framing after `B355` — *"this tool CANNOT SAY WHICH END BROKE… 'clean up the
+dangling reference' would have destroyed the last record of a real defect"* — is the most valuable
+sentence in the file, and it is the one that turns a verdict back into a question. The closing
+*"NOT FLAGGED IS NOT VERIFIED"* is the same discipline. **A scan that publishes its own bounds is
+the reason this review could be narrow instead of exploratory.**
+
+Related: **B343**, **B347**, **B355**, **B310**, **B354**.
 
 ---
 
