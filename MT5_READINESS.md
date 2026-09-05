@@ -33,6 +33,17 @@ strategy against it.
 
 ---
 
+## THE PLAN, IF YOU WANT THE WHOLE PICTURE FIRST
+
+**[`MT5_PROGRAMME.md`](MT5_PROGRAMME.md)** — written 2026-09-05: every task between here and trading
+the demo, what each one is FOR, and which of the four gates it belongs to. **It is the document that
+answers "when can I start"**; this one answers "what do you need from me".
+
+**Its headline, so it is not buried:** *linking* the demo is one task away and in flight. *Trading*
+the demo is a programme, and one piece of it — the order path — has never been scoped by anyone.
+
+---
+
 ## When you have credentials, start here
 
 **[`MT5_FIRST_CONNECTION.md`](MT5_FIRST_CONNECTION.md)** — every open question turned into an ordered
