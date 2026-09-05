@@ -22081,6 +22081,96 @@ could never surface: a mock has whatever attributes the test gives it.
 
 Related: **B335**, **B334**, **B292**, **B215**, **B303**, **B342**.
 
+
+> ### B341 ADDENDUM — THE FIX DOES NOT NEED A SHIM, BECAUSE THE VENDOR ALREADY HAS THE FIELD, IN A BETTER SHAPE THAN OURS
+>
+> **Measured after the entry above, when `T-0134` had to choose a seam.** The reachability datum is
+> not missing from the SDK; it is on a **different object**, and it is *one three-valued enum* where
+> the adapter invented *two booleans*:
+>
+> ```
+> MetatraderAccount.connection_status  ->  CONNECTED | DISCONNECTED | DISCONNECTED_FROM_BROKER
+> MetatraderAccount.wait_connected()   ->  "waits until API server has connected to the terminal
+>                                           AND terminal has connected to the broker"
+> RpcMetaApiConnectionInstance         ->  NOTHING. Its only connection-shaped members are
+>                                          `connect` and `wait_synchronized`.
+> ```
+>
+> **`DISCONNECTED_FROM_BROKER` is `B292`'s distinction, named by the vendor.** *Connected to MetaApi
+> but not to the broker* is not a state we inferred from two flags — it is one of three documented
+> values on the account.
+>
+> **So the adapter should hold the `MetatraderAccount`**, take its reads from
+> `account.get_rpc_connection()` and its reachability from `account.connection_status`. One vendor
+> object carries both facts. A shim presenting a fabricated `terminal_state` over the real objects
+> would translate the vendor's enum back into our invented pair — **`B184`, deliberately
+> constructed** — and would preserve, behind a translation layer, the assumption this entry exists
+> to record as false.
+>
+> ## AND EVERY SIGNATURE WE GUESSED IS RIGHT, WHICH IS THE RESULT THAT MAKES THE SHAPE FINDING SHARP
+>
+> ```
+> close_position(position_id: str, options=None)            our keyword matches
+> get_symbol_price(symbol: str, keep_subscription=False)    matches
+> get_symbol_specification(symbol: str)                     matches
+> get_deals_by_time_range(start_time, end_time, ...)        matches
+> get_account_information(options=None) / get_positions / get_orders   match
+> ```
+>
+> **Nine of nine call sites are correct and the tenth member does not exist on that object.** The
+> mock got every *name* right and the *arrangement* wrong, which is exactly the class `B334` said
+> had no instrument — and the instrument turned out to be `pip install`.
+>
+> ## TWO THINGS FOUND IN PASSING, RECORDED SO THEY ARE NOT REDISCOVERED
+>
+> * **`close_position_partially(position_id, volume, options)` EXISTS.** `close_position`'s partial
+>   refusal is therefore blocked *only* by the units→lots conversion, exactly as its message says —
+>   not by a missing venue capability. The call to use when `B302` is settled is named here.
+> * **`connect()` may be understating what it needs.** The adapter does `connect()` then
+>   `wait_synchronized()`. `account.wait_connected()` is documented as waiting for **both** the API
+>   server→terminal and terminal→broker links, which is the property `_require_broker_link` checks
+>   afterwards. Whether `wait_synchronized` alone implies a broker link is unsettled and belongs on
+>   the checklist rather than in a guess.
+
+> ### B341 SECOND ADDENDUM — `connection_status` IS A CACHED SNAPSHOT, AND I RECOMMENDED IT AS IF IT WERE LIVE
+>
+> **Correcting my own addendum above, before anything was built on it.** The addendum told
+> `T-0134` to take reachability from `MetatraderAccount.connection_status`, and that is still the
+> right FIELD. **It is not a live one.**
+>
+> ```python
+> @property
+> def connection_status(self) -> str:
+>     return self._data['connectionStatus']        # <-- the last REST payload
+>
+> async def reload(self):
+>     self._data = await self._metatrader_account_client.get_account(self.id)
+> ```
+>
+> **It changes only when `reload()` is awaited.** A guard reading it without one would answer
+> `CONNECTED` from a payload fetched at connect time, arbitrarily long after the broker link
+> dropped — **a confident answer from stale data, which is the exact failure `_require_broker_link`
+> exists to prevent.** Substituting it naively would have replaced a guard that never runs
+> (`B341`) with a guard that lies, and the second is worse because it looks like it works.
+>
+> **HOW I MISSED IT, because that is the reusable part.** I checked that the name existed, that the
+> three values were documented, and that they matched `B292`'s distinction — and stopped, because
+> the answer was *tidy*: one vendor enum replacing two invented booleans. **I verified the field's
+> VOCABULARY and not its FRESHNESS.** That is the same shape as the finding it was correcting:
+> `B341` is about checking every name and never asking about the arrangement.
+>
+> **WHAT THIS LEAVES, stated as a choice rather than a conclusion**, because the cost is real and
+> unmeasured:
+>
+> * **`reload()` before each guarded read** — one extra REST call per `get_positions` /
+>   `get_orders`. Correct, and it spends quota that is denominated in **CPU credits nobody has
+>   measured** (checklist 1.5), on the path a kill switch uses.
+> * **The streaming connection's `TerminalState`** — genuinely live, driven by
+>   `on_broker_connection_status_changed`, and it costs a **second connection and a websocket
+>   synchronisation** the read-only phase does not otherwise need.
+>
+> **Neither is free and the adapter must not pretend otherwise.** What it must not do is read the
+> cached field and call it a link check.
 ---
 
 ### B342 — `recommendedRetryTime` IS AN ABSOLUTE DATE AND THE ADAPTER CALLS `int()` ON IT. A real 429 raises `ValueError` from inside the translator whose only job is to return a clean error
@@ -22139,59 +22229,6 @@ mock built from our reading could not have produced the failing input in the fir
 the behaviour, the log is the description.
 
 Related: **B340**, **B341**, **B215**, **B334**.
-
----
-
-> ### B341 ADDENDUM — THE FIX DOES NOT NEED A SHIM, BECAUSE THE VENDOR ALREADY HAS THE FIELD, IN A BETTER SHAPE THAN OURS
->
-> **Measured after the entry above, when `T-0134` had to choose a seam.** The reachability datum is
-> not missing from the SDK; it is on a **different object**, and it is *one three-valued enum* where
-> the adapter invented *two booleans*:
->
-> ```
-> MetatraderAccount.connection_status  ->  CONNECTED | DISCONNECTED | DISCONNECTED_FROM_BROKER
-> MetatraderAccount.wait_connected()   ->  "waits until API server has connected to the terminal
->                                           AND terminal has connected to the broker"
-> RpcMetaApiConnectionInstance         ->  NOTHING. Its only connection-shaped members are
->                                          `connect` and `wait_synchronized`.
-> ```
->
-> **`DISCONNECTED_FROM_BROKER` is `B292`'s distinction, named by the vendor.** *Connected to MetaApi
-> but not to the broker* is not a state we inferred from two flags — it is one of three documented
-> values on the account.
->
-> **So the adapter should hold the `MetatraderAccount`**, take its reads from
-> `account.get_rpc_connection()` and its reachability from `account.connection_status`. One vendor
-> object carries both facts. A shim presenting a fabricated `terminal_state` over the real objects
-> would translate the vendor's enum back into our invented pair — **`B184`, deliberately
-> constructed** — and would preserve, behind a translation layer, the assumption this entry exists
-> to record as false.
->
-> ## AND EVERY SIGNATURE WE GUESSED IS RIGHT, WHICH IS THE RESULT THAT MAKES THE SHAPE FINDING SHARP
->
-> ```
-> close_position(position_id: str, options=None)            our keyword matches
-> get_symbol_price(symbol: str, keep_subscription=False)    matches
-> get_symbol_specification(symbol: str)                     matches
-> get_deals_by_time_range(start_time, end_time, ...)        matches
-> get_account_information(options=None) / get_positions / get_orders   match
-> ```
->
-> **Nine of nine call sites are correct and the tenth member does not exist on that object.** The
-> mock got every *name* right and the *arrangement* wrong, which is exactly the class `B334` said
-> had no instrument — and the instrument turned out to be `pip install`.
->
-> ## TWO THINGS FOUND IN PASSING, RECORDED SO THEY ARE NOT REDISCOVERED
->
-> * **`close_position_partially(position_id, volume, options)` EXISTS.** `close_position`'s partial
->   refusal is therefore blocked *only* by the units→lots conversion, exactly as its message says —
->   not by a missing venue capability. The call to use when `B302` is settled is named here.
-> * **`connect()` may be understating what it needs.** The adapter does `connect()` then
->   `wait_synchronized()`. `account.wait_connected()` is documented as waiting for **both** the API
->   server→terminal and terminal→broker links, which is the property `_require_broker_link` checks
->   afterwards. Whether `wait_synchronized` alone implies a broker link is unsettled and belongs on
->   the checklist rather than in a guess.
-
 ---
 
 ### B345 — A TEST STUBS `aiohttp` INTO `sys.modules` WHEN IT IS MERELY NOT-YET-IMPORTED, AT COLLECTION TIME, AND NEVER REMOVES IT — so `T-0133`'s real `aiohttp` is shadowed by a hollow module for the whole suite process
