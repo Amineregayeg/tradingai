@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-05 (B372 — THE AGGREGATE POSITION READ COLLAPSES THREE STATES INTO ONE, AND THE WORST INSTANCE TELLS AN OPERATOR A POSITION DOES NOT EXIST. Measured as a differential: healthy plus a broker that CANNOT BE ASKED, healthy plus a broker that is FLAT, and healthy with a second broker ABSENT ENTIRELY all return the same list. TWO THINGS NOBODY HAD NAMED. First, positions.py:49 catches BrokerError and returns 502 and THAT BRANCH IS UNREACHABLE, because the aggregate swallows first and returns [] — so a reader of the endpoint concludes a broker failure surfaces as a 502, the handler is right there and well written, and THAT IS WHY THE DEFECT SURVIVED REVIEW. Second and worst, DELETE /positions/{id} looks the position up in that same aggregate and raises 404 'not found in any connected broker' — so AN OPERATOR CLOSING A POSITION BY HAND IS TOLD IT DOES NOT EXIST while the broker is connected and the position is open, which is B366's zero and B349's refusal by a third route and renders as a DEFINITE NEGATIVE rather than an ambiguous zero. AND THE CLASS WAS ALREADY WRITTEN DOWN: live_loop_proxy.py:37 says get_all_positions() returning [] is ambiguous by construction — the fix for the proxy's version names the aggregate's version in a comment and stops, which is B314. MY VOCABULARY CLAIM WAS HALF WRONG: the adapter's vocabulary is an EXCEPTION and this layer cannot raise, since the endpoint's contract is never-an-error and three consumers rest on it; what transfers is close_all_positions' REPORT — one row per subject with a disposition and a reason, PER ADAPTER rather than per position. Property and kill-set registered BEFORE any arm exists, with the B349 orthogonality condition. FILED WITH B371, where renaming CFT's label turns 5 of 6 MT5 tests red because they locate their subject through another broker's string — the locator class from c584b5b sitting unfired in its neighbours.)
+Last updated: 2026-09-05 (B374 — A SECOND LIVE-MONEY DEFECT IS DEPLOYED, AND IT IS IN SERIES WITH THE FIRST. Found by auditing the DENOMINATOR rather than the claim: I had written into ENGINE_START_RUNBOOK that the deployed CFT kill switch is B303, having looked at it only because T-0132 made me, and swept nothing else — a claim with an uncounted denominator. Counted, seven files differ between the deployed sha and HEAD and six are safe (three MT5-only and unwired with every write refusing, three docstring-only with zero behavioural change); the seventh is kill_switch.py, whose B366 fix is in the repo and NOT DEPLOYED, and it is the CONSUMER so it is venue-agnostic and applies to CFT. The two sit in series on one path: B303 aborts CFT's loop on a ConnectTimeout so the results die with the frame, and B366 discards a report even if one existed, giving '0 closed, 0 failed'. So the runbook UNDERSTATED it — the deployed kill switch cannot report what it failed to close and the layer above would not report it either — and step 1 of the start sequence now reads LAND T-0132 AND DEPLOY HEAD, because landing the adapter fix and deploying that alone still leaves the operator reading three zeros. The runbook's reading order and the rest of its sequence were verified and hold: no migration is pending, and web-build is still necessary rather than residual since the frontend moved. AND REVIEW CORRECTED ITS OWN B362: 'the chronology proxy costs zero reports today, by luck' is FALSE — three of the seven missed ids are cited over six sites, and they are three of the four the git-order fix recovered, so the proxy was suppressing three REAL flags in product code rather than none. The cause is the register's own recurring one: the check was run from a directory where backend/app does not exist, with stderr silenced, so A SCAN THAT COULD NOT SEE ITS POPULATION RETURNED A CONFIDENT ZERO and the conclusion was published inverted.)
 
 ---
 
@@ -24172,6 +24172,96 @@ the adapters it could not ask and why. **`close_position`'s 404 then becomes ans
 position"*, and today they are the same one.
 
 Related: **B292**, **B293**, **B366**, **B349**, **B272**, **B314**, **B215**.
+
+---
+
+### B374 — THE DEPLOYED BUILD HAS A SECOND LIVE-MONEY DEFECT AND THE RUNBOOK NAMES ONLY THE FIRST. `B366` is in the consumer, it is VENUE-AGNOSTIC, and it is what makes `B303` unreportable
+
+`ENGINE_START_RUNBOOK.md` holds the engine on one measured claim: the deployed build's CFT
+`close_all_positions` catches `BrokerError` only, so a `ConnectTimeout` aborts the loop. **True, and
+the manager said plainly that they checked it because `T-0132` made them look, and swept nothing
+else** — *"unsafe in this one way I happened to be looking at"* with an uncounted denominator.
+
+## THE DENOMINATOR, COUNTED
+
+Seven files under `backend/app` changed between the deployed sha `e897d903c` and `HEAD`:
+
+```
+mt5.py                  MT5 only -- not wired to any connection row, and its writes refuse   no exposure
+manager.py              MT5 token validation only; the ALLOW_LIVE_TRADING hoist is DEPLOYED  no exposure
+schemas/broker.py       MT5 request fields                                                   no exposure
+decision_trace.py       DOCSTRING only (B10 -> B157 repointing), 0 behavioural lines         no exposure
+entry_comparison.py     DOCSTRING only                                                       no exposure
+news_context.py         DOCSTRING only                                                       no exposure
+kill_switch.py          B366 -- A SECOND LIVE-MONEY DEFECT                                   EXPOSED
+```
+
+**Six of seven are safe and one is not.** Also counted: **no migration changed since the deploy**
+(`git diff e897d90..HEAD -- backend/alembic` is empty, latest is `0008`), so the runbook's *"the
+migration lives in the image"* holds; and the **frontend DID move** (`SettingsPage.tsx` +83,
+`types/api.ts` +12), so recreating `web-build` in step 3 is still necessary rather than residual.
+
+## THE SECOND DEFECT, AND WHY IT COMPOUNDS THE FIRST
+
+Deployed `kill_switch.py`:
+
+```python
+except Exception as exc:
+    logger.error("Kill switch: error calling close_all_positions", error=str(exc))
+    close_results = []
+```
+
+**`close_all_positions` raising for ANY reason yields "0 closed, 0 failed".** `B366`'s fix — read
+`exc.partial_report` — is in the repo and is not deployed.
+
+**It is in the consumer, so it is venue-agnostic and it applies to CFT.** On the deployed build the
+two defects are in series on one path:
+
+```
+1. B303   CFT's loop aborts on a ConnectTimeout and its results die with the frame
+2. B366   even if a report existed, the consumer discards it -> operator reads 0 closed, 0 failed
+```
+
+**The runbook says the deployed kill switch cannot report what it failed to close. It is worse: the
+layer above would not report it either.** Fixing only `B303` and deploying that alone would leave
+the operator reading three zeros — so `T-0132` landing is necessary and not sufficient, and step 1
+of the sequence should say *land T-0132 **and deploy `HEAD`***, which the existing step 4 sha check
+already enforces if step 1 is stated correctly.
+
+**The hold is right and this strengthens it.** Nothing here argues for starting the engine.
+
+---
+
+## AMENDMENT TO `B362` — MY OWN "COSTS ZERO REPORTS TODAY" WAS A CONFIDENT ZERO FROM A DIRECTORY THAT DID NOT EXIST
+
+`B362` measured that the chronology proxy missed 8 of 27 heading-name pairs and then said:
+
+> *"it costs zero reports today — by luck. None of the eight missed ids is cited anywhere under
+> `backend/app`."*
+
+**That is false.** Re-run from the repository root rather than its parent:
+
+```
+B116  1 site      B124  2 sites      B34  3 sites
+B171  0           B18   0            B180 0        B25  0
+```
+
+**Three of the seven are cited, over six sites.** The proxy was not costing zero reports; it was
+suppressing three real SUPERSEDED flags — which is precisely what the manager's git-order
+implementation recovered (`B34`, `B116`, `B124` are three of the four newly flagged ids).
+
+**The cause, confirmed:** the check ran from `/mnt/c/Users/malek/TradingAI`, where `backend/app` does
+not exist, with `2>/dev/null` silencing the *No such file or directory* warning. **A scan that could
+not see its population returned a confident zero, and I published the conclusion into the register.**
+
+`B354` is the same failure in the same session — a measurement whose baseline was wrong and whose
+output was well-formed — and this one is worse, because there the number happened to be right anyway
+and here the conclusion was inverted. **The register's standing rule is that a clean pass over an
+uncounted set is worthless; this was a clean pass over an EMPTY set that looked counted.**
+
+Related: **B366**, **B303**, **B362**, **B354**, **B333**, **B361**.
+
+---
 
 ---
 
