@@ -52,8 +52,32 @@ const BROKER_CAPABILITIES = {
       { value: 'practice', label: 'Demo' },
       { value: 'live', label: 'Live' },
     ],
-    envNote: 'Matches the MetaApi account you provisioned. Reads only — MT5 order placement '
-      + 'refuses at the adapter until the sizing conversion is settled.',
+    // `B370`. BOTH SENTENCES HERE WERE CLAIMS TO THE USER AND BOTH WERE WRONG.
+    //
+    // "Matches the MetaApi account you provisioned" claimed a CHECK against something checked
+    // against nothing: the MT5 branch of _make_adapter never reads `environment`, so `practice`,
+    // `live` and `nonsense` all construct and a typo is accepted in silence. The demo-or-real
+    // fact comes from `venue_account_type`, read FROM THE VENUE per call — the right source,
+    // which makes this field redundant rather than merely unchecked.
+    //
+    // IT IS KEPT RATHER THAN REMOVED, and that is a deliberate disagreement with the obvious fix.
+    // The stored value is DISPLAYED in the connection list above. Dropping the field would make
+    // the API's schema default stand in for a choice the user never made and then show it as a
+    // fact — manufacturing a value, which is worse than an inert one. So it stays, and it says
+    // what it is. Surfacing `venue_account_type` where the connection is displayed is the real
+    // fix and is a separate change on the read path.
+    //
+    // "until the sizing conversion is settled" was accurate about WHERE and WHY and WRONG ABOUT
+    // SUFFICIENCY, which is what a user reads. "Until X" promises that settling X lifts the
+    // refusal; three more blockers stand behind it, and the last is a decision only Malek can
+    // make. MT5_PROGRAMME's Gate 4 scopes it as three changes plus a ruling, and this note said
+    // the last obstacle was arithmetic.
+    envNote: 'A label for your own reference — it is NOT checked against MetaApi, and the '
+      + 'demo-or-real fact is read from the venue itself on every call. '
+      + 'READS ONLY: four things stop MT5 placing an order, and settling any one of them changes '
+      + 'nothing on its own — the adapter refuses (sizing conversion, B302), the execution '
+      + 'service has no live mode, it refuses any non-simulated broker, and whether an MT5 demo '
+      + 'counts as simulated is an open ruling (T-0076).',
   },
 } as const
 
@@ -454,7 +478,7 @@ export default function SettingsPage() {
                           </div>
                         )}
                         {caps.envNote && (
-                          <div style={{ fontSize: 11, color: '#55556a', marginTop: 4, lineHeight: 1.45 }}>
+                          <div data-testid="env-note" style={{ fontSize: 11, color: '#55556a', marginTop: 4, lineHeight: 1.45 }}>
                             {caps.envNote}
                           </div>
                         )}

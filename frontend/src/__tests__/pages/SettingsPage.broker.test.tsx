@@ -95,4 +95,42 @@ describe('B369 — MT5 is reachable from the broker form', () => {
     // user hunting for a mistake they did not make, which is what the header is about.
     expect(screen.getByText(/^Demo$/)).toBeTruthy()
   })
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // B370 — what the note CLAIMS to the user
+  // ────────────────────────────────────────────────────────────────────────────
+
+  it('does not tell the user the environment is CHECKED against anything', async () => {
+    const user = userEvent.setup()
+    await openBrokerForm(user)
+    const select = screen.getByDisplayValue(/Crypto Fund Trader/i) as HTMLSelectElement
+    await user.selectOptions(select, 'mt5')
+
+    // `_make_adapter`'s MT5 branch never reads `environment` — `practice`, `live` and `nonsense`
+    // all construct. A note saying it MATCHES the provisioned account claims a check that does
+    // not exist, so a typo is accepted in silence.
+    // LOCATED BY A STABLE ANCHOR, NOT BY ITS OWN TEXT. Both arms first found the note by a
+    // phrase that is itself under test, so a mutation to that phrase broke the LOCATOR and both
+    // arms failed — one of them for a reason unrelated to its subject. A test that cannot find
+    // its subject reports the same red as one whose subject is wrong.
+    const note = screen.getByTestId('env-note')
+    expect(note.textContent).toMatch(/NOT checked against MetaApi/i)
+    expect(screen.queryByText(/Matches the MetaApi account you provisioned/i)).toBeNull()
+  })
+
+  it('does not name ONE blocker as the only thing between the user and trading', async () => {
+    const user = userEvent.setup()
+    await openBrokerForm(user)
+    const select = screen.getByDisplayValue(/Crypto Fund Trader/i) as HTMLSelectElement
+    await user.selectOptions(select, 'mt5')
+
+    const note = screen.getByTestId('env-note').textContent ?? ''
+    // "until the sizing conversion is settled" was accurate about WHERE and WHY and wrong about
+    // SUFFICIENCY — and sufficiency is what a user reads. Four things stop an order, and the
+    // last is a ruling only Malek can give.
+    expect(note).not.toMatch(/until the sizing conversion is settled/i)
+    expect(note).toMatch(/four things/i)
+    expect(note).toMatch(/T-0076/)
+    expect(note).toMatch(/no live mode/i)
+  })
 })
