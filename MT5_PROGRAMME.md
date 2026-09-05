@@ -16,8 +16,8 @@ programme: three named changes in the live loop, plus one decision that is Malek
 ## Where the line actually falls
 
 ```
-GATE 1   the adapter is CORRECT            in flight    4 tasks    needs nothing from Malek
-GATE 2   the adapter is REACHABLE          in flight    2 tasks    needs a deploy authorisation
+GATE 1   the adapter is CORRECT            in flight    5 tasks    needs nothing from Malek
+GATE 2   the adapter is REACHABLE          1 of 2 DONE  T-0134 landed b07a43f, deploy running
 GATE 3   the demo is CONNECTED             blocked      1 task     needs the MetaApi token
 GATE 4   the strategy TRADES the demo      SCOPED       3 tasks    needs the T-0076 ruling
 ```
@@ -91,6 +91,25 @@ verification. The survivors **cluster**: five of the seven rate-limit dispatch s
 *inverted* with the suite green. **One parametrized arm kills all five with the seven copies left
 exactly where they are.**
 
+### B352 — the live-trading gate has no arm at all
+
+**Goal: put a test behind the single centralised check that stands between a stored
+`observe_only=False` and a live-write adapter.**
+
+**Found while `T-0134` was hoisting it** — the check had to move out of the CFT branch so a second
+broker branch could not return before it, and moving a guard is the moment to ask what fails if it
+stops working. **The answer was nothing.**
+
+```
+grep -rn ALLOW_LIVE_TRADING tests/   ->  two files, BOTH prose in docstrings
+grep -rn "setenv|environ\[" tests/  |  ALLOW_LIVE   ->  no results
+```
+
+**Nothing in the suite sets the variable.** And the two files that mention it name it as the
+upstream control they are defending *behind* — so a defence-in-depth argument is resting on a gate
+that nothing checks. **`T-0134` just added a second caller to it**, which is the moment this stops
+being theoretical.
+
 ### B343 — three assumption markers that cannot be discharged
 
 **Goal: stop a citation from reading as a discharged assumption when the thing it cites cannot
@@ -108,10 +127,12 @@ marker** — `"checklist item 99.9"` passes, and so does `"settled by the checkl
 **The state to reach:** something in the application can construct an MT5 connection, and the code
 that does is running on the server.
 
-### T-0134 — make `mt5` constructible **(IN FLIGHT — this is the one task between you and a linked demo)**
+### ~~T-0134~~ — make `mt5` constructible — **DONE 2026-09-05, `b07a43f`**
 
 **Goal: turn a class that only its own test file can instantiate into something the platform can
-connect with.**
+connect with.** **Landed.** `_MT5_ALIASES = {"mt5", "metatrader5", "metatrader", "metaapi"}` and the
+factory constructs `MetaTrader5Adapter` from an account factory. **The demo is now linkable as soon
+as there is a token.**
 
 Today `_make_adapter` branches on one alias set and ends `raise ValueError("Unsupported broker")`.
 A `broker_connections` row naming `mt5` raises.
