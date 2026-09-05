@@ -85,8 +85,10 @@ class DecisionTrace:
     #: An observation (`observe`) never writes here, and that is load-bearing rather than
     #: tidy: `reasons` guards its census line with `blocked_by is None`, so a recorded
     #: would-block that touched this field would emit a record with no
-    #: `candidates: N considered` line -- `B10` exactly, rebuilt by a change that suppresses
-    #: nothing.
+    #: `candidates: N considered` line -- `B157`'s `B10` HALF exactly, rebuilt by a change
+    #: that suppresses nothing. (`B10` was deliberately closed; `B157` carries it, and the
+    #: TWO HALVES POINT OPPOSITE WAYS -- this is the MUST-EMIT one, because the zero here is
+    #: a fact the evaluation OBSERVED, not an absence it never looked at.)
     blocked_by: str | None = None
 
     #: Did this bar get PAST every gate that can stop it, and reach the entry decision?
@@ -128,7 +130,8 @@ class DecisionTrace:
         Deliberately NOT `gate(..)` with the return ignored. `gate` sets `blocked_by` on a
         failing verdict, and two things follow that a caller ignoring the return would not
         see: `summary` would name this gate as the reason a bar was declined when it was
-        not, and `reasons` would drop its census line, which is `B10`. **The blocking
+        not, and `reasons` would drop its census line, which is `B157`'s `B10` half --
+        the MUST-EMIT direction, an observed zero. **The blocking
         channel makes the record claim a block; that is what the channel is for.**
 
         Returns nothing ON PURPOSE. There is no value here a caller could act on without
@@ -239,7 +242,7 @@ class DecisionTrace:
         # were candidates, so a bar that passed every gate and then found no
         # fair-value gap produced a record ending after the last PASS — it read as
         # truncated, and 5 of the 137 declines in run 7d788ad6 were exactly that
-        # (KNOWN_ISSUES B10). "0 considered" is a finding; silence is an
+        # (KNOWN_ISSUES B157, its `B10` half). "0 considered" is a finding; silence is an
         # ambiguity, and it is the same "nothing found vs never checked"
         # distinction the gates above are listed pass-or-fail to preserve.
         #

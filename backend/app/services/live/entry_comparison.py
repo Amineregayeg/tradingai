@@ -84,7 +84,7 @@ registered_id = "ENTRY-001"
 #: `amplifier_levels_examined`), 4 decline with `NOT_APPLICABLE`, and 2 are constant by nature.
 #:
 #: **So the emptiness is DERIVED — the rule ran and its own values say it examined nothing —
-#: rather than asserted at one call site.** `B10`'s practice implemented inside the rules: *0
+#: rather than asserted at one call site.** `B157`'s `B10` half implemented inside the rules: *0
 #: examined* recorded rather than left silent, and the harness consumes a discriminator the
 #: rules already publish instead of inventing one.
 #:

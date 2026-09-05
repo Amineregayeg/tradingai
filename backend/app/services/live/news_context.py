@@ -268,7 +268,9 @@ class NewsContext:
         `trace.observe`, never `trace.gate`. `gate` sets `blocked_by` on a failing verdict,
         which would make `summary` name this gate as the reason a bar was declined when it
         declined for another reason — and would drop `reasons`' `candidates:` census line,
-        which is `B10` rebuilt by a change that suppresses nothing.
+        which is `B157`'s `B10` half rebuilt by a change that suppresses nothing. **This file
+        is where BOTH halves are live**: the census line must EMIT an observed zero, and
+        `detail()` must REFUSE to render a funnel of zeros the calendar never supplied.
         """
         trace.observe(GATE_NAME, self.would_block, self.detail, **self.values())
 
