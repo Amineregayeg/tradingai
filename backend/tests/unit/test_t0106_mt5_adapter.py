@@ -30,6 +30,7 @@ import pytest
 
 from app.core.exceptions import BrokerConnectionError, BrokerError, BrokerRateLimitError
 from app.db.enums import DirectionType, OrderType
+import app.services.broker.mt5 as _mt5_module
 from app.services.broker.base import OrderRequest
 from app.services.broker.mt5 import (
     ACCOUNT_TRADE_MODES,
@@ -1507,3 +1508,157 @@ def test_an_account_with_NO_replicas_is_decided_by_its_primary_alone():
     asyncio.run(adapter.connect())
     with pytest.raises(MT5BrokerUnreachable):
         asyncio.run(adapter.get_positions())
+
+
+# ======================================================================================
+# B340 — ONE arm over EVERY dispatch site, with the seven copies left where they are
+# ======================================================================================
+
+#: Every member that translates the SDK's 429 into ours, and the SDK call each one makes.
+#: **Derived by reading the module, not by memory** — `grep -c _rate_limited` is 8 (one definition
+#: and seven dispatch sites), and `test_EVERY_member_that_calls_the_SDK_routes_its_rate_limit`
+#: below asserts this list is still the whole population.
+RATE_LIMIT_SITES = [
+    ("get_account", "get_account_information", lambda a: a.get_account()),
+    ("get_positions", "get_positions", lambda a: a.get_positions()),
+    ("get_orders", "get_orders", lambda a: a.get_orders()),
+    ("get_recent_trades", "get_deals_by_time_range", lambda a: a.get_recent_trades()),
+    ("reference_price", "get_symbol_price", lambda a: a.reference_price("BTCUSD")),
+    ("get_symbol_specification", "get_symbol_specification",
+     lambda a: a.get_symbol_specification("BTCUSD")),
+]
+
+
+@pytest.mark.parametrize("member,sdk_call,invoke", RATE_LIMIT_SITES,
+                         ids=[s[0] for s in RATE_LIMIT_SITES])
+def test_EVERY_read_translates_a_429_into_a_rate_limit_error(member, sdk_call, invoke):
+    """ASSUMES: a 429 arrives as `TooManyRequestsException` carrying an ISO instant in
+    `metadata['recommendedRetryTime']`. Settled by checklist item 1.5, which now captures the
+    exception's TYPE as well as its payload.
+
+    **`B340`. 33 of 67 semantic mutations to `mt5.py` survived all 30 arms, and the survivors
+    CLUSTERED: five of the seven rate-limit dispatch sites could be INVERTED with the suite
+    green.** Two singletons covered `get_account` and nothing else, so six members carried a copy
+    of a dispatch nothing exercised.
+
+    **THE FIXTURE'S VALUE TYPE IS THE TEST.** Measured at `c5dacba`: the integer `7` gives six
+    passed and the venue's ISO instant gives six failed — same arm, only the value changed. An
+    integer fixture is green today against broken code, which is how `B342` lived behind an arm
+    that named the right member.
+    """
+    adapter, mock = _adapter()
+    retry_at = datetime.now(timezone.utc) + timedelta(seconds=120)
+
+    async def _limited(*a, **k):
+        raise TooManyRequestsException({
+            "recommendedRetryTime": retry_at.isoformat().replace("+00:00", "Z"),
+        })
+
+    setattr(mock._connection, sdk_call, _limited)
+    with pytest.raises(BrokerRateLimitError) as exc:
+        asyncio.run(invoke(adapter))
+    assert 110 <= exc.value.retry_after_seconds <= 120, (
+        f"{member} did not carry the server's own retry time: {exc.value.retry_after_seconds}"
+    )
+
+
+def test_connect_ALSO_translates_a_429_rather_than_reporting_an_unclassified_failure():
+    """ASSUMES: the same 429 shape on the connect path (checklist item 1.5).
+
+    The seventh dispatch site. `_classify_connect_error` reaches it after the two coded errors, so
+    a 429 during connect must not fall through to *"neither E_SRV_NOT_FOUND nor E_AUTH"* — which
+    is true and useless, and would send someone to check a server name during a throttle.
+    """
+    retry_at = datetime.now(timezone.utc) + timedelta(seconds=60)
+    adapter, _ = _adapter(connect=False, connect_error=TooManyRequestsException({
+        "recommendedRetryTime": retry_at.isoformat().replace("+00:00", "Z"),
+    }))
+    with pytest.raises(BrokerRateLimitError) as exc:
+        asyncio.run(adapter.connect())
+    assert exc.value.retry_after_seconds is not None
+
+
+def test_a_NON_rate_limit_failure_is_still_classified_normally_at_every_site():
+    """ASSUMES: nothing about the venue — it is the must-MISS for the arm above.
+
+    **Without this, a dispatch that treated EVERY exception as a rate limit passes all six
+    instances.** `B334` measured that the must-miss on the name discriminates the mechanism; this
+    is the same control applied across the whole population rather than at one site.
+    """
+    for member, sdk_call, invoke in RATE_LIMIT_SITES:
+        adapter, mock = _adapter()
+
+        async def _boom(*a, **k):
+            raise RuntimeError("not a throttle")
+
+        setattr(mock._connection, sdk_call, _boom)
+        if member == "reference_price":
+            # documented to swallow and return None rather than raise (base.py:195)
+            assert asyncio.run(invoke(adapter)) is None
+            continue
+        with pytest.raises(BrokerError) as exc:
+            asyncio.run(invoke(adapter))
+        assert not isinstance(exc.value, BrokerRateLimitError), (
+            f"{member} treated a RuntimeError as a rate limit"
+        )
+
+
+#: Members that talk to the SDK and deliberately do NOT route through `_translate`, each with the
+#: reason. **A declared exemption list is the point:** without one, "does not route" and "was
+#: forgotten" are the same observation, which is the shape `B215` keeps naming.
+ROUTING_EXEMPT = {
+    "_classify_connect_error":
+        "connect must distinguish E_SRV_NOT_FOUND from E_AUTH before anything else, so its "
+        "dispatch returns three different types rather than one",
+    "close_all_positions":
+        "a per-position failure becomes that ROW's reason and the loop continues (B303); "
+        "translating would raise and abandon the remaining positions",
+}
+
+
+def test_EVERY_member_that_calls_the_SDK_routes_its_rate_limit_through_ONE_dispatch():
+    """ASSUMES: nothing about the venue. It is about this module's own structure.
+
+    **`B340`'s second half, and the reason the consolidation is safe.** The parametrized arm above
+    proves the seven copies all behaved; this proves there is now one implementation and that
+    nothing has quietly grown an eighth copy. **A pin over a derived population**, so a new read
+    that forgets to translate fails here by name rather than joining the guarded set in silence.
+
+    Read structurally rather than by grep: `SDK_RATE_LIMIT_EXCEPTION` appears in prose in this
+    module a dozen times, and a substring guard would either match those or be tuned until it
+    stopped.
+    """
+    source = pathlib.Path(_mt5_module.__file__).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    offenders = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        body = ast.get_source_segment(source, node) or ""
+        talks_to_sdk = "await connection." in body or "self._require_connection()." in body
+        if not talks_to_sdk or node.name in ROUTING_EXEMPT:
+            continue
+        if "self._translate(" not in body:
+            offenders.append(node.name)
+    assert not offenders, (
+        f"these members call the SDK and do not route their failures through _translate: "
+        f"{offenders}. Either route them, or add them to ROUTING_EXEMPT WITH A REASON — an "
+        "undeclared exemption and an oversight are the same observation."
+    )
+
+
+def test_the_dispatch_EXISTS_IN_ONE_PLACE_and_the_copies_are_gone():
+    """ASSUMES: nothing about the venue. The must-hit half of the consolidation.
+
+    Counting the name-comparison, not the constant: `B340` measured seven copies of
+    `type(exc).__name__ == SDK_RATE_LIMIT_EXCEPTION`, five of which could be inverted with the
+    suite green. The two that remain are the declared exemptions above, and this arm goes red if a
+    third reappears — which is how the copies came back last time nobody was counting.
+    """
+    source = pathlib.Path(_mt5_module.__file__).read_text(encoding="utf-8")
+    comparisons = source.count("type(exc).__name__ == SDK_RATE_LIMIT_EXCEPTION")
+    assert comparisons == 2, (
+        f"expected 2 dispatch comparisons — `_translate` and `_classify_connect_error`, which "
+        f"answers a different question — and found {comparisons}. B340 is about SEVEN copies of "
+        "this line, five of them unexercised."
+    )

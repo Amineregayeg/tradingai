@@ -323,6 +323,26 @@ class MetaTrader5Adapter(BrokerAdapter):
             retry_after_seconds=seconds,
         )
 
+    def _translate(self, exc: Exception, what: str) -> BrokerError:
+        """One dispatch, seven call sites — `B340`, and this is the SECOND half of that fix.
+
+        **The order was measured and it is the reverse of the intuitive one.** Consolidating first
+        would have produced one site covered by two arms, and the parametrized arm would then have
+        been written against the consolidated code, where it can only ever prove that ONE
+        implementation works. Landing the arm first, against seven copies, proved every copy
+        behaved — and only then is collapsing them safe, because the arm that would notice a
+        divergence already exists and already passed against the divergent version.
+
+        `B340` measured what the copies cost: **33 of 67 semantic mutations survived all 30 arms,
+        and five of these seven sites could be INVERTED with the suite green.**
+
+        Returns rather than raises so the caller keeps `raise ... from exc` and the original
+        traceback.
+        """
+        if type(exc).__name__ == SDK_RATE_LIMIT_EXCEPTION:
+            return self._rate_limited(exc)
+        return BrokerError(f"MT5 {what} failed: {exc}", broker="mt5")
+
     # ------------------------------------------------------------------
     # 1. connect — connect() THEN wait_synchronized(). BOTH.
     # ------------------------------------------------------------------
@@ -414,9 +434,7 @@ class MetaTrader5Adapter(BrokerAdapter):
         try:
             info = await connection.get_account_information()
         except Exception as exc:  # noqa: BLE001
-            if type(exc).__name__ == SDK_RATE_LIMIT_EXCEPTION:
-                raise self._rate_limited(exc) from exc
-            raise BrokerError(f"MT5 get_account failed: {exc}", broker="mt5") from exc
+            raise self._translate(exc, "get_account") from exc
 
         self.venue_account_type = self._read_account_type(info)
 
@@ -481,9 +499,7 @@ class MetaTrader5Adapter(BrokerAdapter):
         try:
             return list(await connection.get_positions())
         except Exception as exc:  # noqa: BLE001
-            if type(exc).__name__ == SDK_RATE_LIMIT_EXCEPTION:
-                raise self._rate_limited(exc) from exc
-            raise BrokerError(f"MT5 get_positions failed: {exc}", broker="mt5") from exc
+            raise self._translate(exc, "get_positions") from exc
 
     def _connection_statuses(self) -> list:
         """The primary's status first, then every replica's — the vendor's own population.
@@ -680,9 +696,7 @@ class MetaTrader5Adapter(BrokerAdapter):
         try:
             orders = await connection.get_orders()
         except Exception as exc:  # noqa: BLE001
-            if type(exc).__name__ == SDK_RATE_LIMIT_EXCEPTION:
-                raise self._rate_limited(exc) from exc
-            raise BrokerError(f"MT5 get_orders failed: {exc}", broker="mt5") from exc
+            raise self._translate(exc, "get_orders") from exc
         return list(orders)
 
     # ------------------------------------------------------------------
@@ -724,9 +738,7 @@ class MetaTrader5Adapter(BrokerAdapter):
                 start_time=since_dt, end_time=datetime.now(timezone.utc)
             )
         except Exception as exc:  # noqa: BLE001
-            if type(exc).__name__ == SDK_RATE_LIMIT_EXCEPTION:
-                raise self._rate_limited(exc) from exc
-            raise BrokerError(f"MT5 get_recent_trades failed: {exc}", broker="mt5") from exc
+            raise self._translate(exc, "get_recent_trades") from exc
 
         # `B356`. **THE DEALS READ IS THE ONE WRAPPED READ, AND THE ADAPTER ITERATED THE
         # WRAPPER.** `get_deals_by_time_range` returns `MetatraderDeals`
@@ -819,8 +831,21 @@ class MetaTrader5Adapter(BrokerAdapter):
         try:
             quote = await connection.get_symbol_price(symbol=pair)
         except Exception as exc:  # noqa: BLE001
-            if type(exc).__name__ == SDK_RATE_LIMIT_EXCEPTION:
-                raise self._rate_limited(exc) from exc
+            # ROUTED THROUGH THE ONE DISPATCH, AND STILL SWALLOWING (`B340`).
+            #
+            # This member kept its OWN copy of the name comparison after the other five were
+            # consolidated, and every arm stayed green — **which is B340's own lesson aimed at
+            # B340's own fix: a behavioural arm cannot see that one member is structurally
+            # different from its five siblings.** The manager caught it by reading.
+            #
+            # It is not routed by simply raising what `_translate` returns, because this member
+            # must NOT raise on a generic failure: it returns `float | None`, and swallowing a
+            # market-data error is deliberate (`base.py:195`). So the dispatch decides WHAT the
+            # failure is, in one place, and this member decides what to DO with it — which is the
+            # asymmetry stated rather than left for a reader to infer from a missing branch.
+            translated = self._translate(exc, f"reference_price({pair!r})")
+            if isinstance(translated, BrokerRateLimitError):
+                raise translated from exc
             return None
         if not quote:
             return None
@@ -853,11 +878,7 @@ class MetaTrader5Adapter(BrokerAdapter):
         try:
             spec = await connection.get_symbol_specification(symbol=symbol)
         except Exception as exc:  # noqa: BLE001
-            if type(exc).__name__ == SDK_RATE_LIMIT_EXCEPTION:
-                raise self._rate_limited(exc) from exc
-            raise BrokerError(
-                f"MT5 get_symbol_specification({symbol!r}) failed: {exc}", broker="mt5",
-            ) from exc
+            raise self._translate(exc, f"get_symbol_specification({symbol!r})") from exc
         return dict(spec or {})
 
     # ------------------------------------------------------------------
