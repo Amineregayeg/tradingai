@@ -66,3 +66,38 @@ pandas-ta==0.4.71b0
 # invalid record is not evidence — the whole conformance suite is a pure function of what
 # lands here.
 jsonschema==4.26.0
+
+# --- MetaTrader 5, through MetaApi (T-0133) ---
+# THE ADAPTER IS BUILT AND NOTHING COULD CONNECT WITHOUT THIS LINE. `app/services/broker/mt5.py`
+# deliberately does NOT import this package (B328: an adapter whose module cannot be imported is
+# silently skipped by the discovery walk that exists to cover it, so it would ship uncovered with
+# the suite green). The client is injected instead. That design means 130 tests pass against a mock
+# with this package absent — so the FIRST thing a real token would have met is an ImportError
+# inside a container. This line is what closes that gap, and it must stay a pin rather than a range.
+#
+# WHAT IT COSTS, MEASURED BY A REAL INSTALL AND NOT BY A --dry-run (a dry run proves only that pip
+# can COMPUTE a set; it cannot tell you whether the result RUNS). Into a clean venv on python 3.12:
+#
+#   19 packages added, 65 -> 84 distributions.
+#   NOTHING in the production set was removed, downgraded or changed. `pip check`: clean.
+#   The combined single-resolution install -- which is what the container's entrypoint runs -- is
+#   BYTE-IDENTICAL to installing prod first and this second, so the result is order-independent.
+#   Every one of the 19 came from a prebuilt wheel; no source build, so python:3.12-slim needs
+#   no compiler.
+#
+# THREE HTTP STACKS IN ONE IMAGE, and the SDK is the one that brings all three: it declares
+# `httpx`, `aiohttp` AND `requests`. Production used exactly one (httpx) before this line.
+#
+# `python-socketio==4.6.1` IS A PINNED OLD MAJOR (5.x is current), pinned by the SDK, not by us,
+# and it drags `python-engineio==3.14.2` with it. Resolution alone cannot tell you whether an old
+# socketio major COEXISTS at runtime, so it was checked in one interpreter: httpx, aiohttp,
+# requests, socketio 4.6.1 and engineio 3.14.2 all import together, `MetaApi` is constructible, and
+# an httpx HTTPS request still succeeds (HTTP 200) with the SDK loaded.
+#
+# TWO SIBLING SDKs ARRIVE WHETHER OR NOT WE WANT THEM. `metaapi-cloud-copyfactory-sdk` and
+# `metaapi-cloud-metastats-sdk` are HARD requirements of this package, not extras. We use neither
+# (copy-trading and analytics). They cannot be excluded without vendoring.
+#
+# BUMPING THIS: re-run the coexistence check, not just the resolution. The failure mode this pin
+# guards against is a version that resolves and does not run.
+metaapi-cloud-sdk==29.1.1

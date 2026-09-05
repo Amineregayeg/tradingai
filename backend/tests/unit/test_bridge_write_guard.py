@@ -33,28 +33,58 @@ def _load_guard():
     Those are installed in the bridge container, not the backend venv. The guard
     is pure logic, so stub the imports rather than skip the tests — a
     safety-critical function that is only tested "when convenient" is untested.
+    **That refusal to skip is still right and is not what changed below.**
+
+    `B345`. THIS USED TO ASK `if name not in sys.modules` — *has anything imported this yet* —
+    and to leave the stub in place forever. Those two questions had one answer for as long as
+    `aiohttp` was absent from the venv, so the stub was harmless. **`T-0133` pinned
+    `metaapi-cloud-sdk`, which brings a REAL `aiohttp`, and separated them:** this function then
+    shadowed an installed package with a hollow module **at collection time**, for every test in
+    the process, in both run orders. Nothing here changed; the environment moved underneath a
+    condition that never measured what it was written to mean.
+
+    So it now asks **is it importable**, and it **removes what it installed**. A stub that
+    outlives the import it exists for is global state, and `metaapi_cloud_sdk` declares `aiohttp`
+    — a later test constructing a real client would meet a crippled HTTP library and fail
+    somewhere unrelated to its subject.
     """
+    import importlib.util
     import sys
     import types
 
+    def _is_really_installed(name: str) -> bool:
+        """`find_spec` raises when a PARENT package is missing, which is itself a 'no'."""
+        try:
+            return importlib.util.find_spec(name) is not None
+        except (ImportError, ValueError, AttributeError):
+            return False
+
     stubs = {}
     for name in ("aiohttp", "playwright", "playwright.async_api"):
-        if name not in sys.modules:
-            mod = types.ModuleType(name)
-            if name == "aiohttp":
-                mod.web = types.SimpleNamespace(
-                    Application=object, Request=object, Response=object,
-                    json_response=lambda *a, **k: None, get=None, post=None,
-                    run_app=lambda *a, **k: None,
-                )
-            if name == "playwright.async_api":
-                mod.async_playwright = lambda: None
-            sys.modules[name] = mod
-            stubs[name] = mod
+        if name in sys.modules or _is_really_installed(name):
+            continue
+        mod = types.ModuleType(name)
+        if name == "aiohttp":
+            mod.web = types.SimpleNamespace(
+                Application=object, Request=object, Response=object,
+                json_response=lambda *a, **k: None, get=None, post=None,
+                run_app=lambda *a, **k: None,
+            )
+        if name == "playwright.async_api":
+            mod.async_playwright = lambda: None
+        sys.modules[name] = mod
+        stubs[name] = mod
 
-    spec = importlib.util.spec_from_file_location("cft_bridge_under_test", _BRIDGE)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    try:
+        spec = importlib.util.spec_from_file_location("cft_bridge_under_test", _BRIDGE)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    finally:
+        # REMOVE ONLY WHAT THIS CALL PUT THERE, and only if it is still ours. `bridge` keeps its
+        # own references, so the loaded module is unaffected by the cleanup.
+        for name, mod in stubs.items():
+            if sys.modules.get(name) is mod:
+                del sys.modules[name]
     return module
 
 
