@@ -16,7 +16,7 @@ programme: three named changes in the live loop, plus one decision that is Malek
 ## Where the line actually falls
 
 ```
-GATE 1   the adapter is CORRECT            in flight    4 tasks    B352 already done in T-0134
+GATE 1   the adapter is CORRECT            in flight    3 tasks    T-0135 (5 findings), B340, B343
 GATE 2   the adapter is REACHABLE          DONE         T-0134 b07a43f + deployed e897d903c
 GATE 3   the demo is CONNECTED             blocked      1 task     needs the MetaApi token
 GATE 4   the strategy TRADES the demo      SCOPED       3 tasks    needs the T-0076 ruling
@@ -41,7 +41,13 @@ correction is in Gate 4 below (`B350`).
 a safety path. **Everything here was found by review or by installing the real SDK, and none of it
 needs Malek.**
 
-### T-0106 cycle 2 — the unreadable-field regression `B349`
+### `B349` — the unreadable-field regression  *(inside `T-0135`)*
+
+> **NOT a `T-0106` cycle 2, and this document said it was.** `T-0106` is **DONE** — Review passed
+> cycle 1 on 2026-09-05 with all four mutation predictions matched, and `B349` came *out* of that
+> review rather than being left open by it. It is routed to `T-0135`, which already owns
+> `close_all_positions`. **The heading here previously named a cycle that does not exist**, so a
+> reader counting Gate 1's tasks counted this one twice.
 
 **Goal: make sure a field we cannot parse cannot disable the kill switch.**
 
