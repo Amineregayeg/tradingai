@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-05 (B343 — THE `ASSUMES:` MARKER AUDIT: 3 of 21 arms cite checklist items that CANNOT FALSIFY them, and it is ONE mechanism rather than three accidents because the citations cross the DEAL/POSITION axis; and the policing arm enforces a WORD, not a reference — it checks that the string 'checklist' occurs in the marker, so 'checklist item 99.9' passes and so does 'settled by the checklist' naming no item at all. FILED WITH SIX OTHERS FROM THE T-0106 REVIEW: B334, the mock encodes the ADAPTER'S reading rather than the documentation's, so no arm can fail on a fact mt5.py and the mock encode the same way; B335, _require_broker_link FAILS OPEN when the guard attribute is absent and close_all_positions then returns [] on a down link, the exact collapse its own docstring says it prevents; B336, the direction mapping is uncovered and making every position LONG passes 30 of 30; B337, the position whose close WAS SENT is reported NOT_ATTEMPTED with an affirmatively false reason, and the arm covering that scenario asserts every row except that one; B338, coercions that manufacture a value the venue never sent, in the file that cites B215 throughout; and B340, re-running an inherited patch's own tests is 50.7% of a verification — 33 of 67 semantic mutations to mt5.py survive 30 green arms and the survivors CLUSTER.)
+Last updated: 2026-09-05 (B346 — EVEN ONCE mt5 IS CONSTRUCTIBLE, NOTHING IN THE ENGINE WOULD SEND IT AN ORDER. Traced because Malek asked whether he can start fully setting up the new simulation, which required reading the ORDER PATH rather than the adapter and nobody had. There are exactly two place_order call sites in the app: service.py:167 and live_loop_proxy.py:142, and both ExecutionService constructions in the tree pass the in-process paper broker (crypto_loop.py:168 and :794) while the proxy resolves to that same loop.paper — so NO BrokerAdapter held by the broker manager is on any order path. Reads are; writes are not. THREE INDEPENDENT REFUSALS STAND BEHIND IT AND ALL ARE DELIBERATE: ExecMode has NO LIVE member because the branch was removed rather than disabled, execute() RAISES at service.py:96 on any adapter reporting is_simulation=False, and MetaTrader5Adapter returns exactly that pending T-0076. The safety design works; what nobody had written down is that it also means THE DEMO CANNOT BE TRADED — linking for reads is T-0134 plus B341's reshape and is close, while running the strategy against the demo is a PROGRAMME needing a ruling and an order path that has never been scoped. B305 to B333 to this is the same walk three times — what instrument does it trade, what constructs it, what sends it an order — each found only when someone outside the task's frame asked a question the task did not need answered. FILED WITH B344, in which I asserted twice in one afternoon what an instrument could discriminate, from reading it, and was wrong both times: I predicted pip install would settle NAMES when nine of nine were already correct and the live axis was ARRANGEMENT, and I published that our ASSUMES meta-arm checks references RESOLVE when it checks that the WORD 'checklist' occurs. Review asked to be included and is, as a third instance, with the difference kept: a wrong prediction about CONTENT and a wrong prediction about an INSTRUMENT'S DISCRIMINATING POWER are not the same error, because the second one gets used to DISPATCH work.)
 
 ---
 
@@ -21813,6 +21813,201 @@ document had returned two confident false positives**, and only reading the bodi
 same class as `B319` and `B296`, on the instrument built to audit instruments.
 
 Related: **B334**, **B331**, **B341**, **B340**, **B272**.
+
+---
+
+### B344 — I ASSERTED WHAT TWO INSTRUMENTS COULD DISCRIMINATE, FROM READING THEM, AND WAS WRONG ABOUT BOTH IN ONE AFTERNOON — and I dispatched work on the first and published the second
+
+**Filed 2026-09-04 by manager.** `B140` is the standard this loop runs on — *read the code, form a
+claim about what it does, publish the claim as a mechanism* — and I rewrote `PROMPT_MANAGER.md`
+around it after `B320`/`B321`. **Both instances below are that rule violated on the same day, about
+instruments rather than about product code.**
+
+## INSTANCE 1 — I PREDICTED WHAT `pip install` WOULD CATCH, AND NAMED THE WRONG AXIS
+
+`B334` (review) closed with: *"it is not that the instrument is weak; it is that this class of
+defect has no instrument until a venue exists."* **I judged that too strong by half and said so in
+writing**, narrowing it to a split I asserted:
+
+> *"the real SDK is an instrument for the NAMES without any account… what it CANNOT settle is
+> behaviour, payload shapes, or which optional fields a real broker omits."*
+
+**I dispatched Review to falsify `B334`'s closing sentence on that split.** Then Execute installed
+the SDK and measured it:
+
+```
+close_position(position_id: str, options=None)          our keyword matches
+get_symbol_price(symbol: str, keep_subscription=False)  matches
+get_symbol_specification(symbol: str)                   matches
+get_deals_by_time_range(start_time, end_time, ...)      matches
+get_account_information / get_positions / get_orders    match
+                                        NINE OF NINE NAMES CORRECT
+```
+
+**Every name was right.** What the install caught was that the tenth member is **on a different
+object** — `terminal_state` does not exist on what `get_rpc_connection()` returns, and the
+reachability datum lives on `MetatraderAccount.connection_status` as a three-valued enum.
+
+> **The axis was ARRANGEMENT — which object holds which member — and NEITHER `B334` NOR MY
+> NARROWING NAMED IT.** Review said no instrument existed; I said the instrument settles names.
+> The instrument existed, settled nothing about names because nothing was wrong with them, and
+> settled the object graph, which is the thing neither of us thought to list.
+
+**My half-credit is worth stating precisely, because it is smaller than it looks.** I was right that
+an instrument existed before a venue did, and that mattered — it is why the install happened before
+Malek links. **I was wrong about everything it would find**, and a prediction that gets the
+existence right and the content wrong is not a corrected version of `B334`, it is a different error.
+
+## INSTANCE 2 — I PUBLISHED WHAT OUR OWN META-ARM CHECKS, AND IT CHECKS A WORD
+
+In `25f458d` I amended `MT5_FIRST_CONNECTION.md` §1.5 with this sentence:
+
+> *"one arm checks that those references RESOLVE. Nothing checks that the item on the other end can
+> actually falsify the assumption."*
+
+**The first clause is false.** `test_t0106_mt5_adapter.py:200`:
+
+```python
+names_item = "checklist" in marker.lower() or "nothing about the venue" in marker.lower()
+```
+
+**It checks that the WORD `checklist` occurs in the marker text.** *"checklist item 99.9"* passes.
+*"settled by the checklist"*, naming no item, passes. **Nothing resolves anything.**
+
+**And the sentence it sits in is about inadequate instruments reading as discharged.** I described
+the bound of one guard while overstating another guard in the same paragraph, from reading it
+instead of running it. Review's `B343` then found three markers citing items that cannot falsify
+them — **which is the audit result you get when the guard checks a word.**
+
+## THE SHARED MECHANISM, AND I CHECKED THAT IT IS SHARED RATHER THAN ASSUMING IT
+
+**Both are: a claim about what an instrument can DISCRIMINATE, made from reading the instrument,
+published, and acted on.** Not a claim about what code does — a claim about what a *test* or a
+*tool* would catch. That is the class `B140` exists for and the class I am least likely to apply it
+to, because an instrument feels like infrastructure rather than like a subject.
+
+**The unification is the tidier claim and this register says the tidier claim is the one to
+recheck**, so: the two differ in subject (an external package; our own arm), in blast radius
+(dispatched work; a published document), and in how they were caught (a peer's measurement; a
+peer's audit). **They share the mechanism and nothing else** — which is why this is one entry with
+two instances rather than one finding stated twice.
+
+**What it costs, concretely:** Review spent a cycle attacking a sentence of `B334`'s on an axis that
+was not the live one. It found `B343` anyway, which is the second-order reason the dispatch was not
+wasted — **and "it worked out" is not a defence of the reasoning that produced it.**
+
+## A THIRD INSTANCE, ADDED AT REVIEW'S OWN REQUEST — AND IT MAKES THIS NOT A MANAGER FAILURE MODE
+
+**Review asked not to be let off the hook, and it is right that the framing above was too narrow:**
+
+> *"B334 named two spellings as suspicious and the adapter was right both times. Your B344 mechanism
+> covers my instance as well as yours, so it should say so — it is one register-wide pattern with
+> two seats in it, not a manager failure mode."*
+
+**Verified against Execute's measurement rather than accepted:** nine of nine call signatures were
+correct, and the two spellings `B334` flagged were among them.
+
+**What the three share:** a claim about what is WRONG, or about what an instrument could SHOW to be
+wrong, **formed by reading and published before running.** All three were falsified by the same
+event — `pip install` — and none of the three seats had to wait for a venue to run it.
+
+**What they do NOT share, stated so the unification stays honest:** Review predicted *which facts*
+were wrong and was wrong about the facts. I predicted *what an instrument would catch* and was wrong
+about the axis. **A wrong prediction about content and a wrong prediction about an instrument's
+discriminating power are not the same error**, and collapsing them would lose the thing that makes
+the second one worse: an instrument claim gets used to DISPATCH work, so it is wrong in a direction
+that spends other seats' cycles. Mine did exactly that.
+
+Related: **B140**, **B334**, **B343**, **B320**, **B341**.
+
+---
+
+---
+
+### B346 — EVEN ONCE `mt5` IS CONSTRUCTIBLE, NOTHING IN THE ENGINE WOULD SEND IT AN ORDER. The live loop's execution service is hardcoded to the in-process paper broker at both of its construction sites
+
+**Filed 2026-09-05 by manager, because Malek asked whether he can "start fully setting up the new
+simulation and linking the demo account".** Answering that required tracing the order path rather
+than the adapter, and **nobody had.**
+
+`B333` found that the adapter is written and **nothing constructs it**. This is one layer further
+out: **construct it, and it still receives no orders.**
+
+## THE ORDER PATH, MEASURED — THERE ARE EXACTLY TWO `place_order` CALL SITES IN THE APP
+
+```
+backend/app/services/execution/service.py:167   res = await self.broker.place_order(req)
+backend/app/services/broker/live_loop_proxy.py:142   return await target.place_order(request)
+```
+
+And **both `ExecutionService` constructions in the tree pass the same in-process object:**
+
+```
+crypto_loop.py:168   self.execution = ExecutionService(self.paper, ExecMode.PAPER)
+crypto_loop.py:794   self.execution = ExecutionService(self.paper, ExecMode.PAPER)
+```
+
+`self.paper` is a `PaperBroker`, or a `SimPropFirmBroker` when `broker_mode == "sim"`
+(`crypto_loop.py:151`). **Both are simulations constructed inside the process.** The proxy's
+`target` resolves to that same loop broker, so it re-exposes the engine's own book to the rest of
+the app — **it does not route an order outward.**
+
+> **No `BrokerAdapter` instance held by the broker manager is on any order path.** Reads are; writes
+> are not.
+
+## THREE INDEPENDENT REFUSALS, ALL DELIBERATE, AND THAT IS THE POINT
+
+**This is not a bug and the entry does not propose fixing it as one.** Each layer was built on
+purpose and says so:
+
+```python
+class ExecMode(str, Enum):
+    OBSERVE = "observe"
+    PAPER = "paper"
+    # NOTE: there is deliberately NO LIVE member. This service cannot place a
+    # real-money order. Any adapter it receives must be is_simulation=True
+
+# service.py:96 — HARD SAFETY
+if not getattr(self.broker, "is_simulation", False):
+    raise RuntimeError("ExecutionService requires a simulation broker (is_simulation=True); ...")
+```
+
+1. **`ExecMode` has no `LIVE` member** — the branch was removed, not disabled.
+2. **`execute()` raises** on any adapter reporting `is_simulation=False`.
+3. **`MetaTrader5Adapter.is_simulation` returns `False`** (`mt5.py:147`), deliberately, pending
+   `T-0076`.
+
+**So the MT5 adapter is refused twice over, by two mechanisms that do not know about each other**,
+and a fourth thing — the hardcoded `self.paper` — means it would never be offered in the first
+place. **The safety design works. What is missing is anyone having written down that it also means
+the demo cannot be traded.**
+
+## WHY THIS WAS INVISIBLE, WHICH IS THE SAME REASON AS `B333` AND `B305`
+
+**Every MT5 task was about the adapter** — its members, its transport, its schema, its refusals, its
+construction. **`T-0134` was scoped as "make `mt5` constructible" and that is genuinely the next
+step for READS.** Nothing in the run asked *what calls `place_order`*, so nothing noticed that the
+answer is a hardcoded attribute two files away.
+
+**`B305` → `B333` → this is the same walk, three times**, each one a layer further from the adapter:
+what instrument does it trade; what constructs it; what sends it an order. **Each was found only
+when someone outside the task's frame asked a question the task did not need answered** — and this
+one was found because Malek used the words *"fully setting up"*, which the frame had no room for.
+
+## WHAT IT MEANS CONCRETELY, STATED SO IT IS NOT SOFTENED
+
+**Linking the MT5 demo for READS** — account information, positions, prices, the account-type field
+— **is `T-0133` + `T-0134` + `B341`'s reshape, and that is real and close.**
+
+**Running the strategy against the MT5 demo is a PROGRAMME, not a wiring change.** It needs
+`T-0076` ruled (his), and it needs an order path from the loop to an adapter that does not exist and
+has never been scoped. **A reader of `MT5_READINESS.md` would not learn this** — that document's
+own "honest risks" section says linking MT5 tests the plumbing rather than the strategy, which is
+true and is about a different thing.
+
+Related: **B333**, **B305**, **B341**, **B267**.
+
+---
 
 ---
 
