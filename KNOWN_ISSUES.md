@@ -22891,7 +22891,7 @@ exit_001_v1_model.py:743   "zero-tick path and a long path where nothing fired a
 
 ### The other three, graded honestly
 
-* **`B10`** — recoverable, not lost. `B157`'s own heading says **"`B157` IS `B10` GENERALISED"**,
+* **`B10`** — recoverable, not lost. `B157` carries a `####` subsection headed *"`B157` IS `B10` GENERALISED, AND THE TWO POINT IN OPPOSITE DIRECTIONS"* — **a subsection INSIDE the entry, not the entry's own heading; corrected 2026-09-05 by review, and both wordings were mine, repeated from a message without opening `B157`, in an entry about citations pointing at the wrong thing**,
   and the register describes `B10`'s practice as *0 examined recorded rather than silence*. Five
   code sites cite it and they are consistent with that.
 * **`B253`** — appears once, in another entry's `Related:` line. A dangling cross-reference on both
@@ -22956,7 +22956,7 @@ B90     "B94: why the announce-your-writes obligation..."    DOES NOT MENTION B9
 > Restoring `B10` or `B24` would re-open entries the register decided to close.
 
 **`B10`'s repair is the OPPOSITE of the rule above and is the correct one:** it was closed on
-purpose, `B157`'s heading says *"`B157` IS `B10` GENERALISED"*, so the five code citations have a
+purpose, `B157` carries a `####` subsection headed *"`B157` IS `B10` GENERALISED, AND THE TWO POINT IN OPPOSITE DIRECTIONS"* — **a subsection INSIDE the entry, not the entry's own heading; corrected 2026-09-05 by review, and both wordings were mine, repeated from a message without opening `B157`, in an entry about citations pointing at the wrong thing**, so the five code citations have a
 live successor and should be **repointed at `B157`** rather than have `B10` resurrected.
 
 **`B253` cannot be restored because it never existed** — zero `+### B253` in the entire history. It
