@@ -25,7 +25,7 @@ from decimal import Decimal
 
 import pytest
 
-from app.core.exceptions import BrokerError, BrokerRateLimitError
+from app.core.exceptions import BrokerConnectionError, BrokerError, BrokerRateLimitError
 from app.db.enums import DirectionType, OrderType
 from app.services.broker.base import OrderRequest
 from app.services.broker.mt5 import (
@@ -34,6 +34,7 @@ from app.services.broker.mt5 import (
     MT5AccountTypeUnreadable,
     MT5AccountTypeUnrecognised,
     MT5AuthFailed,
+    MT5ConnectionStatusUnrecognised,
     MT5BrokerUnreachable,
     MT5ServerNotFound,
 )
@@ -70,14 +71,61 @@ class _CodedError(Exception):
         self.code = code
 
 
-class _TerminalState:
-    def __init__(self, connected: bool = True, connected_to_broker: bool = True) -> None:
-        self.connected = connected
-        self.connected_to_broker = connected_to_broker
+class _RpcConnection:
+    """`RpcMetaApiConnectionInstance`'s shape — **the six reads and NO `terminal_state`**.
+
+    `B341`: that absence is the real SDK's arrangement and not an omission in this mock. Every
+    member the adapter calls is real and correctly named; they are split across two objects that
+    share no reads, so no single connection can serve both the data and the guard.
+    """
+
+    def __init__(self, owner: "MetaApiMock") -> None:
+        self._owner = owner
+        self.synchronized = False
+
+    async def connect(self) -> None:
+        if self._owner._connect_error is not None:
+            raise self._owner._connect_error
+
+    async def wait_synchronized(self) -> None:
+        self.synchronized = True
+        self._owner.synchronized = True
+
+    async def get_account_information(self) -> dict:
+        return dict(self._owner.account)
+
+    async def get_positions(self) -> list[dict]:
+        return [dict(p) for p in self._owner._positions]
+
+    async def get_orders(self) -> list[dict]:
+        return []
+
+    async def get_deals_by_time_range(self, start_time, end_time) -> list[dict]:
+        return [dict(d) for d in self._owner._deals]
+
+    async def get_symbol_price(self, symbol: str) -> dict:
+        return await self._owner.get_symbol_price(symbol=symbol)
+
+    async def get_symbol_specification(self, symbol: str) -> dict:
+        return {"volume_min": 0.01, "volume_step": 0.01, "volume_max": 100.0,
+                "contract_size": 1.0}
+
+    async def close_position(self, position_id: str) -> dict:
+        error = self._owner._close_errors.get(position_id)
+        if error is not None:
+            raise error
+        self._owner.closed.append(position_id)
+        return {"positionId": position_id, "status": "closed"}
 
 
 class MetaApiMock:
-    """The venue's shape as our documentation describes it — no more friendly than that."""
+    """`MetatraderAccount`'s shape — **the object the adapter now holds** (`T-0134`).
+
+    It hands out the RPC connection and answers `connection_status`, and **`connection_status` is
+    a CACHED FIELD here exactly as it is on the SDK**: `reload()` is what refreshes it. The mock
+    counts reloads so an arm can assert the adapter refreshed before trusting the value, which is
+    the whole of `B341`'s second addendum.
+    """
 
     def __init__(
         self,
@@ -85,7 +133,8 @@ class MetaApiMock:
         account: dict | None = None,
         positions: list[dict] | None = None,
         deals: list[dict] | None = None,
-        terminal_state: _TerminalState | None = None,
+        connection_status: str | None = "CONNECTED",
+        status_after_reload: str | None = None,
         connect_error: Exception | None = None,
         close_errors: dict[str, Exception] | None = None,
     ) -> None:
@@ -96,44 +145,31 @@ class MetaApiMock:
         }
         self._positions = positions if positions is not None else []
         self._deals = deals if deals is not None else []
-        self.terminal_state = terminal_state or _TerminalState()
         self._connect_error = connect_error
         self._close_errors = close_errors or {}
         self.closed: list[str] = []
         self.synchronized = False
+        self.reloads = 0
+        self.connection_status = connection_status
+        #: What `reload()` reveals. `None` means the cached value is already current — the point
+        #: being that an adapter which never reloads cannot tell these two apart.
+        self._status_after_reload = status_after_reload
+        self._connection = _RpcConnection(self)
 
-    async def connect(self) -> None:
-        if self._connect_error is not None:
-            raise self._connect_error
+    def get_rpc_connection(self) -> _RpcConnection:
+        """NOT a coroutine, matching the SDK — `get_rpc_connection(self) -> ...Instance`."""
+        return self._connection
 
-    async def wait_synchronized(self) -> None:
-        self.synchronized = True
+    async def reload(self) -> None:
+        self.reloads += 1
+        if self._status_after_reload is not None:
+            self.connection_status = self._status_after_reload
 
     async def get_account_information(self) -> dict:
         return dict(self.account)
 
-    async def get_positions(self) -> list[dict]:
-        return [dict(p) for p in self._positions]
-
-    async def get_orders(self) -> list[dict]:
-        return []
-
-    async def get_deals_by_time_range(self, start_time, end_time) -> list[dict]:
-        return [dict(d) for d in self._deals]
-
     async def get_symbol_price(self, symbol: str) -> dict:
         return {"bid": 100.0, "ask": 102.0}
-
-    async def get_symbol_specification(self, symbol: str) -> dict:
-        return {"volume_min": 0.01, "volume_step": 0.01, "volume_max": 100.0,
-                "contract_size": 1.0}
-
-    async def close_position(self, position_id: str) -> dict:
-        error = self._close_errors.get(position_id)
-        if error is not None:
-            raise error
-        self.closed.append(position_id)
-        return {"positionId": position_id, "status": "closed"}
 
 
 def _position(pid: str, **overrides) -> dict:
@@ -147,9 +183,17 @@ def _position(pid: str, **overrides) -> dict:
     return base
 
 
-def _adapter(**mock_kwargs) -> tuple[MetaTrader5Adapter, MetaApiMock]:
+def _adapter(connect: bool = True, **mock_kwargs) -> tuple[MetaTrader5Adapter, MetaApiMock]:
+    """**Connects by default**, because after `T-0134` a read without a connection REFUSES.
+
+    That refusal is a property worth having and it is not what most arms are about, so it is
+    exercised by its own arm rather than by every other one failing for the same reason.
+    """
     mock = MetaApiMock(**mock_kwargs)
-    return MetaTrader5Adapter(client=mock), mock
+    adapter = MetaTrader5Adapter(account=mock)
+    if connect and mock._connect_error is None:
+        asyncio.run(adapter.connect())
+    return adapter, mock
 
 
 # ======================================================================================
@@ -273,7 +317,7 @@ def test_an_unreachable_broker_makes_get_positions_RAISE_and_never_return_empty(
     """
     adapter, _ = _adapter(
         positions=[_position("p1")],
-        terminal_state=_TerminalState(connected=True, connected_to_broker=False),
+        connection_status="DISCONNECTED_FROM_BROKER",
     )
     with pytest.raises(MT5BrokerUnreachable) as exc:
         asyncio.run(adapter.get_positions())
@@ -327,7 +371,9 @@ def test_the_adapter_USES_the_servers_retry_time_and_never_invents_one():
     async def _limited(*a, **k):
         raise TooManyRequestsException({"recommendedRetryTime": 7})
 
-    mock.get_account_information = _limited
+    # PATCH THE CONNECTION, NOT THE ACCOUNT (`T-0134`): the reads moved to the RPC
+    # connection, so patching the account here would silently no-op.
+    mock._connection.get_account_information = _limited
     with pytest.raises(BrokerRateLimitError) as exc:
         asyncio.run(adapter.get_account())
     assert exc.value.retry_after_seconds == 7, (
@@ -346,7 +392,9 @@ def test_a_429_with_NO_retry_time_is_SURFACED_rather_than_defaulted():
     async def _limited(*a, **k):
         raise TooManyRequestsException({})
 
-    mock.get_account_information = _limited
+    # PATCH THE CONNECTION, NOT THE ACCOUNT (`T-0134`): the reads moved to the RPC
+    # connection, so patching the account here would silently no-op.
+    mock._connection.get_account_information = _limited
     with pytest.raises(BrokerRateLimitError) as exc:
         asyncio.run(adapter.get_account())
     assert exc.value.retry_after_seconds is None
@@ -370,7 +418,9 @@ def test_an_exception_with_a_DIFFERENT_name_is_not_treated_as_a_rate_limit():
     async def _other(*a, **k):
         raise SomeOtherSdkError("not a 429")
 
-    mock.get_account_information = _other
+    # PATCH THE CONNECTION, NOT THE ACCOUNT (`T-0134`): the reads moved to the RPC
+    # connection, so patching the account here would silently no-op.
+    mock._connection.get_account_information = _other
     with pytest.raises(BrokerError) as exc:
         asyncio.run(adapter.get_account())
     assert not isinstance(exc.value, BrokerRateLimitError)
@@ -635,7 +685,7 @@ def test_close_all_RAISES_rather_than_reporting_nothing_when_it_cannot_enumerate
     """
     adapter, _ = _adapter(
         positions=[_position("p1")],
-        terminal_state=_TerminalState(connected=True, connected_to_broker=False),
+        connection_status="DISCONNECTED_FROM_BROKER",
     )
     with pytest.raises(BrokerError) as exc:
         asyncio.run(adapter.close_all_positions())
@@ -821,3 +871,107 @@ def test_an_UNPARSEABLE_OPTIONAL_number_RAISES_and_is_not_read_as_ABSENT():
     with pytest.raises(BrokerError) as exc:
         asyncio.run(adapter.get_positions())
     assert "swap" in str(exc.value)
+
+
+# ======================================================================================
+# T-0134 — the adapter holds the ACCOUNT, and the guard REFRESHES before it trusts
+# ======================================================================================
+
+
+def test_a_read_before_connect_REFUSES_rather_than_answering_from_nothing():
+    """ASSUMES: nothing about the venue. It is about the adapter's own lifecycle.
+
+    `B341`: the previous shape ran every read against whatever object was injected, so an adapter
+    that had never connected produced venue-shaped answers. **Not connected is *could not ask*.**
+    """
+    adapter, _ = _adapter(connect=False)
+    with pytest.raises(BrokerConnectionError) as exc:
+        asyncio.run(adapter.get_positions())
+    assert "connect() has not been called" in str(exc.value)
+
+
+def test_the_link_check_RELOADS_before_it_trusts_the_cached_status():
+    """ASSUMES: `MetatraderAccount.connection_status` is `self._data['connectionStatus']` and is
+    refreshed only by `reload()`. Read from the installed package (`T-0133`); **checklist item
+    1.1 does not cover it**, and the manager is amending that item because as written it prints
+    the cached field three times and reads the same value each time.
+
+    **THIS IS THE ARM THAT WOULD PASS AGAINST A GUARD THAT LIES.** The account starts saying
+    `CONNECTED` and the reload reveals `DISCONNECTED_FROM_BROKER`. An adapter that reads the
+    cached value returns positions from a broker it cannot see; one that reloads first raises.
+    The two are indistinguishable without this arm, which is why the fix needed one.
+    """
+    adapter, mock = _adapter(
+        positions=[_position("p1")],
+        connection_status="CONNECTED",
+        status_after_reload="DISCONNECTED_FROM_BROKER",
+    )
+    with pytest.raises(MT5BrokerUnreachable):
+        asyncio.run(adapter.get_positions())
+    assert mock.reloads >= 1, "the guard trusted a cached field without refreshing it"
+    assert adapter.last_link_check_at is not None, (
+        "the age of the answer must be published, not inferred"
+    )
+
+
+def test_a_HEALTHY_link_is_the_must_MISS_half_and_the_read_succeeds():
+    """ASSUMES: `CONNECTED` means both links are up — the vendor's own wording is *"terminal &
+    broker connection status"*. No checklist item covers it beyond 1.1.
+
+    Without this, the arm above passes under a guard that raises unconditionally.
+    """
+    adapter, mock = _adapter(positions=[_position("p1")], connection_status="CONNECTED")
+    assert len(asyncio.run(adapter.get_positions())) == 1
+    assert mock.reloads >= 1
+
+
+def test_a_MISSING_connection_status_FAILS_CLOSED():
+    """ASSUMES: nothing about the venue. It is `B335`, on the new shape.
+
+    The old guard did `getattr(client, "terminal_state", None)` and **`return`ed** when it was
+    absent, so an object that could not answer was treated as reachable. **An account that cannot
+    say whether it is connected has not said that it is.**
+    """
+    adapter, _ = _adapter(positions=[_position("p1")], connection_status=None)
+    with pytest.raises(MT5BrokerUnreachable) as exc:
+        asyncio.run(adapter.get_positions())
+    assert "CANNOT BE ESTABLISHED" in str(exc.value)
+
+
+def test_an_UNRECOGNISED_status_is_a_DIFFERENT_failure_from_a_known_outage():
+    """ASSUMES: the three documented values are today's whole vocabulary and a vendor may add a
+    fourth. Settled by checklist item 1.1 only for the values it observes.
+
+    Both fail closed. If they were one type, **a new vendor value would read as a permanent
+    outage forever** — `B215` on the field the read guard rests on, and the same split
+    `_read_account_type` already makes.
+    """
+    adapter, _ = _adapter(positions=[_position("p1")], connection_status="CONNECTING")
+    with pytest.raises(MT5ConnectionStatusUnrecognised) as exc:
+        asyncio.run(adapter.get_positions())
+    assert exc.value.value == "CONNECTING"
+    assert not isinstance(exc.value, MT5BrokerUnreachable), (
+        "an answer we do not understand must not be reported as a known outage"
+    )
+
+
+def test_the_RPC_CONNECTION_CANNOT_serve_the_guard_which_is_why_the_account_is_held():
+    """ASSUMES: `RpcMetaApiConnectionInstance` carries the six reads and NOT `terminal_state`,
+    and `StreamingMetaApiConnectionInstance` the reverse. Read from the installed package
+    (`T-0133`); no checklist item covers the SDK's object graph.
+
+    **This pins `B341`'s actual finding rather than its first headline.** Every member the adapter
+    calls is real and correctly named — `TerminalState.connected` and `connected_to_broker` exist
+    with exactly those names. They are **split across two objects that share no reads**, so the
+    connection cannot answer the guard and the account must be held.
+    """
+    _, mock = _adapter()
+    connection = mock.get_rpc_connection()
+    assert not hasattr(connection, "terminal_state"), (
+        "the mock must encode the SDK's arrangement: the RPC connection has no terminal_state, "
+        "and a mock that grew one would make this adapter's design look unnecessary"
+    )
+    for read in ("get_positions", "get_orders", "get_account_information",
+                 "get_deals_by_time_range", "get_symbol_price", "get_symbol_specification"):
+        assert hasattr(connection, read)
+    assert hasattr(mock, "connection_status") and hasattr(mock, "get_rpc_connection")

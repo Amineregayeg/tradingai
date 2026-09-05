@@ -134,12 +134,18 @@ PROXY_ADAPTERS = [
 #
 # ⚠ AND IT IS A SECOND INSTANCE OF `B327`, RECORDED RATHER THAN LEFT TO BE FOUND.
 # `test_live_adapter_write_methods_need_explicit_credentials` asserts a bare `TypeError` on
-# `cls()`. `MetaTrader5Adapter()` raises for want of `client` — **which is not a credential**,
+# `cls()`. `MetaTrader5Adapter()` raises for want of `account` — **which is not a credential**,
 # exactly as `live_loop_proxy` raised for want of `loop`. The arm will be green for this adapter
 # for a reason unrelated to credentials, and `B327`'s fix (derive the required positional
 # parameters and assert each is in a declared credential set) must cover it.
 LIVE_ADAPTERS = LIVE_ADAPTERS + [
-    ("mt5", MetaTrader5Adapter, lambda: MetaTrader5Adapter(client=object())),
+    # `T-0134` renamed this parameter from `client` to `account`, and THAT RENAME IS THE POINT
+    # rather than a tidy-up: `B341` measured that no SDK object carries the ten members the old
+    # `client` was assumed to have, so the adapter now holds a `MetatraderAccount` and takes its
+    # reads from `account.get_rpc_connection()`. Seven arms in this file broke on the rename and
+    # they were right to — the population that constructs an adapter is wider than the file that
+    # changes it.
+    ("mt5", MetaTrader5Adapter, lambda: MetaTrader5Adapter(account=object())),
 ]
 
 ALL_ADAPTERS = SIM_ADAPTERS + LIVE_ADAPTERS + PROXY_ADAPTERS

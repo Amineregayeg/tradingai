@@ -27,6 +27,7 @@ checklist, **the arms resting on a falsified answer are findable by grep rather 
 from __future__ import annotations
 
 import asyncio
+import inspect
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Callable
@@ -56,6 +57,12 @@ POSITION_TYPES = {
     "POSITION_TYPE_SELL": DirectionType.SHORT,
 }
 
+#: The three values MetaApi documents for `MetatraderAccount.connection_status` — read from the
+#: installed package (`T-0133`): *"one of CONNECTED, DISCONNECTED, DISCONNECTED_FROM_BROKER"*.
+#: **`DISCONNECTED_FROM_BROKER` is `B292`'s distinction named by the vendor** — connected to
+#: MetaApi and not to the broker is not a state we inferred from two flags.
+CONNECTION_STATUSES = ("CONNECTED", "DISCONNECTED", "DISCONNECTED_FROM_BROKER")
+
 #: The SDK's rate-limit exception, MATCHED BY CLASS NAME because this module deliberately does
 #: not import the SDK (see the module docstring). **A string match is weaker than an isinstance
 #: check and it is what not-importing costs**, so it is named here rather than inlined, and the
@@ -83,6 +90,25 @@ class MT5BrokerUnreachable(BrokerConnectionError):
     two connection states, and in this one `getPositions()` returns an empty list that means
     nothing. An empty list from a broker we cannot see is *could not ask*, not *flat*.
     """
+
+
+class MT5ConnectionStatusUnrecognised(BrokerError):
+    """`connection_status` carried a value outside the three documented ones.
+
+    **A different failure from `MT5BrokerUnreachable`, on purpose.** Unreachable is *we asked and
+    the link is down*; this is *we asked and did not understand the answer*. Collapsing them would
+    make a new vendor value read as a permanent outage — `B215` on the field the read guard rests
+    on, and the same split `MT5AccountTypeUnrecognised` makes for the same reason.
+    """
+
+    def __init__(self, value: Any) -> None:
+        super().__init__(
+            f"the account reported connection status {value!r}, which is not one of "
+            f"{CONNECTION_STATUSES}. Failing closed: this is an ANSWER WE DO NOT UNDERSTAND and "
+            f"not a known outage — see {CHECKLIST} item 1.1.",
+            broker="mt5",
+        )
+        self.value = value
 
 
 class MT5AccountTypeUnreadable(BrokerError):
@@ -182,15 +208,32 @@ class MetaTrader5Adapter(BrokerAdapter):
     #: these in from the ruling would be inventing a venue's vocabulary (checklist 1.3).
     default_pairs: list[str] = []
 
-    def __init__(self, client: Any, *, account_id: str = "") -> None:
-        """`client` is an object carrying MetaApi's method names — the SDK, or the mock.
+    def __init__(self, account: Any, *, account_id: str = "") -> None:
+        """`account` is a MetaApi **`MetatraderAccount`** — or the mock that presents its shape.
+
+        **`T-0134` CHANGED WHAT THIS TAKES, AND `B341` IS WHY.** It used to take a single `client`
+        carrying all ten members the adapter calls. **No SDK object has all ten**, and the split is
+        not arbitrary:
+
+            RpcMetaApiConnectionInstance        all six reads       NO terminal_state
+            StreamingMetaApiConnectionInstance  terminal_state      NONE of the reads
+
+        Every member is real and correctly named — that part of the reading held up — but **no
+        single connection can serve both the data and the guard.** The account is the object that
+        owns both: `get_rpc_connection()` for the reads, and `connection_status` for reachability.
 
         Injected rather than constructed here: see the module docstring. An unimportable adapter
         module is skipped in silence by the arm that covers it.
         """
-        self._client = client
+        self._account = account
+        self._connection: Any = None
         self._account_id = str(account_id or "")
         self.connected: bool = False
+
+        #: When the broker link was last CHECKED, not when it was last known good. `None` until
+        #: the first guarded read. Published because `connection_status` is a cached field and a
+        #: reader deserves to know the age of the answer rather than infer it.
+        self.last_link_check_at: datetime | None = None
 
         #: The venue's own answer to *what kind of account is this*, verbatim, or `None` if it has
         #: not been read. **EXPOSED AND NOT CONSULTED** — see `is_simulation`.
@@ -267,12 +310,40 @@ class MetaTrader5Adapter(BrokerAdapter):
         venue (checklist 1.1).
         """
         try:
-            await self._client.connect()
-            await self._client.wait_synchronized()
+            # `T-0134`. The reads live on the RPC connection, which the ACCOUNT hands out
+            # (`B341`). `get_rpc_connection` is not a coroutine on the SDK, so it is called and
+            # awaited only if it returns something awaitable — which keeps an async mock working.
+            self._account = await self._resolve_account()
+            connection = self._account.get_rpc_connection()
+            if inspect.isawaitable(connection):
+                connection = await connection
+            self._connection = connection
+            await self._connection.connect()
+            await self._connection.wait_synchronized()
         except Exception as exc:  # noqa: BLE001 - classified immediately below
             raise self._classify_connect_error(exc) from exc
         self.connected = True
         logger.info("MT5 adapter connected and synchronized")
+
+    async def _resolve_account(self) -> Any:
+        """The account, or the result of calling the thing that makes one.
+
+        **`T-0134`.** `manager._make_adapter` is SYNCHRONOUS and building a `MetatraderAccount`
+        is not — it needs `MetaApi(token).metatrader_account_api.get_account(id)`. Rather than
+        make the whole factory async, the adapter accepts either a ready account **or a callable
+        that produces one**, and resolves it here, at `connect()`, which is already the async
+        boundary.
+
+        **That also keeps the SDK import out of this module** (`B328`): the callable the factory
+        builds imports `metaapi_cloud_sdk` inside itself, so this file stays importable in an
+        image where the package is missing and the contract arm can still see the adapter.
+        """
+        account = self._account
+        if callable(account) and not hasattr(account, "get_rpc_connection"):
+            account = account()
+            if inspect.isawaitable(account):
+                account = await account
+        return account
 
     @staticmethod
     def _classify_connect_error(exc: Exception) -> Exception:
@@ -314,8 +385,9 @@ class MetaTrader5Adapter(BrokerAdapter):
     # 2. get_account — and the account-type read
     # ------------------------------------------------------------------
     async def get_account(self) -> Account:
+        connection = self._require_connection()
         try:
-            info = await self._client.get_account_information()
+            info = await connection.get_account_information()
         except Exception as exc:  # noqa: BLE001
             if type(exc).__name__ == SDK_RATE_LIMIT_EXCEPTION:
                 raise self._rate_limited(exc) from exc
@@ -365,9 +437,10 @@ class MetaTrader5Adapter(BrokerAdapter):
         which would silently defeat any kill-switch confirmation that re-reads positions to check
         the book is empty. **Raising is the only option the type leaves.**
         """
-        self._require_broker_link()
+        await self._require_broker_link()
+        connection = self._require_connection()
         try:
-            raw_positions = await self._client.get_positions()
+            raw_positions = await connection.get_positions()
         except Exception as exc:  # noqa: BLE001
             if type(exc).__name__ == SDK_RATE_LIMIT_EXCEPTION:
                 raise self._rate_limited(exc) from exc
@@ -375,16 +448,62 @@ class MetaTrader5Adapter(BrokerAdapter):
 
         return [self._to_position(raw) for raw in raw_positions]
 
-    def _require_broker_link(self) -> None:
-        """Both booleans, not one (`B292`, checklist 1.1)."""
-        state = getattr(self._client, "terminal_state", None)
-        if state is None:
-            return
-        if not getattr(state, "connected", False):
+    def _require_connection(self) -> Any:
+        """The RPC connection, or a refusal saying `connect()` was never called.
+
+        **`B341`.** The previous shape let every read run against whatever object was injected, so
+        an adapter that had never connected produced venue-shaped answers from nothing.
+        """
+        if self._connection is None:
+            raise BrokerConnectionError(
+                "MT5 adapter has no connection: connect() has not been called, so there is "
+                "nothing to read from. This is 'could not ask', not an empty account.",
+                broker="mt5",
+            )
+        return self._connection
+
+    async def _require_broker_link(self) -> None:
+        """Both links, and **the answer is refreshed before it is trusted** (`B292`, `B341`).
+
+        **`connection_status` IS A CACHED FIELD** — `self._data['connectionStatus']` on the
+        account, and `self._data` changes only when `reload()` is awaited. Reading it without one
+        answers `CONNECTED` from the payload fetched at connect time, **arbitrarily long after the
+        broker link dropped**, which replaces a guard that never runs with a guard that lies. The
+        second is worse because it looks like it works.
+
+        **THE COST, STATED RATHER THAN HIDDEN:** one REST call per guarded read, against a quota
+        denominated in **CPU credits nobody has measured** (checklist 1.5).
+
+        **WHY NOT THE STREAMING CONNECTION, WHICH IS GENUINELY LIVE.** `TerminalState.connected`
+        and `connected_to_broker` are push-updated and are exactly the pair this adapter wants —
+        **the adapter's names were right all along.** But `StreamingMetaApiConnectionInstance`
+        carries **none of the six reads**, so taking the guard from there means holding a second
+        connection permanently alongside the RPC one **whose entire job is to answer one boolean
+        pair**. That is the upgrade once 1.5 prices a call. It is not phase 1.
+        """
+        reload_ = getattr(self._account, "reload", None)
+        if reload_ is not None:
+            result = reload_()
+            if inspect.isawaitable(result):
+                await result
+        self.last_link_check_at = datetime.now(timezone.utc)
+
+        status = getattr(self._account, "connection_status", None)
+        if status is None:
+            # FAIL CLOSED (`B335`). This branch used to `return`, so an object without the
+            # attribute was treated as reachable. An account that cannot say whether it is
+            # connected has not said that it is.
+            raise MT5BrokerUnreachable(
+                "the account reports no connection status at all, so the broker link CANNOT BE "
+                f"ESTABLISHED as up. Failing closed ({CHECKLIST} item 1.1).", broker="mt5",
+            )
+        if status not in CONNECTION_STATUSES:
+            raise MT5ConnectionStatusUnrecognised(status)
+        if status == "DISCONNECTED":
             raise MT5BrokerUnreachable(
                 "not connected to MetaApi, so nothing can be read.", broker="mt5",
             )
-        if not getattr(state, "connected_to_broker", False):
+        if status == "DISCONNECTED_FROM_BROKER":
             raise MT5BrokerUnreachable(
                 "connected to MetaApi but NOT to the broker. Any position list read now would be "
                 "empty because we cannot see, not because the book is flat — and the two must "
@@ -474,9 +593,10 @@ class MetaTrader5Adapter(BrokerAdapter):
     # ------------------------------------------------------------------
     async def get_orders(self, status: str | None = None) -> list[dict]:
         """Pending orders. `status` is accepted for the contract and MetaApi has one list."""
-        self._require_broker_link()
+        await self._require_broker_link()
+        connection = self._require_connection()
         try:
-            orders = await self._client.get_orders()
+            orders = await connection.get_orders()
         except Exception as exc:  # noqa: BLE001
             if type(exc).__name__ == SDK_RATE_LIMIT_EXCEPTION:
                 raise self._rate_limited(exc) from exc
@@ -502,8 +622,9 @@ class MetaTrader5Adapter(BrokerAdapter):
         without one is also not a fill for our purposes and is skipped the same way.
         """
         since_dt = since or datetime.fromtimestamp(0, tz=timezone.utc)
+        connection = self._require_connection()
         try:
-            deals = await self._client.get_deals_by_time_range(
+            deals = await connection.get_deals_by_time_range(
                 start_time=since_dt, end_time=datetime.now(timezone.utc)
             )
         except Exception as exc:  # noqa: BLE001
@@ -548,8 +669,9 @@ class MetaTrader5Adapter(BrokerAdapter):
         available"* — which reads as a market-data fault and sends the debugger to the wrong
         subsystem. The language will not enforce it, so it is here on purpose.
         """
+        connection = self._require_connection()
         try:
-            quote = await self._client.get_symbol_price(symbol=pair)
+            quote = await connection.get_symbol_price(symbol=pair)
         except Exception as exc:  # noqa: BLE001
             if type(exc).__name__ == SDK_RATE_LIMIT_EXCEPTION:
                 raise self._rate_limited(exc) from exc
@@ -581,8 +703,9 @@ class MetaTrader5Adapter(BrokerAdapter):
         ETH — and MT5 brokers name the same instrument differently, so the symbol strings come
         from a real account and not from this file.
         """
+        connection = self._require_connection()
         try:
-            spec = await self._client.get_symbol_specification(symbol=symbol)
+            spec = await connection.get_symbol_specification(symbol=symbol)
         except Exception as exc:  # noqa: BLE001
             if type(exc).__name__ == SDK_RATE_LIMIT_EXCEPTION:
                 raise self._rate_limited(exc) from exc
@@ -724,8 +847,9 @@ class MetaTrader5Adapter(BrokerAdapter):
         try:
             for position in positions:
                 row = report[position.id]
+                connection = self._require_connection()
                 try:
-                    result = await self._client.close_position(position_id=position.id)
+                    result = await connection.close_position(position_id=position.id)
                 except Exception as exc:  # noqa: BLE001 - ANY exception, not just BrokerError
                     # A PER-POSITION FAILURE IS `FAILED`, AND THE LOOP CONTINUES. `B303`'s defect
                     # is CFT catching `BrokerError` only, so a `ConnectTimeout` aborts and the

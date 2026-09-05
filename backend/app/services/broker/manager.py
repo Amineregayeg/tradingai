@@ -20,6 +20,7 @@ from app.services.broker.base import BrokerAdapter
 from app.services.broker.cryptofundtrader import CryptoFundTraderAdapter
 
 _CFT_ALIASES = {"cryptofundtrader", "cft", "match-trader", "matchtrader"}
+_MT5_ALIASES = {"mt5", "metatrader5", "metatrader", "metaapi"}
 
 
 def _make_adapter(
@@ -36,19 +37,27 @@ def _make_adapter(
     explicitly enabled server-side.
     """
     key = broker.lower()
+
+    # ------------------------------------------------------------------------------
+    # THE LIVE-TRADING GUARD, HOISTED OUT OF THE CFT BRANCH (`T-0134`).
+    #
+    # A stored observe_only=False is honoured ONLY when ALLOW_LIVE_TRADING is set
+    # server-side. Its own comment said it "runs on EVERY construction path", and that
+    # was true only while CFT was the ONLY branch: a second branch returning before this
+    # point would have been a new unguarded real-money path, which is exactly why OANDA
+    # was deleted from this function. So it now runs BEFORE the dispatch, for every
+    # broker, and adding a branch cannot skip it by construction rather than by care.
+    # ------------------------------------------------------------------------------
+    allow_live = os.getenv("ALLOW_LIVE_TRADING", "false").strip().lower() == "true"
+    observe_only = creds.get("observe_only", True)
+    if observe_only is False and not allow_live:
+        logger.warning(
+            "Forcing observe_only=True for stored connection — live trading disabled",
+            broker=broker,
+        )
+        observe_only = True
+
     if key in _CFT_ALIASES:
-        # Centralised live-trading guard: a stored observe_only=False is honoured
-        # ONLY when ALLOW_LIVE_TRADING is set server-side. This runs on EVERY
-        # construction path (connect, load_from_db, reconnect), so a persisted
-        # live-write connection cannot be silently reconstructed.
-        allow_live = os.getenv("ALLOW_LIVE_TRADING", "false").strip().lower() == "true"
-        observe_only = creds.get("observe_only", True)
-        if observe_only is False and not allow_live:
-            logger.warning(
-                "Forcing observe_only=True for stored connection — live trading disabled",
-                broker=broker,
-            )
-            observe_only = True
         common = dict(
             email=creds.get("email", ""),
             password=creds.get("password", ""),
@@ -74,6 +83,62 @@ def _make_adapter(
         # change silently for anyone who has not deployed the bridge, and so the
         # existing adapter tests keep exercising the path they were written for.
         return CryptoFundTraderAdapter(**common)
+
+    if key in _MT5_ALIASES:
+        # MT5 THROUGH METAAPI — READS ONLY, AND THAT IS NOT A LIMITATION OF THIS BRANCH.
+        #
+        # `B346`: there are exactly two `place_order` call sites in the app and NEITHER can
+        # reach a broker adapter — both `ExecutionService` constructions pass the in-process
+        # paper broker, and the live-loop proxy resolves to that same object. So constructing
+        # this adapter puts MT5 on the READ path and on no order path at all. Three further
+        # refusals sit behind that: `ExecMode` has no LIVE member, `execute()` raises on
+        # `is_simulation=False`, and this adapter's `place_order` refuses outright (`B302`).
+        #
+        # The guard above has already run. It cannot be skipped by returning here, which is the
+        # property that made hoisting it a prerequisite for this branch rather than a tidy-up.
+        # `observe_only` is not passed on because the adapter has no such parameter and no write
+        # to gate — its writes refuse unconditionally. It is logged so the decision is visible
+        # rather than silently absent.
+        logger.info(
+            "Constructing MT5 adapter (reads only; place_order refuses — B302/B346)",
+            broker=broker, observe_only=observe_only, allow_live=allow_live,
+        )
+
+        token = creds.get("token", creds.get("api_token", ""))
+        if not token:
+            raise BrokerConnectionError(
+                "MT5 needs a MetaApi token and none was stored. Refusing to construct an adapter "
+                "that would fail at the first call with something less specific.",
+                broker=broker,
+            )
+        mt5_account_id = creds.get("mt5_account_id", account_id)
+        if not mt5_account_id:
+            raise BrokerConnectionError(
+                "MT5 needs a MetaApi ACCOUNT ID — the provisioned account's id, which is not the "
+                "broker login. Refusing to construct without it.",
+                broker=broker,
+            )
+
+        def _account_factory():
+            """Built here and resolved in `connect()`, which is the async boundary.
+
+            **The SDK is imported INSIDE this closure on purpose** (`B328`): `mt5.py` must stay
+            importable in an image without `metaapi_cloud_sdk`, or the contract arm's discovery
+            walk skips the adapter in silence. Importing at module scope here would defeat that
+            through the factory instead of through the adapter.
+            """
+            from metaapi_cloud_sdk import MetaApi
+
+            async def _build():
+                api = MetaApi(token)
+                return await api.metatrader_account_api.get_account(mt5_account_id)
+
+            return _build()
+
+        from app.services.broker.mt5 import MetaTrader5Adapter
+
+        return MetaTrader5Adapter(account=_account_factory, account_id=str(mt5_account_id))
+
     raise ValueError(f"Unsupported broker: {broker!r}")
 
 
