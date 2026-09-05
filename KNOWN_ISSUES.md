@@ -22989,6 +22989,31 @@ the item can falsify it) and `B347` (a must-hit control whose single fixture can
 two forms it covers). **Each verifies that a reference EXISTS and cannot verify it is the RIGHT
 one.**
 
+## AMENDMENT 3 — THE CHRONOLOGY PROXY IS GONE, AND THE PAYOFF IS MEASURED
+
+**`B362` measured what file order cost and I have replaced it rather than documented it.** Ordering
+now comes from `git log --reverse -p` — the commit in which each heading first appeared.
+
+```
+BEFORE  file order   FLAGGED  4 missing + 9 superseded  + 31 amended
+AFTER   git order    FLAGGED  3 missing + 13 superseded + 34 amended
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^
+                              four citations the proxy was under-reporting
+```
+
+**The direction is the one `B362` predicted**: file order violated commit order on 73 of 342
+adjacent pairs and under-reported supersession by 30% while fabricating none, so replacing it can
+only add. **Cost: about two seconds of `git log`**, which is what Review said when it built the true
+ordering to measure the defect.
+
+**It fails OPEN.** If git is unavailable the tool falls back to file order — under-reporting rather
+than inventing, which is the safe direction for a signal that says *re-read this*.
+
+> **The four recovered citations are the whole argument for measuring a proxy instead of reasoning
+> about one.** I wrote *"file order is a good proxy and it is a proxy"* and left it. That sentence
+> was true, cost nothing to write, and hid four real flags — and it would have hidden more with
+> every entry added, since the register only grows.
+
 Related: **B346**, **B350**, **B329**, **B310**, **B140**.
 
 ---
