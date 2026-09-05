@@ -16,7 +16,7 @@ programme: three named changes in the live loop, plus one decision that is Malek
 ## Where the line actually falls
 
 ```
-GATE 1   the adapter is CORRECT            in flight    5 tasks    needs nothing from Malek
+GATE 1   the adapter is CORRECT            in flight    4 tasks    B352 already done in T-0134
 GATE 2   the adapter is REACHABLE          DONE         T-0134 b07a43f + deployed e897d903c
 GATE 3   the demo is CONNECTED             blocked      1 task     needs the MetaApi token
 GATE 4   the strategy TRADES the demo      SCOPED       3 tasks    needs the T-0076 ruling
@@ -95,10 +95,19 @@ verification. The survivors **cluster**: five of the seven rate-limit dispatch s
 *inverted* with the suite green. **One parametrized arm kills all five with the seven copies left
 exactly where they are.**
 
-### B352 — the live-trading gate has no arm at all
+### ~~B352~~ — the live-trading gate has no arm at all — **DONE inside `T-0134`**
 
 **Goal: put a test behind the single centralised check that stands between a stored
-`observe_only=False` and a live-write adapter.**
+`observe_only=False` and a live-write adapter.** **Already done** — `T-0134` fixed it in the same
+commit that found it, and `test_t0134_mt5_construction.py` carries twelve arms including the
+must-miss that fails if the gate is welded shut. **I queued this as open without reading Execute's
+handoff; verified closed.**
+
+> **One half of it is genuinely still open and it is smaller.** All four gate-effect arms pass
+> `"cft"`, so **nothing drives the forcing on the mt5 path.** The structural arm asserts the guard
+> is *positioned* before every return — and a guard correctly placed can still not run for a
+> branch, which is exactly what "my branch is the second caller" makes non-theoretical. Folded into
+> Execute's next commit touching that file.
 
 **Found while `T-0134` was hoisting it** — the check had to move out of the CFT branch so a second
 broker branch could not return before it, and moving a guard is the moment to ask what fails if it
