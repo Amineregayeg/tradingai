@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-05 (B364 — A GUARD'S DIAGNOSIS IS PART OF THE GUARD. register_commit_check refused a commit with UNNAMED, MODIFIED: B37 when no B37 block was modified and none could be — B37 has no entry, having been deleted from the register in 2026, and the diff merely QUOTED the commit subject that removed it inside a fenced list of nine such subjects. THE REQUIREMENT WAS RIGHT AND THE LABEL WAS NOT: the hook has two routes to flagging an id — the enclosing entry's block changed, or a NEW closure claim naming it appeared in added text — and only the first is a modification, while the second can name an id with NO ENTRY AT ALL, so MODIFIED sends the reader hunting a block that does not exist, a search terminating in nothing rather than in the answer. I ran that search myself. A guard that refuses correctly and explains wrongly costs the time it was built to save. FIXED WITHOUT LOOSENING: two labels, both still refusing, a quoted claim still counts, and NO exemption for fenced blocks — a status table inside a fence is exactly where a real closure claim would hide, and 03b18d6 put its claim in the preamble. Control pair says so: a quoted B37 closed now refuses as UNNAMED CLOSURE CLAIM, a prose edit inside B361 still refuses as UNNAMED MODIFIED, and a clean tree passes — control 2 proving the split is by CONTENT and that block edits did not become cheaper. Fourth instance with B343, B347 and B355's fifth blind spot of an instrument that is right about the answer and wrong about what the answer means.)
+Last updated: 2026-09-05 (B367 — A PARTIALLY CLOSED POSITION IS REPORTED CLOSED. The SDK raises TradeException on every genuine failure and TRADE_RETCODE_DONE_PARTIAL IS IN ITS SUCCESS LIST, so it returns; the adapter stores the response and marks the row CLOSED without inspecting stringCode, so a position that half-closed still has exposure and the report says it is closed. B337's shape with a different cause — a row satisfying Malek's ruled property while making a false statement — and TRADE_RETCODE_NO_CHANGES returns too, which on a close request is not a close. FROM A DELIBERATE SDK SWEEP: 14 members on three axes, arrangement 14 of 14 clean, return shape 7 of 14 compared for 1 new defect, predicate population 4 of 4 for 1 new and 2 CONFIRMED CORRECT — and the two correct predicates are what make the third worth believing. B365: the balance-entry predicate reduces over the WRONG SET. MetatraderDeal.type is REQUIRED and states what a deal IS, and the adapter reads neither it nor entryType, inferring balance-entry from three OPTIONAL fields being absent — so a real FILL missing an optional positionId is SKIPPED while DEAL_TYPE_BALANCE and DEAL_TYPE_COMMISSION are counted as TRADES. A fill is dropped from the trade record and a commission posting is added to it, and last_trades_skipped conflates 'this venue posts balance entries' with 'we could not join these fills', which is B215's collapse inside the counter built to prevent a silent skip. B366: last_close_all_report and partial_report have a consumer that DISCARDS them — kill_switch.py catches Exception and sets close_results = [] — so the operator is told '0 closed, 0 failed' while a complete four-row report sits on the exception just dropped. B303's property holds at the adapter and dies at the boundary, and the data is already produced and attached THREE LINES AWAY, which turns 'not fixed' into 'fixable now with no new information'. THE PRODUCTIVE AXIS WAS PREDICATE POPULATION and it produced both kill-switch findings; three earlier defects found incidentally were a population rather than luck.)
 
 ---
 
@@ -23651,6 +23651,154 @@ blind spot and this are four instances of *an instrument that is right about the
 about what the answer means*.
 
 Related: **B347**, **B343**, **B355**, **B362**.
+
+---
+
+### B365 — THE BALANCE-ENTRY PREDICATE REDUCES OVER THE WRONG POPULATION. `MetatraderDeal.type` is a REQUIRED field that STATES what a deal is, and the adapter infers it from three OPTIONAL fields being absent — wrong in both directions, measured
+
+Found by the deliberate sweep, on the manager's third axis: *when the adapter reduces something to a
+boolean, does the vendor reduce over the same set?*
+
+**The vendor states it.** From the installed package:
+
+```
+MetatraderDeal.type       str          REQUIRED    "Deal type (one of DEAL_TYPE_BUY, DEAL_TYPE_SELL,
+                                                    DEAL_TYPE_BALANCE, DEAL_TYPE_CREDIT, DEAL_TYPE_CHARGE,
+                                                    DEAL_TYPE_CORRECTION, DEAL_TYPE_BONUS,
+                                                    DEAL_TYPE_COMMISSION, ...)"
+MetatraderDeal.entryType  str          REQUIRED    "DEAL_ENTRY_IN, DEAL_ENTRY_OUT, DEAL_ENTRY_INOUT,
+                                                    DEAL_ENTRY_OUT_BY"
+MetatraderDeal.volume     Optional[float]
+MetatraderDeal.price      Optional[float]
+MetatraderDeal.positionId Optional[str]
+```
+
+**The adapter reads neither `type` nor `entryType`.** It decides:
+
+```python
+if deal.get("volume") is None or deal.get("price") is None or deal.get("positionId") is None:
+    skipped += 1; continue
+```
+
+## MEASURED, AND IT IS WRONG IN BOTH DIRECTIONS
+
+```
+type=DEAL_TYPE_BUY          SKIPPED as a balance entry   <- a real FILL missing the OPTIONAL positionId
+type=DEAL_TYPE_BALANCE      counted as a TRADE           <- carries volume/price/positionId
+type=DEAL_TYPE_COMMISSION   counted as a TRADE           <- carries volume/price/positionId
+```
+
+**A fill is dropped from the trade record and a commission posting is added to it.** The adapter's
+own docstring concedes half of this — *"positionId is optional too, which breaks the join a caller
+would make — so a deal without one is also not a fill for our purposes and is skipped the same
+way"* — which is a decision to drop real fills, made because the join is hard, and then described as
+balance-entry detection.
+
+**And `last_trades_skipped` conflates two different facts**: *this venue posts balance entries* and
+*we could not join these fills*. `B215`'s collapse in the counter built to prevent a silent skip.
+
+**The fix is to read the field the vendor requires**: a deal is a fill when `type` is
+`DEAL_TYPE_BUY`/`DEAL_TYPE_SELL`, and everything else is a non-fill with a NAME. `entryType` is the
+second unread required field and it decides whether a deal opened or closed a position, which any
+reconciliation of realised P&L needs.
+
+Related: **B356**, **B334**, **B215**, **B291**.
+
+---
+
+### B366 — THE ABNORMAL-EXIT REPORT IS BUILT, ATTACHED TO THE EXCEPTION, AND DISCARDED BY ITS ONLY CONSUMER. `B303`'s property holds at the adapter and dies at the boundary
+
+`close_all_positions` goes to real trouble to survive an abnormal exit — rows built before the loop,
+`last_close_all_report` published first, `partial_report` attached to the re-raised `BrokerError`.
+Its docstring: *"an exception on position 2 of 4 still reports 4 rows to a caller that has only the
+exception, and to one that has only the adapter."*
+
+**True at the adapter. False at the only caller.**
+
+```python
+# kill_switch.py:66
+try:
+    close_results = await broker_manager.close_all_positions()
+except Exception as exc:
+    logger.error("Kill switch: error calling close_all_positions", error=str(exc))
+    close_results = []
+```
+
+```
+grep -rn "partial_report|last_close_all_report" backend/app   ->  mt5.py ONLY
+```
+
+**The operator is told "0 closed, 0 failed" while a complete four-row report sits on the exception
+object that was just discarded.** Execute named `kill_switch.py:67-69` as not-fixed when it landed
+`T-0134`; the addition here is that **the data needed to do better is already produced and attached,
+three lines away.** That turns *"not fixed"* into *"fixable now, with no new information required."*
+
+## AND IT IS THE WHOLE OBSERVABILITY FAMILY, NOT ONE FIELD
+
+The manager asked whether `last_trades_synchronizing` is consumed. It is not — and neither is
+anything else the adapter publishes:
+
+```
+consumers outside mt5.py and its own test file
+  last_trades_synchronizing   0        last_close_all_report   0
+  last_trades_skipped         0        last_link_check_at      0
+  venue_account_type          0
+```
+
+**Five fields, each recording something that cannot be recovered later, and nothing reads any of
+them.** `venue_account_type` is the sharpest: it exists because `T-0076`'s ruling depends on the
+venue's own answer, and it is *"exposed and not consulted"* by `is_simulation` **by design** — but it
+is not consulted by anything else either.
+
+**Not all of these are defects today** — MT5 has no live connection row, so an absent consumer is
+partly a not-yet. **`last_close_all_report` and `partial_report` are different**: their consumer
+exists, runs on the kill-switch path, and throws them away.
+
+Related: **B303**, **B330**, **B352**, **B215**.
+
+---
+
+### B367 — A PARTIALLY CLOSED POSITION IS REPORTED `CLOSED`. `TRADE_RETCODE_DONE_PARTIAL` is in the SDK's SUCCESS list, so it returns rather than raising, and the adapter never inspects the response
+
+From `metaapi_websocket_client.py`, the SDK's own success set:
+
+```python
+if response['response']['stringCode'] in [
+    'ERR_NO_ERROR', 'TRADE_RETCODE_PLACED', 'TRADE_RETCODE_DONE',
+    'TRADE_RETCODE_DONE_PARTIAL', 'TRADE_RETCODE_NO_CHANGES',
+]:
+    return response['response']
+else:
+    raise TradeException(...)
+```
+
+**Every genuine failure raises, and the adapter handles that correctly** — the per-position
+`except Exception` marks the row `FAILED` with a reason. **`TRADE_RETCODE_DONE_PARTIAL` does not
+raise.** It returns a `MetatraderTradeResponse`, and the adapter does:
+
+```python
+row.update(disposition=self.CLOSED, status="closed", reason=None, result=result, _in_flight=False)
+```
+
+`result` is stored and **never inspected**. `stringCode`, `numericCode` and `message` are all
+present on it and all unread.
+
+**On the kill switch this is the failure mode the member exists to prevent.** A position that
+partially closed still has residual exposure, and the report tells the operator it is CLOSED —
+which is not one of Malek's three states truthfully occupied. *A position we half-closed is not a
+position we closed.* It is `B337`'s shape with a different cause: **a row that satisfies the ruled
+property while making a false statement.**
+
+`TRADE_RETCODE_NO_CHANGES` deserves the same look: it also returns, and *"no changes"* on a close
+request is not a close.
+
+**The fix is one branch on `stringCode`** — `TRADE_RETCODE_DONE` and `ERR_NO_ERROR` are closed,
+`DONE_PARTIAL` and `NO_CHANGES` are `FAILED WITH A REASON` naming what the venue said, since residual
+volume is exactly *"failed, and here is why"*.
+
+Related: **B337**, **B349**, **B330**, **B303**.
+
+---
 
 ---
 
