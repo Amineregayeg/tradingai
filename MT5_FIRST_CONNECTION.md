@@ -14,6 +14,33 @@ deliberately instead of rediscovering them one at a time in production.**
 > rediscovered one at a time in production instead of settled in a sitting. **Each item names the
 > register entry it comes from, so the reasoning behind it is one lookup away.**
 
+## THIS LIST IS RUNNABLE — `agents/mt5_first_connection.py`
+
+**Written 2026-09-05 so the checklist is a transcript rather than a chore.** It runs the items and
+prints each answer against its item number.
+
+```
+stage0     0.1                          free, creates nothing
+provision  the billable act             REFUSES without --yes-this-costs-money
+stage1     1.1 1.1b 1.2 1.3 3.0         the reads, in dependency order
+```
+
+**It carries the four things measured this week that would each make a hand-run produce a wrong
+answer:** it reloads before every `connection_status` read (`B351`), it reads through
+`get_rpc_connection()` and does not look for `terminal_state` there (`B341`), it asks for the
+*type* of `recommendedRetryTime` rather than its value (`B342`), and it asks for the rate-limit
+exception's class name, which this document did not until `B334`.
+
+**The token is read from a FILE and never from an argument** — an argument lands in shell history
+and in `ps` output for every process on the box — and every line printed goes through one scrubber,
+including tracebacks.
+
+**And `stage0` MEASURES that it created nothing** rather than asserting it: it lists the account
+inventory before and after, and reports the delta. If a call designed to fail provisions something,
+that is itself a finding and a billable one, and the script says so and exits non-zero.
+
+---
+
 ## STAGE 0 — **BEFORE YOU HAVE A WORKING ACCOUNT AT ALL** *(free, 2 minutes)*
 
 ### 0.1 What a wrong server name looks like versus a wrong password `B291`
