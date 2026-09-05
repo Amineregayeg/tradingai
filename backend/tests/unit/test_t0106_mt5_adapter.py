@@ -20,6 +20,7 @@ from __future__ import annotations
 import ast
 import asyncio
 import pathlib
+import re
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
@@ -31,6 +32,7 @@ from app.db.enums import DirectionType, OrderType
 from app.services.broker.base import OrderRequest
 from app.services.broker.mt5 import (
     ACCOUNT_TRADE_MODES,
+    CHECKLIST,
     MetaTrader5Adapter,
     MT5AccountTypeUnreadable,
     MT5AccountTypeUnrecognised,
@@ -246,30 +248,109 @@ def test_every_arm_in_this_file_NAMES_the_assumption_it_rests_on():
     )
 
 
-def test_every_ASSUMES_marker_names_a_checklist_item_or_says_none_does():
-    """ASSUMES: nothing about the venue. It joins the markers to the document that settles them.
+#: A marker that cites no item must DECLARE that, and these are the declared ways to say it.
+#: **A convention, not a guess.** The positive half of the arm below resolves a citation against
+#: the document and cannot be fooled; this half can only be as good as the author's honesty, and
+#: saying so is the difference between a bound and a blind spot (`B250`).
+NO_ITEM_TOKENS = ("no checklist item", "nothing about the venue")
 
-    A marker naming no checklist item is an assumption nobody will ever test. Where the checklist
-    genuinely has no item, the marker must SAY SO — `T-0113` established the checklist is *not
-    provably complete*, so finding a gap is expected rather than alarming, and an unnamed gap and
-    an overlooked one look identical.
+#: `item 1.1b` exists, and `3.0` has a ZERO minor. A pattern written from the obvious `\d+\.\d+`
+#: rejects one real item and mishandles the other.
+_ITEM_REF = re.compile(r"item\s+(\d+\.\d+[a-z]?)", re.IGNORECASE)
+_ITEM_HEADING = re.compile(r"^#{1,6}\s*(\d+\.\d+[a-z]?)\b", re.MULTILINE)
+
+
+def _checklist_items() -> set[str]:
+    """Every item id the checklist actually DEFINES, taken from its HEADINGS.
+
+    **Parsing headings rather than searching the text is the whole instrument.** The document
+    discusses `item 99.9` in prose — at `MT5_FIRST_CONNECTION.md:253`, in the passage describing
+    this very defect — so a resolver that greps the document for the number it was handed would
+    accept the canonical bogus example and **certify itself**.
     """
+    text = (pathlib.Path(__file__).resolve().parents[3] / CHECKLIST).read_text(encoding="utf-8")
+    return set(_ITEM_HEADING.findall(text))
+
+
+def test_every_ASSUMES_marker_RESOLVES_its_citation_against_the_document():
+    """ASSUMES: nothing about the venue. It is about this file's own markers.
+
+    **`B343`. This arm used to check for the WORD.**
+
+    ```python
+    names_item = "checklist" in marker.lower() or "nothing about the venue" in marker.lower()
+    ```
+
+    So `"checklist item 99.9"` passed, and so did the bare word `"checklist"` naming nothing. **A
+    citation that cannot be resolved reads as a discharged assumption**, which is worse than an
+    undischarged one, because the reader stops looking.
+
+    Now every `item N.N` a marker names must exist as a HEADING in the document. Three arms cited
+    items that could not settle them and all three crossed one axis — deal-side assumptions citing
+    position-side items — because until `3.0` was written **there was no deal-side item to cite.**
+
+    **What this still cannot do, stated rather than left implied:** it checks that a cited item
+    EXISTS, not that it is the RIGHT one. `2.1` and `3.0` both resolve; only reading them tells
+    you which settles a deal-side assumption. That is the residue of `B343` and it is not
+    mechanisable from here.
+    """
+    real = _checklist_items()
+    assert {"1.1", "1.1b", "2.1", "3.0", "3.1"} <= real, (
+        f"the checklist parser is broken, not the markers: it found {sorted(real)}. "
+        "A resolver that cannot see the real items would fail every arm and look like a finding."
+    )
+
     tree = ast.parse(pathlib.Path(__file__).read_text(encoding="utf-8"))
-    bad = []
+    unresolvable, undeclared = [], []
     for node in ast.walk(tree):
         if not (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
                 and node.name.startswith("test_")):
             continue
         doc = ast.get_docstring(node) or ""
-        marker = doc.split("ASSUMES:", 1)[1].split("\n\n")[0] if "ASSUMES:" in doc else ""
-        if not marker:
+        if "ASSUMES:" not in doc:
             continue
-        names_item = "checklist" in marker.lower() or "nothing about the venue" in marker.lower()
-        if not names_item:
-            bad.append(node.name)
-    assert not bad, (
-        f"these markers name no checklist item and do not say that none covers them: {bad}"
+        marker = doc.split("ASSUMES:", 1)[1].split("\n\n")[0]
+        cited = _ITEM_REF.findall(marker)
+        for item in cited:
+            if item not in real:
+                unresolvable.append(f"{node.name} -> item {item}")
+        if not cited and not any(t in marker.lower() for t in NO_ITEM_TOKENS):
+            undeclared.append(node.name)
+
+    assert not unresolvable, (
+        f"these markers cite checklist items that DO NOT EXIST in {CHECKLIST}: {unresolvable}. "
+        "A citation that cannot be resolved reads as discharged and stops the reader looking."
     )
+    assert not undeclared, (
+        f"these markers name no checklist item and do not say so: {undeclared}. "
+        f"Declare it with one of {NO_ITEM_TOKENS} — an unnamed gap and an overlooked one are "
+        "indistinguishable."
+    )
+
+
+def test_the_resolver_REJECTS_the_bogus_item_the_old_arm_accepted():
+    """ASSUMES: nothing about the venue. It is the must-hit control for the arm above.
+
+    **The fixture is a synthetic marker, independent of every real one** (`B250`) — a control
+    built from the subject it guards can pass because of a property of that subject.
+
+    `99.9` is the specific number the checklist itself uses as its example of a bogus citation,
+    **and it appears in the document**, which is exactly why the resolver reads headings rather
+    than searching text.
+    """
+    real = _checklist_items()
+    assert "99.9" not in real, (
+        "the resolver is searching the document instead of parsing its headings: `99.9` occurs "
+        "in prose at MT5_FIRST_CONNECTION.md:253 and would certify the canonical bogus example"
+    )
+    assert _ITEM_REF.findall("Settled by checklist item 99.9 — which does not exist") == ["99.9"]
+
+    # And the shapes a naive pattern gets wrong, both of which are real items.
+    assert _ITEM_REF.findall("see checklist item 1.1b for the short-list case") == ["1.1b"]
+    assert _ITEM_REF.findall("settled by checklist item 3.0") == ["3.0"]
+
+    # The bare word, which the old arm accepted as a citation.
+    assert _ITEM_REF.findall("settled by the checklist") == []
 
 
 # ======================================================================================
@@ -279,8 +360,12 @@ def test_every_ASSUMES_marker_names_a_checklist_item_or_says_none_does():
 
 def test_a_balance_entry_is_SKIPPED_and_the_skip_is_COUNTED():
     """ASSUMES: `MetatraderDeal` is 6-of-22 required, so `volume`, `price` and `positionId` can
-    all be absent on a real deal (`B291`). Settled by checklist item 2.1 — which optional fields
-    this broker actually omits.
+    all be absent on a real deal (`B291`). Settled by checklist item 3.0 — which optional fields
+    a real broker omits **on a DEAL**.
+
+    `B343`: this cited item **2.1**, which inspects a `MetatraderPosition` and cannot show what a
+    broker omits on a deal. All three mis-citations crossed that one axis, and they did so because
+    **there was no deal-side item to cite** until 3.0 was written.
 
     A balance entry is a credit, a correction or a commission posting. **It is not a fill.**
     Mapping it as a trade with zeroes puts a fabricated fill in the record; raising `KeyError`
@@ -304,8 +389,11 @@ def test_a_balance_entry_is_SKIPPED_and_the_skip_is_COUNTED():
 
 def test_swap_and_commission_are_None_when_ABSENT_and_never_zero():
     """ASSUMES: `swap` and `commission` are OPTIONAL on a deal while `profit` is REQUIRED —
-    MetaApi's model marks only `profit` with `Yes`. Settled by checklist item 2.2 (does this
-    broker send them at all) and item 3.1 (whether `profit` already contains them).
+    MetaApi's model marks only `profit` with `Yes`. Settled by checklist item 3.0 (does this
+    broker send them **on a deal** at all) and item 3.1 (whether `profit` already contains them).
+
+    `B343`: the first citation was item **2.2**, *"are swap and commission present on an OPEN
+    POSITION"* — the same fields, the wrong model. 3.1 was right all along and stays.
 
     `None` means *the venue did not report it*; `0` means *it reported zero*. A default of `0`
     makes a venue that cannot say indistinguishable from one that charged nothing (`B215`).
@@ -359,9 +447,14 @@ def test_the_reachable_case_is_the_must_MISS_half_and_returns_positions():
 
 
 def test_a_position_carries_its_producer_and_its_pnl_key():
-    """ASSUMES: MetaApi calls the open-position P&L field `profit`, and does not document whether
-    it is gross or net of swap and commission. Settled by checklist item 3.1 — the one the
-    checklist itself calls the most consequential unknown.
+    """ASSUMES: MetaApi calls the OPEN POSITION P&L field `profit`. Settled by checklist item 2.1,
+    which prints a real `MetatraderPosition` payload and is the item that would show the key.
+
+    `B343`: this cited item **3.1**, which asks whether a CLOSED DEAL's `profit` is gross or net.
+    That is a different model and a different question, and Review noted 2.1 was cited by nobody
+    for the purpose it actually serves. **The gross-versus-net question for an OPEN POSITION is
+    covered by NO CHECKLIST ITEM** — 3.1 answers it for deals only, and that gap is stated here
+    rather than papered over by keeping a citation that reads as discharged.
 
     `produced_by` says whose conventions the row follows; `pnl_source` says which key the number
     came from. Neither replaces the other (`T-0105`, `T-0102`).
@@ -852,8 +945,7 @@ def test_an_ABSENT_position_type_RAISES_and_is_not_silently_a_SHORT():
 def test_an_UNPARSEABLE_required_number_RAISES_rather_than_becoming_zero(field, value):
     """ASSUMES: the venue's model types `openPrice` and `volume` numeric, so a non-numeric value
     is a CONTRACT VIOLATION rather than a missing optional. Verified against the installed package
-    (`T-0133`), not against a checklist item — **no item covers malformed payloads**, which is a
-    gap worth recording.
+    (`T-0133`): **NO CHECKLIST ITEM covers malformed payloads**, which is a gap worth recording.
 
     `B338`: `_dec` returned `None` for a value it could not parse, and both callers wrote
     `or Decimal("0")`. **A price the adapter could not read became a position with an entry price
