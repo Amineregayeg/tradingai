@@ -237,7 +237,12 @@ retry must not fail. Record the literal value and its format.
 
 ## STAGE 2 — **NEEDS AN OPEN POSITION** *(one trade required)*
 
-### 2.1 Which optional fields a real broker actually omits `B291`
+### 2.1 Which optional fields a real broker actually omits — **ON A POSITION** `B291`
+
+> **SCOPE MADE EXPLICIT 2026-09-05 `B343`.** This item inspects **`MetatraderPosition`, via
+> `get_positions()`, and nothing else.** It cannot show which fields a broker omits on a **DEAL** —
+> that is a different vendor model reached by a different call, and it is **item 3.0**, which exists
+> because this scope was implicit and two arms cited across it.
 
 **Question:** `MetatraderPosition` is 21 required / 7 optional. **Which of the optional ones does
 this broker actually send?**
@@ -256,9 +261,42 @@ field the mock always supplies is a `KeyError` waiting for production.
 **Implication:** decides whether our `Position` needs them as `Decimal | None` — **and `None` must
 mean "not reported", never zero.**
 
+> **Still POSITION-side.** `swap` and `commission` also appear on a **deal**, and their optionality
+> there is a separate fact this item does not touch. **Item 3.0.**
+
 ---
 
 ## STAGE 3 — **NEEDS A CLOSED TRADE** *(the expensive one, and the most important)*
+
+### 3.0 Which optional fields a real broker omits — **ON A DEAL** `B343` `B291`
+
+> **NEW 2026-09-05, and it exists because it was MISSING.** The marker audit found three arms citing
+> checklist items that cannot settle them, and **all three cross the same axis**: the adapter reads
+> **two** vendor models — `MetatraderPosition` from `get_positions()` and `MetatraderDeal` from
+> `get_deals_by_time_range()` — and every position-side item was being cited for deal-side
+> assumptions **because there was no deal-side item to cite.**
+
+**Question:** `MetatraderDeal` is documented as **6 of 22 required.** Which of the other 16 does this
+broker actually send, and **which does it omit?**
+
+**Call:** after any closed trade, `get_deals_by_time_range()`, **print the raw payload of every deal
+returned** — including the balance entries, not just the trade deals.
+
+**Implication, and it is the reason two separate arms need this item:**
+
+* **`volume`, `price` and `positionId` are all optional on a deal.** The adapter's balance-entry
+  detection *depends* on them being absent together — that is how it tells a balance entry from a
+  trade. **If this broker sends a zero instead of omitting them, that detection silently
+  reclassifies every balance entry as a trade.**
+* **`swap` and `commission` are optional on a deal too**, and that is a different fact from their
+  optionality on a position (item 2.2).
+
+> **It needs a closed trade, so it is Stage 3 — but it is NOT item 3.1 and must not be folded into
+> it.** `B331` narrowed 3.1 deliberately and correctly to *gross versus net, never whether the
+> number is there*, and that narrowing is what left these assumptions with nothing to cite. **A
+> correct fix to one document invalidated a citation in another, and nothing joined the two files.**
+
+---
 
 ### 3.1 ⚠ Does a closed deal's `profit` include `swap` and `commission`? `B288` `B291`
 
@@ -323,8 +361,9 @@ FREE, no account          0.1  error shapes -- deliberately get it wrong twice
 CHEAP, one connection     1.1  connection state   <- do before anything reads positions
                           1.2  account type       <- do before anything reads is_simulation
                           1.3  instrument specs    1.4  disconnect    1.5  rate-limit payload
-NEEDS A TRADE             2.1  optional fields     2.2  swap overnight
-NEEDS A CLOSED TRADE      3.1  profit inclusivity  <- the one that matters most
+NEEDS A TRADE             2.1  optional fields ON A POSITION    2.2  swap overnight
+NEEDS A CLOSED TRADE      3.0  optional fields ON A DEAL  <- balance-entry detection depends on it
+                          3.1  profit inclusivity         <- the one that matters most
 NOT ANSWERABLE ON DEMO    CONTEST
 ```
 
