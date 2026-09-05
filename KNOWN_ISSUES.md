@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-05 (B370 — THE UI STRING NAMES ONE OF FOUR BLOCKERS AS THE ONLY ONE. The MT5 envNote says 'Reads only — MT5 order placement refuses at the adapter until the sizing conversion is settled', which is accurate about WHERE and WHY and wrong about SUFFICIENCY: 'until X is settled' promises that settling X lifts the refusal, and three more stand behind it — ExecMode has no LIVE member, execute() raises on is_simulation=False, and the adapter returns False pending T-0076, WHICH IS MALEK'S RULING. So the note tells him the last obstacle is arithmetic when the actual last obstacle is a decision only he can make, and it is worse than vague because it is specific and wrong about the SHAPE of what remains. SECOND HALF: the MT5 branch NEVER READS environment — practice, live and nonsense all CONSTRUCT — while the note says 'Matches the MetaApi account you provisioned', claiming a check against something that is checked against nothing, so a typo is accepted in silence; for MT5 the demo-versus-real fact comes from venue_account_type read from the venue PER CALL, which makes the field redundant rather than merely unused. FOUND WHILE PASSING a81cfd2 AND f8f0545, both of which stand: B369's arm drives the FORM and asserts on what the API client was CALLED WITH rather than reading the component, and carries the token-must-not-arrive-in-api_key half plus a must-miss for a non-MT5 broker. AND THE CHAIN WAS WALKED END TO END FOR THE FIRST TIME — form payload to schema to connect_broker to encrypted blob to decrypt_credentials to _make_adapter to a BUILT MetaTrader5Adapter, with step 1 being the payload the vitest arm asserts rather than one invented for the walk, and only MetaTrader5Adapter.connect substituted because it is a real MetaApi call across the venue boundary.)
+Last updated: 2026-09-05 (B372 — THE AGGREGATE POSITION READ COLLAPSES THREE STATES INTO ONE, AND THE WORST INSTANCE TELLS AN OPERATOR A POSITION DOES NOT EXIST. Measured as a differential: healthy plus a broker that CANNOT BE ASKED, healthy plus a broker that is FLAT, and healthy with a second broker ABSENT ENTIRELY all return the same list. TWO THINGS NOBODY HAD NAMED. First, positions.py:49 catches BrokerError and returns 502 and THAT BRANCH IS UNREACHABLE, because the aggregate swallows first and returns [] — so a reader of the endpoint concludes a broker failure surfaces as a 502, the handler is right there and well written, and THAT IS WHY THE DEFECT SURVIVED REVIEW. Second and worst, DELETE /positions/{id} looks the position up in that same aggregate and raises 404 'not found in any connected broker' — so AN OPERATOR CLOSING A POSITION BY HAND IS TOLD IT DOES NOT EXIST while the broker is connected and the position is open, which is B366's zero and B349's refusal by a third route and renders as a DEFINITE NEGATIVE rather than an ambiguous zero. AND THE CLASS WAS ALREADY WRITTEN DOWN: live_loop_proxy.py:37 says get_all_positions() returning [] is ambiguous by construction — the fix for the proxy's version names the aggregate's version in a comment and stops, which is B314. MY VOCABULARY CLAIM WAS HALF WRONG: the adapter's vocabulary is an EXCEPTION and this layer cannot raise, since the endpoint's contract is never-an-error and three consumers rest on it; what transfers is close_all_positions' REPORT — one row per subject with a disposition and a reason, PER ADAPTER rather than per position. Property and kill-set registered BEFORE any arm exists, with the B349 orthogonality condition. FILED WITH B371, where renaming CFT's label turns 5 of 6 MT5 tests red because they locate their subject through another broker's string — the locator class from c584b5b sitting unfired in its neighbours.)
 
 ---
 
@@ -24021,6 +24021,157 @@ alongside working code**, which is why they are filed rather than mentioned.
 Related: **B369**, **B368**, **B346**, **B333**, **B302**.
 
 ---
+
+---
+
+### B371 — THE CLASS `c584b5b` FIXED IS UNFIRED IN FIVE SIBLING ARMS. They locate the broker `<select>` by ANOTHER BROKER'S LABEL, so renaming Crypto Fund Trader turns 5 of 6 MT5 arms red, each claiming it cannot find the form
+
+Execute hit *"a test that cannot find its subject reports the same red as one whose subject is
+wrong"* twice while fixing `B370`, and fixed it for the `envNote` with a stable
+`data-testid="env-note"`. **The manager asked whether the same shape sits in the file's other arms.
+It does — five times, in one locator.**
+
+```
+SettingsPage.broker.test.tsx:53, 62, 92, 106, 124
+    const select = screen.getByDisplayValue(/Crypto Fund Trader/i) as HTMLSelectElement
+```
+
+**That string is `BROKER_CAPABILITIES.cryptofundtrader.label`** — content under test — **and it is
+findable only because the form DEFAULTS to that broker.** The locator is coupled to two facts, and
+neither is the subject of any of these tests.
+
+## MEASURED — rename one broker's label and the other broker's tests fail
+
+```
+label: 'Crypto Fund Trader'  ->  'CryptoFundTrader'      (a plausible normalisation)
+
+Tests  5 failed | 1 passed (6)
+  TestingLibraryElementError: Unable to find an element with the display value: /Crypto Fund Trader/i.   x5
+```
+
+**The arm named `offers MetaTrader 5 in the broker list at all` fails, and MetaTrader 5 is in the
+list.** A reader is told the MT5 form is broken by a change that touched only the label of a
+different broker. `offers a Demo environment for MT5` and `SENDS token and mt5_account_id` fail the
+same way.
+
+**The sharpest instance is line 53**, where the locator and the subject are the same data: the arm
+finds the `<select>` *by one of its option labels* in order to assert about its option labels. If CFT
+were ever removed — which `BROKER_CAPABILITIES`' own header contemplates, since the list must track
+`_make_adapter` — that arm reports MT5 missing.
+
+## SCOPE, STATED
+
+`getByDisplayValue` appears **8 times across the whole frontend suite and in this one file only**;
+`getByTestId` appears 5 times. **So the class is contained and the fix is the one already applied
+three lines away** — a `data-testid` on the select. Nothing else in the suite locates a subject by a
+neighbour's label.
+
+**What is right and should not be changed:** the `Add Broker` locator is already `findByRole` with
+the reason recorded in a comment — *"the empty-state sentence also contains 'Add Broker', so
+getByText matches two nodes and throws — a failure that reads like the button being absent."*
+**That is this exact defect, correctly diagnosed and avoided, four lines above five instances of
+it.** The knowledge was in the file; it was applied to one locator and not the others.
+
+Related: **B370**, **B369**, **B347**, **B343**.
+
+---
+
+### B372 — `T-0111` MEASURED. Three different states of the world produce byte-identical output; the endpoint's `502` handler for exactly this case is UNREACHABLE; and a manual close tells the operator the position **does not exist** when the broker is merely unreachable
+
+`B292`/`B293` say the aggregate layer cannot express *could-not-ask*. **Measured rather than
+restated**, and it is worse in two places nobody had named.
+
+## 1. THE COLLAPSE, AS A DIFFERENTIAL
+
+```python
+# manager.py:500
+for connection_id, adapter in self._adapters.items():
+    try:
+        all_positions.extend(await adapter.get_positions())
+    except Exception as exc:
+        logger.warning("Failed to fetch positions", ...)
+return all_positions
+```
+
+Driven with a healthy adapter and a second adapter in three different conditions:
+
+```
+healthy + broker that CANNOT BE ASKED   -> ['a1', 'a2']
+healthy + broker that is FLAT           -> ['a1', 'a2']
+healthy, second broker ABSENT entirely  -> ['a1', 'a2']
+
+all three identical: True
+```
+
+The return type is `list[Position]`, and **there is no value in a list that means *one of these
+brokers could not be asked*** — the adapter layer's own argument, one level up. The adapter now
+raises honestly; this layer catches, logs at WARNING, and continues.
+
+**And `except Exception` catches more than unreachability.** While building this measurement my own
+`Position` construction was invalid, and the aggregate swallowed that too — **a bug inside an adapter
+becomes a silently short list**, indistinguishable from a flat book. The instrument's own failure
+demonstrated the finding.
+
+## 2. THE ENDPOINT HAS ERROR HANDLING FOR THIS CASE AND IT CANNOT FIRE
+
+```python
+# positions.py:49
+try:
+    positions = await broker_manager.get_all_positions()
+except BrokerError as exc:
+    raise HTTPException(status_code=502, detail=exc.detail) from exc
+```
+
+```
+'raise' appears in get_all_positions: False
+adapter raised BrokerError -> aggregate RETURNED []
+=> the `except BrokerError -> 502` branch is UNREACHABLE
+```
+
+**This is why the collapse survived review.** A reader of `positions.py` concludes that a broker
+failure surfaces as a 502 — the handler is right there and it is well written. The layer below
+swallows the error before it can arrive. `B272`'s family: a branch that cannot execute, and its
+presence is what makes the defect invisible from the layer that would report it.
+
+## 3. THE WORST INSTANCE IS A CLOSE PATH, AND IT LIES TO A HUMAN
+
+```python
+# positions.py:90 -- DELETE /positions/{id}
+positions = await broker_manager.get_all_positions()
+target = next((p for p in positions if p.id == position_id), None)
+if target is None:
+    raise HTTPException(404, f"Position '{position_id}' not found in any connected broker")
+```
+
+**If the broker holding that position cannot be reached, its positions are missing from the list and
+the operator is told the position does not exist.** The message is affirmatively wrong twice: the
+broker IS connected, and the position IS open.
+
+**An operator trying to close a position manually is told there is nothing to close.** That is
+`B292`'s collapse with the sign that matters — the same shape as `B366`'s *"0 closed, 0 failed"* and
+`B349`'s refusal to enumerate, reached through a third route, and this one renders as a definite
+negative rather than an ambiguous zero.
+
+## 4. THE KNOWLEDGE IS ALREADY IN THE TREE
+
+`live_loop_proxy.py:37` — *"`get_all_positions()` returning `[]` is ambiguous by construction — no
+adapters, …"*. **The class written to fix the proxy's version of this names the aggregate's version
+in a comment and stops there.** `B314`'s shape: knowledge in the tree, not surfaced where it acts.
+
+## THE VOCABULARY TO ADOPT EXISTS AND IT IS NOT AN EXCEPTION
+
+The manager's claim — *"the fix has a proven vocabulary to adopt rather than invent"* — holds, but
+**not the adapter's vocabulary**: the adapter raises, and this layer cannot raise because the
+endpoint's contract is *never an error* and three consumers depend on that.
+
+**The proven pattern is `close_all_positions`' report**: one row per subject, an explicit
+disposition, and a reason — including a state that means *we did not get an answer for this one*.
+The aggregate needs the same shape per ADAPTER: the positions it could read, plus a named list of
+the adapters it could not ask and why. **`close_position`'s 404 then becomes answerable** —
+*"the broker holding this position could not be reached"* is a different HTTP answer from *"no such
+position"*, and today they are the same one.
+
+Related: **B292**, **B293**, **B366**, **B349**, **B272**, **B314**, **B215**.
 
 ---
 
