@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-05 (B362 — citation_check.py REVIEWED, and it corrects the entry that built it. Its SUPERSEDED signal is NOT noise: 6 of 9 are real corrections, 2 are live recurrence signals and exactly 1 is bookkeeping, so my own blind spot UNDERSTATED the tool. Its file-order chronology is lossy in exactly one direction — 73 of 342 adjacent pairs violate commit order because a region of the file was written in REVERSE id order, and over the 27 heading-name pairs it misses 8 and FABRICATES NONE, so it under-reports supersession and never invents it — and it costs zero reports today BY LUCK, since none of the eight missed ids is cited under backend/app. AND B355's REPAIR RULE IS WRONG AS GENERALISED: nine entries have been lost rather than four, EIGHT OF NINE were DELIBERATE CLOSURES under an early convention of deleting an entry once its defect was fixed, and B90 is the only collateral one — so 'restore the entry rather than touch the comment' was generalised from the single atypical case, and following it for B10 or B24 would re-open entries the register decided to close. B10's correct repair is the OPPOSITE: repoint its five code citations at B157, whose heading says B157 IS B10 GENERALISED. B253 never existed at all. B6 is a FALSE POSITIVE — a broker group name realRLCusd-B6 in a live API response, 1 of 4 MISSING rows, in the signal B355 made most consequential. AND THE HOLE THE SCANNER CANNOT SEE IS THE ONE IT WAS BUILT FOR: a citation naming a real, current, un-superseded but WRONG id is invisible, which is B310 exactly — lots.py cited B283 three times for what is B287, all resolving, and running this scanner over that tree would have returned clean. Third instance of one family with B343 and B347: each verifies a reference EXISTS and cannot verify it is the RIGHT one. B90 RESTORED as history rather than as an open defect, its fix having landed.)
+Last updated: 2026-09-05 (B364 — A GUARD'S DIAGNOSIS IS PART OF THE GUARD. register_commit_check refused a commit with UNNAMED, MODIFIED: B37 when no B37 block was modified and none could be — B37 has no entry, having been deleted from the register in 2026, and the diff merely QUOTED the commit subject that removed it inside a fenced list of nine such subjects. THE REQUIREMENT WAS RIGHT AND THE LABEL WAS NOT: the hook has two routes to flagging an id — the enclosing entry's block changed, or a NEW closure claim naming it appeared in added text — and only the first is a modification, while the second can name an id with NO ENTRY AT ALL, so MODIFIED sends the reader hunting a block that does not exist, a search terminating in nothing rather than in the answer. I ran that search myself. A guard that refuses correctly and explains wrongly costs the time it was built to save. FIXED WITHOUT LOOSENING: two labels, both still refusing, a quoted claim still counts, and NO exemption for fenced blocks — a status table inside a fence is exactly where a real closure claim would hide, and 03b18d6 put its claim in the preamble. Control pair says so: a quoted B37 closed now refuses as UNNAMED CLOSURE CLAIM, a prose edit inside B361 still refuses as UNNAMED MODIFIED, and a clean tree passes — control 2 proving the split is by CONTENT and that block edits did not become cheaper. Fourth instance with B343, B347 and B355's fifth blind spot of an instrument that is right about the answer and wrong about what the answer means.)
 
 ---
 
@@ -23592,6 +23592,65 @@ sentence in the file, and it is the one that turns a verdict back into a questio
 the reason this review could be narrow instead of exploratory.**
 
 Related: **B343**, **B347**, **B355**, **B310**, **B354**.
+
+---
+
+### B364 — A GUARD'S DIAGNOSIS IS PART OF THE GUARD. `register_commit_check` said `MODIFIED: B37` on a commit that modified no `B37` block and could not have — `B37` has no entry
+
+**Filed 2026-09-05 by manager, against my own hook, on the commit landing `B362`.** The refusal read:
+
+```
+UNNAMED, MODIFIED : B37
+   A MODIFIED BLOCK CAN FLIP A VERDICT open -> closed ...
+```
+
+**No `B37` block was modified. There is no `B37` block.** It was deleted from the register in 2026,
+and the diff merely **quoted the commit subject that removed it** — *"B37 closed, B33 gains the
+instance it predicted"* — inside a fenced list of nine such subjects.
+
+## THE REQUIREMENT WAS RIGHT. THE LABEL WAS NOT.
+
+**The hook has two routes to flagging an id** and reports both under one word:
+
+| route | fact |
+|---|---|
+| the enclosing entry's block changed | *you edited this entry* |
+| a NEW closure claim naming it appeared in added text | *you asserted something about this id* |
+
+**Only the first is a modification.** The second can name **an id with no entry at all**, and then
+`MODIFIED` sends the reader hunting a block that does not exist — **a search that terminates in
+nothing rather than in the answer.** I ran that search myself before working out what had happened.
+
+> **A guard that refuses correctly and explains wrongly costs the time it was built to save.** The
+> refusal was cheap to satisfy — name the id, say why it appears — and the commit message is better
+> for it. The minutes went entirely to the wrong noun.
+
+## FIXED WITHOUT LOOSENING, AND THE CONTROL PAIR SAYS SO
+
+Split into two labels; **both still refuse**, a quoted claim still counts, and **no exemption is
+added for fenced blocks.** That last is deliberate: a status table inside a fence is exactly where a
+real closure claim would hide, and `03b18d6` — the instance this branch exists for — put its claim
+in the register's preamble, which nobody would call a quotation. **Only the label changes.**
+
+```
+CONTROL 1  quoted "B37 closed" for a NON-EXISTENT id  -> UNNAMED CLOSURE CLAIM : B37   refuses
+CONTROL 2  prose edit inside B361's block             -> UNNAMED, MODIFIED : B361      refuses
+CONTROL 3  nothing staged                             -> rc=0                          passes
+```
+
+**Control 2 is the one that matters**: it proves the split is by CONTENT and that block edits did
+not become cheaper. Control 1's message now ends *"Do not go looking for a modified block; there may
+not be one."*
+
+## THE FAMILY
+
+**`B347` is the same shape one level in** — a must-hit control whose single fixture cannot
+distinguish the two forms it covers, so it reports a clean pass over a hole. Here the guard
+distinguishes two things correctly and **describes them as one**. `B343`, `B347`, `B355`'s fifth
+blind spot and this are four instances of *an instrument that is right about the answer and wrong
+about what the answer means*.
+
+Related: **B347**, **B343**, **B355**, **B362**.
 
 ---
 
