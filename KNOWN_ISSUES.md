@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-05 (B383 — MY WATCHER MATCHED ITSELF, and a self-matching watcher is indistinguishable from the thing it watches. `until ! pgrep -f "pytest -q tests/unit"` — pgrep -f matches FULL COMMAND LINES and the watcher's own shell command line contains the pattern, so it matched itself, never exited, and spun at 7.7% CPU for 2h17m. WHY IT WENT UNNOTICED IS THE ENTRY: every check CONFIRMED it, because ps showed a process matching the pattern the whole time, which is exactly what a running suite looks like, and I reported 'suite still running' to Malek twice on that evidence. A self-matching watcher does not fail — it reports the state it was built to detect, forever, and the POSITIVE signal is the malfunction. The real suite had finished at 14:05 with 2009 passed; nothing ran for three hours while Execute held a run it believed would contend and Review sat idle by explicit agreement, on the last gate before an already-authorised live-money deploy. SECOND INSTANCE TODAY: pkill -f matched its own shell earlier and returned exit 144, and it taught me nothing BECAUSE IT WAS HARMLESS — the suite had already finished, so killing my own shell cost nothing. THE FIX IS NOT 'BE CAREFUL': match the interpreter's own argv[0], anchored, since a bash -c wrapper has /bin/bash as argv[0] and cannot match — A WATCHER MUST NOT BE EXPRESSIBLE IN ITS OWN PREDICATE. Third seat in one day for scans over a wrong population, after Review's wait_connected and Execute's B157 grep and my own names_item read — all three of those were CAUGHT, and the difference is direction: they returned a false NEGATIVE, which invites a second look, and this returned a confirming POSITIVE, which does not.)
+Last updated: 2026-09-05 (B384 — A MUTATION REACHED main AND EVERY EXISTING CHECK PASSED. 8c907fc shipped `if (false)` in PropFirmPage's null guard: Review's M-380-A, live in the SHARED working tree while Execute committed by pathspec, re-opening B380 exactly so an unevaluated account renders 0.00% OF LIMIT USED on the prop-firm breach monitor. THE ENTRY IS NOT THE MUTATION, IT IS THAT NOTHING COULD HAVE CAUGHT IT: both seats' suites were green because each ran BEFORE the other's edit, the commit-msg hook reads the MESSAGE and never the diff, and THE DEPLOY'S SHA VERIFICATION WOULD HAVE MATCHED PERFECTLY — a sha answers whether the server got what was pushed and cannot answer whether what was pushed is what was reviewed, so the check I wrote into the start sequence and called 'not ceremony' would have confirmed the defect arrived intact. Malek had already authorised the deploy on review passing, so the only thing between a fabricated all-clear on a funded account and production was Review re-reading its own restore. EXECUTE NAMED THE WINDOW BETTER THAN I DID: it had been rigorous that a suite result must describe a tree that still exists, superseding two full runs for exactly that, and then staged a file without re-reading it at commit time — the same window watched at only one end, so MEASURE-to-COMMIT needs the discipline both seats gave EDIT-to-MEASURE. THE STRUCTURAL CAUSE IS NOT CARELESSNESS: two seats mutate one working tree and Review has no isolated worktree for the FRONTEND because node_modules lives in the shared one, while its backend mutations ran in a pinned worktree and none reached the index. GUARD BUILT: agents/mutation_marker_check.py, wired into commit-msg, refusing a staged diff that INTRODUCES a marker on added lines only, with a NAMED marker allowed exactly as the register hook treats closure claims, failing CLOSED when it cannot read the diff, and printing its own blind spot — it catches MARKERS not MUTATIONS, so an inverted comparison is invisible to it. It raises a floor and is not a ceiling.)
 
 ---
 
@@ -24753,6 +24753,76 @@ difference is the direction of the error: **those returned a false NEGATIVE, whi
 look. This returned a confirming POSITIVE, which does not.**
 
 Related: **B354**, **B362**, **B359**, **B364**.
+
+---
+
+### B384 — A MUTATION REACHED `main` AND EVERY EXISTING CHECK PASSED. The sha verification would have matched perfectly, because a sha cannot answer what a review answers
+
+**Filed 2026-09-05 by manager**, on Review's escalation and Execute's proposal. `8c907fc` shipped
+`if (false)` in `PropFirmPage.tsx`'s null guard and pushed it to `main`. **It was Review's
+`M-380-A`, live in the SHARED working tree while Execute committed by pathspec** — and it re-opened
+`B380` exactly: the "NOT EVALUATED" branch unreachable, so an unevaluated account renders
+`0.00% OF LIMIT USED`, the fabricated all-clear on the prop-firm breach monitor.
+
+## THE ENTRY IS NOT THE MUTATION. IT IS THAT NOTHING COULD HAVE CAUGHT IT
+
+```
+both seats' suites          GREEN   each ran BEFORE the other's edit
+commit-msg hook             PASS    it reads the MESSAGE and never the diff
+deploy sha verification     MATCH   ... and this is the one that matters
+```
+
+> **A sha answers *did the server get what I pushed*. It cannot answer *is what I pushed what I
+> reviewed*.** The deploy check I wrote into the start sequence, and called *"not ceremony"*, would
+> have confirmed the defect had arrived intact.
+
+**Malek had already authorised the deploy on review passing.** The only thing between a fabricated
+all-clear on a funded account's breach monitor and production was **Review reading its own restore
+and noticing the commit had captured the mutation**.
+
+## THE WINDOW, AND EXECUTE NAMED IT BETTER THAN I DID
+
+Execute took half the cause rather than accepting my *"nothing of yours is at fault"*:
+
+> *"I have been rigorous that a suite result must describe a tree that still exists — I superseded
+> two full runs for exactly that — and then staged a file without re-reading it at commit time.
+> **It is the same window and I was watching only one end of it.** Measuring→committing needs the
+> same discipline as editing→measuring."*
+
+**Both seats spent the day on `EDIT → MEASURE` and neither guarded `MEASURE → COMMIT`.**
+
+## THE STRUCTURAL CAUSE IS NOT CARELESSNESS
+
+**Two seats mutate one working tree, and Review has no isolated worktree for the frontend because
+`node_modules` lives in the shared one.** Its backend mutations ran in a pinned worktree at
+`scratchpad/wt-hold` and none reached the index — **the frontend was the exception for a real
+reason, and it will recur every time the frontend is reviewed.**
+
+## THE GUARD — `agents/mutation_marker_check.py`, wired into `commit-msg`
+
+**Refuses a commit whose STAGED DIFF introduces a mutation marker**, on ADDED lines only, in
+`.py/.ts/.tsx/.js/.jsx`. Markers are drawn from what the seats actually typed this session rather
+than invented: `if (false)`, `if (true)`, `if False:`, `if True:`, `# MUT`, `MUT-n`.
+
+**A NAMED marker is allowed**, exactly as the register hook treats closure claims — because a
+quoted marker in a docstring reads identically to a live one, and `B380`'s own entry quotes
+`if (false)`. **The fix is to name it, never to teach the scanner to guess.**
+
+```
+CONTROL 1  the exact 8c907fc mutation staged   -> REFUSED, naming the line   correct
+CONTROL 2  same diff, marker named in message  -> ALLOWED                    correct
+CONTROL 3  nothing staged                      -> PASSES                     correct
+```
+
+**It fails CLOSED**: a guard that cannot read the diff refuses rather than passes, because *could
+not look* and *looked and found nothing* must never be the same outcome (`B292`).
+
+**And its own blind spot is printed rather than hidden: it catches MARKERS, not MUTATIONS.**
+`value === null` flipped to `value !== null` has no marker and is invisible to it. **This raises a
+floor. It is not a ceiling**, and the thing that actually caught this one was a reviewer re-reading
+its own work.
+
+Related: **B380**, **B383**, **B364**, **B361**.
 
 ---
 
