@@ -8,19 +8,44 @@ sprint** — each one is a thing that must be TRUE before the next is worth star
 the tasks that make it true and what each task is FOR. Malek's own items are listed separately at
 the end because they interleave rather than queue.
 
-**The honest headline:** *linking* the demo is close — one task, in flight. *Trading* the demo is a
-programme: three named changes in the live loop, plus one decision that is Malek's.
+**The honest headline:** *linking* the demo needs your token and nothing else from us. *Trading* it
+is a programme: three named changes in the live loop, plus one decision that is yours.
+
+**And the single most useful correction in this document: GATE 1 AND GATE 3 ARE NOT ORDERED.** Start
+Gate 3 the moment you have a token — it has the longest lead time and it does not wait on us.
 
 ---
 
 ## Where the line actually falls
 
 ```
-GATE 1   the adapter is CORRECT            in flight    3 tasks    T-0135 (5 findings), B340, B343
-GATE 2   the adapter is REACHABLE          DONE         T-0134 b07a43f + deployed e897d903c
-GATE 3   the demo is CONNECTED             blocked      1 task     needs the MetaApi token
-GATE 4   the strategy TRADES the demo      SCOPED       3 tasks    needs the T-0076 ruling
+GATE 1   the adapter is CORRECT       in flight   B343, B340        needs nothing from Malek
+GATE 2a  mt5 is CONSTRUCTIBLE         DONE        T-0134 b07a43f    latched
+GATE 2b  the SERVER runs it           STALE       precondition of Gate 3, not a gate
+GATE 3   the demo is CONNECTED        blocked     the MetaApi token starts it
+GATE 4   the strategy TRADES it       scoped      3 changes + the T-0076 ruling
 ```
+
+> ### ⚠ THE LADDER WAS WRONG ABOUT ITS OWN ORDERING — `B359`'s audit, and it costs you time
+>
+> **GATE 1 DOES NOT GATE GATE 3. Run them in parallel.** Measured: `mt5_first_connection.py`
+> imports `argparse asyncio json pathlib sys traceback typing`, plus `aiohttp` and the MetaApi SDK
+> inside its functions — **nothing from `app/`, and no `MetaTrader5Adapter`.** Every Gate 3 answer
+> is obtainable with the adapter in any state whatsoever, because the instrument talks to the SDK
+> directly.
+>
+> **And the cost runs one way, which is why it matters.** Gate 3 has the longest lead time — it
+> needs you, it needs a provisioned account, and item 3.1 needs a *closed trade* so it cannot finish
+> on day one. **Gate 1 needs none of those and is entirely ours.** The ladder said to wait, and
+> waiting buys nothing.
+>
+> **One word on the summary row:** the token **starts** Gate 3, it does not finish it. *Blocked →
+> token* reads as *token → done*, and item 3.1 still waits on a round trip through a real trade.
+>
+> **And `GATE 2` was never one gate.** `T-0134` latches: `mt5` stays constructible. *"The server
+> runs this code"* is falsified by every subsequent commit and **has already reopened with code in
+> it** (`B361`) — so it is listed as a precondition to re-check immediately before connecting,
+> never as a gate that closes.
 
 > **STATUS 2026-09-05: GATE 2 IS DONE.** `T-0134` landed and the server now runs it — the MetaApi
 > SDK imports in production and the broker factory answers to `mt5`. **Gate 3 is blocked on nothing
@@ -72,7 +97,7 @@ inherited defect. **Do not fix it by reverting to the flooring** — that reintr
 defect. The shape wanted is a position that carries its own unreadable-field marker so the *book*
 can still be enumerated while the *field* stays refused.
 
-### T-0135 — the kill-switch accounting `B335` `B337` `B338` `B342` `B349`
+### ~~T-0135~~ — the kill-switch accounting — **LANDED `0abc534`, in review**
 
 **`B349` is routed here rather than to a cycle 2**, because this task already owns the member.
 
@@ -163,8 +188,12 @@ connect with.** **Landed.** `_MT5_ALIASES = {"mt5", "metatrader5", "metatrader",
 factory constructs `MetaTrader5Adapter` from an account factory. **The demo is now linkable as soon
 as there is a token.**
 
-Today `_make_adapter` branches on one alias set and ends `raise ValueError("Unsupported broker")`.
-A `broker_connections` row naming `mt5` raises.
+**Before it:** `_make_adapter` branched on one alias set and ended
+`raise ValueError("Unsupported broker")`, so a `broker_connections` row naming `mt5` raised.
+**Now:** `_MT5_ALIASES = {"mt5", "metatrader5", "metatrader", "metaapi"}` and the factory constructs
+the adapter. *(This paragraph was left in the present tense inside a section marked DONE — it
+described the world before the task it marks complete, which Review caught reading the document
+against the tree.)*
 
 **Its shape changed under `B341` and it is no longer "add a branch":**
 
@@ -184,7 +213,13 @@ only job is answering one boolean pair**, bought before an account exists to poi
 
 **It must also decide and record where the MetaApi token comes from** — environment variable versus
 the credential blob on the connection row — because that is a security property, not a style
-choice. **And it must reach the existing `ALLOW_LIVE_TRADING` guard rather than returning before
+choice.
+
+> **HALF MET, AND THE DONE MARKER CLOSED IT ANYWAY — `B360`.** *Decided:* the credential blob,
+> `manager.py:117`. *Recorded:* nowhere — `METAAPI_TOKEN` appears nowhere in `backend/app`. **The
+> twenty lines directly above that assignment carry a detailed note about a stale citation**, so the
+> silence about where a live-venue credential comes from is conspicuous rather than accidental.
+> **Still open.** **And it must reach the existing `ALLOW_LIVE_TRADING` guard rather than returning before
 it**; a branch that returns early would be a new unguarded real-money path, which is precisely why
 the OANDA branch was deleted from that function.
 
@@ -205,7 +240,24 @@ preflight was clean before it went: schema matched at `0008` so no migration ran
 open positions — *"deploying now settles nothing and the ledger will not move."* `web-build` was
 recreated alongside `api`, closing the web/api commit gap the preflight flagged.
 
-**Gate 2 is complete. The only thing between you and a linked demo is the MetaApi token.**
+> ### ⚠ THIS HAS ALREADY REOPENED, AND THIS TIME THE DRIFT CONTAINS CODE — `B361`
+>
+> ```
+> api serving   e897d903c
+> 5fe67da       manager.py — the stale B346 citation
+> 0abc534       T-0135 — B349 B337 B338b B335b B342 B356 B353
+> ```
+>
+> **The running container has none of the T-0135 fixes, including `B356`** — the one that makes
+> `get_recent_trades` work against the real SDK at all. **A demo linked against the server right now
+> raises on the first real deals read.**
+>
+> **And Gate 3 is not purely container-independent**, which is the part that would have caught
+> someone out: checklist item **1.1b calls `GET /api/positions`**, and that goes through the
+> deployed API. The rest of Gate 3 talks to the SDK directly and does not.
+>
+> **So: re-run `deploy_preflight.py` and redeploy immediately before the first connection, never
+> earlier** — deploying now would make this sentence true only until Execute lands `B343`.
 
 #### Why it mattered, kept because the gap reopens on every commit
 
@@ -240,6 +292,18 @@ answer interpretable.**
 1. **0.1 — get it wrong twice on purpose.** Misspelled server, then bad password. Free, needs no
    working account. **If they arrive as one generic error, every future credential change costs a
    day.**
+> **ITEM 1.1's OPEN QUESTION IS ALREADY ANSWERED, FOR FREE — `B359`.** It asked whether
+> `wait_synchronized()` alone implies a broker link. **`wait_connected()` exists on
+> `MetatraderAccount`** — the object the adapter now holds — and is documented as waiting until the
+> API server has connected to the terminal **and** the terminal has connected to the broker.
+> Different objects, different properties. **No account was needed to settle it.**
+>
+> **And reading it found a live adapter defect.** The SDK counts an account connected when the
+> **primary OR ANY REPLICA** is `CONNECTED`; `_require_broker_link` checks only the primary. On a
+> replicated account with a healthy replica, **the adapter raises on every read while the vendor
+> considers the account connected** — and refusing to act on the kill switch is leaving every
+> position open.
+
 2. **1.1 — connection state.** `await account.reload()` before each read, or the value is stale by
    construction. **An empty position list from a broker we cannot see is *cannot see*, not *flat*,**
    and the kill switch depends on the difference. Also settles whether `wait_synchronized()` alone
