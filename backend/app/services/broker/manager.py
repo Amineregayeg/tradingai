@@ -287,10 +287,38 @@ class BrokerManager:
         2. Build and connect the adapter (raises BrokerConnectionError on failure).
         3. On success: mark connected=True and store adapter.
         """
+        # `B368`. REFUSE AT THE BOUNDARY, BEFORE ANYTHING IS PERSISTED. Step 1 below encrypts and
+        # writes the row and step 2 builds the adapter, so a request missing these would leave a
+        # connection row behind and fail afterwards. The factory's messages are specific and are
+        # reused verbatim rather than paraphrased into a second wording of the same rule.
+        if request.broker.lower() in _MT5_ALIASES:
+            if not (request.token or "").strip():
+                raise BrokerConnectionError(
+                    "MT5 needs a MetaApi token and none was supplied. It goes in `token` — NOT "
+                    "in `api_key`, which means an exchange API key on every other broker here.",
+                    broker=request.broker,
+                )
+            if not (request.mt5_account_id or request.account_id or "").strip():
+                raise BrokerConnectionError(
+                    "MT5 needs a MetaApi ACCOUNT ID — the provisioned account's id, which is not "
+                    "the broker login. Supply `mt5_account_id`.",
+                    broker=request.broker,
+                )
+
         creds_dict: dict = {
             "api_key": request.api_key,
             "api_secret": request.api_secret or "",
         }
+        # `B368`. THE ONLY BLOB THAT WORKS USED TO BE ONE THIS METHOD COULD NOT WRITE. `_make_adapter`
+        # reads `token` and `mt5_account_id`, and neither was ever put here — so an MT5 connection
+        # could be created ONLY by writing the `broker_connections` row straight into the database.
+        # It survived two audits because both tested that the ADAPTER ACCEPTS a correct blob and
+        # neither tested that the API can EMIT one, with a hand-built blob standing in for the
+        # producer both times (`B356`'s axis, one layer out).
+        if request.token:
+            creds_dict["token"] = request.token
+        if request.mt5_account_id:
+            creds_dict["mt5_account_id"] = request.mt5_account_id
         # Match-Trader / Crypto Fund Trader style credentials (email + password + base URL).
         if request.email:
             creds_dict["email"] = request.email

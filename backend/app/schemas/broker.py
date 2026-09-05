@@ -39,6 +39,19 @@ class BrokerConnectRequest(BaseModel):
         default=None,
         description="API base URL incl. system path, e.g. https://<host>/mtr-api/<system-uuid>",
     )
+    # MetaTrader 5 through MetaApi (`B368`). **These are NOT `api_key` under another name**, and
+    # the decision not to overload it is deliberate: `api_key` means an EXCHANGE API KEY on every
+    # other broker here, and one field carrying two unrelated credentials is `B184` at the
+    # inbound surface — precisely the argument `B360` makes for the token having exactly one
+    # source. `mt5_account_id` is MetaApi's PROVISIONED ACCOUNT ID, which is not the broker login
+    # and not `account_id`.
+    token: str | None = Field(
+        default=None, description="MetaApi token (MetaTrader 5 connections)"
+    )
+    mt5_account_id: str | None = Field(
+        default=None,
+        description="MetaApi provisioned account id — NOT the broker login, NOT account_id",
+    )
     observe_only: bool | None = Field(
         default=None,
         description="If true, the connection is read-only (no order placement). Default true for prop-firm brokers.",
