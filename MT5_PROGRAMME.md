@@ -9,7 +9,7 @@ the tasks that make it true and what each task is FOR. Malek's own items are lis
 the end because they interleave rather than queue.
 
 **The honest headline:** *linking* the demo is close — one task, in flight. *Trading* the demo is a
-programme, and one piece of it has never been scoped by anyone.
+programme: three named changes in the live loop, plus one decision that is Malek's.
 
 ---
 
@@ -19,14 +19,15 @@ programme, and one piece of it has never been scoped by anyone.
 GATE 1   the adapter is CORRECT            in flight    4 tasks    needs nothing from Malek
 GATE 2   the adapter is REACHABLE          in flight    2 tasks    needs a deploy authorisation
 GATE 3   the demo is CONNECTED             blocked      1 task     needs the MetaApi token
-GATE 4   the strategy TRADES the demo      unscoped     3 tasks    needs the T-0076 ruling
+GATE 4   the strategy TRADES the demo      SCOPED       3 tasks    needs the T-0076 ruling
 ```
 
 **Gates 1–3 give you a linked MT5 demo the platform can read**: balance, equity, open positions,
 prices, and the broker-reported account type. **That is real and it is the near thing.**
 
 **Gate 4 is what "for the simulations" means** if it means the strategy placing orders on the demo.
-It is not a wiring change and it contains work nobody has planned. `B346`.
+It is not a wiring change — **but it is a smaller job than this document said an hour ago**, and the
+correction is in Gate 4 below (`B350`).
 
 ---
 
@@ -61,7 +62,9 @@ inherited defect. **Do not fix it by reverting to the flooring** — that reintr
 defect. The shape wanted is a position that carries its own unreadable-field marker so the *book*
 can still be enumerated while the *field* stays refused.
 
-### T-0135 — the kill-switch accounting `B335` `B337` `B338` `B342`
+### T-0135 — the kill-switch accounting `B335` `B337` `B338` `B342` `B349`
+
+**`B349` is routed here rather than to a cycle 2**, because this task already owns the member.
 
 **Goal: make the kill switch's report true, because Malek's ruled property is satisfiable by a
 false one.**
@@ -193,20 +196,36 @@ answer interpretable.**
 **The state to reach:** the engine places orders on the MT5 demo. **This is the gate that is not a
 task list yet.**
 
-### The order path — `B346`, and nobody has scoped it
+### The order path — and it is BINDING, not BUILDING `B346` `B350`
 
-**Goal: give the engine a way to place an order anywhere except its own in-process simulation.**
+**Goal: let the engine's existing order path terminate somewhere other than a simulator built inside
+the process.**
 
-Both `ExecutionService` constructions in the tree pass the loop's in-process broker:
+> **CORRECTED 2026-09-05, hours after this document was first written.** `B346` — mine — said the
+> order path *reaches no adapter*. **That is wrong and Review measured it.** `PaperBroker` and
+> `SimPropFirmBroker` are both `BrokerAdapter` subclasses that define `place_order`, so **the path
+> does not stop short of an adapter: it terminates in one, end to end, every time.** The one it
+> terminates in is always simulated.
+>
+> **The two statements dispatch different work, which is why the correction is worth more than the
+> conclusion:**
+>
+> ```
+> "reaches no adapter"     -> the plumbing does not exist; this means BUILDING an order path
+> "reaches a SIM adapter"  -> the plumbing exists end to end; this means BINDING into it
+> ```
+>
+> **My conclusion survives and is firmer.** Linking MT5 gives reads and cannot give trading — **not
+> because a path is missing but because the destination is hardcoded**, and a hardcoded destination
+> is not fixed by adding an adapter.
+
+**So the work is three named changes rather than an open question:**
 
 ```
-crypto_loop.py:168   ExecutionService(self.paper, ExecMode.PAPER)
-crypto_loop.py:794   ExecutionService(self.paper, ExecMode.PAPER)
+crypto_loop.py:157/162   self.paper is constructed INLINE in __init__ -- no injection point at all
+crypto_loop.py:168/794   ExecMode.PAPER is hardcoded at BOTH construction sites
+broker_mode              selects between TWO SIMULATORS -- it is not a live/sim switch
 ```
-
-`self.paper` is a `PaperBroker` or a `SimPropFirmBroker`. **Both are real `BrokerAdapter`
-subclasses — the mechanism is not "no adapter is on the order path", it is that the only adapters
-on it are the two constructed inside the process** (`B350` corrects `B346` on exactly this).
 
 **Three deliberate refusals stand behind that, and all three are safety features working:**
 
@@ -283,8 +302,9 @@ improvement, not a gap. Nothing waits on it.**
 ## What this document does not promise
 
 **No date.** Gate 1 is four tasks of known shape. Gate 2 is one task in flight plus a command. Gate
-3 is a checklist that cannot start without a token. **Gate 4 has an unscoped piece and an unmade
-decision, and anyone giving it a duration would be guessing.**
+3 is a checklist that cannot start without a token. **Gate 4 now has three named changes and an
+unmade decision** — better than the unscoped piece it was this morning, and still not something to
+put a date on while the decision is open.
 
 **And the thing worth remembering when the demo does connect:** the adapter was written from
 documentation, passed 130 tests against a mock, and the first time a real package was installed it
