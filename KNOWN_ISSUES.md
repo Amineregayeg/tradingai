@@ -22082,6 +22082,45 @@ could never surface: a mock has whatever attributes the test gives it.
 Related: **B335**, **B334**, **B292**, **B215**, **B303**, **B342**.
 
 
+> ### B341 THIRD ADDENDUM — THE ENTRY'S HEADLINE IS TOO STRONG, AND MY OWN MEASUREMENT SAID SO BEFORE I WROTE IT
+>
+> **Narrowed by the manager, who introspected the package rather than reasoning from my message.**
+> The entry says *no SDK object has the shape `mt5.py` assumes*, and I told the manager the adapter
+> *"invented a two-boolean pair to express something the SDK ships as one enum."* **Neither holds.**
+>
+> ```
+> TerminalState.connected             property, push-updated
+> TerminalState.connected_to_broker   property, push-updated by on_broker_connection_status_changed
+> ```
+>
+> **Those are the adapter's exact names.** The pair was not invented; it matches the SDK's
+> streaming API precisely.
+>
+> **AND I HAD MEASURED IT.** The first introspection in this task printed
+> `connected PRESENT / connected_to_broker PRESENT`, and I published it as evidence that our
+> spellings were right — then wrote, in the same entry, that we invented the pair. **The
+> contradiction is internal to the finding, not a later discovery**, which is why it is filed
+> against the entry rather than treated as new information.
+>
+> **THE TRUE FINDING IS NARROWER AND BETTER:** every member the adapter assumes is real, and they
+> are **split across two objects that share no reads.**
+>
+> ```
+> RpcMetaApiConnectionInstance        all six reads      NO terminal_state
+> StreamingMetaApiConnectionInstance  terminal_state     NONE of the six reads
+> ```
+>
+> **No single connection can serve both the data and the guard**, which is the sentence a reader
+> needs in order to see why `reload()` is the answer rather than the streaming connection: the
+> streaming object is not a second connection the read-only phase *does not otherwise need*, it is
+> one **held permanently alongside the RPC connection whose entire job is to answer one boolean
+> pair**, because it cannot serve a single read.
+>
+> **The generalisation this cost me:** *the shape does not exist* is a tidier claim than *the shape
+> is split across two objects*, and I reached for it while holding the measurement that refutes it.
+> `B341` is itself about checking names and not asking about the arrangement — and its headline
+> overstated the arrangement in the opposite direction.
+
 > ### B341 ADDENDUM — THE FIX DOES NOT NEED A SHIM, BECAUSE THE VENDOR ALREADY HAS THE FIELD, IN A BETTER SHAPE THAN OURS
 >
 > **Measured after the entry above, when `T-0134` had to choose a seam.** The reachability datum is
