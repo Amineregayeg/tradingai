@@ -22,7 +22,7 @@ Gate 3 the moment you have a token — it has the longest lead time and it does 
 GATE 1   the adapter is CORRECT       CLOSED      5c18dca           12 findings, all landed
 GATE 2a  mt5 is CONSTRUCTIBLE         DONE        T-0134 b07a43f    latched
 GATE 2b  the SERVER runs it           STALE       precondition of Gate 3, not a gate
-GATE 3   the demo is CONNECTED        BLOCKED     token + the API cannot yet store it (B368)
+GATE 3   the demo is CONNECTED        READY       your token + a redeploy. Nothing else.
 GATE 4   the strategy TRADES it       scoped      3 changes + the T-0076 ruling
 ```
 
@@ -47,7 +47,20 @@ GATE 4   the strategy TRADES it       scoped      3 changes + the T-0076 ruling
 > it** (`B361`) — so it is listed as a precondition to re-check immediately before connecting,
 > never as a gate that closes.
 
-> ## ⛔ CORRECTED 2026-09-05 — **GATE 3 IS NOT BLOCKED ON THE TOKEN ALONE** `B368`
+> ## ✅ RESOLVED SAME DAY — `B368` `B369` LANDED. **The path from your token to a linked demo now exists end to end.**
+>
+> ```
+> UI form  ->  request schema  ->  connect_broker  ->  encrypted blob
+>          ->  decrypt_credentials  ->  _make_adapter  ->  MetaTrader5Adapter
+> ```
+>
+> Settings → Broker Connections now offers **MetaTrader 5 (MetaApi)** with **Demo** and **Live**,
+> and fields for your **MetaApi token** and **provisioned account id** — which is not your MT5
+> login. **What remains before you connect is a redeploy and nothing else.**
+>
+> The original finding is kept below because the way it survived is the useful part.
+>
+> ## ⛔ THE ORIGINAL, 2026-09-05 — **GATE 3 WAS NOT BLOCKED ON THE TOKEN ALONE** `B368`
 >
 > **This document said it was, and that is the sentence Malek would have acted on.** The API cannot
 > write an MT5 connection. `connect_broker` builds its credential blob as
