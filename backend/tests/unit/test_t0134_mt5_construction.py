@@ -210,3 +210,42 @@ def test_the_DEFAULT_is_observe_only_when_the_key_is_absent_entirely(monkeypatch
     assert adapter.observe_only is True, (
         "an absent key must default to observe-only even when live trading is permitted"
     )
+
+
+def test_the_gate_RUNS_on_the_mt5_path_and_not_only_above_it(monkeypatch):
+    """`B352`, second half. **All four gate-effect arms above drive the CFT branch.**
+
+    The AST arm asserts the guard is POSITIONED before every return. **That is a different claim:
+    a guard can be correctly placed and still not run for a branch**, and "mine is the second
+    caller" is exactly when that stops being theoretical.
+
+    **What this can honestly assert, and what it must not.** The MT5 adapter has no `observe_only`
+    parameter and no write to gate — `place_order` refuses unconditionally — so there is no
+    adapter attribute to check, and an arm claiming *the mt5 adapter is observe-only* would be
+    asserting a property that does not exist. That is `B341`'s shape: a name that reads right for
+    an object that has no such thing. What is real is that **the guard EXECUTED for this broker**,
+    which is the property that must survive someone later giving the adapter a write.
+    """
+    # THE INSTRUMENT, AND THE FIRST ONE DID NOT WORK. Written with `caplog` it failed while the
+    # warning was plainly in the captured stderr: this app logs through loguru and `caplog`
+    # captures stdlib `logging`. **The arm was red because the instrument could not see, not
+    # because the property was false** — the exact reading error this register keeps recording, so
+    # the recorder below observes the call itself rather than a sink's rendering of it.
+    calls: list[str] = []
+
+    class _Recorder:
+        def warning(self, message, **kw):
+            calls.append(str(message))
+
+        def info(self, message, **kw):
+            calls.append(str(message))
+
+    monkeypatch.delenv("ALLOW_LIVE_TRADING", raising=False)
+    monkeypatch.setattr(manager_mod, "logger", _Recorder())
+    adapter = _make_adapter("mt5", {**CREDS, "observe_only": False}, "acc-abc", "demo")
+
+    assert isinstance(adapter, MetaTrader5Adapter)
+    assert any("Forcing observe_only=True" in c for c in calls), (
+        "the live-trading gate did not run on the mt5 construction path — it is positioned "
+        f"before the dispatch but this branch reached a return without evaluating it. Saw: {calls}"
+    )
