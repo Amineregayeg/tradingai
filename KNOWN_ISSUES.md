@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-05 (B378 — THE PROP-FIRM BREACH MONITOR SWALLOWS THE EXCEPTION, so B377's loud fix stops the drawdown updating instead of reporting it wrong. Six consumers of CFT's get_account were traced: manager.get_all_accounts and reconciliation.reconcile_all both HANDLE it, carrying reachable:false and the reason while the panel shows the error text and NO FIGURES with a comment saying that a last-known balance would be indistinguishable from a current one — the best-behaved consumer in the tree, and my worry about it did not land. Three more are not CFT at all, since ExecutionService and the loop and the proxy all hold the simulator. THE ONE THAT SWALLOWS IS observe_sync, whose per-adapter `except Exception` logs a warning and writes NO PropFirmSnapshot, so compute_compliance_state never runs — and because the surface reads snapshot HISTORY, a missing snapshot is INDISTINGUISHABLE FROM A QUIET PERIOD, every two minutes, on the drawdown monitor for the funded account. Before B377 an absent equity gave a WRONG drawdown; after it the drawdown STOPS UPDATING, so the consumer is the defect and the repair is to record an UNAVAILABLE state rather than skip. AND B376 MUST LAND WITH B372 RATHER THAN BEFORE IT: B376's raise sits in position normalisation, so it surfaces in manager.get_all_positions — the swallow B372 measured — and until that lands B376 turns a wrongly-LONG position into a position that is NOT THERE. AND REVIEW CORRECTED ITS OWN B377, WHICH I HAD REPEATED TO MALEK: 'a silent fallback to balance changes how large every position is' is TRUE OF THE CODE AND FALSE OF CFT, because ExecutionService is only ever constructed with the loop's simulator per B350, which Review established itself — so CFT's equity reaches the compliance monitor and the dashboard and nothing else. The fix matters MORE than B377 argued rather than less, since a prop-firm breach closes the account, but the mechanism was wrong and it was wrong because a call site was traced instead of what is passed to it.)
+Last updated: 2026-09-05 (B379 — TWO OF THE SIX KILL-SET CLAUSES DID NOT SURVIVE CONTACT, AND BOTH ARE THE SAME KIND: a universal quantifier over arm shapes the author had not seen. Found by Review reviewing B372 against the kill-set Review itself registered before any arm existed — which is what made the review possible and is also what exposed the instrument, since it had never been executed at this size. FIRST: the ORTHOGONALITY CONDITION as stated is wrong. 'An arm dying under both mutations is measuring one thing twice' assumes every arm is NARROW, and the intersection is not empty — test_a_PARTIAL_failure_still_returns_200_because_three_consumers_rest_on_that is a COMPOSITE INTEGRATION arm asserting the whole response contract, so a mutation to either mechanism breaks a claim it legitimately makes, and it SHOULD die under both. The property actually wanted does hold and is the correct formulation: FOR EACH MECHANISM THERE IS AN ARM THAT DIES UNDER ITS MUTATION AND SURVIVES THE OTHER. It worked on B349 because both candidates there were narrow. SECOND: the all-healthy CONTROL cannot hold under M-2, because dropping the positions breaks the healthy path too and that is precisely what M-2 mutates — so A CONTROL HAS TO NAME THE MUTATIONS IT GOVERNS rather than be asserted universally. B372 PASSES: all four mutations covered, DELETE needed its own separate mutation since the unasked guard appears once in GET-one and once in DELETE, the must-miss has a dedicated arm so a fix reporting the problem while losing the data dies, the DELETE arm asserts the DETAIL rather than the status code, and M-4's arm installs a raising adapter and drives a real 502 — the two-layer claim settled by driving it, which is the only form that settles it. Every row was run rather than read from a report.)
 
 ---
 
@@ -24549,6 +24549,73 @@ gross-versus-net ambiguity is **latent, not observed**, and nothing records whic
 a stronger statement than the one I filed, and it comes from the tree rather than from reasoning.
 
 Related: **B377**, **B376**, **B372**, **B350**, **B286**, **B366**.
+
+---
+
+### B379 — THE KILL-SET DISCIPLINE RUN AGAINST A REAL FIX FOR THE FIRST TIME, AND TWO OF ITS SIX CLAUSES WERE MIS-STATED BY ME. *"No arm dies under both"* misfires on a composite integration arm, and an all-healthy control cannot survive a mutation that breaks the read path
+
+`B372`'s fix is the first defect of its size reviewed against a kill-set registered **before any arm
+existed**, which is the whole point of the ordering: the arms cannot have been shaped to fit what
+already passed. **The fix passes all four mutations. Two of my own specifications did not survive
+contact.**
+
+## WHAT THE RUN MEASURED
+
+```
+M-1  aggregate swallows, `unasked` never populated      6 arms fail
+       incl. test_an_UNASKED_adapter_is_NAMED_and_not_silently_dropped
+M-2  MUST-MISS: `unasked` kept, positions DROPPED       4 arms fail
+       incl. test_the_HEALTHY_positions_still_come_back_IN_FULL
+M-3  GET-one's unasked guard removed                    1 arm  (test_GET_one_distinguishes...)
+M-3b DELETE's unasked guard removed                     1 arm  (test_DELETE_does_not_404...)
+M-4  the replacement 502 made unreachable again         1 arm  (test_the_502_PATH_IS_REACHABLE...)
+```
+
+## CLAUSE 1 THAT WAS WRONG — THE ORTHOGONALITY CONDITION AS A SET INTERSECTION
+
+I wrote: *"`M-2` must NOT kill `M-1`'s arm — an arm dying under both is measuring one thing twice."*
+Measured, the intersection is **not** empty:
+
+```
+INTERSECTION: test_a_PARTIAL_failure_still_returns_200_because_three_consumers_rest_on_that
+```
+
+**And that arm SHOULD die under both.** It is a composite integration arm asserting the whole
+response contract — a partial failure returns 200, the healthy positions are present, and the
+unasked broker is named. A mutation to either mechanism breaks a claim it legitimately makes.
+
+**The property I actually wanted, and it holds:** *for each mechanism there must exist an arm that
+dies under its mutation and SURVIVES the other.* `test_an_UNASKED_adapter_is_NAMED` dies only under
+`M-1`; `test_the_HEALTHY_positions_still_come_back_IN_FULL` dies only under `M-2`. **The separation
+is real; my formulation of it was not.**
+
+**Why the wrong form worked on `B349`:** there, the two candidate arms were both narrow, so an
+intersection would genuinely have meant one was passing for the wrong reason. **A universal
+"intersection must be empty" quietly assumes every arm is narrow**, and an integration arm is not.
+
+## CLAUSE 2 THAT WAS WRONG — THE ALL-HEALTHY CONTROL
+
+I wrote: *"the all-healthy case must stay green under every mutation."* Under `M-2` it fails, and
+correctly: dropping the positions breaks the healthy path too, which is what `M-2` mutates.
+**The control is right for `M-1`, `M-3` and `M-4`, which touch only the unasked path, and cannot
+hold for a mutation on the read.** A control has to name the mutations it applies to.
+
+## WHY THIS IS AN ENTRY
+
+**A kill-set is an instrument, and this register's rule is that an instrument gets verified before
+its output is believed.** Mine had never been executed against a fix of this size — `T-0135`'s was
+close, but Execute reported the numbers and I re-ran only three of seven rows. Here I ran every row
+myself, and **the two clauses that failed are both of the same kind: a universal quantifier over
+arms whose shapes I had not seen.** The mutations were right; the conditions ABOUT the mutations
+over-reached.
+
+**Nothing here weakens the practice.** Registering before the arms exist is what made the review
+possible, and four of six clauses held exactly. The refinement is to state each control against the
+mutations it governs, and to require a witness arm per mechanism rather than an empty intersection.
+
+Related: **B372**, **B349**, **B332**, **B354**, **B362**.
+
+---
 
 ---
 
