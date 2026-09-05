@@ -249,3 +249,78 @@ def test_the_gate_RUNS_on_the_mt5_path_and_not_only_above_it(monkeypatch):
         "the live-trading gate did not run on the mt5 construction path — it is positioned "
         f"before the dispatch but this branch reached a return without evaluating it. Saw: {calls}"
     )
+
+
+def test_the_MetaApi_token_comes_ONLY_from_the_credential_blob_and_never_from_the_environment():
+    """`B360`. T-0134 required the token's source to be *decided and recorded — a security
+    property, not a style choice*. It was decided at the branch and recorded nowhere, so a DONE
+    marker closed a half-met requirement.
+
+    **The decision, now asserted rather than only written:** the token comes from the connection
+    row's encrypted credential blob and from nowhere else. An environment variable is
+    process-global while a token is per-connection, so one variable could hold exactly one
+    account's token and a second MT5 account would silently authenticate as the first — and a live
+    broker credential in `os.environ` is visible to `/proc`, to a crash dump, and to anything that
+    logs the environment.
+    """
+    monkey_env = "METAAPI_TOKEN"
+
+    # READ STRUCTURALLY, AND THE FIRST VERSION OF THIS ARM WAS WRONG IN THE WAY IT WARNS ABOUT.
+    # It asserted the string `METAAPI_TOKEN` did not occur in the module — and went red on the
+    # COMMENT that records this very decision, which names the variable in order to say it is not
+    # consulted. **A substring scan cannot tell a use from a mention**, which is the same defect
+    # B343's marker arm had. So this collects the names actually passed to `os.getenv` /
+    # `os.environ.get` and checks those.
+    def _is_env_read(func: ast.expr) -> bool:
+        """`os.getenv(...)` or `os.environ.get(...)` — and NOTHING ELSE.
+
+        The second version of this arm matched `func.attr in ("getenv", "get")`, which collected
+        every `.get()` in the module including `creds.get("token")` — **the very dict lookup this
+        decision says is the CORRECT source**, reported as a violation. A scan whose population is
+        wider than its subject produces confident nonsense in the accusing direction.
+        """
+        if not isinstance(func, ast.Attribute):
+            return False
+        if func.attr == "getenv":
+            return isinstance(func.value, ast.Name) and func.value.id == "os"
+        if func.attr == "get":
+            return (isinstance(func.value, ast.Attribute) and func.value.attr == "environ"
+                    and isinstance(func.value.value, ast.Name) and func.value.value.id == "os")
+        return False
+
+    tree = ast.parse(inspect.getsource(manager_mod))
+    env_names = []
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call) and _is_env_read(node.func)
+                and node.args and isinstance(node.args[0], ast.Constant)
+                and isinstance(node.args[0].value, str)):
+            env_names.append(node.args[0].value)
+    assert env_names, "the scan found no environment reads at all, so it cannot be trusted to " \
+                      "find a bad one — manager.py is known to read ALLOW_LIVE_TRADING"
+    assert not any("TOKEN" in n.upper() and "BRIDGE" not in n.upper() for n in env_names), (
+        f"manager.py reads a token from the environment: {env_names}. The decision recorded at "
+        "the branch says the credential blob is the only source. CFT_BRIDGE_TOKEN is exempt — it "
+        "addresses one process-level service, not a per-account credential."
+    )
+
+    # The behavioural half: with NOTHING in the blob, construction refuses. If an environment
+    # variable were ever consulted as a fallback, this would quietly succeed.
+    import os
+    os.environ[monkey_env] = "tok-from-the-environment"
+    try:
+        with pytest.raises(BrokerConnectionError, match="MetaApi token"):
+            _make_adapter("mt5", {"mt5_account_id": "acc-abc"}, "acc-abc", "demo")
+    finally:
+        os.environ.pop(monkey_env, None)
+
+
+def test_api_token_is_a_fallback_KEY_in_the_same_blob_and_not_a_second_SOURCE():
+    """`B360`. Rows predating MT5 store the credential under `api_token`.
+
+    **One source, two key names, is not two sources** — the distinction the comment at the branch
+    makes, asserted so a later reader cannot collapse it.
+    """
+    adapter = _make_adapter(
+        "mt5", {"api_token": "legacy-key", "mt5_account_id": "acc-abc"}, "acc-abc", "demo"
+    )
+    assert isinstance(adapter, MetaTrader5Adapter)

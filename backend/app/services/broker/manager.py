@@ -114,6 +114,37 @@ def _make_adapter(
             broker=broker, observe_only=observe_only, allow_live=allow_live,
         )
 
+        # ------------------------------------------------------------------------------
+        # WHERE THE METAAPI TOKEN COMES FROM — DECIDED AND RECORDED (`B360`).
+        #
+        # `T-0134` required this to be *"decided and recorded — a security property, not a style
+        # choice"*, and it was decided HERE and written down NOWHERE. A DONE marker closed a
+        # half-met requirement, so the decision existed only as the behaviour of this line.
+        #
+        # **THE TOKEN COMES FROM THE CONNECTION ROW'S ENCRYPTED CREDENTIAL BLOB, AND FROM NOWHERE
+        # ELSE. No environment variable is consulted** — `METAAPI_TOKEN` appears nowhere in
+        # `backend/app`, and that absence is deliberate rather than an omission.
+        #
+        # WHY THE BLOB AND NOT AN ENV VAR, since an env var is the obvious alternative and is how
+        # `ALLOW_LIVE_TRADING` and `CFT_BRIDGE_TOKEN` above are done:
+        #
+        #   * **An env var is process-global and a token is per-connection.** The manager holds
+        #     many connections and is built to; one variable can hold exactly one account's token,
+        #     so a second MT5 account would silently authenticate as the first.
+        #   * **The blob is already encrypted at rest** and read through `decrypt_credentials`.
+        #     An env var puts a live broker credential in the process environment, where it is
+        #     visible to `/proc`, to a crash dump, and to anything that logs `os.environ`.
+        #   * **Two sources for one fact is `B184`.** If both were consulted, precedence would
+        #     become a security question answered by an `or`.
+        #
+        # The contrast with the two env vars above is deliberate and not an inconsistency:
+        # `ALLOW_LIVE_TRADING` is a SERVER-WIDE POLICY SWITCH that must not be settable from a
+        # database row a user can write, and `CFT_BRIDGE_TOKEN` addresses one process-level
+        # service. **A per-account credential is the opposite shape.**
+        #
+        # `api_token` is accepted as a fallback KEY within the same blob — not a second source —
+        # because connection rows predating MT5 use that name.
+        # ------------------------------------------------------------------------------
         token = creds.get("token", creds.get("api_token", ""))
         if not token:
             raise BrokerConnectionError(
