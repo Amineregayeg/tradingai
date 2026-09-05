@@ -485,6 +485,18 @@ class MetaTrader5Adapter(BrokerAdapter):
                 raise self._rate_limited(exc) from exc
             raise BrokerError(f"MT5 get_positions failed: {exc}", broker="mt5") from exc
 
+    def _connection_statuses(self) -> list:
+        """The primary's status first, then every replica's — the vendor's own population.
+
+        Returned as a list rather than a boolean so the caller can still say WHICH failure it is:
+        collapsing to *connected / not connected* here would throw away the
+        `DISCONNECTED` versus `DISCONNECTED_FROM_BROKER` distinction that `B292` exists for.
+        """
+        statuses = [getattr(self._account, "connection_status", None)]
+        for replica in (getattr(self._account, "replicas", None) or []):
+            statuses.append(getattr(replica, "connection_status", None))
+        return statuses
+
     def _require_connection(self) -> Any:
         """The RPC connection, or a refusal saying `connect()` was never called.
 
@@ -536,7 +548,25 @@ class MetaTrader5Adapter(BrokerAdapter):
             await result
         self.last_link_check_at = datetime.now(timezone.utc)
 
-        status = getattr(self._account, "connection_status", None)
+        # `B359`. **THE VENDOR COUNTS THE PRIMARY *OR ANY REPLICA*, AND THIS READ ONLY THE
+        # PRIMARY.** `MetatraderAccount.wait_connected` decides it like this:
+        #
+        #     'CONNECTED' in [self.connection_status] + [r.connection_status for r in self.replicas]
+        #
+        # So on a replicated account whose primary is `DISCONNECTED_FROM_BROKER` while a replica
+        # is up, this guard raised on **every read** while the SDK considered the account
+        # connected. On `close_all_positions` that is a refusal to act, and **refusing to act is
+        # leaving every position open** — `B349`'s consequence reached by a second route.
+        #
+        # A missing `replicas` is read as NONE rather than as an unknown: it is a property on
+        # every real `MetatraderAccount`, so its absence means a non-replicated double, and the
+        # primary alone then decides exactly as the vendor's expression does. That is not the
+        # `B353` case — a missing `reload` made the answer UNDATEABLE, whereas a missing
+        # `replicas` leaves the primary's answer intact.
+        statuses = self._connection_statuses()
+        status = statuses[0]
+        if any(s == "CONNECTED" for s in statuses):
+            return
         if status is None:
             # FAIL CLOSED (`B335`). This branch used to `return`, so an object without the
             # attribute was treated as reachable. An account that cannot say whether it is
@@ -545,8 +575,12 @@ class MetaTrader5Adapter(BrokerAdapter):
                 "the account reports no connection status at all, so the broker link CANNOT BE "
                 f"ESTABLISHED as up. Failing closed ({CHECKLIST} item 1.1).", broker="mt5",
             )
-        if status not in CONNECTION_STATUSES:
-            raise MT5ConnectionStatusUnrecognised(status)
+        for seen in statuses:
+            if seen is not None and seen not in CONNECTION_STATUSES:
+                # An answer we do not understand, from the primary OR a replica. Checked across
+                # the whole population because a replica reporting a value we cannot read is
+                # exactly as undecidable as the primary doing so.
+                raise MT5ConnectionStatusUnrecognised(seen)
         if status == "DISCONNECTED":
             raise MT5BrokerUnreachable(
                 "not connected to MetaApi, so nothing can be read.", broker="mt5",

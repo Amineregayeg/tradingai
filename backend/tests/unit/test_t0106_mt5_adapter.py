@@ -23,6 +23,7 @@ import pathlib
 import re
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -154,6 +155,7 @@ class MetaApiMock:
         positions: list[dict] | None = None,
         deals: list[dict] | None = None,
         connection_status: str | None = "CONNECTED",
+        replica_statuses: list | None = None,
         synchronizing: bool = False,
         deals_payload_override: Any = None,
         status_after_reload: str | None = None,
@@ -176,6 +178,11 @@ class MetaApiMock:
         #: What `reload()` reveals. `None` means the cached value is already current — the point
         #: being that an adapter which never reloads cannot tell these two apart.
         self._status_after_reload = status_after_reload
+        #: `B359`. Every real `MetatraderAccount` has this property, and the SDK's own
+        #: `wait_connected` counts the primary OR ANY REPLICA as connected.
+        self.replicas = [
+            SimpleNamespace(connection_status=st) for st in (replica_statuses or [])
+        ]
         self.synchronizing = synchronizing
         #: For the arms that feed a shape the SDK does not declare, so the refusal can be probed.
         self.deals_payload_override = deals_payload_override
@@ -309,7 +316,12 @@ def test_every_ASSUMES_marker_RESOLVES_its_citation_against_the_document():
         doc = ast.get_docstring(node) or ""
         if "ASSUMES:" not in doc:
             continue
-        marker = doc.split("ASSUMES:", 1)[1].split("\n\n")[0]
+        # WHITESPACE-NORMALISED BEFORE MATCHING, and this arm caught itself needing it: a marker
+        # wrapping `NO CHECKLIST\n    ITEM` across a line break was invisible to the substring
+        # check while reading perfectly on the page. **A declared token that a line wrap can hide
+        # is a token that silently stops being declared**, and the failure direction is the bad
+        # one — the marker looks compliant to a human and absent to the arm.
+        marker = re.sub(r"\s+", " ", doc.split("ASSUMES:", 1)[1].split("\n\n")[0])
         cited = _ITEM_REF.findall(marker)
         for item in cited:
             if item not in real:
@@ -1412,3 +1424,86 @@ def test_an_account_that_cannot_be_REFRESHED_fails_CLOSED_like_one_that_cannot_A
     with pytest.raises(MT5BrokerUnreachable) as exc:
         asyncio.run(adapter.get_positions())
     assert "cannot be refreshed" in str(exc.value)
+
+
+# ======================================================================================
+# B359 — the vendor counts the primary OR ANY REPLICA
+# ======================================================================================
+
+
+def test_a_CONNECTED_REPLICA_makes_the_account_readable_even_with_the_primary_down():
+    """ASSUMES: `MetatraderAccount.wait_connected` defines connected as
+    `'CONNECTED' in [self.connection_status] + [r.connection_status for r in self.replicas]`.
+    **Read from the installed package** (`T-0133`); NO CHECKLIST ITEM covers replicas, and item
+    1.1 prints only the primary's status, so running it on a replicated account would not settle
+    this either — a gap worth recording rather than a citation that reads as discharged.
+
+    **`B359`.** The guard read only the primary, so on a replicated account whose primary is
+    `DISCONNECTED_FROM_BROKER` while a replica is up it raised on **every read** while the SDK
+    considered the account connected. On `close_all_positions` that is a refusal to act, and
+    **refusing to act is leaving every position open** — `B349`'s consequence by a second route.
+    """
+    adapter, _ = _adapter(
+        positions=[_position("p1")],
+        connection_status="DISCONNECTED_FROM_BROKER",
+        replica_statuses=["CONNECTED"],
+    )
+    assert len(asyncio.run(adapter.get_positions())) == 1
+
+
+def test_ALL_endpoints_down_still_RAISES_and_the_fix_did_not_open_the_guard():
+    """ASSUMES: the same vendor expression (see above; NO CHECKLIST ITEM covers replicas).
+
+    **The must-MISS, and the one that matters.** Widening the population is one edit away from
+    *any status anywhere means connected*. With nothing connected the guard must still refuse, and
+    it must still say WHICH failure it is rather than collapsing to a boolean.
+    """
+    adapter, _ = _adapter(
+        positions=[_position("p1")],
+        connection_status="DISCONNECTED_FROM_BROKER",
+        replica_statuses=["DISCONNECTED", "DISCONNECTED_FROM_BROKER"],
+    )
+    with pytest.raises(MT5BrokerUnreachable) as exc:
+        asyncio.run(adapter.get_positions())
+    assert "NOT to the broker" in str(exc.value), (
+        "the failure collapsed to a boolean and lost B292's distinction"
+    )
+
+
+def test_an_UNRECOGNISED_status_on_a_REPLICA_is_as_undecidable_as_on_the_primary():
+    """ASSUMES: the three documented values are today's whole vocabulary (checklist item 1.1).
+
+    A replica reporting a value we cannot read leaves the account's state exactly as undecidable
+    as the primary doing so, and reading only the primary's vocabulary would let a new vendor
+    value through on the half of the population nobody checks.
+    """
+    adapter, _ = _adapter(
+        positions=[_position("p1")],
+        connection_status="DISCONNECTED",
+        replica_statuses=["CONNECTING"],
+    )
+    with pytest.raises(MT5ConnectionStatusUnrecognised):
+        asyncio.run(adapter.get_positions())
+
+
+def test_an_account_with_NO_replicas_is_decided_by_its_primary_alone():
+    """ASSUMES: `replicas` is a property on every real `MetatraderAccount`, so its absence means a
+    non-replicated double rather than an unknown. Read from the installed package; NO CHECKLIST
+    ITEM covers it.
+
+    **The control that keeps the fix from being vacuous.** If a missing `replicas` were read as
+    *something might be connected*, the guard would stop refusing anything.
+    """
+    class _NoReplicas:
+        connection_status = "DISCONNECTED_FROM_BROKER"
+
+        def get_rpc_connection(self):
+            return _RpcConnection(MetaApiMock())
+
+        async def reload(self):
+            return None
+
+    adapter = MetaTrader5Adapter(account=_NoReplicas())
+    asyncio.run(adapter.connect())
+    with pytest.raises(MT5BrokerUnreachable):
+        asyncio.run(adapter.get_positions())
