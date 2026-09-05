@@ -20,8 +20,9 @@ from __future__ import annotations
 import ast
 import asyncio
 import pathlib
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from typing import Any
 
 import pytest
 
@@ -35,6 +36,7 @@ from app.services.broker.mt5 import (
     MT5AccountTypeUnrecognised,
     MT5AuthFailed,
     MT5ConnectionStatusUnrecognised,
+    MT5FieldUnreadable,
     MT5BrokerUnreachable,
     MT5ServerNotFound,
 )
@@ -100,8 +102,24 @@ class _RpcConnection:
     async def get_orders(self) -> list[dict]:
         return []
 
-    async def get_deals_by_time_range(self, start_time, end_time) -> list[dict]:
-        return [dict(d) for d in self._owner._deals]
+    async def get_deals_by_time_range(self, start_time, end_time):
+        """**`MetatraderDeals`, the WRAPPER** — `{deals, synchronizing}` (`B356`).
+
+        This returned a bare LIST until T-0135, and that single wrong line kept a live adapter
+        defect green across 50 arms: the adapter iterated the wrapper, got its KEYS, and
+        `"deals".get(...)` raised `AttributeError` outside the `try`. **A mock encodes the
+        adapter's reading, so where the reading was wrong the mock was wrong in the same
+        direction** — `B334`'s class, arriving for real.
+
+        Exactly ONE of the six reads is wrapped and it is this one. The rule is discoverable once
+        you know to look: the TIME-RANGE queries wrap.
+        """
+        if self._owner.deals_payload_override is not None:
+            return self._owner.deals_payload_override
+        return {
+            "deals": [dict(d) for d in self._owner._deals],
+            "synchronizing": self._owner.synchronizing,
+        }
 
     async def get_symbol_price(self, symbol: str) -> dict:
         return await self._owner.get_symbol_price(symbol=symbol)
@@ -134,6 +152,8 @@ class MetaApiMock:
         positions: list[dict] | None = None,
         deals: list[dict] | None = None,
         connection_status: str | None = "CONNECTED",
+        synchronizing: bool = False,
+        deals_payload_override: Any = None,
         status_after_reload: str | None = None,
         connect_error: Exception | None = None,
         close_errors: dict[str, Exception] | None = None,
@@ -154,6 +174,9 @@ class MetaApiMock:
         #: What `reload()` reveals. `None` means the cached value is already current — the point
         #: being that an adapter which never reloads cannot tell these two apart.
         self._status_after_reload = status_after_reload
+        self.synchronizing = synchronizing
+        #: For the arms that feed a shape the SDK does not declare, so the refusal can be probed.
+        self.deals_payload_override = deals_payload_override
         self._connection = _RpcConnection(self)
 
     def get_rpc_connection(self) -> _RpcConnection:
@@ -368,16 +391,32 @@ def test_the_adapter_USES_the_servers_retry_time_and_never_invents_one():
     """
     adapter, mock = _adapter()
 
+    # `B342`. **THIS FIXTURE USED TO SAY `7`, AND THAT INTEGER IS WHY THE DEFECT WAS INVISIBLE.**
+    # The venue sends an ABSOLUTE INSTANT — the vendor's own handler does
+    # `date(metadata['recommendedRetryTime']).timestamp()` then `sleep(retry_time - now)`, and the
+    # installed model types the field `str` / *"Recommended date to retry request."* Against `7`
+    # the old `int(recommended)` passed; against what the venue actually sends it raised
+    # `ValueError` from inside the translator whose only job is to return a clean error.
+    # **The fixture's VALUE TYPE decided whether the arm could see its subject**, not the number
+    # of assertions in it.
+    retry_at = datetime.now(timezone.utc) + timedelta(seconds=90)
+
     async def _limited(*a, **k):
-        raise TooManyRequestsException({"recommendedRetryTime": 7})
+        raise TooManyRequestsException({
+            "recommendedRetryTime": retry_at.isoformat().replace("+00:00", "Z"),
+        })
 
     # PATCH THE CONNECTION, NOT THE ACCOUNT (`T-0134`): the reads moved to the RPC
     # connection, so patching the account here would silently no-op.
     mock._connection.get_account_information = _limited
     with pytest.raises(BrokerRateLimitError) as exc:
         asyncio.run(adapter.get_account())
-    assert exc.value.retry_after_seconds == 7, (
-        f"the server asked for 7s and the adapter carried {exc.value.retry_after_seconds}"
+    assert exc.value.retry_after_seconds is not None, (
+        "a 429 carrying a retry time must produce one — this is the ValueError B342 is about"
+    )
+    assert 85 <= exc.value.retry_after_seconds <= 90, (
+        f"the server asked us to wait until {retry_at.isoformat()}, roughly 90s away, and the "
+        f"adapter carried {exc.value.retry_after_seconds}"
     )
 
 
@@ -975,3 +1014,309 @@ def test_the_RPC_CONNECTION_CANNOT_serve_the_guard_which_is_why_the_account_is_h
                  "get_deals_by_time_range", "get_symbol_price", "get_symbol_specification"):
         assert hasattr(connection, read)
     assert hasattr(mock, "connection_status") and hasattr(mock, "get_rpc_connection")
+
+
+# ======================================================================================
+# T-0135 — B349, B337, B338 second half: the kill switch must not be disableable
+# ======================================================================================
+
+
+@pytest.mark.parametrize("field,value", [
+    ("swap", "--"), ("commission", "n/a"),
+    ("stopLoss", "not-a-number"), ("takeProfit", "-"),
+    ("currentPrice", "x"), ("profit", "n/a"),
+    ("openPrice", "1,234.50"), ("volume", "0.5 lots"),
+])
+def test_an_UNREADABLE_FIELD_ON_ONE_POSITION_CANNOT_STOP_THE_OTHERS_CLOSING(field, value):
+    """ASSUMES: `id` and `symbol` arrive as strings and need no numeric coercion. Read from the
+    installed model (`T-0133`); **no checklist item covers malformed payloads**, the same gap the
+    other coercion arms name.
+
+    **`B349`, and it is a regression this seat introduced.** Cycle 1 made `_dec` raise — correct,
+    and it fixed a genuine defect where an unparseable price silently became zero. But
+    `close_all_positions` enumerated by building a full `Position` per row, so **one bad character
+    in a field the kill switch never reads left every position open.**
+
+    ```
+    before cycle 1   unparseable swap -> None (wrongly labelled ABSENT)  -> all 4 closed
+    after  cycle 1   unparseable swap -> MT5FieldUnreadable              -> 0 closed
+    ```
+
+    **On a kill switch, refusing to act IS leaving every position open** — the outcome the member
+    exists to prevent. Parametrized over all eight numeric fields, required and optional alike,
+    because the member reads none of them: **a position we cannot fully PARSE is not a position we
+    cannot CLOSE.**
+    """
+    positions = [_position(f"p{i}") for i in range(1, 5)]
+    positions[1][field] = value
+    adapter, mock = _adapter(positions=positions)
+
+    report = asyncio.run(adapter.close_all_positions())
+    assert [r["disposition"] for r in report] == ["CLOSED"] * 4, (
+        f"an unreadable {field} stopped the kill switch closing readable positions"
+    )
+    assert sorted(mock.closed) == ["p1", "p2", "p3", "p4"]
+
+
+def test_the_RAISE_ITSELF_IS_UNCHANGED_and_get_positions_still_refuses_that_payload():
+    """ASSUMES: nothing about the venue — it asserts that a behaviour of OUR code did not change.
+    No checklist item covers it and none could.
+
+    **The must-MISS half of the arm above, and the important one.**
+
+    `B349` is fixed by removing a dependency, NOT by softening `_dec`. If this arm ever goes green
+    by returning a position, the zero-price defect cycle 1 removed has come back — and the arm
+    above would still pass, because it never looks at a parsed number.
+    """
+    # An OPTIONAL field: unreadable is not absent, and it still refuses.
+    adapter, _ = _adapter(positions=[_position("p1", swap="--")])
+    with pytest.raises(MT5FieldUnreadable) as exc:
+        asyncio.run(adapter.get_positions())
+    assert "swap" in str(exc.value)
+
+    # A REQUIRED field, which is the direction that matters most. **If this ever goes green the
+    # B349 fix did not scope the tolerance to the fields `close_all_positions` ignores — it
+    # repealed B338**, and the parametrized arm above would not notice, because it never looks at
+    # a parsed number.
+    four = [_position(f"p{i}") for i in range(1, 5)]
+    four[1]["openPrice"] = "1,234.50"
+    adapter2, _ = _adapter(positions=four)
+    with pytest.raises(MT5FieldUnreadable) as exc2:
+        asyncio.run(adapter2.get_positions())
+    assert "openPrice" in str(exc2.value)
+
+
+def test_the_position_whose_close_WAS_SENT_is_not_reported_as_NOT_ATTEMPTED():
+    """ASSUMES: the same iteration as the other close-all arms; no checklist item covers it.
+
+    **`B337`.** The inner `except Exception` does not catch `CancelledError`, so the row for the
+    position whose close was **already in the air** kept its pre-loop default and was reported
+    `NOT_ATTEMPTED / "the close loop never reached this position"` — **affirmatively false about
+    our own action.** The previous arm asserted p1, p3 and p4 and **not p2**: the single row that
+    was wrong was the single row nobody looked at.
+
+    Malek ruled *FAILED WITH A REASON*. The reason clause is part of the ruled state and is where
+    *outcome unknown* belongs, which is what makes three states sufficient — **so no fourth
+    disposition is added.**
+    """
+    adapter, _ = _adapter(
+        positions=[_position(f"p{i}") for i in range(1, 5)],
+        close_errors={"p2": asyncio.CancelledError()},
+    )
+    with pytest.raises(BrokerError) as exc:
+        asyncio.run(adapter.close_all_positions())
+
+    rows = {r["position_id"]: r for r in exc.value.partial_report}
+    assert rows["p2"]["disposition"] == "FAILED", "the sent close was reported as not attempted"
+
+    # ASSERT WHAT THE REASON DOES SAY, NOT WHAT IT DOES NOT. Review's kill-set is explicit that
+    # `reason != "the close loop never reached this position"` passes for ANY other wrong string,
+    # including an empty one. So the reason must positively name what happened.
+    reason = rows["p2"]["reason"]
+    assert "CancelledError" in reason, f"the reason does not name what killed the loop: {reason!r}"
+    assert "SENT" in reason and "NEVER OBSERVED" in reason
+    assert "MUST be checked at the venue" in reason
+
+    # M-337-B, THE OVER-FIX MUST-MISS. Marking every non-CLOSED row FAILED satisfies every
+    # count-based arm — the row count is 4 under the defect, under the fix AND under the over-fix.
+    # **The ruling's three states are only three if something asserts the third still occurs**,
+    # so the genuinely untouched rows must keep BOTH the disposition and the reason.
+    for untouched in ("p3", "p4"):
+        assert rows[untouched]["disposition"] == "NOT_ATTEMPTED"
+        assert rows[untouched]["reason"] == "the close loop never reached this position", (
+            f"{untouched} was never reached and no longer says so — the third state has been "
+            "collapsed into FAILED, which satisfies the ruled property while destroying it"
+        )
+    assert rows["p1"]["disposition"] == "CLOSED"
+    assert "_in_flight" not in rows["p2"], "internal bookkeeping leaked to the caller"
+
+
+def test_POSITIONS_WITHOUT_AN_ID_GET_THEIR_OWN_ROWS_and_do_not_collapse_into_one():
+    """ASSUMES: `id` is REQUIRED on `MetatraderPosition` (`B291`), so reaching this needs a venue
+    contract violation — **a bound, not a live defect**. Settled by checklist item 1.1, which
+    prints a real payload.
+
+    **`B338` second half.** The report was keyed on `position.id` while a missing id defaulted to
+    `""`, so **three open positions produced two rows** and two closes went out for the empty id.
+    A position open when the switch was pulled was reported **nowhere** — the ruled property
+    failing silently rather than loudly. The report is now keyed by enumeration index, which is
+    unique by construction, and the id travels inside the row where a duplicate is visible instead
+    of destructive.
+    """
+    p2, p3 = _position("p2"), _position("p3")
+    del p2["id"]
+    del p3["id"]
+    adapter, mock = _adapter(positions=[_position("p1"), p2, p3])
+
+    report = asyncio.run(adapter.close_all_positions())
+
+    # THE PROPERTY, NOT THE IMPLEMENTATION: every position open when the switch was pulled gets
+    # EXACTLY ONE row. Keying on a defaulted id loses a row to collision just as surely as to an
+    # empty string.
+    assert len(report) == 3, f"positions collapsed into {len(report)} row(s)"
+    assert len({id(r) for r in report}) == 3
+
+    # A DELIBERATE DIVERGENCE FROM THE KILL-SET'S LETTER, RECORDED RATHER THAN SLIPPED IN.
+    # Review predicted "3 closes attempted". This sends ONE, because `close_position(position_id="")`
+    # is a call that cannot succeed and whose effect at a real venue is unknown — refusing to
+    # address a position we cannot name is safer than issuing an unaddressed close. The kill-set
+    # says to specify the property rather than the implementation, and the property — one row per
+    # position, every row accounted for — holds either way.
+    assert mock.closed == ["p1"], "a close was sent for a position with no id"
+
+    unaddressable = [r for r in report if not r["position_id"]]
+    assert len(unaddressable) == 2
+    for row in unaddressable:
+        assert row["disposition"] == "FAILED", "unaddressable must not read as NOT_ATTEMPTED"
+        assert "no position id" in row["reason"]
+
+
+def test_DUPLICATE_ids_still_produce_one_row_each():
+    """ASSUMES: `id` is REQUIRED and unique on `MetatraderPosition` (`B291`), so duplicates are a
+    venue contract violation and a bound rather than a live defect. Checklist item 1.1 prints a
+    real position list and would show ids in practice; **no item asks whether they are unique**,
+    which is a gap worth recording rather than implying 1.1 settles it.
+
+    The must-hit sibling of the arm above: keying by id loses a row to collision just as surely as
+    it loses one to an empty string, and a report that silently holds fewer rows than there were
+    positions is the ruled property failing quietly.
+    """
+    adapter, _ = _adapter(positions=[_position("dup"), _position("dup"), _position("p3")])
+    report = asyncio.run(adapter.close_all_positions())
+    assert len(report) == 3
+    assert sorted(r["position_id"] for r in report) == ["dup", "dup", "p3"]
+
+
+def test_a_retry_time_ALREADY_PAST_means_retry_now_and_never_a_negative_wait():
+    """ASSUMES: the same absolute-instant shape (checklist item 1.5, which now captures the
+    field's TYPE as well as the payload).
+
+    Clock skew and a slow round trip both put the instant behind us. A negative
+    `retry_after_seconds` would be handed to a sleep, and the safe reading of *retry after a
+    moment that has passed* is **now**, not *never* and not *before*.
+    """
+    adapter, mock = _adapter()
+    past = (datetime.now(timezone.utc) - timedelta(seconds=30)).isoformat().replace("+00:00", "Z")
+
+    async def _limited(*a, **k):
+        raise TooManyRequestsException({"recommendedRetryTime": past})
+
+    mock._connection.get_account_information = _limited
+    with pytest.raises(BrokerRateLimitError) as exc:
+        asyncio.run(adapter.get_account())
+    assert exc.value.retry_after_seconds == 0
+
+
+def test_an_UNREADABLE_retry_time_is_SURFACED_and_does_not_crash_the_translator():
+    """ASSUMES: the field is a string the vendor's `date()` helper parses (checklist item 1.5).
+
+    **`B342`'s real failure mode, generalised.** The old code raised `ValueError` from inside
+    `_rate_limited` for any value `int()` could not take. A throttle must never become a crash:
+    an unreadable retry time is reported as *no usable backoff*, which is the same honest answer
+    the absent-field path already gives.
+    """
+    adapter, mock = _adapter()
+
+    async def _limited(*a, **k):
+        raise TooManyRequestsException({"recommendedRetryTime": "whenever you like"})
+
+    mock._connection.get_account_information = _limited
+    with pytest.raises(BrokerRateLimitError) as exc:
+        asyncio.run(adapter.get_account())
+    assert exc.value.retry_after_seconds is None
+    assert "could not be read as a time" in str(exc.value)
+
+
+def test_get_recent_trades_IS_GUARDED_like_the_other_two_reads():
+    """ASSUMES: MetaApi reports the broker link on the account, and a deal read during an outage
+    could return a list missing the most recent fills. **No checklist item reads deals with the
+    link deliberately down** — the gap is named in the adapter rather than left implied.
+
+    **`B335` second half.** Two of the three reads were guarded and this one was not, with nothing
+    said either way. An unguarded read during an outage returns a deal list that is
+    indistinguishable from a quiet period — `B292`'s collapse on the reconciliation path.
+    """
+    adapter, _ = _adapter(
+        deals=[{"id": "d1", "positionId": "p1", "volume": 1.0, "price": 10.0, "profit": 1.0}],
+        connection_status="DISCONNECTED_FROM_BROKER",
+    )
+    with pytest.raises(MT5BrokerUnreachable):
+        asyncio.run(adapter.get_recent_trades())
+
+
+# ======================================================================================
+# B356 / B353 — the wrapped read, and a guard whose halves failed opposite ways
+# ======================================================================================
+
+
+def test_the_deals_read_is_UNWRAPPED_and_not_iterated_as_a_mapping():
+    """ASSUMES: `get_deals_by_time_range` returns `MetatraderDeals` — `{deals, synchronizing}` —
+    while the other five reads return their payload bare. **Read from the installed package**
+    (`T-0133`); checklist item 3.0 prints raw deal payloads and would show it, and this arm exists
+    because no reading of the documentation produced it.
+
+    **`B356`.** The adapter iterated the wrapper, so `deal` was the string `"deals"` and
+    `"deals".get("volume")` raised `AttributeError` — **outside** the `try`, caught by neither
+    handler. Fifty arms were green because the mock returned a list.
+    """
+    adapter, _ = _adapter(deals=[
+        {"id": "d1", "positionId": "p1", "volume": 1.0, "price": 10.0, "profit": 2.0},
+    ])
+    trades = asyncio.run(adapter.get_recent_trades())
+    assert [t["id"] for t in trades] == ["d1"]
+    assert adapter.last_trades_synchronizing is False
+
+
+def test_a_BARE_LIST_is_REFUSED_rather_than_iterated():
+    """ASSUMES: the pinned SDK declares the wrapper (`T-0133`); no checklist item covers a shape
+    the vendor does not document.
+
+    **The must-hit control for the unwrap, and the tempting wrong fix is tolerance.** Accepting
+    both shapes would work today and would hide the next change of shape exactly as this one was
+    hidden. A bare list means the SDK or venue moved, and that must be loud.
+    """
+    adapter, _ = _adapter(deals_payload_override=[{"id": "d1"}])
+    with pytest.raises(BrokerError) as exc:
+        asyncio.run(adapter.get_recent_trades())
+    assert "MetatraderDeals" in str(exc.value) and "list" in str(exc.value)
+
+
+def test_SYNCHRONIZING_is_carried_and_an_incomplete_list_is_not_presented_as_complete():
+    """ASSUMES: `synchronizing` means *"search results may be incomplete"* — the model's own
+    words. Settled by checklist item 3.0, which reads deals during initial synchronisation.
+
+    **Dropping it turns a SHORT list into a COMPLETE one** on the reconciliation path, which is
+    `B215`: an undercount and a quiet period are otherwise identical. Published rather than
+    raised — a read that refuses during synchronisation is unusable at startup, and a caller
+    reconciling counts needs the flag, not an exception.
+    """
+    adapter, _ = _adapter(
+        deals=[{"id": "d1", "positionId": "p1", "volume": 1.0, "price": 10.0, "profit": 2.0}],
+        synchronizing=True,
+    )
+    trades = asyncio.run(adapter.get_recent_trades())
+    assert len(trades) == 1, "the deals still come back; the flag is the warning, not a refusal"
+    assert adapter.last_trades_synchronizing is True, (
+        "an incomplete deal list was presented as a complete one"
+    )
+
+
+def test_an_account_that_cannot_be_REFRESHED_fails_CLOSED_like_one_that_cannot_ANSWER():
+    """ASSUMES: nothing about the venue — it is about this guard's own two halves.
+
+    **`B353`.** A missing `connection_status` raised; a missing `reload` was skipped in silence
+    and the cached value read anyway, **seven lines apart in the same guard, failing opposite
+    ways.** An account we cannot refresh is one whose answer we cannot date, and an undateable
+    answer is not an answer — the same argument that made the other half fail closed.
+    """
+    class _NoReload:
+        connection_status = "CONNECTED"
+
+        def get_rpc_connection(self):
+            return _RpcConnection(MetaApiMock())
+
+    adapter = MetaTrader5Adapter(account=_NoReload())
+    asyncio.run(adapter.connect())
+    with pytest.raises(MT5BrokerUnreachable) as exc:
+        asyncio.run(adapter.get_positions())
+    assert "cannot be refreshed" in str(exc.value)

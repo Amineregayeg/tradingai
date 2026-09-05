@@ -243,6 +243,11 @@ class MetaTrader5Adapter(BrokerAdapter):
         #: statement**: a silent skip and a venue with no balance entries are otherwise identical.
         self.last_trades_skipped: int = 0
 
+        #: Whether the venue said it was still SYNCHRONIZING on the last `get_recent_trades`
+        #: (`B356`). **A short list during synchronisation is not a short history**, and the two
+        #: are otherwise identical to a caller.
+        self.last_trades_synchronizing: bool = False
+
         #: The most recent `close_all_positions` report, published BEFORE its loop runs so the
         #: partial record survives an abnormal exit (`B303`). `None` until the switch is pulled.
         self.last_close_all_report: dict[str, dict] | None = None
@@ -292,10 +297,30 @@ class MetaTrader5Adapter(BrokerAdapter):
                 broker="mt5",
                 retry_after_seconds=None,
             )
+        # `B342`. **IT IS AN ABSOLUTE INSTANT, NOT A DURATION**, and this used to call `int()` on
+        # it — so a real 429 raised `ValueError` from inside the translator whose only job is to
+        # return a clean error. The vendor's own handler is
+        # `date(metadata['recommendedRetryTime']).timestamp()` then `sleep(retry_time - now)`,
+        # and the model types the field `str` / *"Recommended date to retry request."*
+        retry_at = MetaTrader5Adapter._parse_time(recommended)
+        if retry_at is None:
+            # UNPARSEABLE. Not guessing, and not raising either: the caller asked us to translate
+            # a rate limit, and failing to read one field must not turn a throttle into a crash.
+            return BrokerRateLimitError(
+                f"MetaApi rate limit hit and recommendedRetryTime={recommended!r} could not be "
+                f"read as a time. Not guessing a backoff: the quota is in CPU credits and our "
+                f"per-call cost has never been measured ({CHECKLIST} item 1.5).",
+                broker="mt5",
+                retry_after_seconds=None,
+            )
+        seconds = (retry_at - datetime.now(timezone.utc)).total_seconds()
+        # A retry time already in the past means retry now, not sleep for a negative time.
+        seconds = max(0, int(seconds))
         return BrokerRateLimitError(
-            f"MetaApi rate limit hit; the server asks for {recommended}s.",
+            f"MetaApi rate limit hit; the server asks us to wait until {recommended} "
+            f"({seconds}s from now).",
             broker="mt5",
-            retry_after_seconds=int(recommended),
+            retry_after_seconds=seconds,
         )
 
     # ------------------------------------------------------------------
@@ -437,16 +462,28 @@ class MetaTrader5Adapter(BrokerAdapter):
         which would silently defeat any kill-switch confirmation that re-reads positions to check
         the book is empty. **Raising is the only option the type leaves.**
         """
+        return [self._to_position(raw) for raw in await self._raw_positions()]
+
+    async def _raw_positions(self) -> list[dict]:
+        """The venue's position payloads, guarded and **UNCOERCED** (`B349`).
+
+        **This split exists so that no numeric field can disable the kill switch.**
+        `close_all_positions` needs `id` and `symbol` — two strings the venue sends as strings —
+        and it used to obtain them by building a full `Position`, which runs every numeric field
+        through `_dec`. After `T-0106` cycle 1 those raise, so **one unparseable `swap` on one
+        position aborted the enumeration and left all four open.**
+
+        The reads that need typed numbers still get them; the read that needs two strings no
+        longer pays for numbers it never looks at.
+        """
         await self._require_broker_link()
         connection = self._require_connection()
         try:
-            raw_positions = await connection.get_positions()
+            return list(await connection.get_positions())
         except Exception as exc:  # noqa: BLE001
             if type(exc).__name__ == SDK_RATE_LIMIT_EXCEPTION:
                 raise self._rate_limited(exc) from exc
             raise BrokerError(f"MT5 get_positions failed: {exc}", broker="mt5") from exc
-
-        return [self._to_position(raw) for raw in raw_positions]
 
     def _require_connection(self) -> Any:
         """The RPC connection, or a refusal saying `connect()` was never called.
@@ -481,11 +518,22 @@ class MetaTrader5Adapter(BrokerAdapter):
         connection permanently alongside the RPC one **whose entire job is to answer one boolean
         pair**. That is the upgrade once 1.5 prices a call. It is not phase 1.
         """
+        # `B353`. THESE TWO HALVES USED TO FAIL IN OPPOSITE DIRECTIONS, SEVEN LINES APART. A
+        # missing `connection_status` raised; a missing `reload` was **skipped in silence** and
+        # the cached value read anyway — so an account object that cannot refresh answered
+        # `CONNECTED` from whenever it was built, which is exactly the staleness this guard was
+        # rewritten to prevent. **An account we cannot refresh is one whose answer we cannot
+        # date**, and that is not an answer.
         reload_ = getattr(self._account, "reload", None)
-        if reload_ is not None:
-            result = reload_()
-            if inspect.isawaitable(result):
-                await result
+        if reload_ is None:
+            raise MT5BrokerUnreachable(
+                "the account cannot be refreshed — it exposes no `reload`, so `connection_status` "
+                "could only be read as a CACHED value of unknown age. Failing closed: an "
+                f"undateable answer is not an answer ({CHECKLIST} item 1.1).", broker="mt5",
+            )
+        result = reload_()
+        if inspect.isawaitable(result):
+            await result
         self.last_link_check_at = datetime.now(timezone.utc)
 
         status = getattr(self._account, "connection_status", None)
@@ -621,6 +669,20 @@ class MetaTrader5Adapter(BrokerAdapter):
         `positionId` is optional too, which breaks the join a caller would make — so a deal
         without one is also not a fill for our purposes and is skipped the same way.
         """
+        # `B335` SECOND HALF. Two of the three reads were guarded and this one was not, **with
+        # nothing said either way** — and in a file that gives `disconnect` a docstring explaining
+        # why it is a no-op, an unstated asymmetry on the property the file is built around is
+        # itself the defect.
+        #
+        # IT IS GUARDED, AND THE ARGUMENT FOR THE OTHER CHOICE IS RECORDED RATHER THAN DISMISSED:
+        # deals plausibly come from MetaApi's own history store rather than from the broker
+        # terminal, in which case a read during a broker outage would succeed and guarding
+        # needlessly refuses it. **That is a real possibility and it is unobserved.** What decides
+        # it is which error is worse: an unguarded read during an outage returns a deal list
+        # MISSING THE MOST RECENT FILLS and indistinguishable from a quiet period — `B292`'s
+        # collapse on the reconciliation path. A needless refusal is loud and retryable.
+        # **Checklist gap: no item reads deals with the broker link deliberately down.**
+        await self._require_broker_link()
         since_dt = since or datetime.fromtimestamp(0, tz=timezone.utc)
         connection = self._require_connection()
         try:
@@ -631,6 +693,32 @@ class MetaTrader5Adapter(BrokerAdapter):
             if type(exc).__name__ == SDK_RATE_LIMIT_EXCEPTION:
                 raise self._rate_limited(exc) from exc
             raise BrokerError(f"MT5 get_recent_trades failed: {exc}", broker="mt5") from exc
+
+        # `B356`. **THE DEALS READ IS THE ONE WRAPPED READ, AND THE ADAPTER ITERATED THE
+        # WRAPPER.** `get_deals_by_time_range` returns `MetatraderDeals`
+        # — `{deals: List[MetatraderDeal], synchronizing: bool}` — while the other five reads
+        # return their payload bare. Iterating the wrapper yields its KEYS, so `"deals".get(...)`
+        # raised `AttributeError` **outside** the `try` and neither handler caught it.
+        #
+        # **Every arm was green because the mock returned a list.** That is `B334`'s class
+        # arriving for real: a mock encodes the adapter's reading, and the one place the reading
+        # was wrong is the one place no arm could see. Five of six bare is what a careful
+        # documentation reading produces; the sixth is what only the installed package says. The
+        # discoverable rule is that the **time-range** queries wrap —
+        # `get_history_orders_by_time_range -> {historyOrders, synchronizing}` is the same shape.
+        deals, synchronizing = self._unwrap_deals(deals)
+
+        # `synchronizing` MEANS *"search results may be incomplete"*, and dropping it presents a
+        # SHORT list as a COMPLETE one — a silent undercount on the reconciliation path (`B215`).
+        # Published rather than raised: a read that refuses during synchronisation is unusable at
+        # startup, and a caller reconciling a deal count against a trade count needs the flag, not
+        # an exception. Same shape as `last_trades_skipped` for the same reason.
+        self.last_trades_synchronizing = bool(synchronizing)
+        if synchronizing:
+            logger.warning(
+                "MT5 get_recent_trades: the venue is still SYNCHRONIZING, so this deal list may "
+                "be INCOMPLETE. Do not reconcile a count against it."
+            )
 
         trades: list[dict] = []
         skipped = 0
@@ -658,6 +746,30 @@ class MetaTrader5Adapter(BrokerAdapter):
         if skipped:
             logger.info(f"MT5 get_recent_trades skipped {skipped} balance entr(y/ies)")
         return trades
+
+    @staticmethod
+    def _unwrap_deals(payload: Any) -> tuple[list, bool]:
+        """`MetatraderDeals` in, `(deals, synchronizing)` out — and a BARE LIST is REFUSED.
+
+        Tolerating both shapes would be the tempting choice and it is the wrong one: the pinned
+        SDK declares the wrapper, so a bare list means the venue or the SDK changed underneath us,
+        and **silently iterating it is how this defect existed in the first place.** Refusing
+        names the shape that arrived.
+        """
+        if isinstance(payload, dict):
+            if "deals" not in payload:
+                raise BrokerError(
+                    f"MT5 get_recent_trades: the deals payload is a mapping with no `deals` key "
+                    f"(keys: {sorted(payload)}). MetatraderDeals is documented as "
+                    f"{{deals, synchronizing}}.", broker="mt5",
+                )
+            return list(payload["deals"] or []), bool(payload.get("synchronizing", False))
+        raise BrokerError(
+            f"MT5 get_recent_trades expected a MetatraderDeals wrapper "
+            f"({{deals, synchronizing}}) and got {type(payload).__name__}. Refusing to iterate it: "
+            f"iterating the wrapper yields its KEYS, which is B356 — the defect this refusal "
+            f"exists to make loud.", broker="mt5",
+        )
 
     # ------------------------------------------------------------------
     # 6. reference_price
@@ -822,7 +934,15 @@ class MetaTrader5Adapter(BrokerAdapter):
         """
         report: dict[str, dict] = {}
         try:
-            positions = await self.get_positions()
+            # `B349`. UNCOERCED. This used to call `get_positions()`, which builds a full
+            # `Position` per row and runs every numeric field through `_dec` — so after cycle 1
+            # ONE unparseable `swap`, a field this member never reads, raised and left all four
+            # positions open. **On a kill switch, refusing to act is leaving every position
+            # open.** The fix is not to soften the raise (that would restore the zero-price
+            # defect cycle 1 correctly removed) but to stop depending on coercion we do not use:
+            # `id` and `symbol` arrive as strings. **A position we cannot fully PARSE is not a
+            # position we cannot CLOSE.**
+            raw_positions = await self._raw_positions()
         except Exception as exc:  # noqa: BLE001
             # COULD NOT ENUMERATE. Returning `[]` here would say "there was nothing to close",
             # which is the `B292` collapse on the kill switch's own path.
@@ -831,10 +951,17 @@ class MetaTrader5Adapter(BrokerAdapter):
                 f"report on them: {exc}. Nothing was attempted.", broker="mt5",
             ) from exc
 
-        for position in positions:
-            report[position.id] = {
-                "position_id": position.id,
-                "pair": position.pair,
+        # KEYED BY ENUMERATION INDEX, NOT BY POSITION ID — `B338` second half. `id` is REQUIRED on
+        # `MetatraderPosition`, but the report used to key on it while `_to_position` defaulted a
+        # missing one to `""`, so **two positions with no id collapsed into ONE row** and a
+        # position open when the switch was pulled was reported NOWHERE. The index is unique by
+        # construction; the id travels inside the row where a duplicate is visible instead of
+        # destructive.
+        for index, raw in enumerate(raw_positions):
+            position_id = str(raw.get("id", "") or "").strip()
+            report[f"#{index}"] = {
+                "position_id": position_id,
+                "pair": str(raw.get("symbol", "UNKNOWN")),
                 "disposition": self.NOT_ATTEMPTED,
                 "status": "failed",
                 "reason": "the close loop never reached this position",
@@ -845,30 +972,71 @@ class MetaTrader5Adapter(BrokerAdapter):
         self.last_close_all_report = report
 
         try:
-            for position in positions:
-                row = report[position.id]
-                connection = self._require_connection()
+            for index, raw in enumerate(raw_positions):
+                row = report[f"#{index}"]
+                position_id = row["position_id"]
+
+                if not position_id:
+                    # UNADDRESSABLE, AND SAID SO RATHER THAN SKIPPED. Without an id there is no
+                    # close to send. It is FAILED WITH A REASON — never NOT_ATTEMPTED, which
+                    # would imply the loop simply had not got here yet.
+                    row.update(
+                        disposition=self.FAILED, status="failed",
+                        reason="the venue sent no position id, so this position could not be "
+                               "addressed and no close was sent for it",
+                    )
+                    continue
+
+                # `B337`. THE IN-FLIGHT STATE IS WRITTEN BEFORE THE AWAIT, AND IT IS THE TRUTH.
+                # The row used to keep its pre-loop default while the close was in the air, so a
+                # cancellation reported the position whose close WAS SENT as
+                # `NOT_ATTEMPTED / "the close loop never reached this position"` — affirmatively
+                # false about our own action, at 3am. Malek ruled **FAILED WITH A REASON**, and
+                # the reason clause is where *outcome unknown* belongs; that is what makes three
+                # states sufficient and why no fourth disposition is added. Every path below
+                # overwrites this, so it survives only when nothing else got to.
+                row.update(
+                    disposition=self.FAILED, status="failed", _in_flight=True,
+                    reason="the close for this position was SENT and the outcome was never "
+                           "observed. The position may or may not be closed and MUST be checked "
+                           "at the venue.",
+                )
                 try:
-                    result = await connection.close_position(position_id=position.id)
+                    result = await self._require_connection().close_position(
+                        position_id=position_id
+                    )
                 except Exception as exc:  # noqa: BLE001 - ANY exception, not just BrokerError
                     # A PER-POSITION FAILURE IS `FAILED`, AND THE LOOP CONTINUES. `B303`'s defect
                     # is CFT catching `BrokerError` only, so a `ConnectTimeout` aborts and the
                     # remaining positions are never attempted. Abandoning positions 3 and 4
                     # because position 2 timed out would MANUFACTURE `NOT_ATTEMPTED` rows for
-                    # positions we could have closed — a worse outcome that satisfies the
-                    # property just as well, which is why the property alone does not decide it.
+                    # positions we could have closed.
                     row.update(
-                        disposition=self.FAILED, status="failed",
+                        disposition=self.FAILED, status="failed", _in_flight=False,
                         reason=f"{type(exc).__name__}: {exc}",
                     )
                     continue
                 row.update(
                     disposition=self.CLOSED, status="closed", reason=None, result=result,
+                    _in_flight=False,
                 )
         except BaseException as exc:  # noqa: BLE001 - CancelledError is not an Exception
-            # THE LOOP ITSELF DIED. Everything still `NOT_ATTEMPTED` genuinely was not attempted,
-            # and that is the state the ruling exists for. Carry the report ON the exception so a
-            # caller that only has the exception still has the record.
+            # THE LOOP ITSELF DIED. Rows still `NOT_ATTEMPTED` genuinely were not attempted; the
+            # row carrying the in-flight reason above was SENT and is not among them.
+            #
+            # NAME WHAT KILLED IT, IN THE ROW. The pre-await reason cannot know the exception — it
+            # is written before the call — so without this the operator reads *the outcome was
+            # never observed* with no way to tell a cancellation from a process death. **A reason
+            # that says only what did NOT happen is `B337`'s defect one level down:** true, and
+            # not informative.
+            for _row in report.values():
+                if _row.pop("_in_flight", False):
+                    _row["reason"] = (
+                        f"{type(exc).__name__}: the close for this position was SENT and the "
+                        f"outcome was NEVER OBSERVED — the loop did not survive to record it "
+                        f"({exc}). The position may or may not be closed and MUST be checked at "
+                        f"the venue."
+                    )
             failure = BrokerError(
                 f"MT5 close_all_positions ended abnormally after "
                 f"{sum(1 for r in report.values() if r['disposition'] != self.NOT_ATTEMPTED)} of "
@@ -877,6 +1045,8 @@ class MetaTrader5Adapter(BrokerAdapter):
             )
             failure.partial_report = list(report.values())  # type: ignore[attr-defined]
             raise failure from exc
+        for row in report.values():
+            row.pop("_in_flight", None)      # internal bookkeeping never reaches a caller
         return list(report.values())
 
     # ------------------------------------------------------------------
