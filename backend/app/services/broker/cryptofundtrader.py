@@ -54,6 +54,39 @@ from app.services.broker.base import Account, BrokerAdapter, OrderRequest
 PNL_KEYS: tuple[str, ...] = ("profit", "netProfit", "openNetProfit")
 
 
+#: Keys this venue is known to use for a position's size, in the adapter's historical order.
+VOLUME_KEYS: tuple[str, ...] = ("volume", "lots", "size")
+
+#: Keys the ACCOUNT payload is known to use for open P&L. `B286`'s pair — `profit` is
+#: conventionally GROSS and `netProfit` is net of costs, so they are NOT the same quantity.
+#: **`T-0114` fixed the POSITION field and left its sibling twelve lines above** (`B377`).
+ACCOUNT_PNL_KEYS: tuple[str, ...] = ("profit", "netProfit")
+
+#: The DOCUMENTED side/type spellings, mapped explicitly. **`B376`.**
+#:
+#: THE KNOWN SET IS A GUESS AND SAYING SO IS PART OF THE FIX. Unlike MT5 there is no SDK, no
+#: capture corpus and no vendor documentation here — the endpoint map was reverse-engineered from
+#: the terminal by network capture — so **nothing is known about which spellings CFT actually
+#: sends.** If this guess is wrong the adapter will REFUSE rather than trade the wrong way round,
+#: which is the safe direction; **one capture of a real open position settles it** and is the
+#: cheapest thing anyone could do to this file.
+SIDE_DIRECTIONS: dict[str, DirectionType] = {
+    "BUY": DirectionType.LONG, "LONG": DirectionType.LONG, "B": DirectionType.LONG,
+    "SELL": DirectionType.SHORT, "SHORT": DirectionType.SHORT, "S": DirectionType.SHORT,
+}
+
+
+def first_key_present(raw: dict, keys: tuple[str, ...]) -> str | None:
+    """Which of `keys` this payload ACTUALLY carries, or `None` (`B286`, generalised by `B377`).
+
+    **PRESENCE, NOT `.get` WITH A DEFAULT**, and never a fallback to the first key — that
+    reintroduces the ambiguity one layer down. A named function so an arm imports it rather than
+    re-implementing it: the first `pnl_key_present` test re-implemented the selection inline, and
+    a mutation restoring the silent fallback left those arms green because they exercised the copy.
+    """
+    return next((k for k in keys if k in raw), None)
+
+
 def pnl_key_present(raw: dict) -> str | None:
     """Which P&L key this payload ACTUALLY carries, or `None` if it carries none (`B286`).
 
@@ -67,7 +100,7 @@ def pnl_key_present(raw: dict) -> str | None:
     carried. **And never a fallback to `"profit"`** — that reintroduces the ambiguity one
     layer down, in the field whose whole purpose is to remove it.
     """
-    return next((k for k in PNL_KEYS if k in raw), None)
+    return first_key_present(raw, PNL_KEYS)
 
 
 DEFAULT_HOST = "https://trading.cryptofundtrader.com"
@@ -254,11 +287,73 @@ class CryptoFundTraderAdapter(BrokerAdapter):
         return max(0, int((datetime.now(tz=timezone.utc) - open_time).total_seconds()))
 
     @staticmethod
+    def _require_account_key(acct: dict, key: str) -> Any:
+        """A key the account payload must actually carry (`B377`).
+
+        `equity` fell back to `balance`. **They are not the same quantity**: with the key absent
+        the account asserts open P&L is zero while `unrealized_pl` on the same object may not be.
+
+        **WHERE THIS EQUITY ACTUALLY GOES, TRACED RATHER THAN ASSUMED.** It reaches the prop-firm
+        compliance monitor — `observe_sync.sync_account_compliance` does
+        `total_loss = max(0.0, initial_balance - account.equity)` and then
+        `compute_compliance_state(...)` — and the dashboard. **It does NOT reach position
+        sizing.** `size_position(acct.equity, ...)` exists at `execution/service.py:151`, but both
+        `ExecutionService` constructions pass the loop's SIMULATOR (`crypto_loop.py:168` and
+        `:794`, `B350`), so no CFT account object arrives there.
+
+        I nearly wrote *"it changes how large every position is"* here on a peer's word. It is
+        false, and **the error was tracing a CALL SITE instead of tracing what is passed to it**.
+
+        **It matters more than that, not less.** A prop-firm breach CLOSES THE ACCOUNT, and this
+        drawdown monitor is what stands in front of that. Substituting `balance` for `equity`
+        silently asserts that open P&L is zero, which understates the loss on exactly the number
+        the breach is computed from.
+        """
+        if key not in acct:
+            raise BrokerError(
+                f"the account payload carried no `{key}`. Refusing to substitute another field: "
+                f"`equity` fed position sizing, and falling back to `balance` silently asserts "
+                f"that open P&L is zero while changing the size of every position (B377).",
+                broker="cryptofundtrader",
+            )
+        return acct.get(key)
+
+    @staticmethod
     def _side_to_direction(side: Any) -> DirectionType:
-        s = str(side or "").upper()
-        if s in {"SELL", "SHORT", "S"}:
-            return DirectionType.SHORT
-        return DirectionType.LONG
+        """Map the documented spellings. **RAISE on anything else** (`B376`).
+
+        This was `SHORT if s in {"SELL","SHORT","S"} else LONG`, so **everything unrecognised
+        became a LONG on the venue that trades real money**: `''`, `None`, `0`, `1`, `ASK`, `BID`,
+        `MARKET`, `LIMIT`, `SELL_LIMIT` — and a payload carrying no `side` and no `type` at all.
+
+        **THIS IS `B336` AGAIN AND IT IS WORSE, THREE WAYS.** MT5 defaulted to SHORT; this
+        defaults to LONG, which agrees with the common case and is therefore harder to notice and
+        likelier to have been running. MT5's writes refuse; CFT trades. And `SELL_LIMIT -> LONG`
+        is the MIRROR of MT5's defect rather than a repeat — `endswith` over-matched,
+        set-membership under-matches. **Both are the absence of a mapping**, which is why the same
+        fix applies unchanged: map what is known and raise on the rest, so an unknown becomes a
+        QUESTION instead of a direction.
+
+        There is no value of `DirectionType` that means *I could not tell*, so raising is the only
+        option the type leaves — the same argument `get_positions` already makes for raising
+        rather than returning `[]`.
+        """
+        if side is None or str(side).strip() == "":
+            raise BrokerError(
+                "the position payload carried NO side and NO type, so its direction cannot be "
+                "read. Refusing to guess: this used to become a LONG.",
+                broker="cryptofundtrader",
+            )
+        key = str(side).strip().upper()
+        if key not in SIDE_DIRECTIONS:
+            raise BrokerError(
+                f"the venue reported side/type {side!r}, which is not one of "
+                f"{tuple(SIDE_DIRECTIONS)}. Refusing to guess a direction — this used to become a "
+                f"LONG, and SELL_LIMIT in particular became a LONG. The known set is inferred "
+                f"rather than documented (B376); one capture of a real position settles it.",
+                broker="cryptofundtrader",
+            )
+        return SIDE_DIRECTIONS[key]
 
     # ------------------------------------------------------------------
     # Connection lifecycle
@@ -366,18 +461,30 @@ class CryptoFundTraderAdapter(BrokerAdapter):
     async def get_account(self) -> Account:
         response = await self._client.get(self._api("/balance"))
         data = self._handle_response(response, "get_account")
-        acct = data if isinstance(data, dict) else {}
+        return self._account_from_payload(data if isinstance(data, dict) else {})
+
+    def _account_from_payload(self, acct: dict) -> Account:
+        """The payload -> `Account` mapping, as a NAMED method (`B377`).
+
+        **Separated from the transport so an arm exercises THIS and not a re-implementation of
+        it.** Same argument `pnl_key_present` records: its first test re-implemented the selection
+        inline, and a mutation restoring the silent fallback left those arms green because they
+        were exercising the copy. A mapping only reachable through an HTTP round-trip gets tested
+        by a hand-built stand-in, which is `B368`'s shape.
+        """
         self._currency = acct.get("currency", self._currency)
+        account_pnl_key = first_key_present(acct, ACCOUNT_PNL_KEYS)
         return Account(
             account_id=self._account_id,
             broker=self.broker_name,
-            balance=float(_dec(acct.get("balance"))),
-            equity=float(_dec(acct.get("equity", acct.get("balance")))),
+            balance=float(_dec(self._require_account_key(acct, "balance"))),
+            equity=float(_dec(self._require_account_key(acct, "equity"))),
             currency=self._currency,
             margin_used=float(_dec(acct.get("margin"))),
             margin_available=float(_dec(acct.get("freeMargin"))),
             open_trade_count=0,
-            unrealized_pl=float(_dec(acct.get("profit", acct.get("netProfit")))),
+            unrealized_pl=float(_dec(acct.get(account_pnl_key) if account_pnl_key else None)),
+            unrealized_pl_source=account_pnl_key,
         )
 
     # ------------------------------------------------------------------
@@ -424,7 +531,11 @@ class CryptoFundTraderAdapter(BrokerAdapter):
             # payload never carried.
             pnl_source = pnl_key_present(raw)
             unrealized_pnl = _dec(raw.get(pnl_source) if pnl_source else None)
-            volume = _dec(raw.get("volume", raw.get("lots", raw.get("size"))))
+            # `B377`. `volume`/`lots`/`size` are not interchangeable units — `B302`'s ambiguity
+            # acquired at the venue boundary — so the key is chosen by PRESENCE and recorded,
+            # never by a silent three-deep fallback.
+            volume_key = first_key_present(raw, VOLUME_KEYS)
+            volume = _dec(raw.get(volume_key) if volume_key else None)
             sl = raw.get("stopLoss", raw.get("slPrice", raw.get("sl")))
             tp = raw.get("takeProfit", raw.get("tpPrice", raw.get("tp")))
             sl_dec = _dec(sl) if sl not in (None, "", 0, "0") else None
@@ -569,6 +680,29 @@ class CryptoFundTraderAdapter(BrokerAdapter):
         response = await self._client.post(self._api("/position/close"), json=body)
         return self._handle_response(response, f"close_position({position_id})")
 
+    async def _closable_positions(self) -> list[tuple[str, str]]:
+        """`(id, pair)` per open position, read WITHOUT the numeric or direction coercions.
+
+        **`B349`, ported the moment `B376` made it live here.** This member needs an id and a
+        symbol — two strings the venue sends as strings — and it used to obtain them by building
+        a full `Position` per row. `B376` makes `_side_to_direction` RAISE on an unrecognised
+        side, so without this split **one position with a side we cannot read would abort the
+        enumeration and leave every position open** — and on a kill switch, refusing to act IS
+        leaving every position open.
+
+        The pairing is the point: `B376`'s raise is right, and it is only safe because the close
+        path no longer depends on the coercion. **A position we cannot fully PARSE is not a
+        position we cannot CLOSE.**
+        """
+        response = await self._client.get(self._api("/open-positions"))
+        data = self._handle_response(response, "close_all_positions:list")
+        rows: list[tuple[str, str]] = []
+        for raw in self._list_field(data, "positions", "openPositions"):
+            symbol = raw.get("symbol") or raw.get("instrument") or "UNKNOWN"
+            rows.append((str(raw.get("id", raw.get("positionId", "")) or "").strip(),
+                         from_mt_symbol(symbol)))
+        return rows
+
     async def close_all_positions(self) -> list[dict]:
         """**Malek's ruled property, on the venue he actually trades** (`T-0132`, `B303`).
 
@@ -616,7 +750,7 @@ class CryptoFundTraderAdapter(BrokerAdapter):
 
         report: dict[str, dict] = {}
         try:
-            positions = await self.get_positions()
+            positions = await self._closable_positions()
         except Exception as exc:  # noqa: BLE001
             # COULD NOT ENUMERATE. Returning `[]` would say "there was nothing to close", which is
             # `B292`'s collapse on the kill switch's own path.
@@ -625,10 +759,10 @@ class CryptoFundTraderAdapter(BrokerAdapter):
                 f"report on them: {exc}. Nothing was attempted.", broker=self.broker_name,
             ) from exc
 
-        for index, pos in enumerate(positions):
+        for index, (pos_id, pos_pair) in enumerate(positions):
             report[f"#{index}"] = {
-                "position_id": str(pos.id or "").strip(),
-                "pair": pos.pair,
+                "position_id": pos_id,
+                "pair": pos_pair,
                 "disposition": self.NOT_ATTEMPTED,
                 "status": "failed",
                 "reason": "the close loop never reached this position",
@@ -637,7 +771,7 @@ class CryptoFundTraderAdapter(BrokerAdapter):
         self.last_close_all_report = report
 
         try:
-            for index, pos in enumerate(positions):
+            for index, _row_source in enumerate(positions):
                 row = report[f"#{index}"]
                 position_id = row["position_id"]
 

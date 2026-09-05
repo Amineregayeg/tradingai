@@ -22,6 +22,12 @@ class Account:
     open_trade_count: int = 0
     unrealized_pl: float = 0.0
 
+    #: WHICH key the venue's account payload carried `unrealized_pl` under, or `None` if it
+    #: carried none (`B377`). The sibling of `Position.pnl_source`: `T-0114` gave the position
+    #: field its provenance and left the account field twelve lines above it with a silent
+    #: `profit` -> `netProfit` fallback, and those are not the same quantity (`B286`).
+    unrealized_pl_source: str | None = None
+
 
 @dataclass
 class OrderRequest:

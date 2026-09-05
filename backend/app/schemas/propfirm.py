@@ -35,10 +35,13 @@ class PropFirmStatusRead(BaseModel):
     profile_id: uuid.UUID
     firm_name: str
     state: ComplianceState
-    equity: Decimal
-    balance: Decimal
-    daily_loss: Decimal
-    total_loss: Decimal
+    # `B378`. OPTIONAL, because an UNAVAILABLE snapshot carries no figures. A caller that renders
+    # `equity` must now handle its absence — which is the point: the old shape could not express
+    # *we did not evaluate*, so the monitor showed the last good number with nothing marking it.
+    equity: Decimal | None
+    balance: Decimal | None
+    daily_loss: Decimal | None
+    total_loss: Decimal | None
     daily_loss_limit_pct: Decimal | None = None
     total_loss_limit_pct: Decimal | None = None
     timestamp: datetime

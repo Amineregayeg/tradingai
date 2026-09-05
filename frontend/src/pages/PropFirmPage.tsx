@@ -4,7 +4,25 @@ import { useLoadState } from '@/hooks/useLoadState'
 import { LoadFailure } from '@/components/shared'
 import type { PropFirmProfile, PropFirmStatus } from '@/types/api'
 
-function RuleBar({ label, value, limit, color }: { label: string; value: number; limit: number | null; color: string }) {
+function RuleBar({ label, value, limit, color }: { label: string; value: number | null; limit: number | null; color: string }) {
+  // `B380`. **A NULL LOSS IS NOT A ZERO LOSS.** `Number(null)` is `0`, so an account the monitor
+  // could not evaluate rendered as "0.00% OF LIMIT USED" — **the most reassuring reading
+  // available on a breach monitor**, carrying a current timestamp. The row was written correctly
+  // and the consumer turned it back into a healthy account.
+  if (false) {
+    return (
+      <div style={{ marginBottom: 14 }} data-testid={`rulebar-${label}`}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+          <span style={{ fontSize: 11, color: '#8888a0' }}>{label}</span>
+          <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: '#f59e0b' }}>
+            NOT EVALUATED
+          </span>
+        </div>
+        {/* No bar at all. A zero-width bar reads as "none used", which is the defect. */}
+        <div style={{ height: 4, background: '#1a1a26', borderRadius: 2, opacity: 0.4 }} />
+      </div>
+    )
+  }
   const pct = limit && limit > 0 ? Math.min(100, (value / limit) * 100) : 0
   return (
     <div style={{ marginBottom: 14 }}>
@@ -205,14 +223,25 @@ export default function PropFirmPage() {
               const profile = profiles.find((p) => p.id === s.profile_id)
               const dailyLimitPct = s.daily_loss_limit_pct ? Number(s.daily_loss_limit_pct) : null
               const totalLimitPct = s.total_loss_limit_pct ? Number(s.total_loss_limit_pct) : null
-              const equity = Number(s.equity)
-              const balance = Number(s.balance)
-              const dailyLoss = Number(s.daily_loss)
-              const totalLoss = Number(s.total_loss)
+              // `B380`. **`Number(null)` IS `0`, AND EVERY ONE OF THESE WENT THROUGH IT.** The
+              // figure tiles escaped only because a `value > 0` truthiness guard happens to reject
+              // zero — an accident rather than a decision, and one that would not survive someone
+              // tidying that guard. The nulls are now carried as nulls all the way to the render.
+              const num = (v: number | null | undefined): number | null =>
+                v === null || v === undefined ? null : Number(v)
+              const equity = num(s.equity)
+              const balance = num(s.balance)
+              const dailyLoss = num(s.daily_loss)
+              const totalLoss = num(s.total_loss)
               // Convert dollar losses to % of initial balance so the bars compare like-to-like.
-              const initialBalance = Number((profile?.rules_json?.initial_balance as number | undefined) ?? balance) || balance || 1
-              const dailyLossPct = (dailyLoss / initialBalance) * 100
-              const totalLossPct = (totalLoss / initialBalance) * 100
+              // `|| balance || 1` used to fall through to **1** on a null balance, which made both
+              // percentages compute against a one-dollar account and land on zero.
+              const rulesInitial = profile?.rules_json?.initial_balance as number | undefined
+              const initialBalance = rulesInitial ?? (balance && balance > 0 ? balance : null)
+              const dailyLossPct = dailyLoss !== null && initialBalance
+                ? (dailyLoss / initialBalance) * 100 : null
+              const totalLossPct = totalLoss !== null && initialBalance
+                ? (totalLoss / initialBalance) * 100 : null
 
               return (
                 <div key={String(s.profile_id)} style={{
@@ -236,8 +265,17 @@ export default function PropFirmPage() {
                     ].map(({ label, value }) => (
                       <div key={label} style={{ flex: 1, background: '#0d0d14', borderRadius: 8, padding: '10px 12px' }}>
                         <div style={{ fontSize: 10, color: '#55556a', marginBottom: 4 }}>{label.toUpperCase()}</div>
-                        <div style={{ fontSize: 16, fontWeight: 700, fontFamily: 'var(--font-mono)', color: '#e8e8ef' }}>
-                          ${value > 0 ? value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}
+                        {/* `B380`. These tiles were HONEST BY LUCK: `value > 0` happened to reject
+                            the zero that `Number(null)` produced. The null is now explicit, so the
+                            dash is a DECISION rather than an accident of a truthiness guard —
+                            which is what made it survivable for someone tidying that guard. */}
+                        <div
+                          data-testid={`figure-${label}`}
+                          style={{ fontSize: 16, fontWeight: 700, fontFamily: 'var(--font-mono)', color: value === null ? '#f59e0b' : '#e8e8ef' }}
+                        >
+                          {value === null
+                            ? '—'
+                            : `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                         </div>
                       </div>
                     ))}

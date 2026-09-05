@@ -289,9 +289,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             from app.services.broker.observe_sync import sync_all_observe_only
 
             async with async_session_maker() as db:
-                count = await sync_all_observe_only(db, "system")
-                if count:
-                    logger.info("Observe-only prop-firm sync", profiles=count)
+                # `B378`. `sync_all_observe_only` returns a REPORT, not a count. `if count:` on
+                # a dict is always true, so the old line logged every pass and reported
+                # `profiles={'synced': 0, ...}` as though it were a number — and `if count:` used
+                # to mean *something synced*. Both halves of the meaning are restored explicitly.
+                result = await sync_all_observe_only(db, "system")
+                if result["synced"]:
+                    logger.info("Observe-only prop-firm sync", profiles=result["synced"])
+                if result["unavailable"]:
+                    logger.error(
+                        "Prop-firm compliance NOT EVALUATED for some accounts — the monitor is "
+                        "stale, not quiet",
+                        unavailable=result["unavailable"],
+                    )
         except Exception as exc:
             logger.warning("Observe-only prop-firm sync failed", error=str(exc))
 

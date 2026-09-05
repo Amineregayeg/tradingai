@@ -51,6 +51,18 @@ def _adapter(positions, close_errors=None, observe_only=False):
     errors = close_errors or {}
     sent: list[str] = []
 
+    async def _closable():
+        """`B376`/`B349`: `close_all_positions` enumerates via `_closable_positions`, NOT via
+        `get_positions`, so that a side the adapter cannot read cannot abort the close path.
+
+        **These arms moved with it.** Patching `get_positions` here would leave them driving a
+        member the subject no longer calls — green, and measuring nothing. The tuples are what the
+        real member returns: an id and a pair, read as strings with no coercion.
+        """
+        if isinstance(positions, Exception):
+            raise positions
+        return [(str(p.id or "").strip(), p.pair) for p in positions]
+
     async def _get_positions():
         if isinstance(positions, Exception):
             raise positions
@@ -63,6 +75,7 @@ def _adapter(positions, close_errors=None, observe_only=False):
         return {"status": "closed", "id": position_id}
 
     adapter.get_positions = _get_positions          # type: ignore[assignment]
+    adapter._closable_positions = _closable         # type: ignore[assignment]
     adapter.close_position = _close                 # type: ignore[assignment]
     return adapter, sent
 

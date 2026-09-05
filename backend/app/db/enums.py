@@ -91,6 +91,13 @@ class ComplianceState(str, enum.Enum):
     COOLDOWN = "COOLDOWN"
     BREACHED = "BREACHED"
 
+    #: `B378`. **NOT A COMPLIANCE VERDICT — the absence of one.** The monitor could not reach the
+    #: broker, so no drawdown was computed. Its own value rather than reusing `ACTIVE`, on
+    #: `B268`/`REJECTED`'s argument: folding *we did not evaluate* into *we evaluated and you are
+    #: fine* is `B215`'s collapse on the control that stands in front of a prop-firm breach, and a
+    #: breach closes the account. **A stale ACTIVE and a fresh ACTIVE look identical.**
+    UNAVAILABLE = "UNAVAILABLE"
+
 
 class OrderType(str, enum.Enum):
     MARKET = "MARKET"

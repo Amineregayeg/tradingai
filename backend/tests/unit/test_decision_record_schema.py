@@ -36,6 +36,9 @@ _CHAIN = [
     ("0006", "0006_decision_outcome_abandoned.py", "0005"),
     ("0007", "0007_decision_attribution.py", "0006"),
     ("0008", "0008_decision_outcome_rejected.py", "0007"),
+    # `B378`/`B380`. The chain guard fired for this one exactly as designed — a migration on disk
+    # that nothing replays is a migration nothing tests, and it caught mine in the full suite.
+    ("0009", "0009_compliance_unavailable.py", "0008"),
 ]
 
 
@@ -79,6 +82,22 @@ class _RecordingOp:
         if table != "decision_records":
             return
         self.columns[col.name] = col
+
+    def alter_column(self, table, name, **kw):
+        """Nullability/type changes — `0009` makes four `prop_firm_snapshots` figures nullable.
+
+        **Added because the chain guard caught its own absence.** Every operation here records
+        only `decision_records`, which is this file's subject; but a migration touching ANOTHER
+        table must still REPLAY, and without this method `_replay_chain` raised `AttributeError`
+        and five arms went red for one migration the harness could not run. **The shim was
+        narrower than the migrations it replays**, and the guard that says *every migration on
+        disk is replayed* is exactly what surfaced it.
+        """
+        if table != "decision_records":
+            return
+        col = self.columns.get(name)
+        if col is not None and "nullable" in kw:
+            col.nullable = kw["nullable"]
 
     def drop_column(self, table, name, **kw):
         if table == "decision_records":

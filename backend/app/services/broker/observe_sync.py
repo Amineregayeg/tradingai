@@ -104,11 +104,15 @@ async def sync_account_compliance(
 async def sync_all_observe_only(
     db: AsyncSession,
     user_id: str,
-) -> int:
+) -> dict:
     """Sync every connected adapter that maps to a prop-firm profile (by account_id).
 
-    Returns the number of profiles synced. Safe to call periodically; never trades.
-    Adapters that can't be reached (e.g. network/transport blocked) are skipped.
+    Returns `{"synced": int, "unavailable": [...]}`. Safe to call periodically; never trades.
+
+    **`B378`. AN ADAPTER THAT CANNOT BE REACHED IS NO LONGER *SKIPPED*** — it gets an
+    `UNAVAILABLE` snapshot with no figures, so the compliance surface can say *could not evaluate*
+    instead of showing the last good value indefinitely. The surface reads snapshot HISTORY, and a
+    missing row is indistinguishable from a quiet period.
     """
     from app.services.broker.manager import broker_manager
 
@@ -120,6 +124,9 @@ async def sync_all_observe_only(
     profiles = {p.account_id: p for p in result.scalars().all() if p.account_id}
 
     synced = 0
+    #: `B378`. Accounts whose compliance could NOT be evaluated this pass, with a reason. A caller
+    #: reading only `synced` cannot tell *nothing to do* from *nothing worked*.
+    unavailable: list[dict] = []
     for adapter in broker_manager._adapters.values():
         account_id = getattr(adapter, "_account_id", "") or ""
         profile = profiles.get(account_id)
@@ -129,12 +136,52 @@ async def sync_all_observe_only(
             await sync_account_compliance(adapter, db, user_id, profile)
             synced += 1
         except Exception as exc:  # transport/auth/etc — monitoring is best-effort
+            # `B378`. **SKIPPING WRITES NOTHING, AND THE SURFACE READS SNAPSHOT HISTORY** — so a
+            # missing snapshot is indistinguishable from a quiet period, and the monitor shows the
+            # last good value indefinitely. Every two minutes, on the drawdown monitor for a
+            # funded account, where a breach closes the account.
+            #
+            # THIS DEFECT IS CREATED BY `B377` AND MUST LAND WITH IT. Before B377 an absent
+            # `equity` silently became `balance` and the monitor showed a WRONG drawdown; after
+            # B377 `get_account` raises and the monitor STOPS UPDATING. A wrong number at least
+            # moves; a frozen one looks like calm. So the failure is RECORDED as its own state
+            # rather than skipped: the monitor can now say *could not evaluate*.
+            # **RECORDED, NOT MERELY RETURNED.** An earlier version of this fix built this list,
+            # logged it and returned it — and review's line is the one that matters: *an arm
+            # asserting the function returns `unavailable` would PASS while the monitor still
+            # lies.* The surface reads snapshot HISTORY, so the information has to reach a ROW.
+            # That is `B366`'s exact shape, and it was sitting inside the fix for a defect
+            # described to me as `B366`'s shape.
+            db.add(PropFirmSnapshot(
+                user_id=user_id,
+                profile_id=profile.id,
+                equity=None, balance=None, daily_loss=None, total_loss=None,
+                state=ComplianceState.UNAVAILABLE,
+            ))
+            unavailable.append({
+                "account_id": account_id,
+                "broker": getattr(adapter, "broker_name", "unknown"),
+                "reason": f"{type(exc).__name__}: {exc}",
+            })
             logger.warning(
                 "Observe-only sync skipped",
                 broker=adapter.broker_name,
                 account_id=account_id,
                 error=str(exc),
             )
-    if synced:
+    if synced or unavailable:
+        # COMMIT ON FAILURE TOO. The UNAVAILABLE rows ARE the deliverable of a failed pass, and a
+        # commit guarded by `synced` alone would discard exactly the evidence this fix exists to
+        # create.
         await db.commit()
-    return synced
+    if unavailable:
+        # LOUD, AND SEPARATELY FROM THE PER-ADAPTER WARNING ABOVE. That one says an adapter was
+        # skipped; this says the DRAWDOWN MONITOR did not evaluate, which is the fact an operator
+        # needs and the one a snapshot history cannot express by omission.
+        logger.error(
+            "Prop-firm compliance NOT EVALUATED this pass — the monitor is showing stale state, "
+            "not a quiet period",
+            unavailable=unavailable,
+            evaluated=synced,
+        )
+    return {"synced": synced, "unavailable": unavailable}

@@ -25,6 +25,11 @@ export type Timeframe = '1m' | '5m' | '15m' | '1H' | '4H' | 'D'
 export type TradeStatus = 'OPEN' | 'CLOSED' | 'CANCELLED'
 
 export type ComplianceState =
+  // `B380`. `UNAVAILABLE` is not a compliance verdict — it is the ABSENCE of one, written when the
+  // monitor could not reach the broker. Missing from this union while the backend sends it is the
+  // mirror of `B369`: not offering something the backend refuses, but failing to REPRESENT
+  // something the backend now sends. `B369`'s one-directional invariant cannot catch it.
+  | 'UNAVAILABLE'
   | 'ACTIVE'
   | 'AT_RISK'
   | 'CRITICAL'
@@ -367,10 +372,12 @@ export interface PropFirmStatus {
   profile_id: string
   firm_name: string
   state: ComplianceState
-  equity: number
-  balance: number
-  daily_loss: number
-  total_loss: number
+  // `B380`. NULLABLE, because an UNAVAILABLE snapshot carries no figures. Typed `number` while
+  // the API sent null is what let `Number(null) === 0` reach the drawdown bars.
+  equity: number | null
+  balance: number | null
+  daily_loss: number | null
+  total_loss: number | null
   daily_loss_limit_pct: number | null
   total_loss_limit_pct: number | null
   timestamp: string

@@ -23,10 +23,17 @@ class PropFirmSnapshot(UserScopedMixin, Base):
         ForeignKey("prop_firm_profiles.id", ondelete="CASCADE"),
         nullable=False,
     )
-    equity: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
-    balance: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
-    daily_loss: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
-    total_loss: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    # `B378`. NULLABLE, so an UNAVAILABLE row carries NO FIGURES.
+    #
+    # The alternative was writing the last known values into the new row, and that is the defect
+    # rather than the fix: it is exactly *showing the last good value* with a fresh timestamp on
+    # it. Zeros would be worse still — a manufactured drawdown on the number a breach is computed
+    # from. **A row that says we could not evaluate must not also say what the equity was**, and
+    # NULL is the only value that says nothing (`B215`, `B338`).
+    equity: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
+    balance: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
+    daily_loss: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
+    total_loss: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
     state: Mapped[ComplianceState] = mapped_column(
         Enum(ComplianceState, name="compliance_t"),
         nullable=False,
