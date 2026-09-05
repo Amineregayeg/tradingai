@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-05 (B368 — GATE 3 IS NOT BLOCKED ON THE TOKEN ALONE: THE API CANNOT WRITE AN MT5 CONNECTION. Found by review while verifying B360's comment, every claim in which is true — the comment documents how the token is CONSUMED and never asks whether anything can PRODUCE it. connect_broker builds its credential blob as api_key/api_secret plus email/password/base_url, with NO token and NO mt5_account_id, so _make_adapter raises 'MT5 needs a MetaApi token and none was stored' — driven directly, a blob carrying token and mt5_account_id CONSTRUCTS the adapter and the api_key form does not. THE ONLY BLOB THAT WORKS IS ONE THE API CANNOT WRITE, so an MT5 connection can be created today only by writing the broker_connections row straight into the database. MT5_PROGRAMME.md is wrong where it matters most: Malek gets a token, finds no field to paste it into, and the document told him that step was done. REVIEW'S OWN AUDIT PASSED THAT CLAIM — it tested that the adapter ACCEPTS a correct blob, which is what Gate 2 asserts, and never tested that the API can EMIT one: B356's axis one layer out, the shape a producer emits versus the shape a consumer requires, with a hand-built blob standing in for the producer both times. THE REPAIR IS A CHOICE: add token/mt5_account_id to the request schema, or read api_key as a third fallback — the second is cheaper and worse, because api_key means an exchange API key on every other broker and B360's own two-sources-is-B184 argument cuts against it. Also corrects my B355 amendment, which twice said B157's OWN HEADING says B157 IS B10 GENERALISED when it is a #### subsection heading inside the entry — phrasing repeated from a message without opening B157, in an entry about citations pointing at the wrong thing.)
+Last updated: 2026-09-05 (B369 — B368 ONE LAYER OUT: the API will accept token and mt5_account_id after B368's fix, and THE DASHBOARD STILL CANNOT SEND THEM. SettingsPage.tsx offers ONE broker in its list, Crypto Fund Trader, so there is no MT5 option at all, and its non-CFT branch renders api_key and account_id rather than token and mt5_account_id — so Malek gets a MetaApi token, opens Settings, and finds a dropdown that does not contain his venue. THE FILE IS NOT WRONG, which is the distinction: its header states the invariant it satisfies, that a broker listed there must be one the backend can construct, and that invariant is ONE-DIRECTIONAL — frontend subset of backend — so an absent MT5 violates nothing. A one-directional invariant guarantees you cannot offer what the backend refuses and says NOTHING about offering what the backend now accepts, so the UI silently lags every adapter added and the lag is invisible from either side. Nothing is broken and the feature does not exist. THIRD INSTANCE OF ONE AXIS IN ONE DAY and the count is the finding: B356 the adapter's reading versus the SDK's return shape, B368 the API's blob versus the factory's required blob, B369 the UI's form versus the API's accepted schema — each a PRODUCER and a CONSUMER of one structure verified only from the consumer's side, with something hand-built standing in for the producer. B368's arm was fixed by driving connect_broker rather than constructing a blob, and the same fix here means an arm that drives the FORM rather than asserting a field exists. Needs no design decision: B368 settled the field names and their source.)
 
 ---
 
@@ -23867,6 +23867,69 @@ blocker**, because Malek will obtain a token, find no field to paste it into, an
 have told him that step was done.
 
 Related: **B360**, **B356**, **B346**, **B350**, **B333**.
+
+---
+
+### B369 — `B368` ONE LAYER OUT: the API will accept `token` after the fix, and the DASHBOARD still cannot send it. There is no MT5 option in the broker list at all
+
+**Filed 2026-09-05 by manager**, checking the layer above `B368` because `B368` is the third
+instance of one axis and the axis does not stop at the API.
+
+**`B368`:** the API could not write a blob the factory could read. **This:** the UI cannot write a
+blob the API can read — **and it cannot even offer the choice.**
+
+```
+SettingsPage.tsx   broker options list          Crypto Fund Trader.   THAT IS THE WHOLE LIST.
+                   form branches on broker
+                     'cryptofundtrader'  ->  email / password / server / account_id / observe_only
+                     ELSE                ->  api_key / account_id
+```
+
+**There is no `mt5` option, and the else-branch renders `api_key` and `account_id`** — not `token`,
+not `mt5_account_id`. So after `B368` lands, the end-to-end state is:
+
+```
+Malek gets a MetaApi token
+  -> opens Settings -> Broker Connections
+  -> the dropdown offers ONE broker, and it is not MT5
+```
+
+## THE FILE STATES THE INVARIANT IT SATISFIES, AND THAT IS WHY THIS IS NOT A BUG IN IT
+
+`SettingsPage.tsx`'s own header:
+
+> *"What the BACKEND can actually construct — see `broker/manager.py::_make_adapter` … a broker
+> listed here that [the backend cannot construct] must never be."*
+
+**The invariant is one-directional — frontend ⊆ backend — and it holds.** MT5 being absent violates
+nothing. **The file is correct and the platform is unusable for the thing it was built for this
+week**, which is the distinction worth keeping: *nothing is broken, and the feature does not exist.*
+
+> **A one-directional invariant guarantees you cannot offer what the backend refuses. It says
+> nothing about offering what the backend now accepts**, so the UI silently lags every adapter
+> added, and the lag is invisible from either side.
+
+## THIRD INSTANCE OF ONE AXIS IN ONE DAY, AND THE COUNT IS THE FINDING
+
+```
+B356   the adapter's reading    vs   the SDK's actual return shape
+B368   the API's blob           vs   the factory's required blob
+B369   the UI's form            vs   the API's accepted schema
+```
+
+**Each is a PRODUCER and a CONSUMER of one structure, verified only from the consumer's side, with
+something hand-built standing in for the producer.** `B368`'s arm was fixed by driving
+`connect_broker` rather than constructing a blob; **the same fix applied here means an arm that
+drives the FORM, not one that asserts a field exists.**
+
+## WHAT IT DOES NOT NEED
+
+**Not a design decision.** `B368` already settled the field names and their source, and the
+work is: add `mt5` to the option list, branch the form on it, and send `token` and
+`mt5_account_id`. **The token is a live-venue credential on an inbound surface**, so it goes the
+same route `B368` established rather than a new one.
+
+Related: **B368**, **B356**, **B360**, **B334**.
 
 ---
 
