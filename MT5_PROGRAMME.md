@@ -17,10 +17,14 @@ programme: three named changes in the live loop, plus one decision that is Malek
 
 ```
 GATE 1   the adapter is CORRECT            in flight    5 tasks    needs nothing from Malek
-GATE 2   the adapter is REACHABLE          1 of 2 DONE  T-0134 landed b07a43f, deploy running
+GATE 2   the adapter is REACHABLE          DONE         T-0134 b07a43f + deployed e897d903c
 GATE 3   the demo is CONNECTED             blocked      1 task     needs the MetaApi token
 GATE 4   the strategy TRADES the demo      SCOPED       3 tasks    needs the T-0076 ruling
 ```
+
+> **STATUS 2026-09-05: GATE 2 IS DONE.** `T-0134` landed and the server now runs it — the MetaApi
+> SDK imports in production and the broker factory answers to `mt5`. **Gate 3 is blocked on nothing
+> but the token.**
 
 **Gates 1–3 give you a linked MT5 demo the platform can read**: balance, equity, open positions,
 prices, and the broker-reported account type. **That is real and it is the near thing.**
@@ -161,12 +165,27 @@ the OANDA branch was deleted from that function.
 
 **This task delivers READS and cannot deliver trading**, and its commit must say so.
 
-### The deploy — **25 commits behind**
+### ~~The deploy~~ — **DONE 2026-09-05, verified in the running container**
 
 **Goal: make the server run the code this document describes.**
 
 ```
-deployed   99849e972      main   25 commits ahead
+api serving   e897d903c   ==   local HEAD e897d903c
+in-container  import metaapi_cloud_sdk            -> OK
+              MetaTrader5Adapter.broker_name      -> "mt5"
+```
+
+**Verified inside the container rather than inferred from the deploy command exiting.** The
+preflight was clean before it went: schema matched at `0008` so no migration ran, engine down, zero
+open positions — *"deploying now settles nothing and the ledger will not move."* `web-build` was
+recreated alongside `api`, closing the web/api commit gap the preflight flagged.
+
+**Gate 2 is complete. The only thing between you and a linked demo is the MetaApi token.**
+
+#### Why it mattered, kept because the gap reopens on every commit
+
+```
+was   deployed 99849e972      main   25 commits ahead
 ```
 
 Nothing from this week is on the server: not the adapter, not the SDK pin, not the kill-switch
