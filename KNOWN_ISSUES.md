@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-05 (B351 — MY CORRECTION TO MT5_FIRST_CONNECTION ITEM 1.1 REPLACED A LOUD FAILURE WITH A QUIET LIE, in the item Malek runs first, on the day he asked to link his account. Three versions in one day and the middle one is mine and the worst: v1 named members that do not exist and raised AttributeError, which teaches nothing but announces it; v2 told him to print account.connection_status after each of three calls, and that is a CACHED property returning self._data['connectionStatus'] from the last REST payload, refreshed only by awaiting reload() — so it prints the SAME VALUE THREE TIMES and the reader concludes the connection state never changes, in the document whose whole purpose is teaching the difference between CANNOT SEE and NOTHING THERE. v3 requires await account.reload() before each print. AND THE FINDING v2 RESTED ON WAS ITSELF TOO STRONG: TerminalState.connected and connected_to_broker DO exist, push-updated by on_broker_connection_status_changed, so the adapter's pair was not invented and matches the SDK's streaming API exactly — the real defect is that the members are split across two objects sharing no reads, RpcMetaApiConnectionInstance having every read and no terminal_state while StreamingMetaApiConnectionInstance has terminal_state and none of the reads, so no single connection serves both the data and the guard, which is why reload() beats holding a second websocket to answer one boolean pair. THE MECHANISM IS B344's, THIRD INSTANCE IN ONE DAY AND THE ONLY ONE THAT REACHED MALEK: I took a peer's measurement of a field's VOCABULARY and published a procedure depending on its FRESHNESS, which nobody had checked. Execute made the move first and caught itself; I repeated it downstream without re-deriving anything, because one-vendor-enum-replaces-two-invented-booleans was tidy. The SDK was already installed — inspect.getsource answers it in four minutes.)
+Last updated: 2026-09-05 (B351 remains the newest heading — my checklist correction replaced a loud failure with a quiet lie in the item Malek runs first. LANDED ALONGSIDE IT NOW, parked during the register queue: B350, which corrects B346's MECHANISM while leaving its conclusion standing. I wrote that neither place_order call site reaches a BrokerAdapter; measured, BOTH DO — PaperBroker and SimPropFirmBroker are BrokerAdapter subclasses defining place_order, so the order path does not stop short of an adapter, it TERMINATES IN ONE end to end every time and the one it terminates in is always SIMULATED. B140's class: right conclusion, wrong reason, in an entry written to bound another task. It matters because the two statements dispatch different work — 'reaches no adapter' sends a reader to BUILD an order path that already exists, while 'reaches a SIM adapter' makes it a BINDING job naming its own blockers: self.paper constructed INLINE in crypto_loop.__init__ with no injection point, ExecMode.PAPER hardcoded at both construction sites, and broker_mode selecting between TWO SIMULATORS rather than being a live/sim switch. The conclusion is firmer — linking MT5 gives reads and cannot give trading, not because a path is missing but because THE DESTINATION IS HARDCODED, and that is not fixed by adding an adapter. B349: B338's uniform raise meets close_all_positions' all-or-nothing enumeration, so an unreadable SWAP — an accounting field the kill switch never reads — aborts enumeration and leaves ALL FOUR positions open, where before cycle 1 it became None and all four closed, because ON THE KILL SWITCH REFUSING TO ACT IS LEAVING EVERY POSITION OPEN. B347 and B348 from the T-0133 review: an import scanner's must-hit control cannot fail because both statement forms collapse to one set element, and 'either half alone would have sufficed' holds only for INSTALLED names.)
 
 ---
 
@@ -22438,6 +22438,275 @@ two-object split fell out of the same session. **The instrument was on the machi
 document was written.**
 
 Related: **B341**, **B344**, **B292**, **B140**, **B333**.
+
+---
+
+### B347 — THE IMPORT SCANNER'S MUST-HIT CONTROL CANNOT FAIL FOR `from X import Y`. Both statement forms collapse to the same set element, so the half the adapter would most plausibly use is uncovered by the arm written to cover it
+
+`T-0133` added a design guard — `mt5.py` must not import the SDK at module scope (`B328`) — and,
+correctly, a must-hit control for it, citing `B250`: *"a guard is only as wide as its scanner."* The
+control uses a synthetic source rather than `mt5.py`, so it cannot pass because of a property of its
+own subject. **That part is right and it is the reason the rest is worth saying.**
+
+```python
+both_forms = (
+    "import metaapi_cloud_sdk\n"
+    "from metaapi_cloud_sdk.clients.error_handler import TooManyRequestsException\n"
+)
+assert _imported_modules(both_forms) == {SDK_MODULE}
+```
+
+**Both statements resolve to the same top-level name.** Combining them into one fixture and
+asserting set equality makes the second form untestable — the set is `{metaapi_cloud_sdk}` whether
+or not `ast.ImportFrom` is handled at all.
+
+Measured, by making the scanner blind to one node type at a time:
+
+```
+MUTATION                            test_t0133_metaapi_sdk_pin.py
+scanner blind to plain `import X`   2 failed, 7 passed      <- caught
+scanner blind to `from X import Y`  9 passed                <- NOT caught
+```
+
+and the mechanism, checked directly rather than inferred from the suite result:
+
+```
+                                   intact scanner         ImportFrom-blind
+`import X` alone                   {metaapi_cloud_sdk}    {metaapi_cloud_sdk}
+`from X import Y` ALONE            {metaapi_cloud_sdk}    set()
+the control's COMBINED fixture     {metaapi_cloud_sdk}    {metaapi_cloud_sdk}   <- the collapse
+```
+
+**So a scanner that had gone blind to `from ... import` passes its own must-hit**, and
+`from metaapi_cloud_sdk import MetaApi` in `mt5.py` — **the form somebody actually reaching for the
+SDK would write** — returns `set()` and the design guard stays green.
+
+**`B272`'s family: an assertion that cannot fail, here for one of the two forms it names.** Same
+shape as `B327`, where a bare `pytest.raises(TypeError)` was green for a reason unrelated to
+credentials. In both cases the arm is real, the control is real, and one branch of what it claims to
+cover is asserted by a predicate that cannot discriminate it.
+
+**Two lines, and it needs no new fixture:**
+
+```python
+assert _imported_modules("import metaapi_cloud_sdk\n") == {SDK_MODULE}
+assert _imported_modules("from metaapi_cloud_sdk.clients.error_handler import X\n") == {SDK_MODULE}
+```
+
+**What is right and must not be lost in the fix:** the aliased form IS separately asserted, and the
+blind-spot assertion on dynamic `importlib.import_module` is a better instrument than it looks — it
+pins a NEGATIVE so that the comment describing the bound goes red if the scanner ever grows the
+capability. That is the thing to copy, not to change.
+
+Related: **B272**, **B327**, **B250**, **B328**.
+
+---
+
+### B348 — *"EITHER HALF OF THE FIX ALONE WOULD HAVE SUFFICED"* IS TRUE FOR THE NAME THAT CAUSED THE BUG AND FALSE FOR THE OTHER TWO IN THE SAME LOOP. The halves are not redundant; they protect DISJOINT environments
+
+`B345`'s fix has two halves — **A**: do not stub a package that is really installed; **B**: remove in
+a `finally` what the call installed. Execute stated in the report and the entry that either alone
+would have sufficed, rather than letting the diff imply both were needed. **Verified, and it is true
+in the environment the suite runs in:**
+
+```
+VARIANT                          HALF A  HALF B  RESULT
+V0   as it was before the fix     OFF     OFF    2 failed, 31 passed   <- reproduces, both detectors
+V-B  only the finally cleanup     OFF     on     33 passed
+V-A  only the importable check    on      OFF    33 passed
+V-AB as landed                    on      on     33 passed
+```
+
+## BUT THE TWO HALVES DO DIFFERENT JOBS IN DIFFERENT ENVIRONMENTS, AND THE LOOP CONTAINS BOTH TODAY
+
+Replicating `_load_guard`'s logic over one name that is genuinely absent:
+
+```
+package                       HALF A  HALF B   hollow stub LEFT BEHIND?
+aiohttp (installed=True)       on      OFF     no
+aiohttp (installed=True)       OFF     on      no
+zzz_not_installed              on      OFF     YES -- CONTAMINATED
+zzz_not_installed              OFF     on      no
+```
+
+**Half A prevents the stub when the package is installed. Half B bounds the stub's lifetime when it
+is not.** When the package is absent — *which is the case the stub exists for* — **Half A is a no-op
+and Half B is the entire fix.**
+
+**And this is not hypothetical. It is live in the same three-name loop right now:**
+
+```
+aiohttp                installed=True     <- Half A does the work
+playwright             installed=False    <- Half A is a no-op; Half B alone
+playwright.async_api   installed=False    <- Half A is a no-op; Half B alone
+```
+
+So the claim holds for `aiohttp`, the name that caused `B345`, and fails for the other two names in
+the very same loop.
+
+## WHAT THE SUITE PINS, WHICH IS THE OUTCOME AND NEITHER MECHANISM
+
+`V-A` and `V-B` both pass **33**, so **deleting either half is invisible.** The shadow arm cannot see
+Half B's real job either — by construction it skips dotted names and only flags a stub whose package
+IS installed, so a leftover `playwright` stub is outside its population. That exclusion is correct
+for the arm's stated subject and it leaves Half B unmeasured.
+
+**Why this is worth an entry rather than a shrug:** `B345` happened because a condition stopped
+meaning what it was written to mean and nothing noticed. A report saying either half is sufficient,
+plus a suite that goes green with either deleted, is how the `finally` gets removed as redundant in
+six months — the same failure, one turn of the wheel later. **The fix is right and complete. The
+claim about it is what needs narrowing**, to: *either half alone suffices for a name that is
+installed; for an absent name only the cleanup does.*
+
+Related: **B345**, **B339**, **B215**.
+
+---
+
+### B349 — AN UNREADABLE `swap` NOW DISABLES THE KILL SWITCH. `B338`'s fix raises uniformly across field classes, and `close_all_positions` enumerates all-or-nothing, so a decorative accounting field on ONE position stops all four from being closed
+
+Execute asked the review to look for *"a fix whose guard is load-bearing for one class of field and
+vacuous for another."* **This is that seam with the sign reversed: a guard applied UNIFORMLY across
+field classes whose consequences are not uniform**, on the one path where the difference decides
+whether positions stay open.
+
+Four positions open, one carrying a malformed value, `close_all_positions()` called:
+
+```
+FIELD                            RESULT                              CLOSES SENT
+openPrice    = '1,234.50'        BrokerError: could not enumerate    []
+volume       = '0.5 lots'        BrokerError: could not enumerate    []
+profit       = 'n/a'             BrokerError: could not enumerate    []
+currentPrice = 'x'               BrokerError: could not enumerate    []
+stopLoss     = 'not-a-number'    BrokerError: could not enumerate    []
+takeProfit   = '-'               BrokerError: could not enumerate    []
+swap         = '--'              BrokerError: could not enumerate    []
+commission   = 'n/a'             BrokerError: could not enumerate    []
+```
+
+**The bottom four are decorative for this member.** `close_all_positions` reads `position.id` and
+`position.pair` and nothing else. An unparseable `swap` — an accounting field the kill switch never
+looks at — leaves **three perfectly readable positions open** because a fourth had a bad character
+in a number nobody was going to use.
+
+## THIS IS A REGRESSION AND IT IS ON THE ONE PATH WHERE FAILING CLOSED IS FAILING OPEN
+
+```
+before cycle 1   unparseable swap -> None (silently mislabelled as ABSENT)  -> all 4 closed
+after  cycle 1   unparseable swap -> MT5FieldUnreadable                      -> 0 closed
+```
+
+**The old behaviour was wrong and the new behaviour is worse HERE**, which is why this is a seam
+rather than a mistake. Failing closed on a value you cannot read is right almost everywhere in this
+adapter. **On the kill switch, refusing to act IS leaving every position open** — the outcome the
+member exists to prevent, and the same outcome `B292` argues about from the other direction. The
+member's own docstring says returning `[]` would falsely claim *there was nothing to close*; raising
+claims nothing at all and leaves the same book open.
+
+**Nothing is wrong with `_dec`, `_required_dec` or the raise.** `test_an_UNPARSEABLE_OPTIONAL_number_
+RAISES_and_is_not_read_as_ABSENT` makes the optional-field raise deliberate and correct — an
+unreadable `swap` genuinely is not an absent one. **The defect is the composition**, and it is
+invisible to every arm in the file because **no arm pairs an unreadable field with
+`close_all_positions`**: 7 arms name `close_all`, none of them constructs a malformed position.
+
+## THE FIX BELONGS TO `T-0135`, WHICH ALREADY OWNS THIS MEMBER
+
+`close_all_positions` should enumerate on what it actually needs. The raw payload carries `id` and
+`symbol` as strings, untouched by any numeric coercion, so the member can build its report without
+`_to_position` at all — or catch `MT5FieldUnreadable` per position and still emit a row for it,
+which keeps Malek's property (every position open at pull time is reported) instead of abandoning
+it wholesale. **A position we cannot fully PARSE is not a position we cannot CLOSE.**
+
+Grouping it with `B335`, `B337` and `B338`'s second half is right: all four are
+`close_all_positions`, and this one interacts with `B337` directly — whatever row an unparseable
+position gets is exactly the *attempted / not-attempted / unknown* question `B337` opened.
+
+## SECOND FACE, LESSER: THE GUARD COVERS POSITIONS AND STOPS THERE
+
+`_dec` / `_required_dec` guard `_to_position`. Three sibling readers still coerce with bare `float()`:
+
+```
+get_recent_trades   :524-532   float(deal["volume"]), float(deal["price"]), float(deal["profit"]) ...
+reference_price     :561-562   float(bid), float(ask)
+get_account         :329-333   float(info.get("balance", 0.0))          <- B338 second half, known
+```
+
+An unparseable number in a DEAL or a QUOTE raises a bare `ValueError`, not `MT5FieldUnreadable` —
+uncaught by the `BrokerError` handlers around them, which is `B342`'s shape exactly. **This is the
+literal form of the seam Execute described**: the classification is load-bearing for the position
+class and absent for the deal and quote classes, and it is the `MetatraderDeal` / `MetatraderPosition`
+axis that `B343` found the marker citations crossing.
+
+Related: **B338**, **B337**, **B335**, **B292**, **B342**, **B343**, **B215**.
+
+---
+
+### B350 — `B346`'s CONCLUSION IS RIGHT AND ITS MECHANISM IS WRONG. Both `place_order` call sites DO reach a `BrokerAdapter` — a SIMULATED one — and the difference is exactly what `T-0134` would act on
+
+`B346` says: *"Two `place_order` call sites, neither reaching a broker adapter, so linking the MT5
+demo gives reads and cannot give trading."* **The conclusion is correct and important. The stated
+mechanism is not what the code does**, and `B140` is the class — right answer, wrong reason, in an
+entry written to BOUND another task.
+
+## MEASURED
+
+```
+call site                      target                     is a BrokerAdapter?
+execution/service.py:167       self.broker -> self.paper  YES
+live_loop_proxy.py:142         self._target() -> the loop's broker   YES (or a rejection dict)
+```
+
+and `self.paper` is constructed inline in `crypto_loop.__init__`:
+
+```
+crypto_loop.py:157   self.paper = SimPropFirmBroker(PropFirmRules(...), _price_source)   broker_mode == "sim"
+crypto_loop.py:162   self.paper = PaperBroker(starting_balance=..., price_fn=self._mark)  otherwise
+crypto_loop.py:168   self.execution = ExecutionService(self.paper, ExecMode.PAPER)
+crypto_loop.py:794   self.execution = ExecutionService(self.paper, ExecMode.PAPER)
+```
+
+```
+PaperBroker         BrokerAdapter subclass = True   place_order defined = True
+SimPropFirmBroker   BrokerAdapter subclass = True   place_order defined = True
+```
+
+**So the order path does not stop short of an adapter. It terminates in one, end to end, every
+time — and the adapter it terminates in is always simulated.**
+
+## WHY THE DISTINCTION IS NOT PEDANTRY
+
+The two statements dispatch different work:
+
+```
+"reaches no adapter"        -> the plumbing between signal and adapter does not exist.
+                               Linking MT5 means BUILDING the order path.
+"reaches a SIM adapter"     -> the plumbing exists and is exercised end to end.
+                               Linking MT5 means BINDING a different adapter into it.
+```
+
+**The second is the true one and it is a much smaller, much better-defined job** — and it names its
+own blockers, which the first does not:
+
+* `self.paper` is constructed **inline in `__init__`** with no injection point. There is no
+  parameter, factory or registry lookup by which a different adapter could be supplied.
+* `ExecMode.PAPER` is **hardcoded at both construction sites**, so even a substituted adapter would
+  be driven in paper mode.
+* `broker_mode` selects between **two simulators**. It is not a live/sim switch.
+
+**Those three lines are what `T-0134` has to change**, and an entry saying the path reaches no
+adapter sends a reader looking for a path that is already there.
+
+## WHAT SURVIVES UNCHANGED
+
+**`B346`'s conclusion stands and is the load-bearing half: linking the MT5 demo gives reads and
+cannot give trading.** Nothing in this correction weakens that — it is *more* firmly true, because
+the reason is not a missing path but a hardcoded destination, and a hardcoded destination is not
+fixed by adding an adapter. `mt5.py` is also reachable from nothing: `grep -rn '"mt5"'` over
+`backend/app` outside the adapter returns no factory entry, and `_make_adapter` has no MT5 branch.
+
+The B305/B333/B346 walk finding a layer nobody in the task's frame had to look at is also unchanged
+and is the reason the entry was worth writing.
+
+Related: **B346**, **B140**, **B333**, **B305**, **B302**.
 
 ---
 
