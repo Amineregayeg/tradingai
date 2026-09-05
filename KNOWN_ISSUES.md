@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-05 (B367 — A PARTIALLY CLOSED POSITION IS REPORTED CLOSED. The SDK raises TradeException on every genuine failure and TRADE_RETCODE_DONE_PARTIAL IS IN ITS SUCCESS LIST, so it returns; the adapter stores the response and marks the row CLOSED without inspecting stringCode, so a position that half-closed still has exposure and the report says it is closed. B337's shape with a different cause — a row satisfying Malek's ruled property while making a false statement — and TRADE_RETCODE_NO_CHANGES returns too, which on a close request is not a close. FROM A DELIBERATE SDK SWEEP: 14 members on three axes, arrangement 14 of 14 clean, return shape 7 of 14 compared for 1 new defect, predicate population 4 of 4 for 1 new and 2 CONFIRMED CORRECT — and the two correct predicates are what make the third worth believing. B365: the balance-entry predicate reduces over the WRONG SET. MetatraderDeal.type is REQUIRED and states what a deal IS, and the adapter reads neither it nor entryType, inferring balance-entry from three OPTIONAL fields being absent — so a real FILL missing an optional positionId is SKIPPED while DEAL_TYPE_BALANCE and DEAL_TYPE_COMMISSION are counted as TRADES. A fill is dropped from the trade record and a commission posting is added to it, and last_trades_skipped conflates 'this venue posts balance entries' with 'we could not join these fills', which is B215's collapse inside the counter built to prevent a silent skip. B366: last_close_all_report and partial_report have a consumer that DISCARDS them — kill_switch.py catches Exception and sets close_results = [] — so the operator is told '0 closed, 0 failed' while a complete four-row report sits on the exception just dropped. B303's property holds at the adapter and dies at the boundary, and the data is already produced and attached THREE LINES AWAY, which turns 'not fixed' into 'fixable now with no new information'. THE PRODUCTIVE AXIS WAS PREDICATE POPULATION and it produced both kill-switch findings; three earlier defects found incidentally were a population rather than luck.)
+Last updated: 2026-09-05 (B368 — GATE 3 IS NOT BLOCKED ON THE TOKEN ALONE: THE API CANNOT WRITE AN MT5 CONNECTION. Found by review while verifying B360's comment, every claim in which is true — the comment documents how the token is CONSUMED and never asks whether anything can PRODUCE it. connect_broker builds its credential blob as api_key/api_secret plus email/password/base_url, with NO token and NO mt5_account_id, so _make_adapter raises 'MT5 needs a MetaApi token and none was stored' — driven directly, a blob carrying token and mt5_account_id CONSTRUCTS the adapter and the api_key form does not. THE ONLY BLOB THAT WORKS IS ONE THE API CANNOT WRITE, so an MT5 connection can be created today only by writing the broker_connections row straight into the database. MT5_PROGRAMME.md is wrong where it matters most: Malek gets a token, finds no field to paste it into, and the document told him that step was done. REVIEW'S OWN AUDIT PASSED THAT CLAIM — it tested that the adapter ACCEPTS a correct blob, which is what Gate 2 asserts, and never tested that the API can EMIT one: B356's axis one layer out, the shape a producer emits versus the shape a consumer requires, with a hand-built blob standing in for the producer both times. THE REPAIR IS A CHOICE: add token/mt5_account_id to the request schema, or read api_key as a third fallback — the second is cheaper and worse, because api_key means an exchange API key on every other broker and B360's own two-sources-is-B184 argument cuts against it. Also corrects my B355 amendment, which twice said B157's OWN HEADING says B157 IS B10 GENERALISED when it is a #### subsection heading inside the entry — phrasing repeated from a message without opening B157, in an entry about citations pointing at the wrong thing.)
 
 ---
 
@@ -23799,6 +23799,74 @@ volume is exactly *"failed, and here is why"*.
 Related: **B337**, **B349**, **B330**, **B303**.
 
 ---
+
+---
+
+### B368 — GATE 3 IS NOT BLOCKED ON THE TOKEN ALONE. The connection-creation API cannot produce a credential blob the MT5 branch accepts, so when the token arrives there is nowhere supported to put it
+
+`MT5_PROGRAMME.md` tells Malek **"Gate 3 is blocked on nothing but the token"**, and Gate 2 is marked
+DONE on the strength of `_make_adapter` answering to `mt5`. **The adapter is constructible. The
+connection that would carry it is not.**
+
+## MEASURED
+
+`connect_broker` builds the blob that gets encrypted and stored (`manager.py:290-313`):
+
+```python
+creds_dict = {"api_key": request.api_key, "api_secret": request.api_secret or ""}
+if request.email:    creds_dict["email"]    = request.email
+if request.password: creds_dict["password"] = request.password
+if request.server:   creds_dict["base_url"] = request.server
+```
+
+**There is no `token` and no `mt5_account_id`.** The MT5 branch reads:
+
+```python
+token = creds.get("token", creds.get("api_token", ""))
+```
+
+Driven directly:
+
+```
+api_key = the MetaApi token (the only token-shaped field the API offers)
+    -> BrokerConnectionError: "MT5 needs a MetaApi token and none was stored"
+api_key + server + password, the full CFT-shaped payload
+    -> BrokerConnectionError: "MT5 needs a MetaApi token and none was stored"
+{"token": ..., "mt5_account_id": ...}   -- what the branch actually wants
+    -> CONSTRUCTED MetaTrader5Adapter
+```
+
+**The only blob that works is one the API has no way to write.** An MT5 connection can be created
+today only by writing the `broker_connections` row directly into the database.
+
+`mt5_account_id` is not the problem — it falls back to the `account_id` argument, which
+`request.account_id` supplies. **The token is the problem and it is the whole of it.**
+
+## WHY IT WAS NOT CAUGHT, INCLUDING BY ME
+
+`B360` asked *where does the token come from* and answered it correctly for the READ path: the
+connection row's encrypted blob, via `decrypt_credentials`, never an environment variable. **Every
+claim in that comment is true.** It documents how the value is consumed and does not ask whether
+anything can produce it.
+
+**And my own programme audit passed this claim.** I checked that `_make_adapter('mt5', ...)`
+constructs rather than raising, which is what Gate 2 asserts, and concluded Gate 3's blocker list was
+accurate. **I tested the adapter's acceptance and not the API's production** — the same axis
+`B356` turned on, one layer out: *the shape a producer emits versus the shape a consumer requires*,
+with a mock-shaped hand-built blob standing in for the real producer on both occasions.
+
+## THE REPAIR IS A CHOICE AND IT IS NOT MINE
+
+Either the request schema gains `token` / `mt5_account_id` and `connect_broker` writes them, or the
+MT5 branch reads `api_key` as a third fallback key. **The second is cheaper and worse**: `api_key`
+already means an exchange API key on every other broker, and `B360`'s own reasoning — *two sources
+for one fact is `B184`* — argues against widening the key set to paper over a missing field.
+
+**Whichever is chosen, `MT5_PROGRAMME.md`'s Gate 3 line must stop saying the token is the only
+blocker**, because Malek will obtain a token, find no field to paste it into, and the document will
+have told him that step was done.
+
+Related: **B360**, **B356**, **B346**, **B350**, **B333**.
 
 ---
 
