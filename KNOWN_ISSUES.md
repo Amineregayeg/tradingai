@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-05 (B358 — THE REDACTION SCRUBBER IN agents/mt5_first_connection.py LEAKED ON JSON ESCAPING, and the MT5 PASSWORD is the exposure rather than the token. Everything printed goes through json.dumps first, so the scrubber compared RAW bytes against text already escaped: a secret containing a backslash, quote, newline or non-ASCII character stopped matching. The token is a JWT and survives encoding unchanged; the password travels in the POST body and an error payload echoing submitted credentials is exactly what stage0 prints. Fixed by also registering json.dumps(s)[1:-1], verified with a must-hit/must-miss pair where the must-miss LEAKS all four escaped cases without the second registration. And main() caught Exception, so KeyboardInterrupt — a BaseException, and Ctrl-C during a network call is the likeliest interruption there is — never reached the traceback scrubber at all. FILED WITH B356, where get_deals_by_time_range returns a WRAPPER, MetatraderDeals{deals, synchronizing}, and mt5.py ITERATES IT — yielding its keys, so 'deals'.get(...) raises AttributeError OUTSIDE the try, caught by neither handler, with all 50 arms green because the mock returns a list; exactly one of six reads is wrapped and it is the one the adapter iterates, and synchronizing is dropped by both the adapter and the script. B357, stage0 claims to be free while posting an account-CREATION body to the creation endpoint with a correct server on its second case, and its inventory check ran AFTER the POSTs — could-not-ask treated as permission to proceed with the irreversible act, now a refusal before them. B353, the link guard fails CLOSED on a missing connection_status and OPEN on a missing reload, seven lines apart. And B354, Review's own mutation harness adopted a surviving mutant as its baseline after an interrupted run, so B340's 50.7% — WHICH I QUOTED TO MALEK IN MT5_PROGRAMME.md — is really 57.3%.)
+Last updated: 2026-09-05 (B361 — 'GATE 2 IS DONE' IS THE ONLY CLAIM IN MT5_PROGRAMME.md THAT UN-DOES ITSELF, AND IT ALREADY HAS. The document presents four gates as states of the world that must be true before the next is worth starting. Three latch: a fix stays fixed, an observation stays observed, a wiring change stays wired. GATE 2 does not — 'the server runs this code' is falsified by every subsequent commit — and I marked that one DONE. MEASURED rather than predicted: the api serves e897d903c and B356's fix landed in 0abc534, so THE DEPLOYED ADAPTER IS THE ONE THAT ITERATES THE DEALS WRAPPER and a demo linked against the server right now would raise AttributeError on the first real deals read, outside the try and caught by neither handler, while the programme document told the operator that gate was closed. B309's shape, which cost six days: seven product commits undeployed while the register read as fixed. The remedy then was deploy_preflight.py reporting the gap ON DEMAND; what did not exist then and still does not is anything that INVALIDATES A WRITTEN CLAIM when the gap reopens — and a document addressed to Malek is worse than the register here, because a register entry saying 'fixed in abc123' is a claim about the REPOSITORY and stays true while a gate saying DONE is a claim about the SERVER and decays silently. THE FIX IS TO THE CLAIM, NOT THE DEPLOY: Gate 2 splits into T-0134, done and latched, and THE DEPLOY as a PRECONDITION OF GATE 3 to be re-checked immediately before the first connection and never earlier. Redeploying now serves nothing — the engine is down, no order path reaches the adapter, and Gate 1 is still landing changes to the very file the deploy would ship.)
 
 ---
 
@@ -23239,6 +23239,65 @@ messages carry paths and argument names, never credentials; and `provision` corr
 password when echoing its own request body.
 
 Related: **B215**, **B334**.
+
+---
+
+### B361 — `GATE 2 IS DONE` IS THE ONLY CLAIM IN THE PROGRAMME THAT UN-DOES ITSELF, and it already has: the deployed adapter raises on the first real deals read
+
+**Filed 2026-09-05 by manager, against my own document.** `MT5_PROGRAMME.md` presents four gates as
+*"a state of the world, not a sprint — each one a thing that must be TRUE before the next is worth
+starting."* **Three of the four latch. One does not, and I marked that one DONE.**
+
+```
+GATE 1  the adapter is CORRECT      a fix stays fixed
+GATE 3  the demo is CONNECTED       an observation stays observed
+GATE 4  the strategy TRADES it      a wiring change stays wired
+
+GATE 2  the adapter is REACHABLE    "the server runs this code" is FALSIFIED BY EVERY COMMIT
+```
+
+**Half of Gate 2 latches and half does not**, and the document does not separate them: `T-0134` made
+`mt5` constructible and that stays true; *the deploy* is a claim about a moving target.
+
+## IT IS ALREADY FALSE, MEASURED RATHER THAN PREDICTED
+
+```
+api serving   e897d903c
+B356's fix    0abc534         <- LATER
+```
+
+**So the deployed adapter is the one that iterates the deals wrapper.** `get_deals_by_time_range`
+returns `MetatraderDeals{deals, synchronizing}`; iterating it yields its keys; `"deals".get(...)`
+raises `AttributeError` **outside** the `try`, caught by neither handler.
+
+> **A demo linked against the server right now would raise on the first real deals read**, and the
+> programme document would have told the operator that gate was closed.
+
+## WHY THIS IS NOT JUST A STALE NUMBER
+
+**`B309` is the same shape and it cost six days**: seven product commits sat undeployed while the
+register read as fixed, demonstrated by `duration_seconds: 0` on 40-hour positions. **The remedy
+adopted then was `deploy_preflight.py`, which reports the gap on demand.** What did not exist then
+and still does not is anything that **invalidates a written claim** when the gap reopens.
+
+**`MT5_PROGRAMME.md` is worse than the register in this one respect**, because it is addressed to
+Malek and phrased as a checklist he can act on. A register entry saying *"fixed in `abc123`"* is a
+claim about the repository and stays true. **A gate saying DONE is a claim about the SERVER, and it
+decays silently.**
+
+## THE FIX IS TO THE CLAIM, NOT TO THE DEPLOY
+
+Redeploying now would make the sentence true for as long as it takes Execute to land `B343`. **The
+document must stop making a latching claim about a non-latching fact:** Gate 2 splits into
+`T-0134` (**done, latched**) and **THE DEPLOY, which is a PRECONDITION OF GATE 3 rather than a
+completed gate** — re-run `deploy_preflight.py` immediately before the first connection, never
+earlier, because *"the value can change between this check and the deploy."*
+
+**And that is the honest ordering anyway.** Deploying now serves nothing: the engine is down, no
+order path reaches the adapter (`B346`/`B350`), and Gate 1 is still landing changes to the very
+file the deploy would ship.
+
+Related: **B309**, **B333**, **B324**, **B356**, **B346**.
 
 ---
 
