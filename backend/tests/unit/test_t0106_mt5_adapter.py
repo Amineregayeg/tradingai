@@ -685,3 +685,139 @@ def test_the_adapter_declares_no_default_pairs_despite_the_asset_class_being_rul
     """
     adapter, _ = _adapter()
     assert adapter.default_pairs == []
+
+
+# ======================================================================================
+# B336 — THE DIRECTION MAPPING, which 30 green arms did not touch
+# ======================================================================================
+
+
+def test_a_SELL_position_reads_as_SHORT():
+    """ASSUMES: `MetatraderPosition.type` is one of `POSITION_TYPE_BUY` / `POSITION_TYPE_SELL`.
+    **Settled by no checklist item, and it did not need one** — `T-0133` put the SDK on disk and
+    its model states exactly those two values, so this is read from the package rather than from
+    our reading of the docs.
+
+    `B336`: making every position LONG unconditionally passed 30 of 30, and the word `SELL`
+    occurred nowhere in this file. **This is the arm whose absence that measured.**
+    """
+    adapter, _ = _adapter(positions=[_position("p1", type="POSITION_TYPE_SELL")])
+    positions = asyncio.run(adapter.get_positions())
+    assert positions[0].direction == DirectionType.SHORT
+
+
+def test_a_BUY_position_reads_as_LONG():
+    """ASSUMES: the same two documented values (see the arm above; no checklist item covers it).
+
+    The must-hit half. Without it the arm above passes under a mapping that answers SHORT for
+    everything, which is the mirror of the defect being fixed.
+    """
+    adapter, _ = _adapter(positions=[_position("p1", type="POSITION_TYPE_BUY")])
+    assert asyncio.run(adapter.get_positions())[0].direction == DirectionType.LONG
+
+
+@pytest.mark.parametrize("bad_type", [
+    0, 1,                                # the INTEGER codes native MT5 actually uses
+    "buy", "sell", "",                   # casings and emptiness the old endswith() swallowed
+    "POSITION_TYPE_SELL_BUY_STOP",       # ends with BUY and is not a buy
+])
+def test_an_UNRECOGNISED_position_type_RAISES_rather_than_defaulting_to_SHORT(bad_type):
+    """ASSUMES: the two documented values are the only ones today, and a vendor may add more.
+    No checklist item asks what the field can carry — **a gap**, and item 1.1 prints the position
+    list, so running it would expose an undocumented value rather than settle it in advance.
+
+    **The old mapping was a DEFAULT wearing a mapping's clothes.** `endswith("BUY")` answered
+    SHORT for every one of these, including the integer codes and the string that ends in `BUY`
+    without being a buy. **A wrong direction inverts the sign of every number downstream**, and
+    there is no value of `DirectionType` that means *I could not tell*.
+    """
+    adapter, _ = _adapter(positions=[_position("p1", type=bad_type)])
+    with pytest.raises(BrokerError) as exc:
+        asyncio.run(adapter.get_positions())
+    assert "not one of" in str(exc.value)
+
+
+def test_an_ABSENT_position_type_RAISES_and_is_not_silently_a_SHORT():
+    """ASSUMES: `type` is present on every position MetaApi returns (`B291` marks it required).
+    Settled by checklist item 1.1, which prints the position list.
+
+    `raw.get("type", "")` made the absent case indistinguishable from a malformed one AND from a
+    genuine SELL. Absent is *could not ask*; SHORT is an answer (`B215`).
+    """
+    raw = _position("p1")
+    del raw["type"]
+    adapter, _ = _adapter(positions=[raw])
+    with pytest.raises(BrokerError):
+        asyncio.run(adapter.get_positions())
+
+
+# ======================================================================================
+# B338 first half — a value we could not READ must never become a zero
+# ======================================================================================
+
+
+@pytest.mark.parametrize("field,value", [
+    ("openPrice", "1,234.50"),   # a thousands separator is the realistic shape
+    ("volume", "0.5 lots"),
+])
+def test_an_UNPARSEABLE_required_number_RAISES_rather_than_becoming_zero(field, value):
+    """ASSUMES: the venue's model types `openPrice` and `volume` numeric, so a non-numeric value
+    is a CONTRACT VIOLATION rather than a missing optional. Verified against the installed package
+    (`T-0133`), not against a checklist item — **no item covers malformed payloads**, which is a
+    gap worth recording.
+
+    `B338`: `_dec` returned `None` for a value it could not parse, and both callers wrote
+    `or Decimal("0")`. **A price the adapter could not read became a position with an entry price
+    of zero** — a number every downstream P&L and risk calculation consumes happily.
+    """
+    adapter, _ = _adapter(positions=[_position("p1", **{field: value})])
+    with pytest.raises(BrokerError) as exc:
+        asyncio.run(adapter.get_positions())
+    assert field in str(exc.value)
+
+
+def test_an_ABSENT_required_number_RAISES_and_is_not_a_zero():
+    """ASSUMES: `openPrice` is required on `MetatraderPosition` (`B291`). Settled by checklist
+    item 1.1, which prints a real position payload.
+    """
+    raw = _position("p1")
+    del raw["openPrice"]
+    adapter, _ = _adapter(positions=[raw])
+    with pytest.raises(BrokerError):
+        asyncio.run(adapter.get_positions())
+
+
+def test_a_LEGITIMATE_zero_survives_and_is_not_read_as_a_failure():
+    """ASSUMES: nothing about the venue. It is about the fix not overshooting.
+
+    **`or Decimal("0")` could not tell a parse failure from a real zero, and neither may the
+    replacement** — in the opposite direction. A genuine `swap` of `0` must stay `0`, and a
+    genuine absent `swap` must stay `None`. This is the must-MISS control for both new raises.
+    """
+    adapter, _ = _adapter(positions=[_position("p1", swap=0, commission=0.0)])
+    position = asyncio.run(adapter.get_positions())[0]
+    assert position.swap == Decimal("0") and position.commission == Decimal("0")
+
+    adapter2, _ = _adapter(positions=[_position("p2")])          # neither field present
+    plain = asyncio.run(adapter2.get_positions())[0]
+    assert plain.swap is None and plain.commission is None, (
+        "an absent optional must stay None — B215 is not repealed by B338"
+    )
+
+
+def test_an_UNPARSEABLE_OPTIONAL_number_RAISES_and_is_not_read_as_ABSENT():
+    """ASSUMES: `swap` and `commission` are optional but NUMERIC when present (`B291`, and the
+    installed model types them `float`). No checklist item covers malformed payloads — the same
+    gap the required-field arm names.
+
+    **Found by predicting a mutation rather than by running one.** Reverting `_dec` to swallow
+    parse errors leaves every REQUIRED field still raising, because `_required_dec` rejects the
+    `None` that swallowing produces — so the required arms could not see the change and I nearly
+    recorded `_dec`'s raise as unmeasured. **For an OPTIONAL field the swallow is invisible: an
+    unreadable `swap` becomes `None`, which is this file's own word for *the venue did not send
+    it*.** That is `B215` collapsed by the fix for `B338`.
+    """
+    adapter, _ = _adapter(positions=[_position("p1", swap="1,2")])
+    with pytest.raises(BrokerError) as exc:
+        asyncio.run(adapter.get_positions())
+    assert "swap" in str(exc.value)

@@ -46,6 +46,16 @@ CHECKLIST = "MT5_FIRST_CONNECTION.md"
 #: distinguishable (`B284`, checklist 1.2).
 ACCOUNT_TRADE_MODES = ("ACCOUNT_TRADE_MODE_DEMO", "ACCOUNT_TRADE_MODE_CONTEST", "ACCOUNT_TRADE_MODE_REAL")
 
+#: The two values MetaApi documents for `MetatraderPosition.type` — verified against the installed
+#: package (`T-0133`), whose model says *"Position type (one of POSITION_TYPE_BUY,
+#: POSITION_TYPE_SELL)"*. **Exactly two, both strings.** `B336`: the previous mapping was
+#: `endswith("BUY")`, which silently made EVERYTHING ELSE — an integer code, an absent field, a
+#: typo — into a SHORT. A position's direction decides the sign of every number downstream.
+POSITION_TYPES = {
+    "POSITION_TYPE_BUY": DirectionType.LONG,
+    "POSITION_TYPE_SELL": DirectionType.SHORT,
+}
+
 #: The SDK's rate-limit exception, MATCHED BY CLASS NAME because this module deliberately does
 #: not import the SDK (see the module docstring). **A string match is weaker than an isinstance
 #: check and it is what not-importing costs**, so it is named here rather than inlined, and the
@@ -97,14 +107,68 @@ class MT5AccountTypeUnrecognised(BrokerError):
         self.value = value
 
 
-def _dec(value: Any) -> Decimal | None:
-    """`None` stays `None`. **A field the venue did not send is not a zero** (`B215`)."""
+class MT5PositionTypeUnrecognised(BrokerError):
+    """`MetatraderPosition.type` carried a value outside the two documented ones (`B336`).
+
+    **Deliberately loud, and deliberately the same shape as `MT5AccountTypeUnrecognised`.** The
+    old mapping asked `endswith("BUY")` and made everything else a SHORT, so an integer code — the
+    representation native MT5 actually uses — or an absent field produced a confident wrong
+    direction rather than a failure. There is no value of `DirectionType` that means *I could not
+    tell*, so the only honest option the type leaves is to raise (`B215`, and `get_positions`'
+    own argument for raising rather than returning `[]`).
+    """
+
+    def __init__(self, value: Any) -> None:
+        super().__init__(
+            f"the venue reported position type {value!r}, which is not one of "
+            f"{tuple(POSITION_TYPES)}. Refusing to guess a direction: every value of the field "
+            f"that is not a documented one used to become SHORT. See {CHECKLIST} item 1.1.",
+            broker="mt5",
+        )
+        self.value = value
+
+
+class MT5FieldUnreadable(BrokerError):
+    """A numeric field was PRESENT and could not be parsed (`B338`).
+
+    **Distinct from absent, which is the whole point.** `_dec` used to return `None` for both, and
+    both callers then wrote `or Decimal("0")` — so a price the adapter could not parse became a
+    position with an entry price of ZERO, a number every downstream P&L and risk calculation would
+    happily consume. `or Decimal("0")` also cannot tell a parse failure from a legitimate zero,
+    which is why the fix is not a different default.
+    """
+
+    def __init__(self, field: str, value: Any) -> None:
+        super().__init__(
+            f"MT5 sent {field}={value!r}, which is not a number. The venue's own model types this "
+            f"field numeric, so this is a contract violation and not a missing optional value — "
+            f"and a value we cannot read must never be floored to zero (B338).",
+            broker="mt5",
+        )
+        self.field = field
+        self.value = value
+
+
+def _dec(value: Any, field: str) -> Decimal | None:
+    """`None` stays `None`. **A field the venue did not send is not a zero** (`B215`).
+
+    **And a field we could not READ is not a missing one** (`B338`) — that raises, because the two
+    were previously the same return value and the callers floored both.
+    """
     if value is None:
         return None
     try:
         return Decimal(str(value))
-    except (InvalidOperation, TypeError, ValueError):
-        return None
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise MT5FieldUnreadable(field, value) from exc
+
+
+def _required_dec(raw: dict, field: str) -> Decimal:
+    """A field the venue's model marks REQUIRED. Absent is a violation, not a zero."""
+    value = _dec(raw.get(field), field)
+    if value is None:
+        raise MT5FieldUnreadable(field, None)
+    return value
 
 
 class MetaTrader5Adapter(BrokerAdapter):
@@ -329,16 +393,15 @@ class MetaTrader5Adapter(BrokerAdapter):
 
     def _to_position(self, raw: dict) -> Position:
         """Normalise one `MetatraderPosition`. **21 required of 28; 7 optional** (`B291`)."""
-        volume = _dec(raw.get("volume")) or Decimal("0")
-        entry = _dec(raw.get("openPrice")) or Decimal("0")
-        current = _dec(raw.get("currentPrice"))
-        profit = _dec(raw.get("profit"))
+        # `B338`. REQUIRED ON THE VENUE'S OWN MODEL, so absent-or-unparseable RAISES rather than
+        # becoming a zero. These two used to end in `or Decimal("0")`, which floored a price the
+        # adapter could not read into a position worth nothing at a price of nothing.
+        volume = _required_dec(raw, "volume")
+        entry = _required_dec(raw, "openPrice")
+        current = _dec(raw.get("currentPrice"), "currentPrice")
+        profit = _dec(raw.get("profit"), "profit")
         open_time = self._parse_time(raw.get("time"))
-        direction = (
-            DirectionType.LONG
-            if str(raw.get("type", "")).upper().endswith("BUY")
-            else DirectionType.SHORT
-        )
+        direction = self._read_direction(raw)
         return Position(
             id=str(raw.get("id", "")),
             pair=str(raw.get("symbol", "UNKNOWN")),
@@ -353,18 +416,46 @@ class MetaTrader5Adapter(BrokerAdapter):
             produced_by=self.broker_name,
             # OPTIONAL ON THE VENUE'S OWN MODEL, so `None` when absent and never `0` (`B215`).
             # These are the fields MT5 has and both venues we have normalised from do not.
-            swap=_dec(raw.get("swap")),
-            commission=_dec(raw.get("commission")),
+            swap=_dec(raw.get("swap"), "swap"),
+            commission=_dec(raw.get("commission"), "commission"),
             r_multiple=None,
             lot_size=volume,
-            sl=_dec(raw.get("stopLoss")),
-            tp=_dec(raw.get("takeProfit")),
+            sl=_dec(raw.get("stopLoss"), "stopLoss"),
+            tp=_dec(raw.get("takeProfit"), "takeProfit"),
             duration_seconds=(
                 int((datetime.now(timezone.utc) - open_time).total_seconds())
                 if open_time else None
             ),
             open_time=open_time or datetime.now(timezone.utc),
         )
+
+    @staticmethod
+    def _read_direction(raw: dict) -> DirectionType:
+        """`B336`. THE MAPPING, EXPLICIT, AND IT FAILS CLOSED.
+
+        This was `str(raw.get("type", "")).upper().endswith("BUY")`. Three things were wrong with
+        it and only one was a spelling:
+
+        * **It was a DEFAULT, not a mapping.** Everything that is not a string ending in `BUY`
+          became a SHORT — including `0`/`1`, the integer codes native MT5 uses, and an ABSENT
+          field. It never failed; it just answered.
+        * **`endswith` matched more than the vocabulary.** `POSITION_TYPE_SELL_BUY_STOP` is not a
+          real value, but the test of a mapping is what it does with an input it was not given.
+        * **`B336` measured that no arm saw any of it:** making every position LONG passed 30 of
+          30, and the word `SELL` occurred nowhere in the file.
+
+        `T-0133` put the SDK on disk, and its model says *"Position type (one of
+        POSITION_TYPE_BUY, POSITION_TYPE_SELL)"* — **two values, both strings**. So this maps those
+        two and raises on anything else, exactly as `_read_account_type` does for the other
+        safety-critical enum in this file. **Direction decides the sign of every number
+        downstream; there is no value of `DirectionType` that means *I could not tell*.**
+        """
+        if "type" not in raw or raw.get("type") is None:
+            raise MT5PositionTypeUnrecognised(None)
+        value = raw["type"]
+        if not isinstance(value, str) or value not in POSITION_TYPES:
+            raise MT5PositionTypeUnrecognised(value)
+        return POSITION_TYPES[value]
 
     @staticmethod
     def _parse_time(value: Any) -> datetime | None:
