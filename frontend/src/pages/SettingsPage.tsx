@@ -25,6 +25,13 @@ import type { Settings, BrokerConnection, BrokerConnectRequest } from '@/types/a
  * here; the reverse is not true and must never be — a broker listed here that
  * the backend cannot build is exactly the bug this replaced.
  *
+ * `B369` — AND THE ONE-DIRECTIONAL INVARIANT ABOVE IS WHY MT5 WAS MISSING FOR A DAY.
+ * "Frontend ⊆ backend" guarantees you cannot OFFER what the backend refuses, and says
+ * nothing about offering what the backend now ACCEPTS. So an adapter added on the
+ * backend violates nothing here and the UI lags it silently, invisibly from both
+ * sides: nothing is broken and the feature does not exist. MT5 was constructible
+ * from the API before it was reachable from this form.
+ *
  * NOTE ON "live": it selects CFT's only HOST, not real-money trading. A
  * challenge account is fake money on that same host. Order placement is gated
  * separately by observe_only and the server-side ALLOW_LIVE_TRADING flag.
@@ -34,6 +41,19 @@ const BROKER_CAPABILITIES = {
     label: 'Crypto Fund Trader',
     environments: [{ value: 'live', label: 'Live' }],
     envNote: 'CFT runs a single host. A challenge account is simulated funds on it.',
+  },
+  mt5: {
+    label: 'MetaTrader 5 (MetaApi)',
+    // BOTH, unlike CFT. A MetaApi account is provisioned against a demo or a live broker
+    // server and the platform reads either — so offering only one would repeat the CFT
+    // mistake in the opposite direction, sending a demo user hunting for a mistake they
+    // did not make.
+    environments: [
+      { value: 'practice', label: 'Demo' },
+      { value: 'live', label: 'Live' },
+    ],
+    envNote: 'Matches the MetaApi account you provisioned. Reads only — MT5 order placement '
+      + 'refuses at the adapter until the sizing conversion is settled.',
   },
 } as const
 
@@ -155,7 +175,11 @@ export default function SettingsPage() {
       const conn = await api.brokers.connect(brokerForm)
       setBrokers((b) => [...b, conn])
       setShowAddBroker(false)
-      setBrokerForm({ broker: 'oanda', api_key: '', account_id: '', environment: 'practice', observe_only: true })
+      // `B369`. THIS RESET SAID `oanda` + `practice` — the exact pair the comment four lines
+      // above line 120 says the backend cannot build, recreated after every SUCCESSFUL connect.
+      // The initial state was fixed and the reset was missed, so the form was correct until it
+      // was used once. It now returns to the same default the component starts from.
+      setBrokerForm({ broker: SUPPORTED_BROKERS[0], api_key: '', account_id: '', environment: 'live', observe_only: true })
     } catch (e: unknown) {
       const err = e as { detail?: string }
       setConnectError(err?.detail ?? 'Connection failed')
@@ -291,7 +315,36 @@ export default function SettingsPage() {
                     />
                   </div>
 
-                  {brokerForm.broker === 'cryptofundtrader' ? (
+                  {brokerForm.broker === 'mt5' ? (
+                    <>
+                      <div style={{ marginBottom: 14 }}>
+                        <label style={{ fontSize: 12, color: '#8888a0', display: 'block', marginBottom: 5 }}>MetaApi Token</label>
+                        <input
+                          type="password"
+                          placeholder="MetaApi API token"
+                          value={brokerForm.token ?? ''}
+                          onChange={(e) => setBrokerForm((f) => ({ ...f, token: e.target.value }))}
+                          style={{ width: '100%' }}
+                        />
+                        <div style={{ fontSize: 11, color: '#55556a', marginTop: 4 }}>
+                          From app.metaapi.cloud — not your broker password.
+                        </div>
+                      </div>
+                      <div style={{ marginBottom: 14 }}>
+                        <label style={{ fontSize: 12, color: '#8888a0', display: 'block', marginBottom: 5 }}>MetaApi Account ID</label>
+                        <input
+                          type="text"
+                          placeholder="provisioned account id"
+                          value={brokerForm.mt5_account_id ?? ''}
+                          onChange={(e) => setBrokerForm((f) => ({ ...f, mt5_account_id: e.target.value }))}
+                          style={{ width: '100%' }}
+                        />
+                        <div style={{ fontSize: 11, color: '#55556a', marginTop: 4 }}>
+                          The id MetaApi assigned when you added the account — not your MT5 login number.
+                        </div>
+                      </div>
+                    </>
+                  ) : brokerForm.broker === 'cryptofundtrader' ? (
                     <>
                       <div style={{ marginBottom: 14 }}>
                         <label style={{ fontSize: 12, color: '#8888a0', display: 'block', marginBottom: 5 }}>Email</label>

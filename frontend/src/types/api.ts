@@ -32,7 +32,11 @@ export type ComplianceState =
   | 'COOLDOWN'
   | 'BREACHED'
 
-export type BrokerName = 'oanda' | 'alpaca' | 'metaapi' | 'cryptofundtrader'
+// `mt5` is what `_make_adapter` matches (`_MT5_ALIASES`); `metaapi` is an alias of the same
+// branch. The other three remain in the union only because removing a name is a separate
+// change from adding one — none is offered by the form, and `_make_adapter` raises
+// "Unsupported broker" for `oanda` and `alpaca`.
+export type BrokerName = 'oanda' | 'alpaca' | 'metaapi' | 'mt5' | 'cryptofundtrader'
 export type Environment = 'practice' | 'live'
 export type Theme = 'dark' | 'light'
 
@@ -311,6 +315,12 @@ export interface BrokerConnectRequest {
   email?: string
   password?: string
   server?: string
+  // MetaTrader 5 through MetaApi (`B368`). NOT `api_key` under another name: that field means an
+  // exchange API key on every other broker, and one field carrying two unrelated credentials is
+  // `B184` at the inbound surface. `mt5_account_id` is MetaApi's PROVISIONED account id — not the
+  // broker login and not `account_id`.
+  token?: string
+  mt5_account_id?: string
   observe_only?: boolean
 }
 
