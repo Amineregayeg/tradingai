@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-05 (B381 — THE CHECK CONSTRAINT IS ENFORCED IN PRODUCTION AND ABSENT WHERE THE TESTS RUN, so no behavioural arm for it can exist. I asked which way the gap cut and Review measured it: a violating write is ACCEPTED against the test database, because 0009 declares the constraint via op.create_check_constraint while conftest builds tables from the MODEL with Base.metadata.create_all and the model carries no __table_args__. So the invariant 'figures are NULL if and only if the state is UNAVAILABLE' holds in production and cannot be asserted anywhere an arm runs. AND B184 DOES NOT APPLY, which was my reason for hesitating: this repo already DECLARES check constraints in the model elsewhere, so putting it there is the convention rather than a second source of truth. FILED ALONGSIDE B384's guard and B383's watcher, both mine. Landed after 8c907fc shipped a reviewer's `if (false)` mutation to main and was repaired at 3b8192e, verified by fetching the remote back and reading the line rather than by comparing shas — since a sha confirms delivery and cannot confirm content.)
+Last updated: 2026-09-05 (B385 and B386 — THE ROLLBACK THAT SAVED THE DATABASE WAS A GUARANTEE AND THE FIX SPENDS IT FOR THE WHOLE BATCH. alembic/env.py does NOT set transaction_per_migration, so ONE transaction wraps the entire upgrade run and PostgreSQL DDL is transactional — which is why production came back at 0008 with the enum unchanged: STRUCTURE, NOT LUCK, and my runbook said the opposite. But 0009 now issues op.execute('COMMIT') and there are NINE revisions, so on any run applying more than one — a fresh database, or one several revisions behind — that COMMIT commits every migration completed earlier in the same invocation and a later failure can no longer roll them back. What remains is RECOVERABLE rather than ATOMIC, working only because of IF NOT EXISTS, which is a weaker property with a different name that the runbook was promising as the stronger one. REMEDY THAT KEEPS BOTH: transaction_per_migration=True in env.py plus the ALTER TYPE in its own revision, so the transaction boundary becomes a FILE boundary and no migration issues its own COMMIT. B386: an arm IS possible — conftest uses SQLite BY CHOICE rather than by law — and THE TRAP IS THE SKIP, because absent a Postgres the arm skips and a skip is could-not-ask reported as asked-and-fine, so an arm is only a test if something FAILS when it does not run: mark them and have the preflight assert the marked set was EXECUTED rather than collected, which is B298's reconciliation pointed at a marker instead of a suite. AND RE-RUN THE ANALYSIS WHEN THE MIGRATION CHANGES, NOT ONLY THE MIGRATION: this outage was a STALE READING rather than an unrun file, since 'safe because it only does X' dies at the next edit and nothing in the tree links the two. Review's own account is that it NAMED THE GAP IN ITS VERDICT AND PASSED ANYWAY — 'treat the post-deploy step as the first execution rather than a confirmation' — and naming a gap is not covering it.)
 
 ---
 
@@ -24885,6 +24885,134 @@ production is unprotected. Production has it and the downgrade's reasoning is no
 is narrower — the guard has never been seen to fire and, where the arms run, it cannot be.**
 
 Related: **B380**, **B378**, **B356**, **B369**, **B184**.
+
+---
+
+### B385 — THE ATOMIC ROLLBACK WAS A GUARANTEE AND THE FIX SPENDS IT. `env.py` wraps the WHOLE upgrade in one transaction, so the mid-migration `COMMIT` also commits every earlier migration in the same run
+
+**First, the part that is mine.** I wrote that `ALTER TYPE ... ADD VALUE` is safe in a transaction on
+PG12+ *"provided the new value is not USED in the same transaction — this migration only adds it and
+alters nullability."* **Then I asked for the `CheckConstraint`, whose predicate names `'UNAVAILABLE'`
+in that same transaction.** My own request invalidated my own analysis and I never re-ran it.
+
+Worse: in the verdict I re-measured everything else against the commit *because* my earlier figures
+came from a tree that no longer existed — and I wrote, in that same verdict, *"`0009` has never been
+executed against a real server… treat the post-deploy step as the first execution rather than a
+confirmation."* **I named the exact gap and ruled PASS without closing it.** Naming a gap is not
+covering it.
+
+## THE ROLLBACK WAS NOT LUCK
+
+```python
+# alembic/env.py:64-71  -- no transaction_per_migration
+context.configure(connection=..., target_metadata=..., compare_type=True, ...)
+with context.begin_transaction():
+    context.run_migrations()
+```
+
+**One transaction wraps the entire `alembic upgrade head` run, and PostgreSQL DDL is
+transactional.** That is why the database came back at `0008` with the enum unchanged and the columns
+still `NOT NULL`. **It was a property of the structure, not a near miss** — and the runbook should say
+so, because the reassurance does not survive the fix.
+
+## AND THE FIX REMOVES IT — FOR THE BATCH, NOT JUST FOR `0009`
+
+```python
+op.execute("ALTER TYPE compliance_t ADD VALUE IF NOT EXISTS 'UNAVAILABLE'")
+op.execute("COMMIT")
+op.execute("BEGIN")
+```
+
+That `COMMIT` ends the enclosing transaction — **the one wrapping every migration in the run.** On an
+upgrade spanning several revisions, every migration completed before this point is committed at that
+moment and can no longer be rolled back by a later failure. **The blast radius of the change is the
+whole batch, not this file.**
+
+**What survives is recoverability, not atomicity:** a failure after the `COMMIT` leaves the enum
+value added — PostgreSQL cannot drop one — with `alembic_version` still at `0008`, and a re-run is
+safe only because of the `IF NOT EXISTS` guard. **That is a weaker property with a different name,
+and the runbook currently promises the stronger one.**
+
+**The remedy that keeps both:** `transaction_per_migration=True` in `env.py`, and the `ALTER TYPE`
+in its own revision. The transaction boundary becomes a file boundary, each migration stays atomic,
+and the next revision runs in a fresh transaction where the value is usable. **No migration then
+needs to issue its own `COMMIT`.**
+
+Related: **B384**, **B361**, **B309**.
+
+---
+
+### B386 — WHAT MUST BE TRUE BEFORE A MIGRATION DEPLOYS, AND THE COUNTED POPULATION: **six instruments, each complete on its own axis and silent on the adjacent one**
+
+## THE RULE, ATTACKED RATHER THAN ENDORSED
+
+The runbook's answer — *run it against a scratch database restored from the backup, verify the
+OUTCOME rather than the exit code, drive any constraint in both directions* — **is right and it is
+not sufficient by itself, for one reason: it is a procedure, and a procedure has no failing state.**
+
+Three additions:
+
+1. **Re-run the ANALYSIS when the file changes, not only the migration.** This outage was not an
+   unrun migration; it was a *stale reading of one*. The file changed after the reading and nothing
+   re-derived it. **Any claim of the form "this is safe because the migration only does X" is
+   invalidated by the next edit to the migration**, and nothing in the tree links the two.
+2. **Verify the count, not the absence of errors.** The manager's own first run inserted from an
+   empty table — `INSERT 0 0` four times, which reads exactly like four clean passes. **The scratch
+   run must assert *how many rows survived and of which shape*, which is the `1902 + 1 = 1903`
+   reconciliation applied to data.**
+3. **Seed before you probe.** An empty population is the failure mode this register has hit in four
+   separate instruments this session.
+
+## `RUN` OR `ARM`? — AN ARM IS POSSIBLE AND IT NEEDS A SECOND ASSERTION
+
+`conftest` uses SQLite **by choice, not by law**, and the manager has just proved a Postgres-backed
+check exists by driving one. So an arm can exist. **The trap is that it will SKIP when no Postgres is
+present, and a skip is *could not ask* reported as *asked and fine*** — the defect this register
+spends its life on.
+
+**So the arm is only a test if something fails when it does not run.** Mark the Postgres-backed arms,
+and have the preflight assert the marked set was **executed, not collected** — `passed == expected`,
+failing on a skip. **That is `B298`'s reconciliation pointed at a marker instead of a suite**, and it
+is the difference between a test and an aspiration. Where that gate cannot be built, say so in the
+runbook rather than leaving the arm to skip in silence.
+
+## THE POPULATION, COUNTED — AND IT IS NOT "FILES NO TEST NAMES"
+
+I started by scanning for code no test file names and the answer was almost none: the migrations
+*are* named, because `test_decision_record_schema.py` replays them. **That measure is worthless
+here**, and the reason is the finding.
+
+```
+op.* calls the migrations make        11
+implemented by the recording shim     11   -- complete, after B384 added alter_column
+executed against a database            0
+```
+
+**The shim is COMPLETE on the axis it measures and silent on the axis that failed.** It answers *does
+this migration call operations I know about* and can never answer *does a database accept the
+result*. `op.execute("ALTER TYPE …")` is recorded; the constraint predicate naming `'UNAVAILABLE'` is
+recorded. **Neither is evaluated.**
+
+**That is the population, and it has six members already on the register:**
+
+```
+the migration shim            records ops           cannot execute DDL                    B384, here
+citation_check.py             a reference RESOLVES  cannot say it is the RIGHT one        B362
+the ASSUMES resolver          an item EXISTS        cannot say it can falsify             B343
+the import scanner must-hit   two forms, one fixture that cannot distinguish them         B347
+mutation_marker_check.py      catches MARKERS       not mutations (bound already printed)
+frontend ⊆ backend            one-directional       cannot see what the backend now sends B369
+```
+
+**Six instruments, one shape: each verifies a form and is silent on the semantics.** Five were found
+by review after the fact; **this is the first where the silent axis took production down**, which is
+the argument for treating the pattern as a class rather than as six incidents.
+
+**The cheap general check:** for every instrument in the tree, write down the axis it measures and
+the adjacent axis it does not — the way `mutation_marker_check.py` already prints its own. An
+instrument whose blind spot is unstated will be trusted past its width, and five of these six were.
+
+Related: **B384**, **B385**, **B362**, **B343**, **B347**, **B369**, **B379**.
 
 ---
 
