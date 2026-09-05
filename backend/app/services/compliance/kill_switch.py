@@ -65,8 +65,32 @@ class KillSwitch:
         try:
             close_results = await broker_manager.close_all_positions()
         except Exception as exc:
-            logger.error("Kill switch: error calling close_all_positions", error=str(exc))
-            close_results = []
+            # `B366`. **THE REPORT IS ALREADY ON THE EXCEPTION AND THIS USED TO DROP IT.**
+            #
+            # `close_all_positions` publishes its rows BEFORE the loop runs and attaches them to
+            # the error it re-raises, precisely so a partial record survives an abnormal exit
+            # (`B303`). The consumer then set `close_results = []`, so the operator was told
+            # **"0 closed, 0 failed"** while a complete four-row report sat on the exception that
+            # had just been discarded. The ruled property held at the adapter and died at the
+            # boundary — and *nothing was closed* and *we lost the record of what was* are the
+            # same sentence to whoever reads the alert at 3am.
+            #
+            # Nothing new is needed to fix it: the data is produced three lines away.
+            partial = getattr(exc, "partial_report", None)
+            close_results = list(partial) if partial else []
+            logger.error(
+                "Kill switch: error calling close_all_positions",
+                error=str(exc),
+                partial_rows_recovered=len(close_results),
+            )
+            if not close_results:
+                # NO REPORT AT ALL IS A DIFFERENT STATE FROM AN EMPTY BOOK, and the counters below
+                # cannot express it — they would read 0/0/0, which is what a flat account looks
+                # like. Said here so it is not inferred from three zeros.
+                logger.error(
+                    "Kill switch: close_all_positions failed and carried NO partial report, so "
+                    "the state of every open position is UNKNOWN — this is not an empty book"
+                )
 
         # ------------------------------------------------------------------
         # THREE STATES, NOT TWO — `B330`, and Malek ruled the property on 2026-08-31:

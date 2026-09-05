@@ -235,3 +235,57 @@ async def test_does_not_import_or_call_finnhub():
         await kill_switch.trigger(db=db, user_id="system", reason="DD")
     # No method on calendar_service was called
     assert not mock_cal.method_calls
+
+@pytest.mark.asyncio
+async def test_a_partial_report_on_the_EXCEPTION_is_recovered_rather_than_dropped():
+    """`B366`. The adapter attaches its rows to the error it re-raises; the consumer dropped them.
+
+    `close_all_positions` publishes the report BEFORE its loop and rides it on the exception, so a
+    partial record survives an abnormal exit (`B303`). This boundary then set `close_results = []`
+    and the operator was told **"0 closed, 0 failed"** while a complete report sat on the exception
+    that had just been discarded. **The ruled property held at the adapter and died at the
+    boundary** — and *nothing was closed* and *we lost the record of what was* read identically to
+    whoever sees the alert at 3am.
+
+    Nothing new was needed to fix it: the data is produced three lines away.
+    """
+    from app.core.exceptions import BrokerError
+
+    failure = BrokerError("the close loop died", broker="mt5")
+    failure.partial_report = [
+        {"position_id": "p1", "disposition": "CLOSED", "status": "closed", "reason": None},
+        {"position_id": "p2", "disposition": "FAILED", "status": "failed",
+         "reason": "CancelledError: the close was SENT and the outcome was never observed"},
+        {"position_id": "p3", "disposition": "NOT_ATTEMPTED", "status": "failed",
+         "reason": "the close loop never reached this position"},
+    ]
+
+    db = _db()
+    with patch("app.services.broker.manager.broker_manager.close_all_positions",
+               new=AsyncMock(side_effect=failure)):
+        result = await kill_switch.trigger(db=db, user_id="system", reason="Test")
+
+    assert len(result["details"]) == 3, (
+        "the partial report was dropped; the operator would read 0 closed, 0 failed while a "
+        "three-row record sat on the discarded exception"
+    )
+    assert result["positions_closed"] == 1
+    assert result["positions_failed_to_close"] == 1
+    assert result["positions_not_attempted"] == 1
+
+
+@pytest.mark.asyncio
+async def test_NO_partial_report_is_a_DIFFERENT_state_from_an_empty_book():
+    """`B366`, the must-miss. Three zeros are what a flat account looks like.
+
+    When the adapter fails without attaching a report, the counters read 0/0/0 — indistinguishable
+    from *there was nothing to close*. The recovery must not make that case look answered, so the
+    absence is stated in its own right rather than inferred from three zeros.
+    """
+    db = _db()
+    with patch("app.services.broker.manager.broker_manager.close_all_positions",
+               new=AsyncMock(side_effect=RuntimeError("no report at all"))):
+        result = await kill_switch.trigger(db=db, user_id="system", reason="Test")
+
+    assert result["details"] == []
+    assert result["positions_closed"] == 0 and result["positions_failed_to_close"] == 0
