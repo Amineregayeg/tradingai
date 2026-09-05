@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-05 (B374 — A SECOND LIVE-MONEY DEFECT IS DEPLOYED, AND IT IS IN SERIES WITH THE FIRST. Found by auditing the DENOMINATOR rather than the claim: I had written into ENGINE_START_RUNBOOK that the deployed CFT kill switch is B303, having looked at it only because T-0132 made me, and swept nothing else — a claim with an uncounted denominator. Counted, seven files differ between the deployed sha and HEAD and six are safe (three MT5-only and unwired with every write refusing, three docstring-only with zero behavioural change); the seventh is kill_switch.py, whose B366 fix is in the repo and NOT DEPLOYED, and it is the CONSUMER so it is venue-agnostic and applies to CFT. The two sit in series on one path: B303 aborts CFT's loop on a ConnectTimeout so the results die with the frame, and B366 discards a report even if one existed, giving '0 closed, 0 failed'. So the runbook UNDERSTATED it — the deployed kill switch cannot report what it failed to close and the layer above would not report it either — and step 1 of the start sequence now reads LAND T-0132 AND DEPLOY HEAD, because landing the adapter fix and deploying that alone still leaves the operator reading three zeros. The runbook's reading order and the rest of its sequence were verified and hold: no migration is pending, and web-build is still necessary rather than residual since the frontend moved. AND REVIEW CORRECTED ITS OWN B362: 'the chronology proxy costs zero reports today, by luck' is FALSE — three of the seven missed ids are cited over six sites, and they are three of the four the git-order fix recovered, so the proxy was suppressing three REAL flags in product code rather than none. The cause is the register's own recurring one: the check was run from a directory where backend/app does not exist, with stderr silenced, so A SCAN THAT COULD NOT SEE ITS POPULATION RETURNED A CONFIDENT ZERO and the conclusion was published inverted.)
+Last updated: 2026-09-05 (B376 — EVERYTHING UNRECOGNISED BECOMES A LONG ON THE VENUE THAT TRADES REAL MONEY. cryptofundtrader reduces direction with `if s in {SELL, SHORT, S}: return SHORT` then `return LONG`, so empty string, None, 0, 1, ASK, BID, MARKET, LIMIT and SELL_LIMIT all become LONG, as does a payload carrying no side and no type at all. B336's TWIN WITH THE DEFAULT POINTING THE OTHER WAY, and worse in three ways: MT5 defaulted to SHORT while this defaults to LONG, which agrees with the common case and is therefore harder to notice; MT5's writes REFUSE and CFT TRADES; and the key falls back onto `type`, the field B291 recorded as carrying three unrelated meanings, which this adapter reads as a fourth. SELL_LIMIT to LONG is the MIRROR of MT5's bug rather than a repeat — endswith over-matched, set-membership under-matches — and both are the absence of a mapping, so B336's fix applies unchanged: map what is known and RAISE on the rest, turning an unknown into a question instead of a LONG. FILED WITH B377, THE ONE THAT MOVES MONEY: `equity` falls back to `balance` and they are not the same quantity, so when the key is absent the account asserts open P&L is zero while unrealized_pl on the same object may not be — and it is not a display field, because execution/service.py passes acct.equity into size_position, so A SILENT FALLBACK TO BALANCE CHANGES HOW LARGE EVERY POSITION IS. Also in B377: volume/lots/size into lot_size is B302's units-or-lots ambiguity ACQUIRED AT THE VENUE BOUNDARY, and the account-level profit/netProfit is B286's exact pair still unfixed, since T-0114 fixed the position field and left its sibling twelve lines above. FROM A DELIBERATE PREDICATE SWEEP OF THE LIVE ADAPTER: 7 reductions examined, 5 defective, B308 CONFIRMED STILL LIVE with open_trade_count a hardcoded 0 that manager.py puts on the wire and BrokerAccountsPanel renders as 'Open positions: 0' while every simulator counts its own. THE GROUND TRUTH WAS STATED FIRST AND HONESTLY: there is none of the kind MT5 had — no SDK, no capture corpus, no vendor documentation — so nothing is claimed about what CFT actually sends, and the sweep asked the answerable question instead, DOES THE REDUCTION DISCARD WHICH INPUT IT SAW, since a reduction that cannot be recovered is defective whatever the venue sends. One reduction was CORRECT and is the model: pnl_key_present tests PRESENCE rather than a defaulted read, so the provenance names a key the payload actually carried.)
 
 ---
 
@@ -24262,6 +24262,200 @@ uncounted set is worthless; this was a clean pass over an EMPTY set that looked 
 Related: **B366**, **B303**, **B362**, **B354**, **B333**, **B361**.
 
 ---
+
+---
+
+### B375 — THE HOIST MADE `CLOSED` ONE SHARED CONSTANT WITH TWO EVIDENTIARY STANDARDS. On MT5 it means the venue affirmed the close; on CFT it means the POST returned 2xx — and an EMPTY or UNPARSEABLE body is recorded `CLOSED` on the live venue
+
+`T-0132` hoisted `CLOSED` / `FAILED` / `NOT_ATTEMPTED` to `BrokerAdapter`, so both adapters now write
+**the same object**. That is right for the vocabulary and it makes a difference in the evidence
+behind it visible for the first time.
+
+```
+MT5   the SDK raises TradeException on every non-success code, so a returned response means the
+      venue AFFIRMED the close.  (B367 is the residue: DONE_PARTIAL is in the success list.)
+CFT   close_position POSTs and passes the response through _handle_response, which ends:
+
+          if not response.content:
+              return {}
+          try:
+              return response.json()
+          except Exception:
+              return {}          # B318 -- the exception discarded whole
+```
+
+**So on CFT a 2xx with no body, or a body that is not JSON, becomes `{}` and the row is written
+`CLOSED`.** Measured:
+
+```
+venue returned a real body                      disposition=CLOSED  result={'status': 'closed', 'id': 'p1'}
+venue returned 2xx with an EMPTY body           disposition=CLOSED  result={}
+venue returned 2xx with an UNPARSEABLE body     disposition=CLOSED  result={}
+```
+
+**`CLOSED` on CFT asserts that an HTTP call did not raise.** There is no venue-side confirmation
+anywhere on the path, and `close_all_positions` cannot distinguish *the venue said it closed* from
+*the venue said nothing*.
+
+## WHY THIS IS SHARPER THAN THE GAP EXECUTE NAMED
+
+Execute recorded the honest bound in the docstring: CFT's close-response shape is unobserved, so
+there is no documented code to check, and **a partial close would read as `CLOSED`**. True — and it
+understates it in the direction that matters. **The gap is not that partial closes are invisible.
+It is that NO close is confirmed**, so partiality is one member of a set that also contains *the
+request succeeded and the position did not close* and *the venue answered with something we could
+not read*.
+
+**And `close_position` takes a `lot_size` that becomes `volume` in the body**, so partial closes are
+a first-class operation on this endpoint rather than a market-conditions accident. The venue has the
+concept; we have no way to observe its answer.
+
+## THE PART THE HOIST CREATED
+
+Before `T-0132` each adapter defined its own constants, and a reader comparing them had to look at
+two files. **Now one symbol carries both meanings**, and `kill_switch.py` counts rows from both
+adapters through it — so *"3 closed"* on the operator's alert is three venue-affirmed closes, three
+un-erroring POSTs, or any mixture, with nothing in the report saying which.
+
+**This is not an argument against the hoist**, which is right: the vocabulary should be common.
+It is an argument that **a shared disposition needs a shared evidentiary bar, or the row must carry
+which one it met.**
+
+## WHAT WOULD CLOSE IT, AND WHAT IT COSTS
+
+Observing a partial close needs a real position, a real close and market conditions that produce
+one — **not cheap and not reproducible on demand.** But the cheaper half is worth separating:
+**capture the shape of an ORDINARY close response.** One close on a live account answers whether the
+endpoint returns any field at all that could express an outcome. **If it returns nothing, that is
+itself the finding** — the venue gives no confirmation, `CLOSED` is the best available answer, and
+the bound belongs in the row rather than only in a docstring.
+
+**It does not gate `T-0132`, and it cannot be observed now anyway**: the engine is held down by
+`ENGINE_START_RUNBOOK.md` and no close can run until it starts.
+
+Related: **B318**, **B367**, **B303**, **B330**, **B215**, **B374**.
+
+---
+
+### B376 — ON THE LIVE VENUE, EVERYTHING THE ADAPTER DOES NOT RECOGNISE BECOMES A **LONG** POSITION. `B336`'s twin with the default pointing the other way, and the key it reads is itself a fallback onto `type`
+
+```python
+@staticmethod
+def _side_to_direction(side: Any) -> DirectionType:
+    s = str(side or "").upper()
+    if s in {"SELL", "SHORT", "S"}:
+        return DirectionType.SHORT
+    return DirectionType.LONG
+```
+
+**Three spellings mean SHORT and the entire rest of the universe means LONG.** Measured:
+
+```
+'SELL' 'SHORT' 'S' 'sell'          -> SHORT
+'BUY' 'LONG' 'B' 'buy'             -> LONG
+'' None 0 1 '0' '1'                -> LONG
+'ASK' 'BID' 'MARKET' 'LIMIT'       -> LONG
+'SELL_LIMIT'                       -> LONG      <- contains SELL and is not in the set
+```
+
+**It never fails; it answers.** `B336` called that *"a DEFAULT wearing a mapping's clothes"* and it
+was fixed on MT5 by mapping the two documented values and raising on anything else, because
+*"direction decides the sign of every number downstream; there is no value of `DirectionType` that
+means I could not tell."*
+
+## THREE REASONS IT IS WORSE HERE THAN IT WAS ON MT5
+
+1. **MT5's default was SHORT; this one is LONG.** On a long-biased book a wrong LONG agrees with the
+   common case and is the harder one to notice.
+2. **MT5's writes refuse. CFT trades.** `direction` drives the sign of `unrealized_pnl`, the
+   R-multiple, the reconciler's matching and the kill switch's report, on the account holding real
+   money.
+3. **The key is itself a fallback:** `raw.get("side", raw.get("type"))`. If `side` is absent and
+   `type` carries an ORDER type, `"MARKET"` is not in the SHORT set and **every position reads
+   LONG**:
+
+```
+raw has no 'side', type='MARKET'  -> reads 'MARKET' -> LONG
+raw has neither                   -> reads None     -> LONG
+```
+
+`type` is the field `B291` recorded as carrying three unrelated meanings in one vendor's SDK. This
+adapter reads it as a fourth.
+
+**`SELL_LIMIT -> LONG` is the mirror of MT5's bug rather than the same one:** `endswith("BUY")`
+over-matched, set-membership under-matches. Both are the absence of a mapping.
+
+**The fix is `B336`'s and it is already written**: map the values this venue is known to send and
+raise on anything else. **What the venue actually sends is unobserved** — see `B377` — so the
+raise is what converts an unknown into a question instead of a LONG.
+
+Related: **B336**, **B291**, **B302**, **B377**.
+
+---
+
+### B377 — `B286` WAS FIXED FOR ONE FIELD AND ITS FAMILY IS STILL LIVE IN THREE MORE. `equity` silently falls back to `balance`, and equity drives position sizing
+
+`B286` found a three-deep silent fallback across keys that are not the same quantity, and `T-0114`
+fixed it **for the position P&L only** — `pnl_source = pnl_key_present(raw)` now records which key
+was read, by PRESENCE rather than by a defaulted read. **That fix is correct and it is the model.
+Three siblings in the same file did not get it.**
+
+```python
+equity        = float(_dec(acct.get("equity", acct.get("balance"))))          # NOT the same quantity
+unrealized_pl = float(_dec(acct.get("profit", acct.get("netProfit"))))        # B286's exact pair
+volume        = _dec(raw.get("volume", raw.get("lots", raw.get("size"))))     # three names, one field
+```
+
+## `equity` FALLING BACK TO `balance` IS THE ONE THAT MOVES MONEY
+
+**Equity is balance plus unrealized P&L.** When the `equity` key is absent the account reports
+`equity == balance`, which asserts that open P&L is zero — while `unrealized_pl` on the same object
+may be non-zero. **The Account can be internally inconsistent and nothing notices.**
+
+And it is not a display field: `execution/service.py` sizes every position from
+`size_position(acct.equity, sig.risk_pct, sizing_price, sig.sl)`. **A silent fallback to balance
+changes how large every position is**, in whichever direction the open book happens to be.
+
+## `volume` / `lots` / `size` SPANS THE UNITS-VERSUS-LOTS AMBIGUITY
+
+Measured — each key alone produces the same `lot_size` with nothing recording which arrived:
+
+```
+payload carries only 'volume' -> lot_size = 0.5   provenance: NONE
+payload carries only 'lots'   -> lot_size = 0.5   provenance: NONE
+payload carries only 'size'   -> lot_size = 0.5   provenance: NONE
+```
+
+**`lots` and `size` are not obviously the same quantity**, and `B302` is the entry establishing that
+`lot_size` is *units-or-lots by adapter* across five call sites. A three-name fallback into that
+field is `B302`'s ambiguity acquired at the venue boundary rather than inherited from the producer.
+
+## AND `open_trade_count` IS STILL A HARDCODED ZERO, ON THE ONLY LIVE ACCOUNT — `B308` CONFIRMED
+
+```
+cryptofundtrader.py:379   open_trade_count=0,
+paper.py / cft_sim.py     open_trade_count=len(self._positions)
+oanda.py:208              open_trade_count=int(acct.get("openTradeCount", 0))
+```
+
+**Every simulator counts its positions and the live venue reports a constant.** It is consumed:
+`manager.py:676` puts it on the wire and
+`BrokerAccountsPanel.tsx:81` renders `<Row label="Open positions" value={String(a.open_trade_count)} />`.
+**The dashboard tells the operator the live account has zero open positions, always.**
+
+## THE GROUND TRUTH I HAD, AND WHAT I COULD NOT COMPARE
+
+**There is no SDK to introspect and no capture corpus in the tree** — the CFT endpoint map was
+reverse-engineered from the terminal. So unlike the MT5 sweep, **I could not compare an assumption
+against a declaration.** What the fallback chains give is a record that *someone observed variation*,
+not a set.
+
+**So the sweep asks a different question, and it is answerable without the venue:** does the
+reduction discard which input it saw? A reduction that cannot be recovered is defective whatever the
+venue sends, and that is the whole of what is claimed here. **Which spelling CFT actually uses
+remains unobserved and is not asserted anywhere above.**
+
+Related: **B286**, **B308**, **B302**, **B376**, **B375**.
 
 ---
 
