@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-05 (B384 — A MUTATION REACHED main AND EVERY EXISTING CHECK PASSED. 8c907fc shipped `if (false)` in PropFirmPage's null guard: Review's M-380-A, live in the SHARED working tree while Execute committed by pathspec, re-opening B380 exactly so an unevaluated account renders 0.00% OF LIMIT USED on the prop-firm breach monitor. THE ENTRY IS NOT THE MUTATION, IT IS THAT NOTHING COULD HAVE CAUGHT IT: both seats' suites were green because each ran BEFORE the other's edit, the commit-msg hook reads the MESSAGE and never the diff, and THE DEPLOY'S SHA VERIFICATION WOULD HAVE MATCHED PERFECTLY — a sha answers whether the server got what was pushed and cannot answer whether what was pushed is what was reviewed, so the check I wrote into the start sequence and called 'not ceremony' would have confirmed the defect arrived intact. Malek had already authorised the deploy on review passing, so the only thing between a fabricated all-clear on a funded account and production was Review re-reading its own restore. EXECUTE NAMED THE WINDOW BETTER THAN I DID: it had been rigorous that a suite result must describe a tree that still exists, superseding two full runs for exactly that, and then staged a file without re-reading it at commit time — the same window watched at only one end, so MEASURE-to-COMMIT needs the discipline both seats gave EDIT-to-MEASURE. THE STRUCTURAL CAUSE IS NOT CARELESSNESS: two seats mutate one working tree and Review has no isolated worktree for the FRONTEND because node_modules lives in the shared one, while its backend mutations ran in a pinned worktree and none reached the index. GUARD BUILT: agents/mutation_marker_check.py, wired into commit-msg, refusing a staged diff that INTRODUCES a marker on added lines only, with a NAMED marker allowed exactly as the register hook treats closure claims, failing CLOSED when it cannot read the diff, and printing its own blind spot — it catches MARKERS not MUTATIONS, so an inverted comparison is invisible to it. It raises a floor and is not a ceiling.)
+Last updated: 2026-09-05 (B381 — THE CHECK CONSTRAINT IS ENFORCED IN PRODUCTION AND ABSENT WHERE THE TESTS RUN, so no behavioural arm for it can exist. I asked which way the gap cut and Review measured it: a violating write is ACCEPTED against the test database, because 0009 declares the constraint via op.create_check_constraint while conftest builds tables from the MODEL with Base.metadata.create_all and the model carries no __table_args__. So the invariant 'figures are NULL if and only if the state is UNAVAILABLE' holds in production and cannot be asserted anywhere an arm runs. AND B184 DOES NOT APPLY, which was my reason for hesitating: this repo already DECLARES check constraints in the model elsewhere, so putting it there is the convention rather than a second source of truth. FILED ALONGSIDE B384's guard and B383's watcher, both mine. Landed after 8c907fc shipped a reviewer's `if (false)` mutation to main and was repaired at 3b8192e, verified by fetching the remote back and reading the line rather than by comparing shas — since a sha confirms delivery and cannot confirm content.)
 
 ---
 
@@ -24823,6 +24823,68 @@ floor. It is not a ceiling**, and the thing that actually caught this one was a 
 its own work.
 
 Related: **B380**, **B383**, **B364**, **B361**.
+
+---
+
+### B381 — THE `UNAVAILABLE` INVARIANT HAS NO ARM AND CANNOT HAVE A BEHAVIOURAL ONE. The constraint lives only in the migration, the tests build from the model, and a violating write is ACCEPTED where the tests run. **This is not `B184` duplication — the model is simply incomplete**
+
+I asked for the `CheckConstraint` that makes `0009`'s downgrade reasoning true. It landed **in the
+migration only**, and the manager asked which way that cuts.
+
+## MEASURED — BOTH HORNS, AND IT IS THE SECOND ONE
+
+```
+alembic/versions/0009:67   op.create_check_constraint("ck_prop_firm_snapshots_unavailable_has_no_figures", ...)
+models/prop_firm_snapshot.py   __table_args__ -> ABSENT
+tests/conftest.py:93           Base.metadata.create_all   -- the test DB is built from the MODEL
+
+CHECK constraints on the TEST-shaped table:      NONE
+INSERT state='UNAVAILABLE' WITH equity/balance:  ACCEPTED
+```
+
+**So the invariant is enforced in production and absent where every arm runs.** No test references
+it — the only `IntegrityError` arms in the suite belong to other tables. **A behavioural arm cannot
+exist as things stand**: one asserting the violating write is rejected would be RED, and if anyone
+writes one that passes it is asserting something other than what it claims.
+
+## AND IT IS NOT A TRADE-OFF AGAINST DUPLICATION — IT IS A DEVIATION FROM THIS REPO'S OWN CONVENTION
+
+```python
+# models/decision_record.py:401
+__table_args__ = (
+    CheckConstraint(f"signal_dir IS NULL OR {_sql_in('signal_dir', SIGNAL_DIRECTIONS)}",
+                    name="ck_decision_records_signal_dir"),
+    CheckConstraint(_sql_in("decided_by", DECIDED_BY_VALUES),
+                    name="ck_decision_records_decided_by"),
+    ...
+```
+
+**The one other table in this codebase with check constraints declares them in the model.** That is
+the pattern, and it is the pattern for a structural reason rather than a stylistic one: **the model
+is the input to `create_all` and to `alembic --autogenerate`, so a constraint present only in a
+migration means the model declares a table shape production does not have.**
+
+**Putting it in the model REMOVES a divergence rather than creating one.** The migration keeps its
+`op.create_check_constraint` because an existing database needs the DDL — that is the ordinary
+alembic relationship, not `B184`. The nullability of these same four columns already lives in both
+places and nobody calls that duplication.
+
+## THE GENERAL INSTRUMENT, AND THE REPO ALREADY HAS THE MACHINERY
+
+This is the manager's own framing — *"a property enforced by one representation of a schema and
+invisible to the other"*, `B356` and `B369` one layer down. **A join arm would catch the class
+rather than this instance**, and `tests/unit/test_decision_record_schema.py` already *"drives each
+migration's `upgrade()` through a recording shim and replays"* it. That shim can collect every
+constraint the migrations create and assert each has a counterpart in `Base.metadata`.
+
+**Today that arm fires**, which is the point of writing it: the first thing it reports is
+`ck_prop_firm_snapshots_unavailable_has_no_figures`.
+
+**What I am not claiming:** that the constraint is wrong, that the migration is wrong, or that
+production is unprotected. Production has it and the downgrade's reasoning is now true. **The claim
+is narrower — the guard has never been seen to fire and, where the arms run, it cannot be.**
+
+Related: **B380**, **B378**, **B356**, **B369**, **B184**.
 
 ---
 
