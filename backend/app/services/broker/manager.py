@@ -87,12 +87,22 @@ def _make_adapter(
     if key in _MT5_ALIASES:
         # MT5 THROUGH METAAPI — READS ONLY, AND THAT IS NOT A LIMITATION OF THIS BRANCH.
         #
-        # `B346`: there are exactly two `place_order` call sites in the app and NEITHER can
-        # reach a broker adapter — both `ExecutionService` constructions pass the in-process
-        # paper broker, and the live-loop proxy resolves to that same object. So constructing
-        # this adapter puts MT5 on the READ path and on no order path at all. Three further
-        # refusals sit behind that: `ExecMode` has no LIVE member, `execute()` raises on
-        # `is_simulation=False`, and this adapter's `place_order` refuses outright (`B302`).
+        # `B350`, WHICH CORRECTS `B346`'s MECHANISM WHILE KEEPING ITS CONCLUSION. There are two
+        # `place_order` call sites and **both DO reach a `BrokerAdapter`** — `PaperBroker` and
+        # `SimPropFirmBroker` are subclasses that define it. The path does not stop short of an
+        # adapter; it terminates in one every time, and **the one it terminates in is always
+        # SIMULATED and hardcoded at the construction site.** So constructing this adapter puts
+        # MT5 on the READ path and on no order path at all. Three further refusals sit behind
+        # that: `ExecMode` has no LIVE member, `execute()` raises on `is_simulation=False`, and
+        # this adapter's `place_order` refuses outright (`B302`).
+        #
+        # THIS COMMENT CITED `B346` AND WENT STALE IN THE MINUTE IT WAS WRITTEN. `B350` landed at
+        # `c00170b`, immediately after the commit carrying this branch — the citation was accurate
+        # when written and wrong when first read. **Nothing links a register id quoted in product
+        # code to the entry it names.** The register has amendments and a hook that refuses a
+        # commit touching an entry its message does not name; a comment quoting an entry has
+        # neither. It matters here because this is the sentence a reader will consult when Gate 4
+        # is built, and the wrong mechanism would send them to BUILD an order path that exists.
         #
         # The guard above has already run. It cannot be skipped by returning here, which is the
         # property that made hoisting it a prerequisite for this branch rather than a tidy-up.
