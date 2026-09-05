@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-05 (B379 — TWO OF THE SIX KILL-SET CLAUSES DID NOT SURVIVE CONTACT, AND BOTH ARE THE SAME KIND: a universal quantifier over arm shapes the author had not seen. Found by Review reviewing B372 against the kill-set Review itself registered before any arm existed — which is what made the review possible and is also what exposed the instrument, since it had never been executed at this size. FIRST: the ORTHOGONALITY CONDITION as stated is wrong. 'An arm dying under both mutations is measuring one thing twice' assumes every arm is NARROW, and the intersection is not empty — test_a_PARTIAL_failure_still_returns_200_because_three_consumers_rest_on_that is a COMPOSITE INTEGRATION arm asserting the whole response contract, so a mutation to either mechanism breaks a claim it legitimately makes, and it SHOULD die under both. The property actually wanted does hold and is the correct formulation: FOR EACH MECHANISM THERE IS AN ARM THAT DIES UNDER ITS MUTATION AND SURVIVES THE OTHER. It worked on B349 because both candidates there were narrow. SECOND: the all-healthy CONTROL cannot hold under M-2, because dropping the positions breaks the healthy path too and that is precisely what M-2 mutates — so A CONTROL HAS TO NAME THE MUTATIONS IT GOVERNS rather than be asserted universally. B372 PASSES: all four mutations covered, DELETE needed its own separate mutation since the unasked guard appears once in GET-one and once in DELETE, the must-miss has a dedicated arm so a fix reporting the problem while losing the data dies, the DELETE arm asserts the DETAIL rather than the status code, and M-4's arm installs a raising adapter and drives a real 502 — the two-layer claim settled by driving it, which is the only form that settles it. Every row was run rather than read from a report.)
+Last updated: 2026-09-05 (B380 — THE FIX WHOSE SUBJECT IS 'ABSENCE MUST BE VISIBLE' RENDERS ABSENCE AS A CLEAN BILL OF HEALTH. B378 writes a PropFirmSnapshot with state=UNAVAILABLE and nullable figures, correctly; the surface a human reads then turns it back into numbers. StatusBadge renders UNAVAILABLE honestly and the equity and balance tiles render an em-dash HONESTLY BY LUCK, escaping only because a `value > 0` truthiness guard happens to reject zero — an accident rather than a decision. But PropFirmPage does Number(s.equity), Number(s.daily_loss) and Number(s.total_loss), each of which is 0 for null, while initialBalance falls through `|| balance || 1` to ONE, so BOTH LOSS PERCENTAGES COMPUTE TO ZERO and the drawdown bars render '0% OF LIMIT USED'. AN UNEVALUATED ACCOUNT RENDERS AS ONE USING NONE OF ITS DRAWDOWN ALLOWANCE, which is the most reassuring reading available on a breach monitor. The TypeScript types also now lie about the payload: ComplianceState has no UNAVAILABLE member and the figures are `number` rather than `number | null`, while the API schema was correctly widened to Decimal | None with a comment saying callers must handle absence — and B369's frontend-subset-of-backend invariant CANNOT catch this, because the frontend is not offering something the backend refuses, it is FAILING TO REPRESENT something the backend now sends, which is the other direction of the same one-directional invariant. WHY THE ARM PASSED: it asserts rows[0].state is ComplianceState.UNAVAILABLE against the DATABASE and calls that the surface. B366 once more — produced, persisted, served, and turned back into a number by the consumer a human reads — so a fix whose whole subject is absence needs its witness driven from the layer where the absence is READ. NOT DEPLOYABLE: the third hold condition exists because a stale monitor shows a healthy account, and shipping this replaces STALE HEALTHY with FRESH HEALTHY, which is worse because it carries a current timestamp.)
 
 ---
 
@@ -24616,6 +24616,81 @@ mutations it governs, and to require a witness arm per mechanism rather than an 
 Related: **B372**, **B349**, **B332**, **B354**, **B362**.
 
 ---
+
+---
+
+### B380 — `B378`'s WITNESS STOPS AT THE MODEL. An `UNAVAILABLE` snapshot renders the drawdown bars at **0%** — a fabricated all-clear on the breach monitor — and the frontend types allow neither the new state nor null figures
+
+The migration's own docstring gets the principle exactly right:
+
+> *"Writing zeros would be worse: a manufactured drawdown on the exact number a breach is computed
+> from. **NULL is the only value that says nothing.**"*
+
+**The NULL survives the database and the API and dies in the browser.**
+
+## MEASURED, IN THE RENDER PATH
+
+```js
+// PropFirmPage.tsx:208-216
+const equity      = Number(s.equity)        // Number(null) === 0
+const balance     = Number(s.balance)       // 0
+const dailyLoss   = Number(s.daily_loss)    // 0
+const totalLoss   = Number(s.total_loss)    // 0
+const initialBalance = Number(...) || balance || 1        // balance is 0 -> falls through to 1
+const dailyLossPct   = (dailyLoss / initialBalance) * 100 // 0
+const totalLossPct   = (totalLoss / initialBalance) * 100 // 0
+```
+
+**Three surfaces, and they do not agree:**
+
+```
+StatusBadge      map[state] ?? { label: state }   -> renders the literal "UNAVAILABLE"    HONEST
+Equity / Balance `${value > 0 ? ... : '—'}`       -> renders "—"                          HONEST (by luck)
+Drawdown bars    dailyLossPct / totalLossPct = 0  -> renders 0% OF THE LIMIT USED         FABRICATED
+```
+
+**The bars are the part an operator reads at a glance on a breach monitor, and they say the account
+is using none of its allowance.** An unevaluated account displays as a maximally healthy one. The
+figures tiles escape only because `value > 0 ? … : '—'` happens to reject zero — **that is an
+accident of a truthiness guard, not a decision about absence.**
+
+## AND THE TYPES NOW LIE ABOUT THE PAYLOAD
+
+```ts
+export type ComplianceState = 'ACTIVE' | 'AT_RISK' | 'CRITICAL' | 'HALTED' | 'COOLDOWN' | 'BREACHED'
+                              // no UNAVAILABLE
+  state: ComplianceState
+  equity: number      // the API schema is now `Decimal | None`
+  balance: number
+  daily_loss: number
+```
+
+The backend's `propfirm.py` was correctly widened to `Decimal | None` with a comment saying *"a
+caller that renders `equity` must now handle its absence — which is the point."* **The caller was
+not changed.** `B369`'s invariant — frontend ⊆ backend — is one-directional and does not catch this:
+the frontend is not offering something the backend refuses, it is failing to represent something the
+backend now sends.
+
+## WHY THE ARM DID NOT CATCH IT, WHICH IS THE TRANSFERABLE HALF
+
+`test_b376_b377_b378_live_venue.py` asserts:
+
+```python
+assert len(rows) == 1, "nothing reached the surface — the monitor still shows the last value"
+assert rows[0].state is ComplianceState.UNAVAILABLE
+assert rows[0].equity is None and rows[0].total_loss is None
+```
+
+**It queries the database and calls that the surface.** The row is written correctly and the
+assertion is true. **`B366`'s shape one more time:** the information is produced, persisted and
+served, and the consumer that a human actually reads turns it back into a number. The condition I
+registered was *"an arm asserting the compliance SURFACE reports not-evaluated"*, and a
+`PropFirmSnapshot` with `state=UNAVAILABLE` is not yet a dashboard that says *could not evaluate*.
+
+**The witness for a fix whose whole subject is "absence must be visible" has to be driven from the
+layer where the absence is read.**
+
+Related: **B378**, **B366**, **B369**, **B215**, **B338**.
 
 ---
 
