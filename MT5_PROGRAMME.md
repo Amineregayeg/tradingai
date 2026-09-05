@@ -96,8 +96,18 @@ the **fixture's value type** — integer `7` gives 6 passed, the venue's ISO ins
 
 **Goal: stop a green suite from meaning "unverified".**
 
-**33 of 67 semantic mutations to `mt5.py` survive all 30 arms** — a green suite is 50.7% of a
-verification. The survivors **cluster**: five of the seven rate-limit dispatch sites can be
+**Semantic mutations to `mt5.py` survive the arms at a rate Review has now measured twice**, and
+the second number is the one to use:
+
+```
+first pass    33 of 67 survive   -> "a green suite is 50.7% of a verification"
+CORRECTED                        -> 57.3%   (B354)
+```
+
+**The first figure came from a contaminated baseline and I had quoted it here.** Review's own
+mutation harness leaves a surviving mutant on disk when a run is interrupted, and the next run
+adopts it as its baseline — **and a surviving mutant passes every arm, so "the baseline is green"
+cannot detect it.** The instrument was auditing itself and the audit is the finding. The survivors **cluster**: five of the seven rate-limit dispatch sites can be
 *inverted* with the suite green. **One parametrized arm kills all five with the seven copies left
 exactly where they are.**
 
