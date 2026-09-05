@@ -280,9 +280,9 @@ class MetaTrader5Adapter(BrokerAdapter):
         #: are otherwise identical to a caller.
         self.last_trades_synchronizing: bool = False
 
-        #: The most recent `close_all_positions` report, published BEFORE its loop runs so the
-        #: partial record survives an abnormal exit (`B303`). `None` until the switch is pulled.
-        self.last_close_all_report: dict[str, dict] | None = None
+        # `last_close_all_report` is INHERITED from `BrokerAdapter` (`T-0132`) — two adapters now
+        # publish it and a caller reading the record should not need to know the venue.
+        self.last_close_all_report = None
 
     # ------------------------------------------------------------------
     # Simulation contract
@@ -1059,9 +1059,9 @@ class MetaTrader5Adapter(BrokerAdapter):
     # ------------------------------------------------------------------
     # 9. close_all_positions — MALEK'S PROPERTY, not any existing shape
     # ------------------------------------------------------------------
-    #: The three dispositions Malek's ruling requires. **Every position open when the switch was
-    #: pulled must be reported as exactly one of these.**
-    CLOSED, FAILED, NOT_ATTEMPTED = "CLOSED", "FAILED", "NOT_ATTEMPTED"
+    # The three dispositions are INHERITED from `BrokerAdapter` (`T-0132`). They were defined
+    # here, and bringing CFT to the same ruled property would have meant a second copy — two
+    # copies of a vocabulary drift, and the consumer reads only strings.
 
     async def close_all_positions(self) -> list[dict]:
         """**Ruled by Malek as a PROPERTY, 2026-08-31**, and this satisfies the property:

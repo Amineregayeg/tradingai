@@ -289,3 +289,38 @@ async def test_NO_partial_report_is_a_DIFFERENT_state_from_an_empty_book():
 
     assert result["details"] == []
     assert result["positions_closed"] == 0 and result["positions_failed_to_close"] == 0
+
+
+@pytest.mark.asyncio
+async def test_the_counter_reads_the_PRODUCERS_constant_and_not_a_copy_of_its_value():
+    """`T-0132`. Both adapters write `BrokerAdapter.NOT_ATTEMPTED`; this counted a string literal.
+
+    **Two sources for one fact is `B184`** — the thing hoisting the vocabulary to the base class
+    was for, left behind at the consumer. It is inert while the constant's value equals the
+    literal, so this arm changes the VALUE and asserts the counting follows it. Without that, the
+    coincidence is what passes.
+
+    The path matters: `B330` already bit here once, counting a `NOT_ATTEMPTED` row as CLOSED and
+    telling the operator a position was closed that nobody had reached.
+    """
+    from app.services.broker.base import BrokerAdapter
+
+    original = BrokerAdapter.NOT_ATTEMPTED
+    db = _db()
+    close_results = [
+        {"position_id": "p1", "disposition": "CLOSED", "status": "closed"},
+        {"position_id": "p2", "disposition": "RENAMED_STATE", "status": "failed"},
+    ]
+    try:
+        BrokerAdapter.NOT_ATTEMPTED = "RENAMED_STATE"
+        with patch("app.services.broker.manager.broker_manager.close_all_positions",
+                   new=AsyncMock(return_value=close_results)):
+            result = await kill_switch.trigger(db=db, user_id="system", reason="Test")
+    finally:
+        BrokerAdapter.NOT_ATTEMPTED = original
+
+    assert result["positions_not_attempted"] == 1, (
+        "the counter compared against a hardcoded 'NOT_ATTEMPTED' rather than the constant the "
+        "adapters write, so a renamed state was counted as CLOSED — B330's exact failure"
+    )
+    assert result["positions_closed"] == 1

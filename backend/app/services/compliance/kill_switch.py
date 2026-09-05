@@ -60,6 +60,7 @@ class KillSwitch:
         )
 
         # Close all positions
+        from app.services.broker.base import BrokerAdapter
         from app.services.broker.manager import broker_manager
 
         try:
@@ -107,8 +108,20 @@ class KillSwitch:
         # A row without a `disposition` is one of the older shapes that cannot express the third
         # state; it keeps exactly its previous meaning, so this widens the vocabulary without
         # reinterpreting any adapter that has not adopted it.
-        not_attempted_rows = [r for r in close_results if r.get("disposition") == "NOT_ATTEMPTED"]
-        accounted = [r for r in close_results if r.get("disposition") != "NOT_ATTEMPTED"]
+        # READ THE PRODUCERS' CONSTANT, NOT A COPY OF ITS VALUE (`T-0132`). Both adapters write
+        # `BrokerAdapter.NOT_ATTEMPTED`; this counted against the string `"NOT_ATTEMPTED"`. **Two
+        # sources for one fact is `B184`** — the very thing hoisting the vocabulary to the base
+        # class was for, left behind at the consumer. Inert today only because the constant's
+        # value equals the literal, **which is exactly why it is worth fixing while nothing
+        # depends on the coincidence**: if the value ever changes, both producers change together
+        # and this silently disagrees, on the counting path where `B330` already bit once — a
+        # NOT_ATTEMPTED row counted as CLOSED and reported to the operator as one.
+        not_attempted_rows = [
+            r for r in close_results if r.get("disposition") == BrokerAdapter.NOT_ATTEMPTED
+        ]
+        accounted = [
+            r for r in close_results if r.get("disposition") != BrokerAdapter.NOT_ATTEMPTED
+        ]
 
         positions_closed = sum(
             1 for r in accounted if r.get("status") not in ("error", "failed")

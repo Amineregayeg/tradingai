@@ -570,16 +570,124 @@ class CryptoFundTraderAdapter(BrokerAdapter):
         return self._handle_response(response, f"close_position({position_id})")
 
     async def close_all_positions(self) -> list[dict]:
+        """**Malek's ruled property, on the venue he actually trades** (`T-0132`, `B303`).
+
+        > Every position open when the switch was pulled must be reported as CLOSED, FAILED WITH A
+        > REASON, or NOT ATTEMPTED. A position in none of those three states is a bug by
+        > construction.
+
+        WHAT THIS REPLACED, AND WHY IT WAS THE MOST DANGEROUS SHAPE IN THE TREE. The loop caught
+        `BrokerError` **only**, so an `httpx.ConnectTimeout` — the failure a kill switch is most
+        likely to meet — aborted it, and `results` died with the frame. **Zero-closed and
+        four-closed produced identical output: nothing.** The remaining positions were never
+        attempted and no record said so.
+
+        Four properties, each of which the old shape lacked:
+
+        * **The rows are enumerated BEFORE the loop**, so *"I never got to this one"* is
+          expressible. Accumulating results as you go cannot say it, and that is the state that
+          matters at 3am.
+        * **The report is published on the adapter BEFORE the loop runs**, so a partial record
+          outlives the frame no matter how the loop ends — including a cancellation, which no
+          `except Exception` catches.
+        * **A per-position failure is FAILED and the loop CONTINUES**, catching `Exception` rather
+          than `BrokerError`. Abandoning positions 3 and 4 because position 2 timed out would
+          MANUFACTURE `NOT_ATTEMPTED` rows for positions we could have closed — worse, and it
+          satisfies the ruled property just as well, which is why the property alone does not
+          decide it (`B332`).
+        * **The in-flight row says the close was SENT.** Written before the await, so every other
+          path overwrites it and it survives only when nothing else got to. `FAILED WITH A REASON`
+          is Malek's vocabulary and the reason clause is where *outcome unknown* belongs — no
+          fourth disposition (`B337`).
+
+        **Keyed by enumeration index, not by position id** (`B338`): keying on an id loses a row
+        to a duplicate or an empty string as surely as to a collision, and a report holding fewer
+        rows than there were positions is the ruled property failing SILENTLY.
+
+        ONE DIFFERENCE FROM MT5 THAT IS THE VENUE AND NOT A SHORTCUT: MT5 inspects the close
+        response's `stringCode` because `MetatraderTradeResponse` documents one and its success
+        list includes `TRADE_RETCODE_DONE_PARTIAL` (`B367`). **CFT's close response shape is
+        unobserved** — the endpoint map was reverse-engineered from the terminal by network
+        capture — so there is no documented code to check and inventing one would assert a
+        vocabulary this venue has never been seen to use. Recorded rather than papered over: a
+        partial close here would still read as CLOSED, and that is a real gap awaiting a capture.
+        """
         self._guard_trading("close_all_positions")
-        positions = await self.get_positions()
-        results: list[dict] = []
-        for pos in positions:
-            try:
-                result = await self.close_position(pos.id)
-                results.append({"pair": pos.pair, "position_id": pos.id, "status": "closed", "result": result})
-            except BrokerError as exc:
-                results.append({"pair": pos.pair, "position_id": pos.id, "status": "error", "error": str(exc)})
-        return results
+
+        report: dict[str, dict] = {}
+        try:
+            positions = await self.get_positions()
+        except Exception as exc:  # noqa: BLE001
+            # COULD NOT ENUMERATE. Returning `[]` would say "there was nothing to close", which is
+            # `B292`'s collapse on the kill switch's own path.
+            raise BrokerError(
+                f"CFT close_all_positions could not enumerate the open positions, so it cannot "
+                f"report on them: {exc}. Nothing was attempted.", broker=self.broker_name,
+            ) from exc
+
+        for index, pos in enumerate(positions):
+            report[f"#{index}"] = {
+                "position_id": str(pos.id or "").strip(),
+                "pair": pos.pair,
+                "disposition": self.NOT_ATTEMPTED,
+                "status": "failed",
+                "reason": "the close loop never reached this position",
+            }
+
+        self.last_close_all_report = report
+
+        try:
+            for index, pos in enumerate(positions):
+                row = report[f"#{index}"]
+                position_id = row["position_id"]
+
+                if not position_id:
+                    row.update(
+                        disposition=self.FAILED, status="failed",
+                        reason="the venue sent no position id, so this position could not be "
+                               "addressed and no close was sent for it",
+                    )
+                    continue
+
+                row.update(
+                    disposition=self.FAILED, status="failed", _in_flight=True,
+                    reason="the close for this position was SENT and the outcome was never "
+                           "observed. The position may or may not be closed and MUST be checked "
+                           "at the venue.",
+                )
+                try:
+                    result = await self.close_position(position_id)
+                except Exception as exc:  # noqa: BLE001 - ANY exception, not just BrokerError
+                    row.update(
+                        disposition=self.FAILED, status="failed", _in_flight=False,
+                        reason=f"{type(exc).__name__}: {exc}",
+                    )
+                    continue
+                row.update(
+                    disposition=self.CLOSED, status="closed", reason=None, result=result,
+                    _in_flight=False,
+                )
+        except BaseException as exc:  # noqa: BLE001 - CancelledError is not an Exception
+            for _row in report.values():
+                if _row.pop("_in_flight", False):
+                    _row["reason"] = (
+                        f"{type(exc).__name__}: the close for this position was SENT and the "
+                        f"outcome was NEVER OBSERVED — the loop did not survive to record it "
+                        f"({exc}). The position may or may not be closed and MUST be checked at "
+                        f"the venue."
+                    )
+            failure = BrokerError(
+                f"CFT close_all_positions ended abnormally after "
+                f"{sum(1 for r in report.values() if r['disposition'] != self.NOT_ATTEMPTED)} of "
+                f"{len(report)} position(s): {type(exc).__name__}: {exc}",
+                broker=self.broker_name,
+            )
+            failure.partial_report = list(report.values())  # type: ignore[attr-defined]
+            raise failure from exc
+
+        for row in report.values():
+            row.pop("_in_flight", None)      # internal bookkeeping never reaches a caller
+        return list(report.values())
 
     # ------------------------------------------------------------------
     # Price streaming — poll the quotes endpoint the terminal uses

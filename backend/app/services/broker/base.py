@@ -42,6 +42,35 @@ class BrokerAdapter(ABC):
 
     broker_name: str = "unknown"
 
+    # ------------------------------------------------------------------
+    # THE KILL-SWITCH DISPOSITION VOCABULARY — Malek's ruled property, 2026-08-31
+    # ------------------------------------------------------------------
+    # > Every position open when the switch was pulled must be reported as CLOSED,
+    # > FAILED WITH A REASON, or NOT ATTEMPTED. A position in none of those three
+    # > states is a bug by construction.
+    #
+    # HERE RATHER THAN ON EACH ADAPTER, and `T-0132` is why. These were defined on
+    # `MetaTrader5Adapter` alone, so bringing CFT to the same property meant either a
+    # second copy of three string literals or an import from one venue's module into
+    # another's. **A ruled property that lives in one implementation is a property of
+    # that implementation** — `B184` waiting to happen, since two copies of a
+    # vocabulary drift and the consumer (`kill_switch.py`) reads only strings.
+    #
+    # FAILED IS "FAILED WITH A REASON", and the reason clause is PART of the ruled
+    # state rather than decoration: it is where *outcome unknown* belongs, which is
+    # what makes three states sufficient and why no fourth disposition exists
+    # (`B337`, ruled by the manager 2026-09-05).
+    CLOSED = "CLOSED"
+    FAILED = "FAILED"
+    NOT_ATTEMPTED = "NOT_ATTEMPTED"
+
+    #: The most recent `close_all_positions` report, published BEFORE that member's loop runs so a
+    #: partial record survives an abnormal exit (`B303`). `None` until the switch is pulled.
+    #: **On the base class for the same reason as the vocabulary above**: two adapters now satisfy
+    #: the ruled property and a caller reading the record should not have to know which venue it
+    #: is talking to.
+    last_close_all_report: dict[str, dict] | None = None
+
     # Instruments this broker should stream by default. Empty ⇒ use the caller's
     # requested list. Lets a crypto broker (CFT) stream crypto while a forex
     # broker (OANDA) streams the forex pairs passed in from startup.
