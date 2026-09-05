@@ -9,7 +9,7 @@ function RuleBar({ label, value, limit, color }: { label: string; value: number 
   // could not evaluate rendered as "0.00% OF LIMIT USED" — **the most reassuring reading
   // available on a breach monitor**, carrying a current timestamp. The row was written correctly
   // and the consumer turned it back into a healthy account.
-  if (false) {
+  if (value === null || value === undefined || Number.isNaN(value)) {
     return (
       <div style={{ marginBottom: 14 }} data-testid={`rulebar-${label}`}>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
