@@ -22011,3 +22011,279 @@ Related: **B333**, **B305**, **B341**, **B267**.
 
 ---
 
+### B341 — NO SDK OBJECT HAS THE SHAPE `mt5.py` ASSUMES. The connection that carries nine of the ten members lacks `terminal_state`, so `_require_broker_link` is not *reachable* fail-open — it is a GUARANTEED no-op in production
+
+**`B335` measured that `_require_broker_link` fails open when the guard attribute is absent, and
+reached it by renaming the attribute.** With `metaapi_cloud_sdk==29.1.1` actually installed
+(`T-0133`), no rename is needed. **The absence is the real shape.**
+
+`mt5.py` takes ONE injected `client` and calls ten members on it. Measured per class over the whole
+installed package — the inverse question to the one a *"which class has this method"* pass answers,
+because that pass truncates and cannot see that no single class has them all:
+
+```
+class                                 n/10   missing
+RpcMetaApiConnectionInstance            9    terminal_state
+MetaApiWebsocketClient                  8    close_position, terminal_state
+StreamingMetaApiConnectionInstance      4    get_account_information, get_positions, get_orders,
+                                             get_deals_by_time_range, get_symbol_price,
+                                             get_symbol_specification
+
+ANY class carrying all ten: NONE
+```
+
+And the two are obtained from different calls on the account object:
+
+```
+MetatraderAccount.get_rpc_connection()        -> RpcMetaApiConnectionInstance        (the reads)
+MetatraderAccount.get_streaming_connection()  -> StreamingMetaApiConnectionInstance  (terminal_state)
+```
+
+## WHY THIS IS WORSE THAN `B335` AND NOT A RESTATEMENT OF IT
+
+`_require_broker_link` is `getattr(self._client, "terminal_state", None)` and **returns silently on
+`None`.** Inject the only object that can serve the adapter's reads and the guard **never runs, on
+every call, forever.** Not a spelling risk; the arrangement the SDK offers.
+
+**The consequence is the one the file was written to prevent**, in `get_positions`' own words —
+*"an empty list from an unreachable broker is indistinguishable from a flat book"* — and on the kill
+switch's path, `close_all_positions` returning `[]` says *there was nothing to close*.
+
+**VERIFIED IT IS NOT AN INSTANCE ATTRIBUTE, because a class-level `hasattr` would miss one.**
+`terminal_state` appears **nowhere** in `rpc_metaapi_connection_instance.py` or
+`rpc_metaapi_connection.py`; on the streaming side it is a property backed by `self._terminal_state`
+assigned in `__init__` (`streaming_metaapi_connection.py:111,379`). The negative is measured, not
+inferred from the matrix.
+
+## AND IT REFUTES TWO OF `B334`'s CONCRETE SUSPICIONS WHILE VINDICATING ITS GENERAL FORM
+
+`B334` reasoned from the tree's quoted docs that the adapter is *"the odd one out"* on
+`terminal_state` vs `terminalState`, and that `TooManyRequestsException`'s suffix *"exists nowhere
+else"*. **Asked of the package rather than of our reading:**
+
+```
+terminal_state            PRESENT      terminalState              ABSENT
+connected                 PRESENT      connected_to_broker        PRESENT
+wait_synchronized         PRESENT      waitSynchronized           ABSENT
+TooManyRequestsException  FOUND (metaapi_cloud_sdk.clients.error_handler)
+TooManyRequests           ABSENT       TooManyRequestsError       ABSENT
+```
+
+**Every spelling in `mt5.py` is the package's spelling.** `MT5_FIRST_CONNECTION.md:45`'s
+`terminalState` is the odd one out, not the adapter.
+
+**`B334`'s general form survives intact and is sharper for it:** it said no arm can fail on a fact
+the adapter and its mock encode the same way, and that the class has no instrument until a venue
+exists. **The second half was wrong and the first half was right.** The installed package is an
+instrument for names, today, without an account — and what it found was not a misspelling but a
+missing object. **Every name checked out and the SHAPE did not**, which is the failure the mock
+could never surface: a mock has whatever attributes the test gives it.
+
+Related: **B335**, **B334**, **B292**, **B215**, **B303**, **B342**.
+
+---
+
+### B342 — `recommendedRetryTime` IS AN ABSOLUTE DATE AND THE ADAPTER CALLS `int()` ON IT. A real 429 raises `ValueError` from inside the translator whose only job is to return a clean error
+
+`mt5.py:_rate_limited` exists so a rate limit becomes a `BrokerRateLimitError` **carrying the
+server's own number instead of a guessed backoff** — its docstring is explicit that the quota is in
+CPU credits and *"the adapter must not invent a backoff."* The reasoning is right. The unit is wrong.
+
+```python
+recommended = metadata.get("recommendedRetryTime")
+return BrokerRateLimitError(f"...the server asks for {recommended}s.",
+                            retry_after_seconds=int(recommended))
+```
+
+**Measured, driving the adapter's own method with the installed SDK's real exception class and
+metadata:**
+
+```
+date('2026-09-04T20:15:00.000Z')  -> datetime.datetime(2026, 9, 4, 20, 15, tzinfo=utc)
+MetaTrader5Adapter._rate_limited(TooManyRequestsException(...))
+    -> RAISED ValueError: invalid literal for int() with base 10: '2026-09-04T20:15:00.000Z'
+```
+
+## THE VENDOR'S OWN HANDLER SAYS WHAT THE FIELD IS
+
+`clients/http_client.py:156` and four more sites:
+
+```python
+retry_time = date(error.metadata['recommendedRetryTime']).timestamp()
+await asyncio.sleep(retry_time - datetime.now().timestamp())
+```
+
+**An absolute instant, subtracted from now to get a duration** — and `error_handler.py:160-161`
+types it `recommendedRetryTime: str` / *"Recommended date to retry request."*
+
+## WHAT WAS RIGHT, RECORDED SO THE FIX DOES NOT REGRESS IT
+
+* `metadata` **is** a `dict` — `TooManyRequestsErrorMetadata` is a `TypedDict` — so `.get()` is
+  correct and the `or {}` guard is correct.
+* `TooManyRequestsException` is the package's real class name (`B341`).
+* **The no-field path is correct today and stays correct:** absent field →
+  `BrokerRateLimitError(retry_after_seconds=None)` that says it is not guessing. Only the
+  field-PRESENT path is broken, which is why no arm caught it — the arm supplying a retry time
+  supplies `{"recommendedRetryTime": 30}`, an integer the venue never sends.
+
+## THE PAIRING WITH `B340`, WHICH IS THE POINT
+
+`B340` measured that **five of the seven copies of the rate-limit dispatch can be inverted with the
+suite green.** This is the same dispatch, *actually broken*, and green. **`B340` measured that the
+arms cannot see this code; this measured that the code is wrong.** Neither found the other, and a
+mock built from our reading could not have produced the failing input in the first place.
+
+**A caveat on the vendor, because the units are genuinely confusing here and it is not our bug:**
+`http_client.py:161` logs `math.ceil((retry_time - now) / 1000)` as *"seconds"* while :163 sleeps
+`retry_time - now`. One of those two is wrong in the SDK. Ours must not copy either — the sleep is
+the behaviour, the log is the description.
+
+Related: **B340**, **B341**, **B215**, **B334**.
+
+---
+
+> ### B341 ADDENDUM — THE FIX DOES NOT NEED A SHIM, BECAUSE THE VENDOR ALREADY HAS THE FIELD, IN A BETTER SHAPE THAN OURS
+>
+> **Measured after the entry above, when `T-0134` had to choose a seam.** The reachability datum is
+> not missing from the SDK; it is on a **different object**, and it is *one three-valued enum* where
+> the adapter invented *two booleans*:
+>
+> ```
+> MetatraderAccount.connection_status  ->  CONNECTED | DISCONNECTED | DISCONNECTED_FROM_BROKER
+> MetatraderAccount.wait_connected()   ->  "waits until API server has connected to the terminal
+>                                           AND terminal has connected to the broker"
+> RpcMetaApiConnectionInstance         ->  NOTHING. Its only connection-shaped members are
+>                                          `connect` and `wait_synchronized`.
+> ```
+>
+> **`DISCONNECTED_FROM_BROKER` is `B292`'s distinction, named by the vendor.** *Connected to MetaApi
+> but not to the broker* is not a state we inferred from two flags — it is one of three documented
+> values on the account.
+>
+> **So the adapter should hold the `MetatraderAccount`**, take its reads from
+> `account.get_rpc_connection()` and its reachability from `account.connection_status`. One vendor
+> object carries both facts. A shim presenting a fabricated `terminal_state` over the real objects
+> would translate the vendor's enum back into our invented pair — **`B184`, deliberately
+> constructed** — and would preserve, behind a translation layer, the assumption this entry exists
+> to record as false.
+>
+> ## AND EVERY SIGNATURE WE GUESSED IS RIGHT, WHICH IS THE RESULT THAT MAKES THE SHAPE FINDING SHARP
+>
+> ```
+> close_position(position_id: str, options=None)            our keyword matches
+> get_symbol_price(symbol: str, keep_subscription=False)    matches
+> get_symbol_specification(symbol: str)                     matches
+> get_deals_by_time_range(start_time, end_time, ...)        matches
+> get_account_information(options=None) / get_positions / get_orders   match
+> ```
+>
+> **Nine of nine call sites are correct and the tenth member does not exist on that object.** The
+> mock got every *name* right and the *arrangement* wrong, which is exactly the class `B334` said
+> had no instrument — and the instrument turned out to be `pip install`.
+>
+> ## TWO THINGS FOUND IN PASSING, RECORDED SO THEY ARE NOT REDISCOVERED
+>
+> * **`close_position_partially(position_id, volume, options)` EXISTS.** `close_position`'s partial
+>   refusal is therefore blocked *only* by the units→lots conversion, exactly as its message says —
+>   not by a missing venue capability. The call to use when `B302` is settled is named here.
+> * **`connect()` may be understating what it needs.** The adapter does `connect()` then
+>   `wait_synchronized()`. `account.wait_connected()` is documented as waiting for **both** the API
+>   server→terminal and terminal→broker links, which is the property `_require_broker_link` checks
+>   afterwards. Whether `wait_synchronized` alone implies a broker link is unsettled and belongs on
+>   the checklist rather than in a guess.
+
+---
+
+### B345 — A TEST STUBS `aiohttp` INTO `sys.modules` WHEN IT IS MERELY NOT-YET-IMPORTED, AT COLLECTION TIME, AND NEVER REMOVES IT — so `T-0133`'s real `aiohttp` is shadowed by a hollow module for the whole suite process
+
+**Found because my own arm went red in the full suite and green alone**, which is `B298`/`B339`'s
+symptom again — *the result depends on how it was run* — with a third cause and a third axis. This
+one is **not** the invocation; it is **another test module's import-time side effect.**
+
+```
+pytest tests/unit/test_t0133_metaapi_sdk_pin.py                       8 passed
+pytest tests/unit (full)                                              1 failed
+    AttributeError: module 'aiohttp' has no attribute 'ClientSession'
+```
+
+## IT IS NOT RUN ORDER, WHICH IS WHY THE OBVIOUS EXPERIMENT MISLEADS
+
+```
+pytest test_bridge_write_guard.py test_t0133_metaapi_sdk_pin.py   ->  1 failed
+pytest test_t0133_metaapi_sdk_pin.py test_bridge_write_guard.py   ->  1 failed   (SAME)
+```
+
+**Both orders fail.** `test_bridge_write_guard.py` calls `_load_guard()` **at module scope**, so the
+stub is installed during *collection*, before any test runs. Reordering cannot help: **being
+collected is enough.**
+
+## THE CONDITION IS THE WRONG QUESTION
+
+```python
+for name in ("aiohttp", "playwright", "playwright.async_api"):
+    if name not in sys.modules:          # <-- NOT-YET-IMPORTED
+        ...
+        sys.modules[name] = mod          # <-- and never removed
+```
+
+`name not in sys.modules` asks **has anything imported this yet**, not **is this installed**. Those
+two questions had the same answer for as long as `aiohttp` was absent from the venv, which is why
+the stub was harmless and invisible. **`T-0133` installed the real `aiohttp` and separated them.**
+Nothing about the test changed; the environment moved underneath a condition that was never
+measuring what it was written to mean.
+
+The comment above it is honest about the intent — *"those are installed in the bridge container,
+not the backend venv"* — and that sentence became false today. **The stub is now shadowing a
+package the image really ships.**
+
+## WHY IT MATTERS BEYOND ONE RED ARM, AND WHY IT IS FILED RATHER THAN JUST FIXED
+
+**The hollow `aiohttp` is in `sys.modules` for every test in the process.** Any code under test that
+imports `aiohttp` gets a module with no `ClientSession`. Nothing does today — measured — but
+`metaapi_cloud_sdk` **declares `aiohttp`**, and `T-0134` is about constructing a real MetaApi client.
+**A test that builds one would meet a hollow HTTP library and fail somewhere unrelated to its
+subject.** The trap is latent and it is directly on the next task's path.
+
+**Measured how latent:** with the stub installed, `metaapi_cloud_sdk.clients.http_client` still
+imports, and the SDK's own sources do not reference `aiohttp` by name. So the SDK's declared
+dependency and its actual import graph disagree, and the failure would arrive later and further away
+than the cause. That is the part worth writing down.
+
+## THE FIX, AND WHAT IT MUST NOT DO
+
+Ask **is it importable**, not **is it imported**, and **remove the stubs afterwards**. It must not
+become *"skip these tests when the dependency is missing"* — the file's own docstring already
+refuses that, and rightly: *"a safety-critical function that is only tested when convenient is
+untested."* The bridge guard is pure logic and must keep running with or without the real package.
+
+## THE FAMILY, STATED SO THE INDEX DOES NOT MISLEAD A THIRD TIME
+
+`B339`'s amendment records that `B298` and `B339` share a headline — *the suite's greenness depends
+on how it was invoked* — over unrelated causes, and predicts *"a third will look like both."*
+**This is the third and it is neither.** Invocation is not involved: same command, same directory,
+same collection scope. The variable is **another module's import-time mutation of global
+interpreter state**, and the thing that changed was **the environment**, not the runner.
+
+Related: **B339**, **B298**, **B211**, **B215**, **B184**.
+
+> ### B345 — THE FIX MEASURED, AND THE HONEST PART: EITHER HALF ALONE WOULD HAVE DONE
+>
+> Predicted before running, application confirmed by grep count, not inferred from the arm firing:
+>
+> ```
+> M1  condition fixed -> REVERTED, cleanup KEPT ............ predicted 0, got 0   (33 passed)
+> M2  cleanup REMOVED, condition fixed KEPT ................ predicted 0, got 0   (33 passed)
+> M3  BOTH reverted — the original code .................... predicted 2, got 2
+>         test_httpx_and_the_SDKs_OWN_http_stacks_coexist_in_ONE_interpreter
+>         test_no_INSTALLED_package_is_SHADOWED_by_a_hollow_stub_in_sys_modules
+> ```
+>
+> **Each half is independently sufficient and the fix ships both**, which is worth stating plainly
+> rather than letting the diff imply both were required. They are not redundant in intent: the
+> *condition* stops the bridge guard exercising a fake `aiohttp` when the real one is installed —
+> a correctness property of that test, independent of leakage — and the *cleanup* bounds the
+> damage whenever a stub is genuinely needed, which stays true if the package is dropped again.
+>
+> **M3 is the arm's real control.** It reconstructs the original code exactly and the new guard
+> goes red, so the guard fails on the defect it was written for rather than only on a synthetic
+> one.
