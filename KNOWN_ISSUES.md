@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-05 (B369 — B368 ONE LAYER OUT: the API will accept token and mt5_account_id after B368's fix, and THE DASHBOARD STILL CANNOT SEND THEM. SettingsPage.tsx offers ONE broker in its list, Crypto Fund Trader, so there is no MT5 option at all, and its non-CFT branch renders api_key and account_id rather than token and mt5_account_id — so Malek gets a MetaApi token, opens Settings, and finds a dropdown that does not contain his venue. THE FILE IS NOT WRONG, which is the distinction: its header states the invariant it satisfies, that a broker listed there must be one the backend can construct, and that invariant is ONE-DIRECTIONAL — frontend subset of backend — so an absent MT5 violates nothing. A one-directional invariant guarantees you cannot offer what the backend refuses and says NOTHING about offering what the backend now accepts, so the UI silently lags every adapter added and the lag is invisible from either side. Nothing is broken and the feature does not exist. THIRD INSTANCE OF ONE AXIS IN ONE DAY and the count is the finding: B356 the adapter's reading versus the SDK's return shape, B368 the API's blob versus the factory's required blob, B369 the UI's form versus the API's accepted schema — each a PRODUCER and a CONSUMER of one structure verified only from the consumer's side, with something hand-built standing in for the producer. B368's arm was fixed by driving connect_broker rather than constructing a blob, and the same fix here means an arm that drives the FORM rather than asserting a field exists. Needs no design decision: B368 settled the field names and their source.)
+Last updated: 2026-09-05 (B370 — THE UI STRING NAMES ONE OF FOUR BLOCKERS AS THE ONLY ONE. The MT5 envNote says 'Reads only — MT5 order placement refuses at the adapter until the sizing conversion is settled', which is accurate about WHERE and WHY and wrong about SUFFICIENCY: 'until X is settled' promises that settling X lifts the refusal, and three more stand behind it — ExecMode has no LIVE member, execute() raises on is_simulation=False, and the adapter returns False pending T-0076, WHICH IS MALEK'S RULING. So the note tells him the last obstacle is arithmetic when the actual last obstacle is a decision only he can make, and it is worse than vague because it is specific and wrong about the SHAPE of what remains. SECOND HALF: the MT5 branch NEVER READS environment — practice, live and nonsense all CONSTRUCT — while the note says 'Matches the MetaApi account you provisioned', claiming a check against something that is checked against nothing, so a typo is accepted in silence; for MT5 the demo-versus-real fact comes from venue_account_type read from the venue PER CALL, which makes the field redundant rather than merely unused. FOUND WHILE PASSING a81cfd2 AND f8f0545, both of which stand: B369's arm drives the FORM and asserts on what the API client was CALLED WITH rather than reading the component, and carries the token-must-not-arrive-in-api_key half plus a must-miss for a non-MT5 broker. AND THE CHAIN WAS WALKED END TO END FOR THE FIRST TIME — form payload to schema to connect_broker to encrypted blob to decrypt_credentials to _make_adapter to a BUILT MetaTrader5Adapter, with step 1 being the payload the vitest arm asserts rather than one invented for the walk, and only MetaTrader5Adapter.connect substituted because it is a real MetaApi call across the venue boundary.)
 
 ---
 
@@ -23930,6 +23930,72 @@ work is: add `mt5` to the option list, branch the form on it, and send `token` a
 same route `B368` established rather than a new one.
 
 Related: **B368**, **B356**, **B360**, **B334**.
+
+---
+
+### B370 — THE MT5 `envNote` NAMES ONE OF FOUR BLOCKERS AND FRAMES IT AS THE ONLY ONE. *"until the sizing conversion is settled"* promises that settling it enables orders, and it would enable nothing. The Demo/Live choice beside it is inert
+
+The string the user reads when they select MT5:
+
+> *"Matches the MetaApi account you provisioned. Reads only — MT5 order placement refuses at the
+> adapter until the sizing conversion is settled."*
+
+**Both halves make a claim and nothing tests either.** A UI string is the most-read documentation in
+the system.
+
+## HALF ONE: THE REFUSAL IS REAL, ITS STATED REASON IS REAL, AND ITS IMPLIED SUFFICIENCY IS FALSE
+
+`place_order` still refuses, and the refusal message really is about the units-to-lots conversion —
+it names `UNITS`, `LOTS`, `volume_min`, `contract_size` and `B302`. **So the note is accurate about
+WHERE and WHY it refuses.**
+
+*"until X is settled"* is a promise that settling X removes the refusal. **Measured, three further
+refusals stand behind it:**
+
+```
+1. ExecMode members: ['OBSERVE', 'PAPER']                      -> no LIVE mode exists
+2. execute():  if not getattr(self.broker, "is_simulation", False): raise
+3. MetaTrader5Adapter.is_simulation -> False                   (pending T-0076, Malek's ruling)
+```
+
+**Settling the sizing conversion would change nothing a user can observe.** `MT5_PROGRAMME.md`
+itself scopes Gate 4 as *three named changes plus a ruling that is Malek's*, and the conversion is
+the adapter-level one of four. The note tells the user the last obstacle is a piece of arithmetic;
+the actual last obstacle is a decision only Malek can make.
+
+**The accurate sentence is shorter, not longer:** *"Reads only. Order placement is not built —
+several refusals stand behind it and one of them is a ruling."* The current version is worse than
+vaguer because it is specific and wrong about the shape of what remains.
+
+## HALF TWO: THE DEMO/LIVE CHOICE HAS NO EFFECT ON MT5
+
+The `mt5` entry offers `practice` and `live`, with recorded reasoning — *"offering only one would
+repeat the CFT mistake in the opposite direction."* **The reasoning is right and the value is
+unused.** Measured:
+
+```
+environment='practice' -> CONSTRUCTED
+environment='live'     -> CONSTRUCTED
+environment='nonsense' -> CONSTRUCTED
+```
+
+**The MT5 branch of `_make_adapter` never reads `environment`.** It is persisted on the connection
+row and read elsewhere as a fallback, but nothing on the MT5 path consumes it — and nothing
+validates it either, so a typo is accepted in silence.
+
+**That is the OPPOSITE of the CFT defect rather than a repeat of it**, and it is not a failure: no
+user hunts for a mistake, because nothing fails. But *"Matches the MetaApi account you
+provisioned"* tells the user the value is checked against something. **It is checked against
+nothing.** For MT5 the demo-versus-real fact comes from the venue itself — `venue_account_type`,
+read per call — which is the right source and makes this field redundant rather than merely unused.
+
+**Neither half is a defect in `f8f0545`'s code.** The form now reaches the API, the payload is right,
+and the arm drives the form rather than reading the component. **These are claims made to the user
+alongside working code**, which is why they are filed rather than mentioned.
+
+Related: **B369**, **B368**, **B346**, **B333**, **B302**.
+
+---
 
 ---
 
