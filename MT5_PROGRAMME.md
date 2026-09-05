@@ -19,7 +19,7 @@ Gate 3 the moment you have a token — it has the longest lead time and it does 
 ## Where the line actually falls
 
 ```
-GATE 1   the adapter is CORRECT       in flight   B343, B340        needs nothing from Malek
+GATE 1   the adapter is CORRECT       CLOSED      5c18dca           12 findings, all landed
 GATE 2a  mt5 is CONSTRUCTIBLE         DONE        T-0134 b07a43f    latched
 GATE 2b  the SERVER runs it           STALE       precondition of Gate 3, not a gate
 GATE 3   the demo is CONNECTED        BLOCKED     token + the API cannot yet store it (B368)
@@ -82,6 +82,29 @@ correction is in Gate 4 below (`B350`).
 ---
 
 # GATE 1 — The adapter is CORRECT
+
+> ## ✅ CLOSED 2026-09-05 — `5c18dca`
+>
+> ```
+> pytest -q tests/unit                 2003 passed, 1 xfailed   exit 0
+> pytest -q --collect-only tests/unit  2004 collected           RECONCILED EXACT
+> scripts/verify_guards.sh             TIER 0.2 PASSED
+> ```
+>
+> **Twelve findings landed:** `T-0135`'s seven (`B349` `B337` `B338b` `B335b` `B342` `B356` `B353`),
+> then `B343`, `B359`, `B340`, `B360`, and `B10`'s repointing — plus `B365` `B366` `B367` from the
+> deliberate SDK sweep, which reopened this gate when it was one item from closing.
+>
+> **The sweep is the part worth remembering.** Three defects of that class — `B341`, `B356`, `B359`
+> — had all been found *incidentally*, while pinning a dependency, reviewing a script, auditing a
+> document. **Looking on purpose returned three more in one pass**, two of them on the kill switch.
+> That settles it as a population rather than luck, and the productive axis was the narrowest one:
+> **the adapter reducing a vendor field to a boolean over a set the vendor does not use.**
+>
+> **And three separate defects survived only because the mock agreed with the code** — `B356`'s
+> wrapper, `B367`'s response, and `B365`, whose fixture *described balance entries by omitting the
+> very fields the adapter used to detect them*, so the arm encoded the wrong reading and could never
+> contradict it. That is `B334` measured three times in one day.
 
 **The state to reach:** `mt5.py` does not lie about what it did, and no unreadable field can silence
 a safety path. **Everything here was found by review or by installing the real SDK, and none of it
