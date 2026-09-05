@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-05 (B352 — THE CENTRALISED LIVE-TRADING GATE HAS NO ARM. manager._make_adapter's ALLOW_LIVE_TRADING check is the single thing stopping a database row with observe_only=False from reconstructing a LIVE-WRITE adapter on every construction path, and NOTHING IN THE SUITE SETS THE VARIABLE. The only references are docstring PROSE in test_bridge_write_guard and test_cft_order_path, both of which name it as the upstream control they are defending BEHIND — correct reasoning, and exactly why nobody armed it: a defence-in-depth layer refuses to ASSUME the layer above checked and was never meant to VERIFY it. Found while HOISTING the guard out of the CFT branch for T-0134, because moving a guard is the moment to ask what fails if it stops working. AND T-0134's OWN STRUCTURAL ARM DOES NOT COVER IT: deleting the forcing while leaving allow_live computed fails 7 effect arms and leaves the POSITION arm green — a guard in the right place that forces nothing passes it. The must-miss is the one that matters: a gate WELDED SHUT satisfies every arm asking 'does it refuse' and silently makes the operator's flag meaningless, which is the failure that looks like safety. Fixed in T-0134.)
+Last updated: 2026-09-05 (B355 — A REGISTER ID QUOTED IN PRODUCT CODE IS DEFENDED BY NOTHING. The register defends its own consistency twice — an entry can carry an AMENDMENT, and register_commit_check REFUSES a commit modifying an entry its message does not name — and a register id quoted in a CODE COMMENT has neither, so a correction lands in KNOWN_ISSUES.md and every quotation of it goes stale IN SILENCE. Found because manager.py's new MT5 branch quoted B346 and restated its mechanism, which B350 had corrected hours before that branch landed. MEASURED with agents/citation_check.py, written with this entry: 183 files, 314 citation sites, 120 distinct ids, 334 register entries, 46 of 120 flagged — and NOT ONE of those sites was checked by anything before today. THE FOUR MISSING CANNOT BE ARGUED WITH: B6, B10, B90 and B253 are cited in product code and have NO ENTRY AT ALL, never written rather than superseded, with the headings jumping B3 to B8 and B9 to B11 — B10 alone is cited five times in code and eight times inside the register, so a maintainer following it from either direction finds nothing. That is B329's family with product code depending on it. AND THE SCANNER'S OWN FALSE POSITIVE IS THIS REGISTER'S FAVOURITE SHAPE: v1 reported B018, which is a flake8-bugbear noqa code — two vocabularies sharing one form, so a rule keyed on the form returns a confident wrong answer, which is B211's and B349's family in the INSTRUMENT rather than the subject. Fixed with two guards rather than one because either alone is a single point of failure on a FALSE POSITIVE, and this register already records that a guard crying wolf gets loosened under time pressure. It says RE-READ and never WRONG except for MISSING, and NOT FLAGGED IS NOT VERIFIED.)
 
 ---
 
@@ -22777,3 +22777,88 @@ absent key defaulting to observe-only even when live trading is permitted.
 splitting a guard from its arms across files is how the next person moves one without the other.
 
 Related: **B93**, **B215**, **B346**, **B302**.
+
+---
+
+### B355 — A REGISTER ID QUOTED IN PRODUCT CODE IS DEFENDED BY NOTHING. 314 citation sites, 120 ids, and four of them name entries that WERE NEVER WRITTEN
+
+**Filed 2026-09-05 by manager**, on Execute's finding and at its suggestion. `manager.py`'s new MT5
+branch quoted `B346` and restated its mechanism. **That mechanism was wrong and `B350` corrected it
+hours before the branch landed** — the comment shipped carrying superseded reasoning into the file
+a reader will consult when Gate 4 is built.
+
+## THE ASYMMETRY IS THE FINDING, NOT THE INSTANCE
+
+**The register defends its own consistency twice over:**
+
+* an entry can carry an **AMENDMENT**, so a reader of the entry meets the correction; and
+* `register_commit_check.py` **REFUSES** a commit that modifies an entry its message does not name
+  — the `touched_ids` branch, added after `03b18d6` shipped a closure claim three minutes before
+  the guard behind it existed.
+
+**A register id quoted in product code has neither.** Nothing links the citation to the entry. A
+correction lands in `KNOWN_ISSUES.md` and every quotation of it goes stale **in silence**, which is
+the one failure direction this project keeps ruling out everywhere else.
+
+Execute's words, and they are the general form:
+
+> *"nothing links a register id quoted in product code to the entry it names. The register has
+> amendments and a hook refusing commits that touch an unnamed entry; a comment quoting an entry
+> has neither."*
+
+## MEASURED, AND THE POPULATION IS LARGER THAN THE INSTANCE SUGGESTS
+
+`agents/citation_check.py`, written with this entry:
+
+```
+scanned      183 files under backend/app
+citations    314 sites, 120 distinct ids
+register     334 entries
+FLAGGED      4 missing + 9 superseded + 33 amended  =  46 of 120
+```
+
+**Not one of those 314 sites was checked by anything before today.**
+
+## THE FOUR "MISSING" ARE THE ONES THAT CANNOT BE ARGUED WITH
+
+**`B6`, `B10`, `B90`, `B253` are cited in product code and HAVE NO ENTRY.** Not superseded, not
+amended — **never written.** The register's headings jump `B3 → B8` and `B9 → B11`.
+
+```
+B10   decision_trace.py:88,131,242   entry_comparison.py:87   news_context.py:271
+B90   exit_001_v1_model.py:533,743
+B253  data_health.py:910
+```
+
+**`B10` is cited five times in product code and mentioned eight times inside the register itself**,
+and there is no `### B10`. So a maintainer following the citation — from the code *or* from the
+register — finds nothing. **This is `B329`'s family (an id bid and never filed) with product code
+depending on it**, which is the version that costs someone an afternoon rather than a bid.
+
+> **A citation to nothing cannot be right, and that is the one signal here that is a verdict rather
+> than a prompt.** The other 42 say *re-read*; these four say *wrong*.
+
+## THE SCANNER'S OWN FALSE POSITIVE, WHICH IS THIS REGISTER'S FAVOURITE SHAPE
+
+**v1 reported `B018` as a missing entry.** It is `# noqa: B018` — a **flake8-bugbear** code in
+`cft_bridge_adapter.py`. **Two vocabularies share one shape**, and a scan keyed on the shape cannot
+tell them apart. That is `B211`'s and `B349`'s family in the instrument rather than the subject:
+*a rule keyed on a form two populations share returns a confident wrong answer.*
+
+**Fixed with two guards rather than one, deliberately:** bugbear codes are always zero-padded and
+register ids never are, **and** `noqa` lines are skipped entirely. Either alone would be a single
+point of failure **on a false positive** — and this register already records that a guard which
+cries wolf *"trains the project to loosen it, and the loosening happens under time pressure by
+someone whose attention is elsewhere."*
+
+## WHAT IT DELIBERATELY DOES NOT CLAIM
+
+**It says RE-READ, never WRONG** — except for MISSING. It cannot tell a correction from agreement,
+it does not read the comment, and a correction naming an id only in its *body* is invisible to it.
+**And NOT FLAGGED IS NOT VERIFIED:** the other 74 ids were checked for whether the register moved,
+which is a different and weaker question than whether the comment is true.
+
+Related: **B346**, **B350**, **B329**, **B310**, **B140**.
+
+---
+
