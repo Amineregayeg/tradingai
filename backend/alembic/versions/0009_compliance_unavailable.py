@@ -40,18 +40,42 @@ def upgrade() -> None:
     # and a migration that can only run against a live connection is one the suite cannot check.
     # The enum step is PostgreSQL-only; everything below it is portable and runs either way.
     if getattr(getattr(bind, "dialect", None), "name", None) == "postgresql":
-        # `ALTER TYPE ... ADD VALUE` DOES run inside a transaction here, and my first comment said
-        # the opposite. `alembic/env.py` wraps this in one, and `IF NOT EXISTS` guards a RE-RUN
-        # rather than the transaction. **It works because the server is PG16**: since PG12 the
-        # statement is permitted inside a transaction provided the new value is not USED in the
-        # same one, and nothing below uses it. So the safety rests on a fact about the server that
-        # this file did not state — it does now, because a reader on an older server needs it.
+        # `ALTER TYPE ... ADD VALUE` DOES run inside a transaction here — `alembic/env.py` wraps
+        # it — and `IF NOT EXISTS` guards a RE-RUN rather than the transaction. PG12+ permits the
+        # statement in a transaction **provided the new value is not USED in the same one.**
+        #
+        # THIS COMMENT USED TO END "and nothing below uses it". That was TRUE WHEN WRITTEN and
+        # false by the time it shipped: the `CheckConstraint` added afterwards names 'UNAVAILABLE'
+        # in its predicate. **The analysis was not re-run when the file changed**, and production
+        # went down on the sentence rather than on the code. The `COMMIT` below is what makes the
+        # remaining half of the claim true.
         #
         # `deploy_migrate.py` warns: *"0002+ are hand-written enum-free… If a future revision adds
         # an enum, revisit this."* READ AND CHECKED: that script strips duplicate CREATE TYPE, and
         # `ADD VALUE` is not `CREATE TYPE`, so the stripping is not implicated. Recorded because a
         # note written to be triggered is worthless if nobody records having read it.
         op.execute("ALTER TYPE compliance_t ADD VALUE IF NOT EXISTS 'UNAVAILABLE'")
+        # ------------------------------------------------------------------------------
+        # **COMMIT HERE OR THE CHECK CONSTRAINT BELOW CANNOT REFERENCE THE VALUE.**
+        #
+        # This migration failed in production with
+        # `UnsafeNewEnumValueUsageError: unsafe use of new value "UNAVAILABLE"`. PG12+ permits
+        # `ALTER TYPE ... ADD VALUE` inside a transaction **provided the value is not USED in the
+        # same one** — and the constraint's predicate uses it. The earlier analysis was correct
+        # when written and went stale when the constraint was added: nobody re-ran the
+        # transaction argument after the file changed.
+        #
+        # SPLITTING INTO 0009 + 0010 DOES NOT FIX IT, which is worth stating because it is the
+        # obvious remedy. `env.py` does `with context.begin_transaction(): context.run_migrations()`
+        # — **ONE transaction for ALL migrations** — so a constraint in 0010 would still run in the
+        # same transaction as this ALTER. It would need `transaction_per_migration=True`, which
+        # changes the semantics of every migration in the tree to fix one.
+        #
+        # `BEGIN` immediately after, so the nullability changes and the constraint remain ATOMIC
+        # together. Committing and leaving the rest outside a transaction would let a constraint
+        # failure land on top of four already-applied column alterations.
+        op.execute("COMMIT")
+        op.execute("BEGIN")
 
     for column in _FIGURES:
         op.alter_column(

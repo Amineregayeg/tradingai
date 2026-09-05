@@ -462,3 +462,52 @@ def test_none_of_the_three_is_bound_to_a_LITERAL_None():
         "is absent — the column exists, the row is NULL, and the reconstruction is impossible "
         "while every arm stays green."
     )
+
+
+def test_no_migration_USES_an_enum_value_it_ADDS_in_the_same_transaction():
+    """The arm for the class that took production down, and it is not the arm this needs.
+
+    **WHAT HAPPENED.** `0009` ran `ALTER TYPE compliance_t ADD VALUE 'UNAVAILABLE'` and then, in
+    the same transaction, created a `CheckConstraint` whose predicate NAMES that value. PostgreSQL
+    refuses: `UnsafeNewEnumValueUsageError`. The api crash-looped and the site returned 502. The
+    database was untouched — the transaction rolled back atomically — but the deploy was dead.
+
+    **`env.py` DOES `with context.begin_transaction(): context.run_migrations()` — ONE transaction
+    for ALL migrations** — so splitting the ALTER and the constraint into two revisions does not
+    help. Only a `COMMIT` between them does.
+
+    **WHY THIS ARM IS HONEST ABOUT ITS OWN WEAKNESS.** The real acceptance is *the migration RUNS
+    against PostgreSQL*, and nothing in this suite executes alembic against a real server — there
+    is no Postgres and no Docker on this machine, which is exactly why a file that passed every
+    local check failed in production. This is a STRUCTURAL guard over the source: it catches this
+    class and it is not a substitute for running the thing. **Recorded so the next reader does not
+    mistake a green here for a migration that has been executed.**
+    """
+    import ast
+    import re
+
+    for path in sorted(_VERSIONS.glob("0*.py")):
+        source = path.read_text(encoding="utf-8")
+        # SCOPED TO upgrade(), AND ANCHORED ON THE ALTER ITSELF. The first version split on the
+        # first occurrence of the quoted value, which is a PROSE mention in the docstring — so it
+        # measured the comments and fired on the fixed file. `downgrade()` is excluded because it
+        # runs in its own transaction and does not add the value.
+        tree = ast.parse(source)
+        upgrade = next(
+            (n for n in tree.body
+             if isinstance(n, ast.FunctionDef) and n.name == "upgrade"), None,
+        )
+        if upgrade is None:
+            continue
+        body = ast.get_source_segment(source, upgrade) or ""
+
+        for match in re.finditer(r"ADD VALUE(?:\s+IF NOT EXISTS)?\s+'([A-Z_]+)'", body):
+            value = match.group(1)
+            after = body[match.end():]
+            # A COMMIT between the ALTER and any later use makes the value durable first.
+            window = after.split('"COMMIT"')[0] if '"COMMIT"' in after else after
+            assert f"'{value}'" not in window, (
+                f"{path.name}: upgrade() uses the enum value {value!r} after adding it and BEFORE "
+                f"any COMMIT. PostgreSQL raises UnsafeNewEnumValueUsageError, and env.py runs "
+                f"every migration in ONE transaction, so splitting revisions does NOT help."
+            )
