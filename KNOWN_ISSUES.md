@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-04 (B339 — A SECOND AXIS ON WHICH "THE SUITE IS GREEN" DEPENDS ON HOW IT WAS RUN. test_t0011_census.py::test_no_rule_id_is_ever_fabricated FAILS from the repo root and PASSES from backend/, because line 352 resolves Path('app/services/telemetry/census.py') RELATIVE TO THE WORKING DIRECTORY. Measured both directions with nothing else running. NOT B298 and I claimed it was, in the same message telling Execute that 'probably the known one' is not a result: B298 is a different test, cause (collecting the tree imports the broker package) and axis (collection scope, not cwd), and ITS REMEDY — one whole-tree --collect-only — DOES NOT DETECT THIS ONE, since a collection from the wrong cwd never evaluates the path. Recorded as a second instance of B298's class and deliberately NOT merged into it, because the unification is the tidier claim and the mechanisms share no code, no test and no fix. THE NEGATIVE RESULT IS THE USEFUL HALF: the dangerous version is a guard that GLOBS a cwd-relative path, finds zero files from the wrong directory and PASSES over nothing — checked, and all four instances in the tree read NAMED files and fail loudly, so the failure direction is safe everywhere. Stated positively because 'no vacuous guards found' and 'nobody looked' are otherwise the same sentence. Not blocking T-0106, whose rootdir is backend/.)
+Last updated: 2026-09-05 (B343 — THE `ASSUMES:` MARKER AUDIT: 3 of 21 arms cite checklist items that CANNOT FALSIFY them, and it is ONE mechanism rather than three accidents because the citations cross the DEAL/POSITION axis; and the policing arm enforces a WORD, not a reference — it checks that the string 'checklist' occurs in the marker, so 'checklist item 99.9' passes and so does 'settled by the checklist' naming no item at all. FILED WITH SIX OTHERS FROM THE T-0106 REVIEW: B334, the mock encodes the ADAPTER'S reading rather than the documentation's, so no arm can fail on a fact mt5.py and the mock encode the same way; B335, _require_broker_link FAILS OPEN when the guard attribute is absent and close_all_positions then returns [] on a down link, the exact collapse its own docstring says it prevents; B336, the direction mapping is uncovered and making every position LONG passes 30 of 30; B337, the position whose close WAS SENT is reported NOT_ATTEMPTED with an affirmatively false reason, and the arm covering that scenario asserts every row except that one; B338, coercions that manufacture a value the venue never sent, in the file that cites B215 throughout; and B340, re-running an inherited patch's own tests is 50.7% of a verification — 33 of 67 semantic mutations to mt5.py survive 30 green arms and the survivors CLUSTER.)
 
 ---
 
@@ -21209,6 +21209,610 @@ observations.** The rootdir measurement is the whole answer; the percentage agre
 artefact of two log files, not evidence.
 
 Related: **B298**, **B211**, **B267**, **B333**.
+
+---
+
+### B334 — THE MOCK ENCODES THE ADAPTER'S READING, NOT THE DOCUMENTATION'S. Renaming the SDK class in `mt5.py` turns two arms red; renaming it in the adapter AND the mock together turns none
+
+`T-0106`'s test file says plainly that a mock cannot falsify a reading (`B256`). **This is the
+measurement of what that costs, as a differential rather than as a caveat.**
+
+```
+M2  SDK_RATE_LIMIT_EXCEPTION renamed in mt5.py ONLY ............. 2 failed, 28 passed
+M3  renamed in mt5.py AND in the mock, together ................. 30 passed
+```
+
+Both mutations were verified to have landed (`diff` on all four sites, and the suite re-run).
+**The arms catch UNILATERAL drift and are blind to JOINT drift** — and joint drift is the only kind
+that can happen here, because the adapter and its mock were written by one seat from one reading in
+one sitting.
+
+## THE MUST-MISS CONTROL IS REAL, AND IT CONTROLS THE MECHANISM RATHER THAN THE NAME
+
+The manager asked whether the file's must-miss has ever been seen to fail. **It has, now:**
+
+```
+M4  every exception treated as a rate limit  ->  test_an_exception_with_a_DIFFERENT_name...  RED
+```
+
+So the name-matching mechanism is doing work and the arm is not a comment. **But no arm anywhere
+controls the NAME.** Under M2 the two arms that go red are the *positive* ones; the must-miss stays
+green in both M2 and M3. A must-miss proves the predicate discriminates, not that its constant is
+right — `B140` at the level of a control.
+
+## AND THE TREE'S OWN QUOTED SOURCE DISAGREES WITH THE ADAPTER, IN BOTH PLACES A NAME IS LOAD-BEARING
+
+`grep -rn TooManyRequestsException` over the whole tree returns **two files: `mt5.py:53` and the
+mock class it was built to match.** Everywhere the tree quotes the vendor it says something else:
+
+```
+KNOWN_ISSUES B291   `TooManyRequests` / HTTP 429        quoting docs/client/rateLimiting/
+MT5_FIRST_CONNECTION 1.5   `TooManyRequests` / 429
+mt5.py:53           "TooManyRequestsException"          the suffix exists nowhere else
+```
+
+The second instance is stronger because the source is a **verbatim code block**. `B291` quotes
+`streamingApi.rst`:
+
+```python
+print(terminalState.connected)             # connected to MetaApi
+print(terminalState.connected_to_broker)   # connected to the BROKER
+```
+
+`MT5_FIRST_CONNECTION.md:45` writes `terminalState` too. **`mt5.py:316` reads `terminal_state`.**
+Three encodings of one fact; the adapter is the odd one out; and `B335` is what that costs.
+
+## THE CHECKLIST ITEM THE MARKER NAMES CANNOT SETTLE THE ASSUMPTION THE MARKER NAMES
+
+`test_an_exception_with_a_DIFFERENT_name_is_not_treated_as_a_rate_limit` says *"Settled by checklist
+item 1.5, which provokes a real 429 and captures the payload."* **Item 1.5 asks for the payload and
+never asks for the exception's class name** — *"capture the full payload, not the status"*. The one
+datum the dispatch depends on is not on the list, so running the checklist would leave this arm's
+assumption exactly as unsettled as it is today.
+
+Item 1.1 is the counter-example and shows the machinery works when the item is right: it prints
+`terminalState.connected`, so running it **would** expose the spelling.
+
+**The `ASSUMES:` markers are a real instrument and this is their bound: the join is only as good as
+the item on the other end, and nothing checks that the item can falsify the marker.**
+
+**THE GENERAL FORM, which is the answer to the review question:** no arm in this file can fail on a
+fact that `mt5.py` and the mock encode the same way. That population is every method name, every
+keyword-argument name, every dict key and every attribute name the adapter uses —
+`get_symbol_price(symbol=...)`, `close_position(position_id=...)`,
+`get_deals_by_time_range(start_time=, end_time=)`, `freeMargin`, `openPrice`, `positionId`, and the
+assumption that the SDK hands back plain dicts at all. **It is not that the instrument is weak; it
+is that this class of defect has no instrument until a venue exists.**
+
+## AMENDMENT — THE SDK SETTLED BOTH NAMES *AGAINST* MY FRAMING. THE ADAPTER WAS RIGHT AND THE TREE'S QUOTED SOURCES WERE THE LOOSE ONES
+
+`metaapi_cloud_sdk` is now installed in a scratch venv (`T-0133`). Introspected read-only:
+
+```
+clients/error_handler.py:166                class TooManyRequestsException(ApiException)
+metaapi/streaming_metaapi_connection_instance.py:144    def terminal_state(self) -> TerminalState
+metaapi/streaming_metaapi_connection.py:379             def terminal_state(self) -> TerminalState
+```
+
+**`mt5.py`'s `"TooManyRequestsException"` is the SDK's class name. `mt5.py`'s `terminal_state` is
+the SDK's attribute name.** `B291`'s `TooManyRequests` and `MT5_FIRST_CONNECTION.md:45`'s
+`terminalState` were loose transcriptions of JS-flavoured docs. **This entry called the adapter
+"the odd one out" twice, and on both counts the adapter was correct.**
+
+**What survives, unchanged, is the finding.** It was never *the adapter is wrong* — it was **no arm
+here can tell either way**, and that is now demonstrated rather than argued: settling it took an
+instrument from outside the tree entirely. A disagreement whose resolution requires installing the
+vendor's package is precisely one that 30 green arms cannot speak to.
+
+## AND THE CLOSING SENTENCE WAS TOO STRONG — the manager pushed back and the push-back is right
+
+*"This class of defect has no instrument until a venue exists"* is wrong by half. **An installed
+package is an instrument for NAMES with no account, no credentials and no venue** — class names,
+attribute names, method names, keyword-argument names, and which object carries which member. It
+cannot settle **behaviour**: whether `connected_to_broker` can really be `False` while `connected`
+is `True`, what a real 429 payload carries, which optional fields a particular broker omits, or
+whether `profit` is gross or net. **Narrow the sentence to the behavioural half.**
+
+**One bound the split does not capture, and it is the one that mattered:** the SDK settles a name
+*given the object*. It cannot settle **which object gets injected** — and that turned out to be the
+live question. See `B341` (Execute, `T-0133`) and this entry's neighbour `B335`.
+
+Confirmed correct against the SDK, incidentally: `get_symbol_price(symbol=)`,
+`get_symbol_specification(symbol=)`, `get_deals_by_time_range(start_time=, end_time=)` and
+`close_position(position_id=)` are all the SDK's real parameter names.
+
+## REFINEMENT — the split is names *and declared payload types*, not names alone
+
+`B342` (Execute) drove `_rate_limited` with the SDK's real exception and got
+`ValueError: invalid literal for int()` — `recommendedRetryTime` is an ISO instant, and `mt5.py`
+does `int(recommended)` and calls it seconds. **My split above put value types on the behavioural
+side, out of reach without a venue. It is not:**
+
+```
+clients/error_handler.py:155   class TooManyRequestsErrorMetadata(TypedDict):
+                                   recommendedRetryTime: str
+                                   """Recommended date to retry request."""
+risk_management/clients/http_client.py:149   retry_time = date(error.metadata['recommendedRetryTime']).timestamp()
+clients/metaapi/metaapi_websocket_client.py:1680   (the same, five more sites)
+```
+
+**The package DECLARES the type and the vendor's own handler DEMONSTRATES the semantics.** Both
+readable today, with no account. So an installed package settles **names, declared payload types,
+and the vendor's own usage of its fields.** What stays behavioural: whether `connected_to_broker`
+can be `False` while `connected` is `True`, which optional fields a particular broker omits, and
+whether `profit` is gross or net.
+
+**And this is the cleanest confirmed instance of this entry's thesis.** The arm that exercises the
+only tested copy of the dispatch feeds it `{"recommendedRetryTime": 7}` — **an integer the venue
+never sends.** The mock's chosen value TYPE made a broken line look correct, so the one covered copy
+was covered wrongly. `B340` measured that the arms cannot see five of the seven copies; `B342`
+measured that the code is wrong; **neither of us found the other's half, and the shared assumption
+is why.**
+
+Related: **B256**, **B291**, **B140**, **B184**, **B335**.
+
+---
+
+### B335 — `_require_broker_link` FAILS OPEN when the guard attribute is absent. It is the one *could-not-ask* in the file that does not fail closed, and failing closed costs ZERO arms
+
+```python
+state = getattr(self._client, "terminal_state", None)
+if state is None:
+    return                      # <-- no comment, and no arm reaches it
+```
+
+Measured against a client carrying every method the adapter calls, with the guard attribute under
+another name and the broker link DOWN:
+
+```
+get_positions        -> RETURNED [Position(id='p1', ...)]
+get_orders           -> RETURNED []
+get_recent_trades    -> RETURNED [{...}]
+close_all_positions, empty book  ->  []
+```
+
+**That last line is the exact failure `close_all_positions`' own docstring says it prevents.**
+Returning `[]` says *there was nothing to close* — `B292`'s collapse, on the kill switch's own path,
+reached through one attribute name.
+
+## THE FIX IS FREE AND DOES NOT WAIT ON MALEK
+
+```
+M6  guard fails CLOSED when the attribute is absent  ->  30 passed
+```
+
+**No arm depends on the fail-open**, because every arm supplies the attribute, so the `None` branch
+is dead code in the suite. Failing closed is correct under *either* spelling — it does not require
+knowing which of `terminal_state` and `terminalState` is right, so it does not wait on checklist
+item 1.1.
+
+```
+M5  attribute renamed in the adapter ALONE  ->  2 failed   (the arms DO catch unilateral drift)
+```
+
+## THE SAME PROPERTY, WITH NO NAMING QUESTION IN IT AT ALL
+
+With the guard working and the broker unreachable:
+
+```
+get_positions        -> RAISED MT5BrokerUnreachable
+get_orders           -> RAISED MT5BrokerUnreachable
+get_recent_trades    -> RETURNED [{'id': 'd1', 'position_id': 'p1', ...}]
+```
+
+**Two of the three read members are guarded and one is not**, with nothing said either way. It may
+be that deals come from MetaApi's history store rather than the broker terminal and the check
+genuinely does not apply — that is defensible and it is **not written down**. In a file that gives
+`disconnect` a docstring explaining why it is a no-op rather than an omission, an unstated asymmetry
+on the property the file is built around is the defect.
+
+## AMENDMENT — the guard has THREE could-not-ask branches. I named one, and the mutation sweep found the other two
+
+`B340`'s sweep pinned what this entry got only half right:
+
+```
+mt5.py:317  if state is None: return                        FAILS OPEN   (this entry)
+mt5.py:319  not getattr(state, "connected", False)          False->True  SURVIVED
+mt5.py:323  not getattr(state, "connected_to_broker", False) False->True SURVIVED
+```
+
+**Lines 319 and 323 are fail-CLOSED and correct** — a missing attribute yields `False`, `not False`
+is `True`, and the guard raises. **Nothing holds them that way.** Flipping either default to `True`
+turns the guard fail-open on a client whose state object carries the booleans under other names —
+which is `B334`'s exact question one level down, since the only quoted source spells the object
+`terminalState` and nothing in the tree fixes the spelling of its members.
+
+So the six-line function has three branches for *the guard itself cannot answer*, **one fails open
+and two fail closed, and no arm exercises any of the three.** The one-line fix this entry proposes
+should pin all three, not just line 317.
+
+## AMENDMENT — NO LONGER HYPOTHETICAL. The attribute is ABSENT on the only object that can serve the adapter's reads
+
+Measured against the installed SDK. Execute measured the same split independently for `T-0133` and
+filed it three minutes earlier as `B341`; this is the review-side consequence, not a second claim.
+
+```
+member                       RpcMetaApiConnectionInstance   StreamingMetaApiConnectionInstance
+terminal_state                        —                                  YES
+get_account_information              YES                                  —
+get_positions                        YES                                  —
+get_orders                           YES                                  —
+get_deals_by_time_range              YES                                  —
+get_symbol_price                     YES                                  —
+get_symbol_specification             YES                                  —
+connect / wait_synchronized          YES                                 YES
+close_position                       YES                                 YES
+```
+
+They are **two distinct objects from two distinct calls** — `account.get_rpc_connection()` and
+`account.get_streaming_connection()`. `MetaTrader5Adapter` takes **one** `client`, and its module
+docstring says that object is *"the real SDK in production"*.
+
+**So the only object that can serve `get_positions` is the one with no `terminal_state`** — and
+`mt5.py:317`'s `if state is None: return` then makes `_require_broker_link` a no-op. The `B292`
+protection this adapter is built around is **off by construction on the wiring that works**, and the
+`[]` that `close_all_positions` returns in that state is the collapse its own docstring names.
+
+**This changes the fix.** Pinning the three branches fail-closed is still right, but it is no longer
+sufficient: fail-closed against an RPC client raises `MT5BrokerUnreachable` on **every** read, which
+is correct-but-useless. The wiring needs both connections — a composite client, or the link state
+read from the streaming connection and the data from the RPC one. **That is a BUILD step, not a
+connect-and-test step**, which is `B333`'s subject from a new direction.
+
+Related: **B292**, **B334**, **B303**, **B215**.
+
+---
+
+### B336 — THE DIRECTION MAPPING IS UNCOVERED. Making every position LONG passes 30 of 30, and the word `SELL` does not occur anywhere in the arms
+
+```
+M1  direction = DirectionType.LONG unconditionally ....... 30 passed
+grep -n "SELL\|SHORT"  test_t0106_mt5_adapter.py ......... (none)
+```
+
+Mutation verified landed: the `diff` is one line, and under it a `POSITION_TYPE_SELL` position reads
+back `DirectionType.LONG`. **The suite does not notice.**
+
+The mapping is correct today for the documented strings — probed directly:
+
+```
+'POSITION_TYPE_BUY'  -> LONG        'POSITION_TYPE_SELL' -> SHORT
+'buy'                -> LONG        'sell'               -> SHORT
+0 -> SHORT      1 -> SHORT      type absent -> SHORT
+```
+
+**So the finding is not that it is wrong; it is that it is unpinned and it fails toward SHORT.**
+`str(raw.get("type", "")).upper().endswith("BUY")` makes everything that is not a string ending in
+BUY into the opposite direction — including the integer codes native MT5 uses, and an absent field.
+`_position()` only ever builds `POSITION_TYPE_BUY`, so the else branch has never been executed by a
+test in this suite.
+
+**This is the third meaning of `type`** — the one `_read_account_type`'s own docstring warns about,
+*"three unrelated meanings for one field name in one SDK"*. Two of the three have arms. The one that
+decides whether a position is long or short does not.
+
+Related: **B334**, **B291**.
+
+---
+
+### B337 — THE POSITION WHOSE CLOSE WAS SENT is reported `NOT_ATTEMPTED`, with the reason *"the close loop never reached this position"* — and the arm covering that scenario asserts every row except that one
+
+```
+close_errors = {"p2": asyncio.CancelledError()}
+
+p1: CLOSED        reason=None
+p2: NOT_ATTEMPTED reason='the close loop never reached this position'
+p3: NOT_ATTEMPTED reason='the close loop never reached this position'
+p4: NOT_ATTEMPTED reason='the close loop never reached this position'
+```
+
+**p2 is the position `await self._client.close_position(position_id='p2')` was issued for.** The
+inner `except Exception` does not catch `CancelledError`, so control leaves for the outer
+`except BaseException` and p2's row keeps the default it was given before the loop ran.
+
+`test_an_ABNORMAL_EXIT_still_reports_every_position_and_names_the_untouched_ones` asserts `p1`
+CLOSED and `p3`/`p4` NOT_ATTEMPTED. **It does not assert `p2`.** The single row that is wrong is the
+single row the arm does not look at.
+
+## WHY THIS IS NOT PEDANTRY
+
+The close for p2 may have reached the venue. At 3am the operator reads *"never reached this
+position"* and concludes nothing was sent — when the truthful state is **sent, outcome unknown**.
+That is `B292`'s class again, a state the vocabulary cannot express collapsed onto a neighbour,
+except that here it collapses onto an **affirmatively false sentence** rather than an ambiguous one.
+
+## AND IT SHOWS THE RULED PROPERTY IS SATISFIABLE BY A FALSE REPORT
+
+Malek's ruling is that every position must be reported as CLOSED, FAILED WITH A REASON, or NOT
+ATTEMPTED. **p2 IS reported as one of the three.** The property holds and the report is wrong, so
+the property alone does not certify the member — **which is what `B332` found from the other side**,
+where an arm satisfying the property specified the abort as required behaviour.
+
+NOT FIXED, AND DELIBERATELY NOT FIXED HERE. It needs a ruling: a fourth disposition (*attempted,
+outcome unknown*), or the in-flight position marked FAILED with the cancellation as its reason.
+FAILED exists today and is the safe neighbour of the two — but the three-state vocabulary is
+Malek's, and widening it or reassigning a row inside it is his call and not the reviewer's.
+
+Related: **B330**, **B332**, **B303**, **B292**.
+
+---
+
+### B338 — COERCIONS THAT MANUFACTURE A VALUE THE VENUE NEVER SENT, in the file that cites `B215` throughout
+
+Two, both measured, both invisible to every arm because the mock only ever sends well-formed values.
+
+**1. `_dec` refuses to invent a zero and both callers immediately invent one.** Its docstring is
+*"`None` stays `None`. A field the venue did not send is not a zero (`B215`)"* — and it also returns
+`None` for a value it could not PARSE, which the callers then floor:
+
+```
+openPrice = '1,234.50'   ->  entry_price = 0
+volume    = '0.5 lots'   ->  lot_size    = 0
+```
+
+**A price the adapter could not parse becomes a position with an entry price of zero** — a number
+every downstream P&L and risk calculation will happily use. `or Decimal("0")` also cannot tell a
+parse failure from a legitimate zero.
+
+**2. `close_all_positions` keys its report on `position.id`, and `_to_position` defaults a missing
+id to `""`:**
+
+```
+3 positions open  ->  2 report rows: ['p1', '']
+closes actually sent: ['p1', '', '']
+```
+
+Two positions collapse into one row. **A position open when the switch was pulled is reported
+nowhere** — the ruled property failing silently rather than loudly — and two close calls go out for
+the empty id.
+
+`id` is REQUIRED on `MetatraderPosition` (`B291`), so reaching this needs a venue contract
+violation: **it is a bound, not a live defect.** It is filed because the default was a choice —
+`_to_position` could raise on a missing id instead — and the cost of that choice lands on the kill
+switch's counting.
+
+## AMENDMENT — a third instance, and it is the whole `Account` constructor
+
+`B340`'s sweep: every numeric default in `get_account` can be changed with the suite green.
+
+```
+mt5.py:265  balance=float(info.get("balance", 0.0))          0.0->1.0   SURVIVED
+mt5.py:266  equity=float(info.get("equity", 0.0))            0.0->1.0   SURVIVED
+mt5.py:268  margin_used=float(info.get("margin", 0.0) or 0.0)      SURVIVED
+mt5.py:269  margin_available=float(info.get("freeMargin", 0.0) or 0.0)  SURVIVED
+```
+
+`test_get_account_normalises_the_venues_fields` passes a COMPLETE account, so the defaults are never
+reached by an arm. **A venue that omits `balance` yields an account whose balance is zero** — and
+`_read_account_type`, five lines above, RAISES on an absent field rather than defaulting it. The
+same method fails closed on the safety field and fails to a fabricated number on the money fields,
+which is the inconsistency worth fixing rather than either behaviour alone.
+
+Related: **B215**, **B291**, **B334**, **B337**.
+
+---
+### B340 — RE-RUNNING AN INHERITED PATCH'S OWN TESTS IS 50.7% OF A VERIFICATION. 33 of 67 semantic mutations to `mt5.py` survive 30 green arms, and the survivors CLUSTER: five of the seven copies of the rate-limit dispatch can be INVERTED with the suite green
+
+Execute inherited `T-0106`'s patch from a session that died, could not check the authorship claim,
+and **asked to be attacked on exactly the right thing**: *"whether my verification of an inherited
+patch was actually verification or was just re-running its own tests."* That is answerable with a
+number rather than an opinion, so here is the number.
+
+**Sweep:** every semantic mutation site in `mt5.py` at `0280995` — comparison-operator swaps,
+`and`/`or` swaps, `not` removal, boolean-constant flips, numeric-constant bumps. **No string
+constants**, so no mutant is killed merely because an arm greps an error message, and docstrings are
+untouched by construction. Each mutant is the file re-`unparse`d from a mutated AST and the 30 arms
+re-run.
+
+```
+TOTAL 67   killed 34   SURVIVED 33   unparseable 0        mutation score 50.7%
+```
+
+**The harness was controlled in both directions before the sweep was believed:**
+
+```
+CONTROL 1  original file ................... 30 passed   (baseline)
+CONTROL 2  unparse round-trip, NO mutation .. 30 passed   (unparse is not the variable)
+CONTROL 3  a known-killed mutation .......... 2 failed    (it can go red)
+CONTROL 4  a known-surviving mutation ....... 30 passed   (it does not go red for free)
+```
+
+## THE SCORE IS THE LESS INTERESTING HALF. THE SURVIVORS CLUSTER.
+
+**Seven copies of the rate-limit dispatch exist. Five of them can be inverted with a green suite.**
+
+```
+mt5.py:308  get_positions              if type(exc).__name__ == SDK_...   Eq->NotEq   SURVIVED
+mt5.py:390  get_orders                                                   Eq->NotEq   SURVIVED
+mt5.py:419  get_recent_trades                                            Eq->NotEq   SURVIVED
+mt5.py:463  reference_price                                              Eq->NotEq   SURVIVED
+mt5.py:496  get_symbol_specification                                     Eq->NotEq   SURVIVED
+            get_account  and  _classify_connect_error                                killed
+```
+
+The two 429 arms both drive `get_account_information`. **So one fact is written seven times
+(`B184`) and tested once** — and `B334` already established that the fact itself cannot be falsified
+by any arm here, because the mock declares the class with the adapter's own spelling. The two
+findings compose: **the name is unfalsifiable AND six of its seven uses are unexercised.**
+
+## THE OTHER SURVIVORS WORTH NAMING
+
+```
+mt5.py:129  self.connected = False -> True          SURVIVED   an adapter that never connected
+                                                               reports connected; stream_prices
+                                                               gates on exactly this flag
+mt5.py:265  balance=float(info.get("balance", 0.0))    0.0->1.0  SURVIVED
+mt5.py:266  equity=...                                 0.0->1.0  SURVIVED
+mt5.py:268  margin_used=...                            0.0->1.0  SURVIVED
+mt5.py:269  margin_available=...                       0.0->1.0  SURVIVED
+mt5.py:347  current if current is not None else entry  IsNot->Is SURVIVED
+mt5.py:348  profit  if profit  is not None else 0      IsNot->Is SURVIVED
+mt5.py:469  if bid is None or ask is None              Or->And   SURVIVED
+mt5.py:470  the one-sided-quote fallback               IsNot->Is SURVIVED
+mt5.py:659  "{n} of {m} position(s)" in the abnormal-exit message  !=->==  SURVIVED
+```
+
+`test_get_account_normalises_the_venues_fields` passes a complete account, so **every default in
+that constructor is a number the adapter would invent and no arm would notice** (`B338`).
+`reference_price`'s one-sided-quote branch is never entered by any arm — the two cases tested are a
+full quote and `{}`.
+
+## WHAT THIS DOES *NOT* SAY, WHICH MATTERS MORE THAN THE NUMBER
+
+**It does not say Execute's verification was theatre, and the honest reading is the opposite.**
+Re-running found nothing, and re-running was never the instrument that could. What Execute actually
+did that the suite could not:
+
+- caught the ONE false sentence in the inherited file by READING it — the docstring claimed the rows
+  are *"returned from a `finally`"* and there is no `finally` in that method and never was. `B184`
+  inside one file, and **no test could ever have surfaced it**
+- reconciled `1902 passed + 1 xfailed = 1903 collected` EXACTLY, and ran the whole-tree
+  `--collect-only` that `B298` exists for
+- named what was NOT fixed (`kill_switch.py:67-69` still catches `Exception` and sets
+  `close_results = []`, so a raising `close_all_positions` yields *"0 closed, 0 failed"* — `B330`'s
+  shape one layer up, and INVISIBLE rather than miscounted)
+- recorded a second instance of `B327` **at the point of the addition** rather than leaving it to be
+  found: `MetaTrader5Adapter()` raises `TypeError` for want of `client`, which is not a credential
+
+**All four verified independently here.** The membership arms were ANSWERED by naming the class with
+a comment saying the arm fired as intended, not silenced — checked in the diff, not taken on trust.
+
+**So the two instruments cover disjoint classes.** Reading finds what the file says about ITSELF.
+Mutation finds what the file's tests say about the VENUE. Execute's question assumed one of the two
+was the real one; the measurement says neither is, and the reason the inherited patch needed both is
+that its author is gone and could not be asked which claims were load-bearing.
+
+**The rule this yields, and it generalises past MT5:** when a patch is inherited rather than
+remembered, *re-running its tests establishes only that it still does what it did* — never that what
+it did was right. **The suite was written by the same absent author as the code.** A second
+instrument is not a nicety there; it is the only thing in the room that the dead session did not
+also write.
+
+## AMENDMENT — the fix is ONE ARM, not seven patched arms and not a consolidated dispatch. Measured before it was acted on
+
+The manager asked, before allocating `T-0135`, whether the seven copies are *why* the arms cannot
+see this — because if so the fix is one dispatch rather than seven arms. **Neither.**
+
+```
+SITE           AS LANDED (30 arms)     WITH ONE PARAMETRIZED ARM (36)
+mt5.py:308     30 passed               1 failed, 35 passed
+mt5.py:390     30 passed               1 failed, 35 passed
+mt5.py:419     30 passed               1 failed, 35 passed
+mt5.py:463     30 passed               1 failed, 35 passed
+mt5.py:496     30 passed               1 failed, 35 passed
+```
+
+**All five survivors die with the seven copies left exactly where they are.** One test function and
+a six-row table. Coverage was never blocked by duplication — nobody wrote the arm. The duplication
+is still `B184` and still worth fixing, for its own reason.
+
+**And consolidating would NOT have caught `B342`.** `_rate_limited` is already ONE function that all
+seven sites call: `B340` is the **dispatch**, `B342` is the **translator**, and collapsing seven
+callers changes nothing about a bug in the callee. The same arm, with only the payload VALUE
+changed:
+
+```
+(a) the mock's chosen value, the integer 7 ................ 6 passed
+(b) the venue's real value, an ISO instant ................ 6 FAILED
+upstream today: ValueError: invalid literal for int() with base 10: '2026-09-04T20:15:00.000Z'
+                -- caught by NEITHER the BrokerRateLimitError handler nor the BrokerError one
+```
+
+**What decides whether `B342` is visible is the fixture's VALUE TYPE**, not the arm count or the
+dispatch count — and that value was chosen by the same reading as the adapter, which is `B334`.
+
+**Order matters, and it is the reverse of the intuitive one:** land the arm first on the
+unconsolidated code, then consolidate with an arm proving every member still routes through the
+dispatch. **Consolidating first refactors the exact code nothing exercises.**
+
+Related: **B334**, **B335**, **B338**, **B184**, **B322**, **B327**, **B330**.
+
+---
+### B343 — THE `ASSUMES:` MARKER AUDIT: three arms cite items that cannot falsify them, and it is ONE mechanism rather than three accidents — the citations cross the DEAL/POSITION axis. And the meta-arm enforces a WORD, not a reference
+
+The manager asked for the audit `B334` implied: `B334` found ONE marker citing an item that could
+not settle it (1.5, since amended), wrote the general bound into the checklist, and then said the
+right thing — *"I fixed the one instance you found and did not audit the rest, which is exactly the
+move this register keeps catching."* This is the rest.
+
+**Population: 27 test functions. 21 cite a checklist item. 4 correctly declare that no item covers
+them. 2 are meta-arms about the file.**
+
+## THE RESULT: 3 OF 21 CANNOT BE SETTLED BY WHAT THEY CITE, AND THEY SHARE A MECHANISM
+
+**The adapter reads TWO vendor models — `MetatraderPosition` from `get_positions`, and
+`MetatraderDeal` from `get_deals_by_time_range`. The markers cross them, in both directions.**
+
+```
+ARM                                             CITES  ITEM ACTUALLY INSPECTS      VERDICT
+test_a_balance_entry_is_SKIPPED_and_COUNTED      2.1   MetatraderPOSITION,         CANNOT
+  assumes MetatraderDEAL is 6-of-22 required,          via get_positions()          SETTLE
+  so volume/price/positionId can be absent
+
+test_swap_and_commission_are_None_when_ABSENT    2.2   an open POSITION,           CANNOT
+  assumes swap/commission optional on a DEAL           "same payload as 2.1"        SETTLE
+                                              +  3.1   narrowed by B331 to
+                                                       "ONLY ever gross-versus-net,
+                                                       never whether the number is there"
+
+test_a_position_carries_its_producer_and_       3.1   a CLOSED DEAL's profit,      CANNOT
+  its_pnl_key                                          via get_deals_by_position    SETTLE
+  assumes the OPEN POSITION field is `profit`
+```
+
+**A position payload cannot show which deal fields a broker omits, and a deal payload cannot show
+what an open position's P&L field is called.** Item 2.1 — *print the raw payload* — is the item that
+would settle arm 3; it is cited by nobody for that purpose.
+
+**The third row is the sharpest, because `B331` narrowed 3.1 deliberately and correctly** and in
+doing so removed the only reading under which arm 2's citation worked. **A correct fix to one
+document silently invalidated a citation in another.** Neither seat could have seen it: the
+correction was right, and nothing joins the two files.
+
+## AND THE ARM THAT POLICES THE MARKERS ENFORCES A WORD, NOT A REFERENCE
+
+`test_every_ASSUMES_marker_names_a_checklist_item_or_says_none_does` tests
+`"checklist" in marker.lower()`. Measured, by editing one marker three ways:
+
+```
+marker cites item 9.9 (DOES NOT EXIST) .......... 30 passed
+marker names the WORD "checklist", no item ...... 30 passed
+marker cites a REAL but IRRELEVANT item (2.1
+  on the disconnect arm) ........................ 30 passed
+```
+
+The `1.5` amendment says *"one arm checks that those references RESOLVE."* **Measured, nothing
+checks that they resolve.** A dangling citation to `9.9` is green. So the instrument is one step
+weaker than its own documentation claims — **and the documentation is the amendment written to
+record the instrument's bound**, which is the same shape as the bound itself.
+
+**No dangling reference exists today** — every cited item (0.1, 1.1, 1.2, 1.3, 1.4, 1.5, 2.1, 2.2,
+3.1) is real. This is a latent hole, not a live one, and it is cheap to close: parse the item
+numbers out of the markers and assert each is a heading in `MT5_FIRST_CONNECTION.md`. **That still
+would not have caught any of the three above**, which cite real, adequate-looking items about the
+wrong object — those need a human or a per-item statement of *which vendor model this item reads*.
+
+## TWO LESSER NOTES, AND ONE WITHDRAWN BEFORE FILING
+
+- **1.3 and the two refusal arms.** `test_place_order_REFUSES` and `test_close_position_is_DEFINED`
+  rest on *"MetaApi's `volume` parameter is MT5 LOTS"*. Item 1.3 fetches `volume_min`/`step`/`max`
+  and `contract_size`; **it never asks what `volume` is denominated in.** Partial rather than
+  failing — and now moot in the cheapest way, because `T-0133`'s installed package answers it
+  without an account.
+- **1.1's object bound, newly exposed.** `B341` measured that `terminal_state` lives on the
+  streaming connection and the reads on the RPC one. Item 1.1 says *print `terminalState.connected`*
+  without saying **which connection object it is read from**, and there are two. 1.1 was my
+  counter-example for a well-formed item; it settles the booleans and does not settle the object.
+
+**WITHDRAWN, and recorded because the failure is the register's favourite one.** A first pass over
+this checklist extracted only each item's `Question:` and `Call:` lines by regex and flagged **0.1**
+(does not name the expected codes) and **1.3** (does not name `contract_size`) as defective. **Both
+are wrong.** 0.1 carries an `Expect:` line naming `E_SRV_NOT_FOUND` and `E_AUTH`, and 1.3's
+`Implication:` names `contract_size` explicitly. **A scan keyed on the structure I assumed the
+document had returned two confident false positives**, and only reading the bodies caught it — the
+same class as `B319` and `B296`, on the instrument built to audit instruments.
+
+Related: **B334**, **B331**, **B341**, **B340**, **B272**.
 
 ---
 
