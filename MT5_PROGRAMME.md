@@ -22,7 +22,7 @@ Gate 3 the moment you have a token — it has the longest lead time and it does 
 GATE 1   the adapter is CORRECT       in flight   B343, B340        needs nothing from Malek
 GATE 2a  mt5 is CONSTRUCTIBLE         DONE        T-0134 b07a43f    latched
 GATE 2b  the SERVER runs it           STALE       precondition of Gate 3, not a gate
-GATE 3   the demo is CONNECTED        blocked     the MetaApi token starts it
+GATE 3   the demo is CONNECTED        BLOCKED     token + the API cannot yet store it (B368)
 GATE 4   the strategy TRADES it       scoped      3 changes + the T-0076 ruling
 ```
 
@@ -47,9 +47,30 @@ GATE 4   the strategy TRADES it       scoped      3 changes + the T-0076 ruling
 > it** (`B361`) — so it is listed as a precondition to re-check immediately before connecting,
 > never as a gate that closes.
 
-> **STATUS 2026-09-05: GATE 2 IS DONE.** `T-0134` landed and the server now runs it — the MetaApi
-> SDK imports in production and the broker factory answers to `mt5`. **Gate 3 is blocked on nothing
-> but the token.**
+> ## ⛔ CORRECTED 2026-09-05 — **GATE 3 IS NOT BLOCKED ON THE TOKEN ALONE** `B368`
+>
+> **This document said it was, and that is the sentence Malek would have acted on.** The API cannot
+> write an MT5 connection. `connect_broker` builds its credential blob as
+> `api_key / api_secret / email / password / base_url` — **no `token`, no `mt5_account_id`** — so
+> the factory raises *"MT5 needs a MetaApi token and none was stored."* Driven directly:
+>
+> ```
+> api_key = the MetaApi token             ->  BrokerConnectionError, "none was stored"
+> {"token": ..., "mt5_account_id": ...}   ->  CONSTRUCTED MetaTrader5Adapter
+> ```
+>
+> **The only blob that works is one the API cannot write.** An MT5 connection can be created today
+> only by writing the `broker_connections` row straight into the database. **You would get a token,
+> find no field to paste it into, and this document would have told you that step was done.**
+>
+> **It needs a small, decided piece of work** — add `token` and `mt5_account_id` to the connect
+> request schema. *Not* by reading `api_key` as a third fallback: that means an exchange API key on
+> every other broker, and `B360`'s own two-sources argument cuts against overloading it.
+>
+> **How it survived two audits is the useful part.** Both tested that the ADAPTER ACCEPTS a correct
+> blob — which is what Gate 2 asserts — and neither tested that the API can EMIT one. `B356`'s axis
+> one layer out: **the shape a producer emits versus the shape a consumer requires, with a
+> hand-built blob standing in for the producer both times.**
 
 **Gates 1–3 give you a linked MT5 demo the platform can read**: balance, equity, open positions,
 prices, and the broker-reported account type. **That is real and it is the near thing.**
