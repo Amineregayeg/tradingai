@@ -497,21 +497,72 @@ class BrokerManager:
     # Aggregate operations
     # ------------------------------------------------------------------
 
-    async def get_all_positions(self) -> list[Position]:
-        """Aggregate open positions across all connected adapters."""
+    async def get_all_positions_report(self) -> dict:
+        """Positions, PLUS the adapters that could not be asked and why (`B372`, `T-0111`).
+
+        **THE PROPERTY, registered by review before this was written:** *every connected adapter is
+        accounted for in every aggregate read — either its positions are included, or it is named
+        as unasked with a reason. A caller must never be unable to tell a flat book from an unread
+        one.*
+
+        `get_all_positions` returned `list[Position]` and swallowed every adapter failure, so three
+        different states of the world produced byte-identical output:
+
+            healthy + a broker that CANNOT BE ASKED   -> ['a1', 'a2']
+            healthy + a broker that is FLAT           -> ['a1', 'a2']
+            healthy, second broker ABSENT entirely    -> ['a1', 'a2']
+
+        **There is no value in a list that means *one of these brokers could not be asked*** — the
+        adapter layer's own argument, one level up. The adapter now raises honestly and this layer
+        caught, logged at WARNING, and continued.
+
+        **THE SHAPE IS `close_all_positions`' REPORT, NOT THE ADAPTER'S EXCEPTION**, and that
+        distinction is review's rather than mine. The adapter expresses *could-not-ask* by raising;
+        **this layer cannot raise**, because the endpoint's contract is *never an error* and three
+        consumers rest on it. What transfers is the report: one row per subject, an explicit
+        disposition, a reason — **per ADAPTER rather than per position.** Third venue for that
+        shape this week.
+
+        **`except Exception` STILL CATCHES MORE THAN UNREACHABILITY**, and that is deliberate here:
+        review found the defect partly because an invalid `Position` construction inside an adapter
+        was swallowed by this same handler and became a silently short list. Narrowing the catch
+        would let such a bug crash the aggregate; naming the adapter in `unasked` reports it
+        instead, which is the honest form of the same tolerance.
+        """
         all_positions: list[Position] = []
+        unasked: list[dict] = []
         for connection_id, adapter in self._adapters.items():
             try:
                 positions = await adapter.get_positions()
                 all_positions.extend(positions)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - see the docstring: breadth is deliberate
+                unasked.append({
+                    "connection_id": connection_id,
+                    "broker": adapter.broker_name,
+                    "reason": f"{type(exc).__name__}: {exc}",
+                })
                 logger.warning(
                     "Failed to fetch positions",
                     connection_id=connection_id,
                     broker=adapter.broker_name,
                     error=str(exc),
                 )
-        return all_positions
+        return {
+            "positions": all_positions,
+            "unasked": unasked,
+            "asked": len(self._adapters) - len(unasked),
+            "connected": len(self._adapters),
+        }
+
+    async def get_all_positions(self) -> list[Position]:
+        """Aggregate open positions across all connected adapters.
+
+        **Kept returning a bare list on purpose.** Three consumers rest on this signature and on
+        its never-raises contract; `get_all_positions_report` is where the unasked adapters are
+        readable. A caller that needs to tell a flat book from an unread one must use the report —
+        and `positions.py` now does.
+        """
+        return (await self.get_all_positions_report())["positions"]
 
     async def reconcile_connections(self, db: AsyncSession) -> dict:
         """Bring reality back in line with intent. Safe to call repeatedly.
