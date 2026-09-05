@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-05 (B355 — A REGISTER ID QUOTED IN PRODUCT CODE IS DEFENDED BY NOTHING. The register defends its own consistency twice — an entry can carry an AMENDMENT, and register_commit_check REFUSES a commit modifying an entry its message does not name — and a register id quoted in a CODE COMMENT has neither, so a correction lands in KNOWN_ISSUES.md and every quotation of it goes stale IN SILENCE. Found because manager.py's new MT5 branch quoted B346 and restated its mechanism, which B350 had corrected hours before that branch landed. MEASURED with agents/citation_check.py, written with this entry: 183 files, 314 citation sites, 120 distinct ids, 334 register entries, 46 of 120 flagged — and NOT ONE of those sites was checked by anything before today. THE FOUR MISSING CANNOT BE ARGUED WITH: B6, B10, B90 and B253 are cited in product code and have NO ENTRY AT ALL, never written rather than superseded, with the headings jumping B3 to B8 and B9 to B11 — B10 alone is cited five times in code and eight times inside the register, so a maintainer following it from either direction finds nothing. That is B329's family with product code depending on it. AND THE SCANNER'S OWN FALSE POSITIVE IS THIS REGISTER'S FAVOURITE SHAPE: v1 reported B018, which is a flake8-bugbear noqa code — two vocabularies sharing one form, so a rule keyed on the form returns a confident wrong answer, which is B211's and B349's family in the INSTRUMENT rather than the subject. Fixed with two guards rather than one because either alone is a single point of failure on a FALSE POSITIVE, and this register already records that a guard crying wolf gets loosened under time pressure. It says RE-READ and never WRONG except for MISSING, and NOT FLAGGED IS NOT VERIFIED.)
+Last updated: 2026-09-05 (B355 — A REGISTER ID QUOTED IN PRODUCT CODE IS DEFENDED BY NOTHING. The register defends its own consistency twice — an entry can carry an AMENDMENT, and register_commit_check REFUSES a commit modifying an entry its message does not name — and a register id quoted in a CODE COMMENT has neither, so a correction lands in KNOWN_ISSUES.md and every quotation of it goes stale IN SILENCE. Found because manager.py's new MT5 branch quoted B346 and restated its mechanism, which B350 had corrected hours before that branch landed. MEASURED with agents/citation_check.py, written with this entry: 183 files, 314 citation sites, 120 distinct ids, 334 register entries, 46 of 120 flagged — and NOT ONE of those sites was checked by anything before today. THE FOUR MISSING CANNOT BE ARGUED WITH: B6, B10, B90 and B253 are cited in product code and have NO ENTRY AT ALL, never written rather than superseded, with the headings jumping B3 to B8 and B9 to B11 — B10 alone is cited five times in code and eight times inside the register, so a maintainer following it from either direction finds nothing. That is B329's family with product code depending on it. AND THE SCANNER'S OWN FALSE POSITIVE IS THIS REGISTER'S FAVOURITE SHAPE: v1 reported B018, which is a flake8-bugbear noqa code — two vocabularies sharing one form, so a rule keyed on the form returns a confident wrong answer, which is B211's and B349's family in the INSTRUMENT rather than the subject. Fixed with two guards rather than one because either alone is a single point of failure on a FALSE POSITIVE, and this register already records that a guard crying wolf gets loosened under time pressure. It says RE-READ and never WRONG except for MISSING, and NOT FLAGGED IS NOT VERIFIED. AMENDED SAME DAY: I called the four MISSING ids 'never written' on the strength of no heading existing, which is INFERRED FROM AN ABSENCE and is wrong for B90. This register records its own deletion in two places predating today — 33a3951 carried away a removal of B90 and left main claiming it fixed for twenty minutes, and B90 is Review's finding that EXIT-001's NOT_APPLICABLE has no denominator. The product code citing it still states that subject at exit_001_v1_model.py:533, so THE COMMENT IS NOW THE ONLY SURVIVING STATEMENT OF THE FINDING: the register lost the entry, the code kept the sentence, and a maintainer cleaning up the dangling reference would have destroyed the last record of a real defect. That inverts B355's own assumption — the citation was not stale, the ENTRY was missing — and it kills the one signal I called a verdict rather than a prompt. The scanner now says a MISSING id is A BROKEN LINK WHOSE BROKEN END IT CANNOT IDENTIFY. B10 is recoverable since B157's heading says B157 IS B10 GENERALISED; B253 is a dangling cross-reference on both ends; B6 has no trace anywhere. AND THE GENERAL FORM IS WORSE THAN THE ONE FILED: a hook guards every MODIFICATION to the entries the register still has, so DELETION IS THE UNGUARDED OPERATION.)
 
 ---
 
@@ -22857,6 +22857,58 @@ someone whose attention is elsewhere."*
 it does not read the comment, and a correction naming an id only in its *body* is invisible to it.
 **And NOT FLAGGED IS NOT VERIFIED:** the other 74 ids were checked for whether the register moved,
 which is a different and weaker question than whether the comment is true.
+
+## AMENDMENT — I CALLED THE FOUR "NEVER WRITTEN". AT LEAST ONE WAS WRITTEN AND THEN REMOVED
+
+**Archaeology done after filing, and it changes what these four are.** The entry above says *"never
+written rather than superseded"* on the strength of no heading existing. **That was inferred from
+an absence and it is wrong for `B90`.**
+
+### `B90` was Review's entry, and this register records its own deletion
+
+Two places in this file, both predating today:
+
+> *"the protection whose own docstring records `33a3951` carrying away a removal of `B90` and
+> leaving `main` claiming it fixed for twenty minutes."*
+
+> *"**`B90` is Review's finding: `EXIT-001`'s `NOT_APPLICABLE` has no denominator.** Attributed
+> here because the commit message cannot be."*
+
+**So `B90` existed, was swept into a manager commit under the wrong authorship, and was later
+carried away by `33a3951`.** The register knows all of this and has no `### B90`.
+
+**And the product code that cites it still states its subject:**
+
+```
+exit_001_v1_model.py:533   #: HOW MANY TICKS THE MODEL ACTUALLY SAW. The denominator (B90).
+exit_001_v1_model.py:743   "zero-tick path and a long path where nothing fired are one record (B90)"
+```
+
+> **The comment is now the only surviving statement of the finding.** The register lost the entry;
+> the code kept the sentence. **That inverts the assumption underneath `B355` — the citation was
+> not stale, the ENTRY was missing**, and a maintainer who "cleaned up" the dangling reference
+> would have destroyed the last record of a real defect.
+
+### The other three, graded honestly
+
+* **`B10`** — recoverable, not lost. `B157`'s own heading says **"`B157` IS `B10` GENERALISED"**,
+  and the register describes `B10`'s practice as *0 examined recorded rather than silence*. Five
+  code sites cite it and they are consistent with that.
+* **`B253`** — appears once, in another entry's `Related:` line. A dangling cross-reference on both
+  ends.
+* **`B6`** — appears nowhere in this file except here. Genuinely no trace.
+
+### WHAT THIS COSTS THE ENTRY ABOVE
+
+**"A citation to nothing cannot be right" was the one signal I called a verdict rather than a
+prompt, and it is the one that was wrong.** For `B90` the citation is right and the register is
+incomplete. **The scanner's MISSING signal detects a broken link and cannot say which end broke** —
+that belongs in its output and is now in it.
+
+**The general form is worse than the one I filed.** A register that can lose an entry, while a hook
+guards every modification to the entries it still has, means **deletion is the unguarded
+operation** — and `33a3951` is the instance, recorded in this file, twenty minutes of `main`
+claiming a fix that had been carried away.
 
 Related: **B346**, **B350**, **B329**, **B310**, **B140**.
 
