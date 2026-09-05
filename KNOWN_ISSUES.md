@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-05 (B351 remains the newest heading — my checklist correction replaced a loud failure with a quiet lie in the item Malek runs first. LANDED ALONGSIDE IT NOW, parked during the register queue: B350, which corrects B346's MECHANISM while leaving its conclusion standing. I wrote that neither place_order call site reaches a BrokerAdapter; measured, BOTH DO — PaperBroker and SimPropFirmBroker are BrokerAdapter subclasses defining place_order, so the order path does not stop short of an adapter, it TERMINATES IN ONE end to end every time and the one it terminates in is always SIMULATED. B140's class: right conclusion, wrong reason, in an entry written to bound another task. It matters because the two statements dispatch different work — 'reaches no adapter' sends a reader to BUILD an order path that already exists, while 'reaches a SIM adapter' makes it a BINDING job naming its own blockers: self.paper constructed INLINE in crypto_loop.__init__ with no injection point, ExecMode.PAPER hardcoded at both construction sites, and broker_mode selecting between TWO SIMULATORS rather than being a live/sim switch. The conclusion is firmer — linking MT5 gives reads and cannot give trading, not because a path is missing but because THE DESTINATION IS HARDCODED, and that is not fixed by adding an adapter. B349: B338's uniform raise meets close_all_positions' all-or-nothing enumeration, so an unreadable SWAP — an accounting field the kill switch never reads — aborts enumeration and leaves ALL FOUR positions open, where before cycle 1 it became None and all four closed, because ON THE KILL SWITCH REFUSING TO ACT IS LEAVING EVERY POSITION OPEN. B347 and B348 from the T-0133 review: an import scanner's must-hit control cannot fail because both statement forms collapse to one set element, and 'either half alone would have sufficed' holds only for INSTALLED names.)
+Last updated: 2026-09-05 (B352 — THE CENTRALISED LIVE-TRADING GATE HAS NO ARM. manager._make_adapter's ALLOW_LIVE_TRADING check is the single thing stopping a database row with observe_only=False from reconstructing a LIVE-WRITE adapter on every construction path, and NOTHING IN THE SUITE SETS THE VARIABLE. The only references are docstring PROSE in test_bridge_write_guard and test_cft_order_path, both of which name it as the upstream control they are defending BEHIND — correct reasoning, and exactly why nobody armed it: a defence-in-depth layer refuses to ASSUME the layer above checked and was never meant to VERIFY it. Found while HOISTING the guard out of the CFT branch for T-0134, because moving a guard is the moment to ask what fails if it stops working. AND T-0134's OWN STRUCTURAL ARM DOES NOT COVER IT: deleting the forcing while leaving allow_live computed fails 7 effect arms and leaves the POSITION arm green — a guard in the right place that forces nothing passes it. The must-miss is the one that matters: a gate WELDED SHUT satisfies every arm asking 'does it refuse' and silently makes the operator's flag meaningless, which is the failure that looks like safety. Fixed in T-0134.)
 
 ---
 
@@ -22710,3 +22710,70 @@ Related: **B346**, **B140**, **B333**, **B305**, **B302**.
 
 ---
 
+### B352 — THE CENTRALISED LIVE-TRADING GATE HAS NO ARM. Two files defend in depth *behind* it in their own docstrings, and nothing anywhere checks that it works
+
+**Found while hoisting it**, not while testing it. `T-0134` had to move
+`_make_adapter`'s `ALLOW_LIVE_TRADING` check out of the CFT branch so a second broker branch could
+not return before it. Moving a guard is the moment to ask what fails if it stops working, and the
+answer was **nothing**.
+
+```
+grep -rn ALLOW_LIVE_TRADING tests/          test_bridge_write_guard.py   (docstring prose)
+                                            test_cft_order_path.py       (docstring prose)
+grep -rn "setenv|environ\[" tests/ | ALLOW_LIVE   ->  no results
+```
+
+**Nothing in the suite sets the variable.** The only mentions are prose, in two files that name it
+as the upstream control they are defending *behind*:
+
+> `test_bridge_write_guard.py:10` — *"`_make_adapter`'s `ALLOW_LIVE_TRADING` gate, and the
+> adapter's `observe_only` check — all sit UPSTREAM of the bridge process… so 'the backend will
+> have checked' is exactly the assumption defence in depth exists to refuse."*
+
+**That sentence is correct and it is now load-bearing in the wrong direction.** The bridge guard
+refuses to *assume* the backend checked. It does not verify it, and it was never supposed to —
+that is the whole point of defence in depth. So two layers reason about the gate, both correctly,
+and **the gate itself is unmeasured.**
+
+## WHAT IT GATES, WHICH IS WHY THIS IS NOT A COVERAGE COMPLAINT
+
+`creds` come from the database. A row persisted with `observe_only=False` is reconstructed on
+**every** construction path — connect, `load_from_db`, reconnect. This check is the single thing
+that stops that row producing a live-write adapter. Its own comment says so:
+
+> *"a stored `observe_only=False` is honoured ONLY when `ALLOW_LIVE_TRADING` is set server-side.
+> This runs on EVERY construction path… so a persisted live-write connection cannot be silently
+> reconstructed."*
+
+**A comment asserting a safety property, on an unarmed guard, is `B93`'s shape** — and the
+property is *real money on a funded prop-firm account*.
+
+## AND THE STRUCTURAL ARM `T-0134` ADDED DOES NOT COVER IT — THEY ARE DIFFERENT PROPERTIES
+
+`T-0134` pins that the guard **dominates every `return`** in the factory, by AST. That was the
+property the hoist was for, and it is not this one:
+
+> **A guard in the right place that forces nothing passes the position arm.**
+
+Measured, because the distinction is exactly the kind that sounds pedantic and is not:
+
+```
+M1  the forcing deleted, `allow_live` still computed   ->  7 failed  (the new effect arms)
+                                                            the POSITION arm stays GREEN
+M2  observe_only hardcoded True — the gate WELDED SHUT ->  1 failed  (the must-miss only)
+```
+
+**M2 is the one worth keeping.** A gate welded shut satisfies every arm that asks *does it
+refuse*, and it silently makes the operator's flag meaningless — the failure that looks like
+safety.
+
+## FIXED IN `T-0134`, and the arms are named here so the next reader can find them
+
+`tests/unit/test_t0134_mt5_construction.py`: the forcing when the flag is unset; six non-`true`
+values that must all leave it shut; **the must-miss that it genuinely opens on `"true"`**; and an
+absent key defaulting to observe-only even when live trading is permitted.
+
+**The arms live in `T-0134`'s file rather than a CFT one** because that is where the hoist is, and
+splitting a guard from its arms across files is how the next person moves one without the other.
+
+Related: **B93**, **B215**, **B346**, **B302**.
