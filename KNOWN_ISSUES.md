@@ -22898,6 +22898,28 @@ exit_001_v1_model.py:743   "zero-tick path and a long path where nothing fired a
   ends.
 * **`B6`** — appears nowhere in this file except here. Genuinely no trace.
 
+### AND THE DEFECT `B90` DESCRIBED IS FIXED — measured, so nobody re-opens it
+
+**Chased after the amendment, because "the last record of a real defect" invites someone to go and
+fix it.** It is already fixed:
+
+```
+exit_001_v1_model.py:546   ticks_seen: int = 0        the denominator, as a field
+                     :630   ticks_seen += 1           counted
+                     :682   ticks_seen=ticks_seen     carried into the record
+                     :713   "ticks_seen": sim.ticks_seen   published
+```
+
+**So the comment at :533 preserves the finding AND its resolution**, while the register preserves
+neither. A reader of the code learns what `B90` was, why the field exists, and that a zero-tick path
+and a 500-tick path where nothing fires would otherwise emit byte-identical records. A reader of the
+register learns that an id was removed.
+
+> **That is the sharpest form of this entry.** The citation is not a dangling reference to be tidied
+> away — **it is load-bearing documentation of a fix**, and it is the only copy. `B355`'s scanner
+> flags it as a broken link, which is correct, and the correct action is to restore the entry rather
+> than to touch the comment.
+
 ### WHAT THIS COSTS THE ENTRY ABOVE
 
 **"A citation to nothing cannot be right" was the one signal I called a verdict rather than a
