@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-05 (B361 — 'GATE 2 IS DONE' IS THE ONLY CLAIM IN MT5_PROGRAMME.md THAT UN-DOES ITSELF, AND IT ALREADY HAS. The document presents four gates as states of the world that must be true before the next is worth starting. Three latch: a fix stays fixed, an observation stays observed, a wiring change stays wired. GATE 2 does not — 'the server runs this code' is falsified by every subsequent commit — and I marked that one DONE. MEASURED rather than predicted: the api serves e897d903c and B356's fix landed in 0abc534, so THE DEPLOYED ADAPTER IS THE ONE THAT ITERATES THE DEALS WRAPPER and a demo linked against the server right now would raise AttributeError on the first real deals read, outside the try and caught by neither handler, while the programme document told the operator that gate was closed. B309's shape, which cost six days: seven product commits undeployed while the register read as fixed. The remedy then was deploy_preflight.py reporting the gap ON DEMAND; what did not exist then and still does not is anything that INVALIDATES A WRITTEN CLAIM when the gap reopens — and a document addressed to Malek is worse than the register here, because a register entry saying 'fixed in abc123' is a claim about the REPOSITORY and stays true while a gate saying DONE is a claim about the SERVER and decays silently. THE FIX IS TO THE CLAIM, NOT THE DEPLOY: Gate 2 splits into T-0134, done and latched, and THE DEPLOY as a PRECONDITION OF GATE 3 to be re-checked immediately before the first connection and never earlier. Redeploying now serves nothing — the engine is down, no order path reaches the adapter, and Gate 1 is still landing changes to the very file the deploy would ship.)
+Last updated: 2026-09-05 (B361 — 'GATE 2 IS DONE' IS THE ONLY CLAIM IN MT5_PROGRAMME.md THAT UN-DOES ITSELF, and it already has: the api serves e897d903c while B356's fix landed in 0abc534, so the DEPLOYED adapter is the one that iterates the deals wrapper and a demo linked now raises on the first real deals read. Three gates latch and GATE 2 does not — 'the server runs this code' is falsified by every commit — so the fix is to the CLAIM: Gate 2 splits into T-0134, done and latched, and THE DEPLOY as a PRECONDITION OF GATE 3. FILED WITH REVIEW'S B359 and B360 from its end-to-end audit of that document. B359: wait_connected EXISTS on MetatraderAccount and settles checklist item 1.1's open question TODAY and for free — and reading it found a LIVE ADAPTER DEFECT, since the SDK counts an account connected when the PRIMARY OR ANY REPLICA is CONNECTED while _require_broker_link checks only the primary, so a replicated account with a healthy replica makes the adapter raise on every read while the vendor considers it connected, which is B349's consequence by a second route. Review also records nearly filing the opposite: its first check asked the two connection-instance classes, got False from both, and a negative from a scan over the WRONG POPULATION reads exactly like a negative about the package. B360: T-0134's own requirement to DECIDE AND RECORD where the MetaApi token comes from was half met — decided as the credential blob at manager.py:117, recorded NOWHERE, with no METAAPI_TOKEN anywhere in backend/app — and a DONE marker closed it, in a section whose surrounding paragraph is still present-tense text describing the world BEFORE the task it marks complete.)
 
 ---
 
@@ -23298,6 +23298,83 @@ order path reaches the adapter (`B346`/`B350`), and Gate 1 is still landing chan
 file the deploy would ship.
 
 Related: **B309**, **B333**, **B324**, **B356**, **B346**.
+
+---
+
+### B359 — THE LINK GUARD IGNORES REPLICAS WHILE THE SDK'S OWN `wait_connected` COUNTS THEM. A healthy multi-region account can read as unreachable, and the refusal lands on the kill switch
+
+`MetatraderAccount.wait_connected()` is the SDK's own answer to the question `_require_broker_link`
+hand-rolls — *"Waits until API server has connected to the terminal and terminal has connected to
+the broker."* Its definition of connected:
+
+```python
+def check_connected():
+    return 'CONNECTED' in [self.connection_status] + list(
+        map(lambda replica: replica.connection_status, self.replicas))
+```
+
+**The vendor counts the primary OR ANY REPLICA. The adapter checks only the primary.**
+
+MetaApi deploys account replicas across regions and the RPC connection is served by whichever region
+is live. So on a replicated account whose primary reports `DISCONNECTED_FROM_BROKER` while a replica
+is `CONNECTED`, **the adapter raises `MT5BrokerUnreachable` on every read while the vendor considers
+the account connected.**
+
+**The direction is safe and the consequence is not.** Failing closed is right — but `B349` is the
+entry about `close_all_positions` refusing to act, and this is a second, independent way to reach
+the same refusal: the kill switch declines to enumerate a book it could have read, on an account
+that is up. *Refusing to act on the kill switch is leaving every position open.*
+
+**How it was nearly missed, which is the reusable half.** The first check asked whether
+`wait_connected` exists on the two connection instance classes. It does not, on either — a confident
+`False`. It exists on `MetatraderAccount`, which is the object `T-0134` made the adapter hold.
+**A negative from a scan over the wrong population is indistinguishable from a negative about the
+package**, and only widening to the whole installed tree turned it up. `B302`'s family, on the
+instrument rather than on the code.
+
+**Fix:** either call `account.wait_connected()` and let the SDK own the definition, or include
+`self.replicas` in the check and say why. **Do not leave the adapter with a private, narrower
+definition of *connected* than the vendor's** — that is `B334`'s class arriving through a semantic
+rather than a name.
+
+Related: **B349**, **B353**, **B335**, **B341**, **B334**.
+
+---
+
+### B360 — `T-0134` DECIDED THE METAAPI TOKEN'S SOURCE AND DID NOT RECORD IT. `MT5_PROGRAMME.md` required both, called it a security property rather than a style choice, and marks the task DONE
+
+The plan's own text, in the `T-0134` section:
+
+> *"It must also decide and record where the MetaApi token comes from — environment variable versus
+> the credential blob on the connection row — **because that is a security property, not a style
+> choice**."*
+
+Measured in the landed branch:
+
+```
+manager.py:117   token = creds.get("token", creds.get("api_token", ""))
+grep -rn METAAPI_TOKEN backend/app   ->   no results
+```
+
+**The decision was made — the credential blob on the connection row — and the reasoning is nowhere.**
+Not in the branch, not in the commit, not in the register. The omission is conspicuous rather than
+incidental: the twenty lines immediately above that assignment carry a detailed comment about a
+stale `B346` citation and about why `observe_only` is not passed on, so the one decision the plan
+singled out as a security property is the one with no note.
+
+**Why it is not a style choice, stated so the next reader does not have to re-derive it.** A token in
+a credential blob lives in the database, in every backup and dump, and behind whatever surface reads
+`broker_connections`; an environment variable lives in the deployment and not in the data. They fail
+differently and they are recovered differently. Either is defensible; **which one was chosen, and
+why, is the thing a security review needs and cannot reconstruct from an assignment expression.**
+
+**And the section carrying that requirement is marked DONE**, so nothing will re-raise it. That is
+the mechanism worth noting: a plan that states a requirement, a task that satisfies the visible half,
+and a completion marker that closes the invisible half with it.
+
+Related: **B334**, **B352**, **B346**.
+
+---
 
 ---
 
