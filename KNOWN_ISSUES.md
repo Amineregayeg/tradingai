@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-05 (B346 — EVEN ONCE mt5 IS CONSTRUCTIBLE, NOTHING IN THE ENGINE WOULD SEND IT AN ORDER. Traced because Malek asked whether he can start fully setting up the new simulation, which required reading the ORDER PATH rather than the adapter and nobody had. There are exactly two place_order call sites in the app: service.py:167 and live_loop_proxy.py:142, and both ExecutionService constructions in the tree pass the in-process paper broker (crypto_loop.py:168 and :794) while the proxy resolves to that same loop.paper — so NO BrokerAdapter held by the broker manager is on any order path. Reads are; writes are not. THREE INDEPENDENT REFUSALS STAND BEHIND IT AND ALL ARE DELIBERATE: ExecMode has NO LIVE member because the branch was removed rather than disabled, execute() RAISES at service.py:96 on any adapter reporting is_simulation=False, and MetaTrader5Adapter returns exactly that pending T-0076. The safety design works; what nobody had written down is that it also means THE DEMO CANNOT BE TRADED — linking for reads is T-0134 plus B341's reshape and is close, while running the strategy against the demo is a PROGRAMME needing a ruling and an order path that has never been scoped. B305 to B333 to this is the same walk three times — what instrument does it trade, what constructs it, what sends it an order — each found only when someone outside the task's frame asked a question the task did not need answered. FILED WITH B344, in which I asserted twice in one afternoon what an instrument could discriminate, from reading it, and was wrong both times: I predicted pip install would settle NAMES when nine of nine were already correct and the live axis was ARRANGEMENT, and I published that our ASSUMES meta-arm checks references RESOLVE when it checks that the WORD 'checklist' occurs. Review asked to be included and is, as a third instance, with the difference kept: a wrong prediction about CONTENT and a wrong prediction about an INSTRUMENT'S DISCRIMINATING POWER are not the same error, because the second one gets used to DISPATCH work.)
+Last updated: 2026-09-05 (B351 — MY CORRECTION TO MT5_FIRST_CONNECTION ITEM 1.1 REPLACED A LOUD FAILURE WITH A QUIET LIE, in the item Malek runs first, on the day he asked to link his account. Three versions in one day and the middle one is mine and the worst: v1 named members that do not exist and raised AttributeError, which teaches nothing but announces it; v2 told him to print account.connection_status after each of three calls, and that is a CACHED property returning self._data['connectionStatus'] from the last REST payload, refreshed only by awaiting reload() — so it prints the SAME VALUE THREE TIMES and the reader concludes the connection state never changes, in the document whose whole purpose is teaching the difference between CANNOT SEE and NOTHING THERE. v3 requires await account.reload() before each print. AND THE FINDING v2 RESTED ON WAS ITSELF TOO STRONG: TerminalState.connected and connected_to_broker DO exist, push-updated by on_broker_connection_status_changed, so the adapter's pair was not invented and matches the SDK's streaming API exactly — the real defect is that the members are split across two objects sharing no reads, RpcMetaApiConnectionInstance having every read and no terminal_state while StreamingMetaApiConnectionInstance has terminal_state and none of the reads, so no single connection serves both the data and the guard, which is why reload() beats holding a second websocket to answer one boolean pair. THE MECHANISM IS B344's, THIRD INSTANCE IN ONE DAY AND THE ONLY ONE THAT REACHED MALEK: I took a peer's measurement of a field's VOCABULARY and published a procedure depending on its FRESHNESS, which nobody had checked. Execute made the move first and caught itself; I repeated it downstream without re-deriving anything, because one-vendor-enum-replaces-two-invented-booleans was tidy. The SDK was already installed — inspect.getsource answers it in four minutes.)
 
 ---
 
@@ -22363,3 +22363,81 @@ Related: **B339**, **B298**, **B211**, **B215**, **B184**.
 > **M3 is the arm's real control.** It reconstructs the original code exactly and the new guard
 > goes red, so the guard fails on the defect it was written for rather than only on a synthetic
 > one.
+
+---
+
+### B351 — MY CORRECTION TO THE CHECKLIST REPLACED A LOUD FAILURE WITH A QUIET LIE, in the item Malek runs first, on the day he asked to link his account
+
+**Filed 2026-09-05 by manager, against myself.** `MT5_FIRST_CONNECTION.md` item 1.1 has now had
+three versions in one day, and **the middle one is mine and is the worst of the three.**
+
+```
+v1   print terminalState.connected / .connected_to_broker    -> AttributeError, LOUD  (B341)
+v2   print account.connection_status at each step            -> THE SAME VALUE THREE TIMES, silent
+v3   await account.reload() before each print                -> the question actually asked
+```
+
+## WHY v2 IS WORSE THAN v1 AND NOT AN IMPROVEMENT ON IT
+
+**v1 named members that do not exist.** Anyone running it got an exception, learned nothing, and
+knew they had learned nothing. **v2 runs clean and answers wrongly.** `connection_status` is a
+cached property — measured in the installed SDK, not read from documentation:
+
+```python
+@property
+def connection_status(self) -> str:
+    return self._data['connectionStatus']       # the last REST payload
+
+async def reload(self):
+    self._data = await self._metatrader_account_client.get_account(self.id)
+```
+
+**It changes only when `reload()` is awaited.** So v2's instruction — *"print `connection_status`
+after each of the three calls and the answer falls out"* — prints the payload fetched before any of
+them, three times, and the reader concludes the connection state never changes.
+
+> **The item exists to teach the difference between *cannot see* and *nothing there*. v2 would have
+> taught a third thing that is false, in the document written for the first hour on a real account.**
+
+## AND THE FINDING v2 WAS BUILT ON WAS ITSELF TOO STRONG
+
+`B341` says no SDK object has the shape `mt5.py` assumes, and I was told the adapter *"invented a
+two-boolean pair to express something the SDK ships as one enum."* **Both overshoot.** Measured:
+
+```
+TerminalState.connected             EXISTS   push-updated by on_broker_connection_status_changed
+TerminalState.connected_to_broker   EXISTS   same
+
+RpcMetaApiConnectionInstance        ALL the reads     no terminal_state
+StreamingMetaApiConnectionInstance  terminal_state    NONE of the reads
+```
+
+**The adapter's pair was not invented. It matches the SDK's streaming API exactly.** The real defect
+is narrower and more useful: **the members are real and split across two objects that share no
+reads**, so no single connection can serve both the data and the guard. That is why the answer is
+`reload()` on the account rather than a second websocket held permanently to answer one boolean
+pair.
+
+## THE MECHANISM, AND IT IS THE ONE I FILED ABOUT MYSELF SIX HOURS EARLIER
+
+**`B344` records that I asserted twice in one day what an instrument could discriminate, from
+reading rather than running. This is the third time, same day, and this one reached Malek.** I took
+a peer's measurement of a field's *vocabulary* — the name exists, the three values are documented,
+they match `B292`'s distinction — and published a procedure depending on its *freshness*, which
+nobody had checked.
+
+**Execute made the same move first and caught itself:** *"I verified the field's vocabulary and not
+its freshness. That is the same shape as the finding it was correcting."* **I then repeated it
+downstream, into a user-facing document, without re-deriving anything** — the tidiness of *one
+vendor enum replaces two invented booleans* was doing the work, and this register's own rule is that
+the tidier claim is the one to recheck.
+
+**What would have caught it, and it cost four minutes when I finally did it:** the SDK was already
+installed. `inspect.getsource` on the property answers the freshness question directly, and the
+two-object split fell out of the same session. **The instrument was on the machine before the
+document was written.**
+
+Related: **B341**, **B344**, **B292**, **B140**, **B333**.
+
+---
+

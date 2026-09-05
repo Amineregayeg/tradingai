@@ -57,11 +57,53 @@ needs no working account, and it is free.**
 > cloud but not to the broker* is not a state we have to infer from two booleans — it is one of
 > three documented values. The two-boolean pair was ours, and `B335` is what believing in it cost.
 
+> ### ⚠ CORRECTED AGAIN, SAME DAY — **v2 OF THIS ITEM WOULD HAVE PRINTED THE SAME VALUE THREE TIMES** `B351`
+>
+> **v1 named members that do not exist and would have raised `AttributeError`. v2 — mine — was
+> worse: it returns a confident wrong answer.** `connection_status` is a **cached property**,
+> measured in the installed SDK:
+>
+> ```python
+> @property
+> def connection_status(self) -> str:
+>     return self._data['connectionStatus']        # the last REST payload
+>
+> async def reload(self):
+>     self._data = await self._metatrader_account_client.get_account(self.id)
+> ```
+>
+> **It changes only when `reload()` is awaited.** Printing it after `connect()`, then after
+> `wait_synchronized()`, prints the payload fetched before any of them — three identical values,
+> from which a reader concludes something false about the connection lifecycle.
+>
+> **And the two booleans the adapter originally assumed DO exist** — `TerminalState.connected` and
+> `TerminalState.connected_to_broker`, push-updated by `on_broker_connection_status_changed`. They
+> are simply on the **streaming** connection. Measured:
+>
+> ```
+> RpcMetaApiConnectionInstance        ALL the reads          no terminal_state
+> StreamingMetaApiConnectionInstance  terminal_state         NONE of the reads
+> ```
+>
+> **No single connection can serve both the data and the guard.** That is the real arrangement
+> defect, and it is why the answer is `reload()` rather than a second websocket held to answer one
+> boolean pair.
+
 **Question:** what does `connection_status` report at each step, and what does `get_positions()`
 return while it reads `DISCONNECTED_FROM_BROKER`?
 
-**Call:** `connect()`, then `wait_synchronized()`, printing `account.connection_status` at each
-step.
+**Call:** `connect()`, then `wait_synchronized()` — and **`await account.reload()` immediately
+before each print**, or the value is stale by construction:
+
+```python
+await account.reload();  print("after connect:      ", account.connection_status)
+await connection.wait_synchronized()
+await account.reload();  print("after synchronized: ", account.connection_status)
+```
+
+**The reload is not a detail of the test — it is the thing being tested.** An adapter that reads
+this field without one has a guard that answers `CONNECTED` from a payload fetched arbitrarily long
+before the broker link dropped.
 
 **AND SETTLE THIS WHILE YOU ARE HERE, because it is new and unresolved:** we call `connect()` then
 `wait_synchronized()`. The SDK also documents **`wait_connected()`**, described as waiting until the
