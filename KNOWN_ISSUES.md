@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-11 (B392 — "M SHORTS REFUSED BY VENUE" IS NOT COUNTABLE. rejection_reason is free Text and outcome is a single REJECTED, so a venue refusal, a drift rejection and a min-size rejection are the same row and the only discriminator is PROSE — and the last two happen ABOVE place_order, never reaching the venue. The obvious fix is the wrong one: matching the venue's sentence keys a count on a string the venue chose, which returns a confident ZERO the day the wording changes rather than failing. So T-0137 counts EVERY rejection and names the mixture in the title, which is the honest weaker thing. A first cut rendered '147 SHORT refused' beside a LONG ONLY badge — adjacency is a causal claim, B380's shape — and execute caught it in its own output. REMEDY: a structured rejection_code enum beside the prose, so GROUP BY signal_dir, rejection_code answers it exactly. SCOPED TO T-0138, since part C is when the venue stops being hypothetical. Until it lands NO SURFACE MAY ATTRIBUTE A REJECTION COUNT TO THE VENUE.)
+Last updated: 2026-09-11 (B389 MODIFIED — SETTLED AT DRIVEN GRADE BY MANAGER: TradingClient(k,s,paper=True,url_override=<live>) returns base_url https://api.alpaca.markets while is_simulation returns True, so the assertion gating ALL execution passes on a client pointed at real money. url_override WINS, confirmed by CONSTRUCTION rather than by reading the constructor, so the remedy is mandatory rather than precautionary. AND THE 'I CANNOT VERIFY THIS FROM MY SEAT' IN THE ENTRY WAS ITSELF FALSE: the venv is at ~/.venvs/tradingai and I found it only because an unrelated ps printed the interpreter path of a suite review was running. I searched, got nothing, and wrote the nothing in as a property of MY SEAT rather than of MY SEARCH — a filesystem find timed out over the WSL mount, I narrowed it to the repo, and the venv is in $HOME outside the tree, so the narrowing that made the search finish is what made it blind. A limitations section is where this hides, because it reads as rigour. Latest heading remains B392.)
 
 ---
 
@@ -25162,7 +25162,31 @@ url_override outranks paper in the SDK   review, READING alpaca/trading/client.p
                                          a driven measurement                              REVIEW
 ```
 
-**CORRECTED AFTER FILING — I recorded the third line one grade HIGHER than it earned.** I wrote
+**SETTLED AT DRIVEN GRADE 2026-09-11, BY ME, AND THE "I CANNOT" IN THIS ENTRY WAS ITSELF WRONG.**
+
+```
+TradingClient("k","s",paper=True)                          ->  BaseURL.TRADING_PAPER
+TradingClient("k","s",paper=True,url_override=<live URL>)  ->  https://api.alpaca.markets
+```
+
+**`url_override` WINS. Confirmed by CONSTRUCTION, not by reading.** A client built `paper=True` is
+pointed at the live endpoint while `is_simulation` returns `True` — the assertion that gates all
+execution passing on a real-money client. **The remedy is now mandatory rather than precautionary.**
+
+**HOW I FOUND IT IS THE LESSON, AND IT IS THIS SESSION'S RECURRING ONE.** I wrote below that this
+seat could not settle it — the SDK "is installed where execute works and is not importable here."
+**That was false.** The venv is at `/home/docz/.venvs/tradingai/`, and I found it only because an
+unrelated `ps` printed the interpreter path of a suite review happened to be running. **I searched,
+got nothing, and wrote the nothing into the entry as a property of MY SEAT rather than of MY
+SEARCH** — the same shape as reading a rejected regex's empty output as *no findings*. **A
+limitations section is exactly where this hides, because it reads as rigour.**
+
+**THE SEARCH FAILED FOR A REASON WORTH NAMING:** a filesystem-wide `find` timed out at 120s over the
+WSL mount, so I narrowed it to the repo — and the venv is in `$HOME`, outside the tree. **The
+narrowing that made the search finish is what made it blind**, and nothing in the empty result said
+so.
+
+**CORRECTED AFTER FILING — I had also recorded the third line one grade HIGHER than it earned.** I wrote
 "driven"; review then volunteered, unasked, that it had *read the constructor* rather than
 constructed a client and printed its `base_url`. **The correction came from the seat the grade
 flattered**, which is the direction this rarely runs — and `B387` is the standing entry for why a
