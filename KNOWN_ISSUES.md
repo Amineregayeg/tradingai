@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-10 (B389 — `is_simulation` REPORTS THE FLAG WE PASSED, NOT WHERE THE CLIENT IS POINTED. Found by review while attacking my claim that part C needs no safety-layer change. The claim HOLDS and my REASON for it was wrong: it holds not because a paper account is a simulation but because `paper` SELECTS THE ENDPOINT — and `url_override` outranks `paper` entirely, so `paper=True, url_override=<live>` points at live while `is_simulation` returns True, a real-venue adapter reaching execute() with the assertion passing. VERIFIED BY ME: we pass url_override nowhere (grep exit 1, not an error), and is_simulation returns the constructed flag. VERIFIED BY REVIEW, not re-verifiable from my seat: the SDK precedence line. The remedy does not depend on it — is_simulation reports a value we passed and never asks the client where it points. Latent today, one keyword argument from live. The inverse of B215/B292/B372/B380: not COULD NOT recorded as DID NOT, but INTENT recorded as FACT.)
+Last updated: 2026-09-10 (B390 — `records_rejected_signals: True` IS A HARDCODED LITERAL THAT CERTIFIES ITS OWN RUN. The second instance of B389's class — intent recorded as fact — found the same evening, inside the task whose whole purpose is the thing the flag claims. Written unconditionally at snapshot time before any signal has been refused, and the only assertion on it reads the literal back, so it CANNOT FAIL. If _record_rejected_signal is never reached, the 147 refused SHORTs leave no record while run.config still certifies the rejections COMPLETE — B380 with a config key in place of a breach monitor. Remedy: the arm must assert the RECORDS (a DecisionRecord with outcome=REJECTED carrying the venue's reason, and the GROUP BY signal_dir count), not the flag. Sent to execute mid-build rather than held for review. GENERALISATION: several config-snapshot keys assert run properties and none is verified against what the run produced; that sweep has NOT been run. Also MODIFIED B389 — I graded review's SDK finding as 'driven' when it was a SOURCE READING, and review volunteered the downgrade unasked.)
 
 ---
 
@@ -25104,8 +25104,8 @@ on a TRUE flag rather than a relaxed one."* I asked review to break it rather th
 
 **The claim holds. The REASON I gave for it was wrong, and the wrong reason is load-bearing.**
 
-It does not hold because a paper account *is* a simulation. Per review, driven against the installed
-SDK at `7b8d895`, it holds because `paper` **selects the endpoint**:
+It does not hold because a paper account *is* a simulation. It holds because `paper` **selects the
+endpoint**:
 
 ```python
 base_url = url_override if url_override else (TRADING_PAPER if paper else TRADING_LIVE)
@@ -25121,8 +25121,18 @@ base_url = url_override if url_override else (TRADING_PAPER if paper else TRADIN
 our code passes url_override NOWHERE     grep over app/, exit code 1 (no match, NOT an error)  ME
 is_simulation returns the constructed
   flag, derived from no endpoint         alpaca.py:181-185, read                               ME
-url_override outranks paper in the SDK   review, driven at 7b8d895                          REVIEW
+url_override outranks paper in the SDK   review, READING alpaca/trading/client.py's
+                                         constructor -- a SOURCE READING, one grade BELOW
+                                         a driven measurement                              REVIEW
 ```
+
+**CORRECTED AFTER FILING — I recorded the third line one grade HIGHER than it earned.** I wrote
+"driven"; review then volunteered, unasked, that it had *read the constructor* rather than
+constructed a client and printed its `base_url`. **The correction came from the seat the grade
+flattered**, which is the direction this rarely runs — and `B387` is the standing entry for why a
+peer's claim about its own work is the one class that goes unchecked. **What would settle it at the
+grade I originally claimed:** construct `TradingClient(k, s, paper=True, url_override=<live>)` and
+print `base_url`. Execute can; this seat cannot.
 
 **I could not re-verify the third line from this seat — the SDK is installed where execute works and
 is not importable here, and `docker` is not on this seat's PATH.** It is recorded as review's
@@ -25144,3 +25154,54 @@ from the client's `base_url`, or assert the two agree at construction. Registere
 **The general shape, and it outlives Alpaca:** `B215`, `B292`, `B372`, `B380` are all *could not*
 recorded as *did not*. **This is its inverse — INTENT recorded as FACT.** A safety check that reads
 a value we supplied is checking our paperwork, not the world.
+
+### B390 — `records_rejected_signals: True` IS A HARDCODED LITERAL THAT CERTIFIES ITS OWN RUN. The config asserts the rejection records are complete; nothing checks it against the records, and the arm written for it cannot fail
+
+**The second instance of `B389`'s class, found the same evening, in the task whose entire purpose is
+the thing the flag claims.** Review named it while returning a correction on something else; I
+verified it and it is worse in situ than in the abstract.
+
+```
+crypto_loop.py:650                        "records_rejected_signals": True,   HARDCODED LITERAL
+grep -rn records_rejected_signals backend/ --include=*.py   ->   3 hits, exit 0
+  crypto_loop.py:650                      the literal
+  test_t0137_refusal_recorded.py:227      assert run.config[...] is True
+  test_t0136_alpaca_adapter.py:390        a docstring
+NOTHING verifies it against DecisionRecord
+```
+
+**It is written unconditionally at snapshot time — before a single signal has been refused — and the
+only assertion on it reads the literal back.** `assert run.config["records_rejected_signals"] is
+True` **cannot fail**: it is the paperwork checking the paperwork, and it is the exact form
+`B389` names as *intent recorded as fact*.
+
+**WHY THIS ONE IS NOT ACADEMIC.** The failure it permits is the failure `T-0137` exists to prevent.
+If `_record_rejected_signal` is never reached, swallows an error, or is left unwired, then:
+
+```
+the 147 refused SHORTs leave NO record
+run.config still says     records_rejected_signals: True
+every downstream reader believes that run's rejections are COMPLETE
+```
+
+**So the absence is not merely unrecorded — it is actively CERTIFIED AS HEALTHY by a config key.**
+That is `B380` four days later with a config literal in place of a breach monitor, and `B215`'s
+family inverted: not *could not* recorded as *did not*, but *nothing happened* recorded as
+*everything was captured*.
+
+**REMEDY, and it is the same shape as `B389`'s.** The flag is a claim about intent, so either it
+stops being a flag and becomes a QUERY — a run's rejection completeness derived from the records —
+or it stays and **something asserts the two agree**. The arm must assert the RECORDS: that a refused
+SHORT produced a `DecisionRecord` with `outcome=REJECTED` carrying the venue's reason, and that
+`GROUP BY signal_dir` returns the expected count. **A row you can query is evidence; a flag we wrote
+is a claim.**
+
+**Sent to execute mid-build on `T-0137` rather than held for the review**, because the arm has to be
+written the right way once rather than adjusted afterwards.
+
+**THE GENERALISATION, which is the part worth keeping:** this tree carries several
+config-snapshot keys asserting properties of a run. **Every one of them is our own paperwork unless
+something verifies it against what the run actually produced**, and `EngineRun.config`'s docstring —
+*"snapshotted at start so a result can never be read against the wrong settings later"* — is exactly
+the reasoning that makes such a key feel trustworthy. **A sweep of that config block for keys no
+consumer verifies is the countermeasure, and it has not been run.**
