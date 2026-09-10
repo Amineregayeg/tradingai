@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-11 (B391 — A VENUE CONSTRAINT ENFORCED IN THE VENUE ADAPTER IS UNREACHABLE IN EVERY PAPER RUN. The live loop builds PaperBroker/SimPropFirmBroker at two sites and hands THOSE to ExecutionService; it has never executed against a venue adapter. So the long-only refusal written the obvious way — in AlpacaAdapter.place_order — would have passed every unit arm and refused nothing in a paper run. Found before writing the enforcement, which is the only reason it is a note and not an incident. Same shape as PaperBroker ignoring lot_size, with direction substituted for size: a simulator that permits what the venue forbids is not a simulation of that venue, and it errs toward MORE fills. Remedy taken: the reason lives in alpaca.py, the policy object on BrokerAdapter, both simulators enforce it, fixed_config wires it. NOT FIXED: nothing forces a new adapter to honour direction_policy — it defaults to None and a silent exemption is exactly how lot_size was lost; after T-0138 there will be two enforcement points on the live path; and the loop's routing is covered structurally rather than driven. See B390 for the flag that would have certified the resulting silence as healthy.)
+Last updated: 2026-09-11 (B392 — "M SHORTS REFUSED BY VENUE" IS NOT COUNTABLE. rejection_reason is free Text and outcome is a single REJECTED, so a venue refusal, a drift rejection and a min-size rejection are the same row and the only discriminator is PROSE — and the last two happen ABOVE place_order, never reaching the venue. The obvious fix is the wrong one: matching the venue's sentence keys a count on a string the venue chose, which returns a confident ZERO the day the wording changes rather than failing. So T-0137 counts EVERY rejection and names the mixture in the title, which is the honest weaker thing. A first cut rendered '147 SHORT refused' beside a LONG ONLY badge — adjacency is a causal claim, B380's shape — and execute caught it in its own output. REMEDY: a structured rejection_code enum beside the prose, so GROUP BY signal_dir, rejection_code answers it exactly. SCOPED TO T-0138, since part C is when the venue stops being hypothetical. Until it lands NO SURFACE MAY ATTRIBUTE A REJECTION COUNT TO THE VENUE.)
 
 ---
 
@@ -25303,3 +25303,47 @@ green, including both that assert nothing was opened and the one that checks the
 `records_rejected_signals: True` sits in the same run's config whether or not a single refusal was
 ever written. The arm for it now asserts the rows and reads the flag only to catch the config being
 dropped entirely.
+
+### B392 — "M SHORTS REFUSED BY VENUE" IS NOT COUNTABLE. `rejection_reason` is free `Text` and `outcome` is a single `REJECTED`, so a venue refusal and a drift rejection are the same row, and the only discriminator is PROSE
+
+**The programme's part-B deliverable was `N longs taken, M shorts refused by venue`. What `T-0137`
+can honestly deliver is `M shorts rejected`, mixture unstated in the number and named in the title.
+Execute made the right call and this entry records why the weaker thing is the honest one.**
+
+```
+DecisionRecord.rejection_reason   Text, free-form          decision_record.py:367
+DecisionRecord.outcome            String, "REJECTED"       decision_record.py:322
+db/enums.py                       REJECTED -- ONE member, no venue/policy/transport split
+```
+
+**So nothing distinguishes these three, and they are not the same event:**
+
+```
+refused because the VENUE cannot express the direction      a permanent venue rule
+rejected because entry DRIFT exceeded tolerance             a transient market condition
+rejected because SIZING returned below the minimum          a configuration consequence
+```
+
+**The last two happen ABOVE `place_order` and never reach the venue at all.**
+
+**WHY THE OBVIOUS FIX IS THE WRONG ONE, and this is the part worth keeping.** Counting only venue
+refusals means matching `rejection_reason` against the venue's sentence. **That keys a count on a
+string the venue chose**, and a scan keyed on vocabulary returns a confident zero the day the
+wording changes — it does not fail, it reports *none*. Execute declined to do it for exactly this
+reason and counted every rejection instead.
+
+**AND THE SHORTFALL NEARLY SHIPPED AS SOMETHING WORSE.** A first cut rendered `147 SHORT refused`
+beside a `LONG ONLY` badge. **Adjacency is a causal claim**: it reads as *the venue refused these
+147*, when an unknown share were drift and sizing rejections that never reached a venue. Execute
+caught it in its own output and it now reads `rejected` with the mixture named. **`B380` is the
+standing instance of a surface turning a number into a conclusion the number does not support.**
+
+**REMEDY — a structured code, so the count keys on an ENUM rather than a sentence.** A
+`rejection_code` beside the prose (`VENUE_DIRECTION_UNSUPPORTED`, `ENTRY_DRIFT`, `MIN_SIZE`), with
+`rejection_reason` kept as the venue's own words. Then `GROUP BY signal_dir, rejection_code` answers
+the programme's question exactly, and the prose stays free to change.
+
+**SCOPED TO `T-0138`, NOT BACKFILLED INTO `T-0137`.** Part C is when the venue stops being
+hypothetical, and *refused by venue* has to be exactly countable at the moment refusals start coming
+from a real one. **Until it lands, no surface may attribute a rejection count to the venue** — the
+title carries the mixture, and that is a constraint on the UI, not a note.
