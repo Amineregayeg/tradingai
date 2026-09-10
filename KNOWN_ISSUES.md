@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-10 (B388 — FIXING A DEFECT CLASS DOES NOT INOCULATE THE CODEBASE AGAINST IT. Filed as 'you are PRIMED to reproduce a class you just fixed' and CORRECTED: the CFT instance predates B377's filing by 71 days, so it cannot have been primed by a fix that did not exist. The class is INVITED BY THE API SHAPE — every venue offers two near-synonymous optional numerics and a fallback is the obvious way to fill one. The two mechanisms predict different things: 'primed after a fix' predicts WHEN and needs someone to remember; 'invited by the shape' predicts WHERE and is a scan runnable today. Running it found TWO MORE in the file I had just fixed — an absent P&L becoming ZERO, and an absent mark becoming the ENTRY price, which asserts the position is at BREAKEVEN — because I was searching for the instance I remembered rather than the shape. The sweep needs a must-hit control against a commit known to contain the class, or a clean result is indistinguishable from a broken scanner.)
+Last updated: 2026-09-10 (B389 — `is_simulation` REPORTS THE FLAG WE PASSED, NOT WHERE THE CLIENT IS POINTED. Found by review while attacking my claim that part C needs no safety-layer change. The claim HOLDS and my REASON for it was wrong: it holds not because a paper account is a simulation but because `paper` SELECTS THE ENDPOINT — and `url_override` outranks `paper` entirely, so `paper=True, url_override=<live>` points at live while `is_simulation` returns True, a real-venue adapter reaching execute() with the assertion passing. VERIFIED BY ME: we pass url_override nowhere (grep exit 1, not an error), and is_simulation returns the constructed flag. VERIFIED BY REVIEW, not re-verifiable from my seat: the SDK precedence line. The remedy does not depend on it — is_simulation reports a value we passed and never asks the client where it points. Latent today, one keyword argument from live. The inverse of B215/B292/B372/B380: not COULD NOT recorded as DID NOT, but INTENT recorded as FACT.)
 
 ---
 
@@ -25094,3 +25094,53 @@ the class, or a clean result is indistinguishable from a broken scanner.
 
 **Related:** `B377`, `B215`, `B338`, `B349`, `B184`.
 
+
+### B389 — `is_simulation` REPORTS THE FLAG WE PASSED, NOT WHERE THE CLIENT IS POINTED. The safety assertion that gates all execution reads our INTENT, and `url_override` sets the endpoint behind its back
+
+**Found by review while attacking a claim of mine, which is the only reason it surfaced.** I asserted
+in `ALPACA_PROGRAMME.md` part C that the safety layer needs no change — *"`ExecMode.PAPER` stays
+correct because an Alpaca paper account genuinely is a simulation, so `execute()`'s assertion passes
+on a TRUE flag rather than a relaxed one."* I asked review to break it rather than confirm it.
+
+**The claim holds. The REASON I gave for it was wrong, and the wrong reason is load-bearing.**
+
+It does not hold because a paper account *is* a simulation. Per review, driven against the installed
+SDK at `7b8d895`, it holds because `paper` **selects the endpoint**:
+
+```python
+base_url = url_override if url_override else (TRADING_PAPER if paper else TRADING_LIVE)
+```
+
+**So `url_override` takes precedence over `paper` entirely.** A client built with
+`paper=True, url_override=<live URL>` is pointed at the live endpoint while `is_simulation` returns
+`True` — a real-venue adapter reaching `execute()` with the assertion passing.
+
+**WHAT IS VERIFIED HERE, AND BY WHOM — because these are not the same grade of evidence:**
+
+```
+our code passes url_override NOWHERE     grep over app/, exit code 1 (no match, NOT an error)  ME
+is_simulation returns the constructed
+  flag, derived from no endpoint         alpaca.py:181-185, read                               ME
+url_override outranks paper in the SDK   review, driven at 7b8d895                          REVIEW
+```
+
+**I could not re-verify the third line from this seat — the SDK is installed where execute works and
+is not importable here, and `docker` is not on this seat's PATH.** It is recorded as review's
+measurement rather than mine, and `B387` is the standing reason that distinction is written down.
+
+**But the remedy does not depend on that third line**, which is why this is filed rather than held:
+whatever the SDK's precedence rule turns out to be, **`is_simulation` reports a value we passed in
+and never asks the client where it is actually pointed.** A flag we passed is a record of our
+intent; the base URL is where the money is. Every route that separates the two is invisible to the
+assertion, and `url_override` is merely the one review found.
+
+**Latent, not live** — nothing constructs an Alpaca adapter for the loop yet, and no caller passes
+`url_override`. **One keyword argument away**, and the assertion would not notice.
+
+**Remedy, one line and it removes the latency rather than documenting it:** derive `is_simulation`
+from the client's `base_url`, or assert the two agree at construction. Registered as `M-4`/`M-5` in
+`agents/tasks/T-0138/KILL_SET.md`, with `M-5` the must-miss that stops always-`True` satisfying it.
+
+**The general shape, and it outlives Alpaca:** `B215`, `B292`, `B372`, `B380` are all *could not*
+recorded as *did not*. **This is its inverse — INTENT recorded as FACT.** A safety check that reads
+a value we supplied is checking our paperwork, not the world.
