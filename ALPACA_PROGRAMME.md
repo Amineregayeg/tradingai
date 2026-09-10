@@ -63,7 +63,7 @@ TRADES by direction     SHORT 147     LONG 146
 
 # WHAT NEEDS TO BE DONE
 
-## A — The adapter
+## A — The adapter  ✅ **DONE** — `T-0136`, landed `54c3982`, 27 arms
 
 **Goal: an `AlpacaAdapter` the platform can construct and read from.**
 
@@ -81,7 +81,20 @@ shape — rows enumerated before the loop, report published before it runs, per-
 continuing — is proven twice; and the could-not-ask work at the aggregate layer (`B372`) is not
 MT5's.
 
-## B — The long-only refusal ⛔ **the one that decides whether the simulation is readable**
+## B — The long-only refusal  ✅ **DONE** — `T-0137`, landed `df1ed4c`, passed review 2026-09-10T23:36:50Z
+
+> **`B391` changed where this lives, and it is the finding of the programme so far.** The refusal
+> could NOT have gone in `AlpacaAdapter.place_order`: the live loop has never executed against a
+> venue adapter at all — it builds `PaperBroker`/`SimPropFirmBroker` and hands THOSE to
+> `ExecutionService`. Written the obvious way, every unit arm would pass and **not one short would
+> be refused in a paper run.** So `DirectionPolicy` lives on `base.py`, the venue owns the reason,
+> and BOTH simulators enforce it — *a simulator that permits what the venue forbids is not a
+> simulation of that venue.*
+>
+> **Delivered weaker than specified, on purpose (`B392`):** the split reads `M shorts rejected`
+> with the mixture named, not `M shorts refused by venue`. `rejection_reason` is free text, so an
+> exact venue count would key on the venue's own sentence — which returns a confident ZERO the day
+> the wording changes rather than failing. The structured `rejection_code` is scoped into C.
 
 **Goal: every SHORT the strategy produces is REFUSED, RECORDED, and COUNTED — never dropped.**
 
@@ -108,7 +121,7 @@ impossible to miss:
   recorded and counted, not that the order failed.** A test asserting "no order was placed" passes
   against a crash.
 
-## C — The order path
+## C — The order path  ⚙️ **EXECUTING** — `T-0138`, six kill-set rows registered before any arm
 
 **Goal: the engine's orders reach the Alpaca paper account instead of the in-process simulator.**
 
