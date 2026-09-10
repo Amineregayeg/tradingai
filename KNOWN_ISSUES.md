@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-11 (B389 MODIFIED — SETTLED AT DRIVEN GRADE BY MANAGER: TradingClient(k,s,paper=True,url_override=<live>) returns base_url https://api.alpaca.markets while is_simulation returns True, so the assertion gating ALL execution passes on a client pointed at real money. url_override WINS, confirmed by CONSTRUCTION rather than by reading the constructor, so the remedy is mandatory rather than precautionary. AND THE 'I CANNOT VERIFY THIS FROM MY SEAT' IN THE ENTRY WAS ITSELF FALSE: the venv is at ~/.venvs/tradingai and I found it only because an unrelated ps printed the interpreter path of a suite review was running. I searched, got nothing, and wrote the nothing in as a property of MY SEAT rather than of MY SEARCH — a filesystem find timed out over the WSL mount, I narrowed it to the repo, and the venv is in $HOME outside the tree, so the narrowing that made the search finish is what made it blind. A limitations section is where this hides, because it reads as rigour. Latest heading remains B392.)
+Last updated: 2026-09-11 (B393 — THE RESET PATH SNAPSHOTS THE CONFIG BEFORE REBUILDING THE BROKER. _config_snapshot() at crypto_loop.py:781 reads self.paper.direction_policy, but self.paper is not rebuilt until 826/831, so long_only and venue describe the broker the run just STOPPED using. Found by review running B390's sweep, verified at HEAD by manager. LATENT ONLY because all four construction sites pass the same fixed.VENUE_DIRECTION_POLICY constant, so the ordering error yields a correct value by accident and any arm asserting the key EXISTS passes regardless. T-0138 ARMS IT: C's subject is making self.paper a different object, and the moment the branches carry different policies a reset produces a run whose config describes the previous broker — rendered as a badge at RunHistoryPanel.tsx:67, so the label actively lies. THE CLASS IS A RELOCATION, which execute named on its own M-10: nothing is deleted, everything is computed, the snapshot just happens at the wrong point, and a text-substitution mutation harness CANNOT GENERATE IT. Remedy scoped into T-0138 — the task that arms a latent defect is the task that should disarm it. Sweep bound recorded: it read ONE dict in ONE file and its zero is about literal spellings, not consumers.)
 
 ---
 
@@ -25371,3 +25371,56 @@ the programme's question exactly, and the prose stays free to change.
 hypothetical, and *refused by venue* has to be exactly countable at the moment refusals start coming
 from a real one. **Until it lands, no surface may attribute a rejection count to the venue** — the
 title carries the mixture, and that is a constraint on the UI, not a note.
+
+### B393 — THE RESET PATH SNAPSHOTS THE CONFIG BEFORE REBUILDING THE BROKER, so `long_only` and `venue` describe the broker the run just STOPPED using. Latent only because all four construction sites share one policy constant — and `T-0138` is what arms it
+
+**Found by review running `B390`'s sweep; verified at `HEAD` by manager.** The sweep was commissioned
+to test whether `T-0137`'s new config keys were derived or asserted. **They are derived — execute's
+claim holds — and the defect is not WHETHER but WHEN.**
+
+```
+770  self.apply_config(config)          <- may change broker_mode
+781  config=self._config_snapshot()     <- SNAPSHOT TAKEN HERE
+826  self.paper = SimPropFirmBroker(...)   \  self.paper REBUILT
+831  self.paper = PaperBroker(...)         /  AFTER the snapshot
+```
+
+`_config_snapshot()` reads `self.paper.direction_policy`. In the reset path **that object is the
+outgoing broker.**
+
+**WHY IT IS LATENT, AND IT IS THE ONLY REASON:**
+
+```
+159, 165, 828, 833   direction_policy=fixed.VENUE_DIRECTION_POLICY   THE SAME CONSTANT, all four
+```
+
+**The ordering error produces a correct value by accident**, because the pre-reset and post-reset
+answers coincide. **A test asserting the config carries `long_only` passes, and would pass however
+wrong the ordering became.**
+
+**`T-0138` ARMS IT.** C's entire subject is making `self.paper` a different object — and `M-3` in its
+kill-set already flags `broker_mode` as a switch that has never carried a third option. **The moment
+the branches carry different policies, a reset produces a run whose config describes the broker it
+just stopped using, and `RunHistoryPanel.tsx:67` renders that as a badge**: a run labelled long-only
+that was not, or the reverse. **A mislabelled run is worse than an unlabelled one** — it is `B268`'s
+denominator problem with the label actively lying rather than missing.
+
+**THE CLASS, AND EXECUTE NAMED IT BEFORE THIS WAS FOUND.** Reviewing its own `M-10`, execute
+observed that **a RELOCATION is not a DELETION and a text-substitution harness cannot express one** —
+substituting one anchor for another degenerates into the deletion case it already tests. **This
+defect is exactly a relocation:** nothing is missing, every value is computed, the snapshot simply
+happens at the wrong point. **No arm asserting *the config has `long_only`* can catch it, because it
+does.** The arm has to reset with a config that CHANGES the policy and assert the snapshot describes
+the NEW broker — which needs two distinct policies to exist, which `T-0138` is about to provide.
+
+**REMEDY — snapshot after the rebuild, or derive those keys at read time.** Not ruled here; the seat
+in the file decides. **Scoped into `T-0138` rather than filed for later, because the task that arms
+a latent defect is the task that should disarm it.**
+
+**THE SWEEP'S BOUND, recorded because `B386` found five of six instruments carrying none.** It
+enumerated ONE dict in ONE file by reading it, and *"no automated consumer"* is a grep for LITERAL
+spellings over `backend/app` and `frontend/src` at `HEAD`. **A dynamic read — `cfg[key]` from a
+variable, a JSON path built at runtime — is invisible to it.** The one consumer it did find,
+`long_only` at `RunHistoryPanel.tsx:67`, was found only because it is spelled literally; had the
+panel written `cfg[flagName]` the sweep would have reported zero consumers. **A zero from it is a
+zero about spellings, not about consumers.**
