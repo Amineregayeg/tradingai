@@ -23,6 +23,28 @@ class BrokerConnectionError(BrokerError):
     """Raised when a broker connection cannot be established or is lost."""
 
 
+class DirectionNotSupported(BrokerError):
+    """The venue cannot take an order in this DIRECTION. A CAPABILITY, not a failure.
+
+    **The distinction is the whole point of a dedicated type.** A generic rejection —
+    *"order rejected"* — is indistinguishable from a transport failure (`B375`), and the two
+    demand opposite responses: a transport failure is worth retrying and a venue that does not
+    support shorting will refuse the same order forever. Sharing a type with
+    `BrokerConnectionError` would make *"the network was down for an hour"* and *"this venue is
+    long only"* read identically in the record.
+
+    `reason` is supplied BY THE VENUE and must name the constraint rather than restate the
+    refusal. It travels unaltered into `DecisionRecord.rejection_reason`, so whatever is written
+    here is what a reader sees months later with no other context.
+    """
+
+    def __init__(self, *, venue: str, direction: str, reason: str) -> None:
+        super().__init__(reason, broker=venue, detail=reason)
+        self.venue = venue
+        self.direction = direction
+        self.reason = reason
+
+
 class BrokerRateLimitError(BrokerError):
     """Raised when broker API rate limit is hit."""
 

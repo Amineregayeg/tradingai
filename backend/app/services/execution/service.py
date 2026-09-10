@@ -16,6 +16,7 @@ import uuid
 from dataclasses import dataclass
 from enum import Enum
 
+from app.core.exceptions import DirectionNotSupported
 from app.core.logging import logger
 from app.db.enums import DirectionType, OrderType
 from app.services.broker.base import BrokerAdapter, OrderRequest
@@ -153,9 +154,28 @@ class ExecutionService:
             return {"status": "rejected", "reason": "non-positive size / stop"}
 
         if self.mode == ExecMode.OBSERVE:
+            # ----------------------------------------------------------------
+            # THE LONG-ONLY PROPERTY IS `PAPER`-SCOPED, AND THIS IS WHERE THE SCOPE COMES FROM.
+            #
+            # This returns ABOVE `place_order`, so in OBSERVE a SHORT is neither sent nor
+            # refused — it is reported as *observed*, with a size. **Recording a venue refusal
+            # here would record an event that did not occur** (the manager's ruling, and it is
+            # `B215`'s shape: a value nobody observed written as though someone had).
+            #
+            # BUT SILENCE IS THE OTHER FAILURE. *Observed* and *refused by the venue* are the
+            # two readings this property exists to keep apart, and an OBSERVE row that says
+            # "would size 0.42 units SHORT" and nothing else reads as a trade the engine would
+            # have taken. So the venue's capability is stated as the COUNTERFACTUAL it is:
+            # `venue_would_refuse` is the reason the venue WOULD have given, or `None`. It
+            # asserts nothing about what happened, because nothing happened.
+            # ----------------------------------------------------------------
+            policy = getattr(self.broker, "direction_policy", None)
             return {"status": "observed", "would_size": round(units, 6),
                     "symbol": sig.symbol, "direction": sig.direction.value,
-                    "sizing_price": sizing_price, "entry_drift_r": drift_r}
+                    "sizing_price": sizing_price, "entry_drift_r": drift_r,
+                    "venue_would_refuse": (
+                        None if policy is None else policy.refusal(sig.direction)
+                    )}
 
         req = OrderRequest(
             pair=sig.symbol, direction=sig.direction, order_type=sig.order_type,
@@ -164,7 +184,31 @@ class ExecutionService:
             sl=sig.sl, tp=sig.tp,
             client_order_id=sig.client_order_id or f"sig-{uuid.uuid4().hex[:8]}",
         )
-        res = await self.broker.place_order(req)
+        try:
+            res = await self.broker.place_order(req)
+        except DirectionNotSupported as exc:
+            # A VENUE CAPABILITY REFUSAL IS A RESULT, NOT AN ERROR — so it is turned back into
+            # the rejection shape every other refusal on this path already uses, and the
+            # venue's own sentence is carried through UNALTERED into
+            # `DecisionRecord.rejection_reason` (`crypto_loop.py:1553`).
+            #
+            # **Only this type is caught.** Widening it to `BrokerError` would fold a network
+            # failure into "the venue refused", which is the exact confusion the dedicated type
+            # exists to prevent — and it would file a permanent-sounding reason for a condition
+            # that clears on its own.
+            #
+            # THE IN-PROCESS SIMULATORS DO NOT REACH HERE: they return the rejection dict
+            # directly, because a raise would abort the bar (the loop has no handler around
+            # this call). This branch is for an adapter that RAISES — `AlpacaAdapter` does, as
+            # it has no fill to describe for an order it never sent — and `ExecutionService`
+            # accepts any adapter reporting `is_simulation=True`, which an Alpaca paper client
+            # does truthfully.
+            logger.info(f"ExecutionService[{self.mode.value}] {sig.symbol} "
+                        f"{sig.direction.value} refused by {exc.venue}: {exc.reason}")
+            return {"status": "REJECTED", "reason": exc.reason,
+                    "pair": sig.symbol, "direction": exc.direction,
+                    "venue": exc.venue,
+                    "sized_units": round(units, 8), "equity_at_entry": acct.equity}
         res.setdefault("status", "FILLED")
         res["mode"] = self.mode.value
         res["sized_units"] = round(units, 8)

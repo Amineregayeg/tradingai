@@ -168,6 +168,42 @@ async def engine_runs(request: Request, user_id: CurrentUser, db: DBSession) -> 
                 ).where(DecisionRecord.run_id == r.id)
             )
         ).one()
+
+        # ------------------------------------------------------------------
+        # REFUSALS SPLIT BY DIRECTION (`T-0137`), AND IT IS A QUERY RATHER THAN A COUNTER.
+        #
+        # `_record_rejected_signal` already writes `signal_dir` and `outcome=REJECTED` on every
+        # refused signal, so the count is a `GROUP BY` over rows that exist. **A counter
+        # incremented alongside them would be a second representation of the same fact**
+        # (`B184`) and would drift from the rows the first time one path wrote without the
+        # other — and the rows, not the counter, are what a later reader can check.
+        #
+        # WHY THIS BELONGS ON THE SURFACE THAT ALSO CARRIES `realized_pnl`. Under a long-only
+        # venue a run that produced no shorts and a run that produced 147 and had every one
+        # refused have the SAME trade list and the same P&L. Nothing else on this endpoint can
+        # tell them apart, and *"the strategy underperformed"* is read off exactly these
+        # numbers. Putting the split anywhere else would leave this surface able to state the
+        # wrong conclusion with nothing beside it to qualify the figure.
+        #
+        # THE SPLIT IS OVER EVERY REJECTION, NOT ONLY VENUE ONES, AND THE NAME SAYS SO. A
+        # signal can also be refused for entry drift or a non-positive size; `rejection_reason`
+        # carries which. Filtering to venue refusals by matching that text would key a count on
+        # a sentence — the scan-on-vocabulary defect that has gone blind here before.
+        from app.models.decision_record import OUTCOME_REJECTED
+
+        by_direction = (
+            await db.execute(
+                select(DecisionRecord.signal_dir, func.count(DecisionRecord.id))
+                .where(
+                    DecisionRecord.run_id == r.id,
+                    DecisionRecord.outcome == OUTCOME_REJECTED,
+                )
+                .group_by(DecisionRecord.signal_dir)
+            )
+        ).all()
+        rejected_by_direction = {
+            (row[0] or "UNKNOWN"): int(row[1]) for row in by_direction
+        }
         out.append({
             "id": str(r.id),
             "started_at": r.started_at.isoformat() if r.started_at else None,
@@ -181,6 +217,8 @@ async def engine_runs(request: Request, user_id: CurrentUser, db: DBSession) -> 
             "wins": int(agg[2] or 0),
             "decisions": int(decisions[0] or 0),
             "abstentions": int(decisions[1] or 0),
+            "rejected_by_direction": rejected_by_direction,
+            "rejections": sum(rejected_by_direction.values()),
         })
     return out
 

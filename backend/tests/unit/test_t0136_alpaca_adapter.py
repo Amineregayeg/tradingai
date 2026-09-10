@@ -16,9 +16,10 @@ from decimal import Decimal
 
 import pytest
 
-from app.core.exceptions import BrokerError
+from app.core.exceptions import BrokerError, DirectionNotSupported
 from app.db.enums import DirectionType, OrderType
 from app.services.broker.alpaca import (
+    ALPACA_CRYPTO_LONG_ONLY,
     ORDER_SIDES,
     POSITION_SIDES,
     AlpacaAdapter,
@@ -380,27 +381,47 @@ def test_a_complete_account_still_reads():
 # ======================================================================================
 
 
-@pytest.mark.parametrize("direction", [DirectionType.LONG, DirectionType.SHORT])
-def test_place_order_REFUSES_EVERY_DIRECTION_in_this_phase(direction):
-    """**The refusal is direction-INDEPENDENT on purpose, and that is `T-0137`'s prerequisite.**
+def test_place_order_REFUSES_A_SHORT_WITH_THE_VENUE_REASON_and_a_LONG_AS_UNIMPLEMENTED():
+    """**THIS ARM ASSERTED THE OPPOSITE UNTIL `T-0137` LANDED, AND IT WAS RIGHT BOTH TIMES.**
 
-    The live loop records whatever reason execution hands it. An adapter that refused SHORTS before
-    the venue-owned reason existed would write **147 records of the wrong shape — worse than none,
-    because they look like coverage** — into a run whose config already claims
-    `records_rejected_signals: True`. `B376` had to land with `B372` for the identical reason.
+    It used to pin that BOTH directions refuse IDENTICALLY, and gave the reason: the live loop
+    records whatever reason execution hands it, so an adapter refusing shorts before the
+    venue-owned reason existed would write **147 records of the wrong shape — worse than none,
+    because they look like coverage**. That was a statement about an ORDERING, and the ordering
+    has now been discharged: `T-0137` built the reason, so the refusal is safe to make.
 
-    So this arm pins that BOTH directions refuse identically: no direction-dependent behaviour
-    exists here yet, which makes the wrong record impossible rather than unlikely.
+    **An arm that pins a phase boundary expires when the phase ends, and the expiry is the
+    point** — it is what stopped the next task from being started in the wrong order. This is
+    the third in this codebase (`test_unsupported_broker_explains_itself` asserted Alpaca could
+    not be constructed at all). Rewritten rather than deleted, because the property worth
+    keeping is the one underneath: **the two refusals must not collapse into one.**
+
+    ```
+    SHORT  -> DirectionNotSupported   the VENUE cannot take it, ever
+    LONG   -> NotImplementedError     the MEMBER is not written yet (part C)
+    ```
+
+    Collapsing them is `B376-B`'s shape and it fails in the expensive direction: a permanent
+    venue reason filed against an order Alpaca would happily accept, telling every later reader
+    the strategy's longs are unplaceable too.
     """
     adapter, _ = _adapter()
-    request = OrderRequest(pair="BTC/USD", direction=direction, order_type=OrderType.MARKET,
-                           lot_size=0.5, price=None, sl=None, tp=None, client_order_id="x")
-    with pytest.raises(NotImplementedError) as exc:
-        asyncio.run(adapter.place_order(request))
-    assert "T-0137" in str(exc.value), (
-        "the refusal must name the task that owns the venue reason, or a reader cannot tell a "
-        "deliberate phase boundary from an unimplemented member"
+
+    def _request(direction):
+        return OrderRequest(pair="BTC/USD", direction=direction, order_type=OrderType.MARKET,
+                            lot_size=0.5, price=None, sl=None, tp=None, client_order_id="x")
+
+    with pytest.raises(DirectionNotSupported) as short_exc:
+        asyncio.run(adapter.place_order(_request(DirectionType.SHORT)))
+    assert short_exc.value.reason == ALPACA_CRYPTO_LONG_ONLY.reason
+    assert short_exc.value.venue == "alpaca"
+
+    with pytest.raises(NotImplementedError) as long_exc:
+        asyncio.run(adapter.place_order(_request(DirectionType.LONG)))
+    assert not isinstance(long_exc.value, DirectionNotSupported), (
+        "the two refusals collapsed: a LONG is now refused for a reason about the venue"
     )
+    assert "not shortable" not in str(long_exc.value)
 
 
 def test_a_PARTIAL_close_is_HONOURED_and_carries_the_size():

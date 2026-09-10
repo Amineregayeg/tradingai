@@ -41,6 +41,9 @@ from __future__ import annotations
 
 from typing import Final
 
+from app.services.broker.alpaca import ALPACA_CRYPTO_LONG_ONLY
+from app.services.broker.base import DirectionPolicy
+
 #: Instruments watched, as pair -> Binance symbol.
 SYMBOLS: Final[dict[str, str]] = {"BTC/USD": "BTCUSDT", "ETH/USD": "ETHUSDT"}
 
@@ -80,6 +83,21 @@ PRICE_SOURCE: Final[str] = "binance"
 #: "paper" would be a plain simulation with no rules and no way to fail, which
 #: is a comfortable thing to watch and not an informative one.
 BROKER_MODE: Final[str] = "sim"
+
+#: **THE VENUE THIS ENGINE TRADES, AND THE DIRECTIONS IT CAN TAKE** (`T-0137`).
+#:
+#: Malek ruled 2026-09-10 that the venue is ALPACA and the platform is LONG ONLY, because
+#: Alpaca crypto is non-marginable and not shortable. **This is a setting of the ENGINE, not
+#: of the simulator** — `BROKER_MODE` above chooses which in-process simulator stands in for
+#: the venue, and the venue's constraint must hold under either choice. Wiring it here rather
+#: than at one of the two construction sites is what makes that true by construction.
+#:
+#: The object, not a copy of the sentence: the venue owns its own reason (`alpaca.py`), and a
+#: second copy of the text here would be `B184` with a string.
+#:
+#: Importing `alpaca` costs nothing at import time — that module deliberately does not import
+#: the SDK at module scope (`B328`), so this is safe with `alpaca-py` absent.
+VENUE_DIRECTION_POLICY: Final[DirectionPolicy] = ALPACA_CRYPTO_LONG_ONLY
 
 #: The challenge size being simulated. A round constant — see the module docstring.
 STARTING_BALANCE: Final[float] = 5_000.0

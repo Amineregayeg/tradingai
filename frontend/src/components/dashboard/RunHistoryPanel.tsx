@@ -44,6 +44,27 @@ interface Run {
   wins: number
   decisions: number
   abstentions: number
+  /** Refusals split by the direction the strategy asked for. A `GROUP BY`, not a counter. */
+  rejected_by_direction?: Record<string, number> | null
+  rejections?: number
+}
+
+/**
+ * T-0137. WHY A LONG-ONLY RUN NEEDS ITS OWN MARK ON THIS PANEL.
+ *
+ * Malek ruled 2026-09-10 that the venue is Alpaca and the platform is LONG ONLY, because
+ * Alpaca crypto is non-marginable and not shortable. Measured on real executed trades: 147
+ * shorts against 146 longs — so roughly HALF of every decision this engine has ever made
+ * cannot be placed.
+ *
+ * That makes a long-only run a DIFFERENT STRATEGY rather than a smaller sample of the same
+ * one, and its P&L and win rate are not comparable with anything recorded before the ruling.
+ * Two lines above, this file already says why that matters: *"A result read against the wrong
+ * configuration is worse than no result — and comparing runs is the entire point of keeping
+ * them."* This is that rule applied to the setting that changes the most.
+ */
+function longOnly(cfg: Record<string, unknown> | null): boolean {
+  return cfg?.long_only === true
 }
 
 function duration(run: Run): string {
@@ -68,9 +89,23 @@ function settingsLine(cfg: Record<string, unknown> | null): string {
   const bal = typeof cfg.starting_balance === 'number'
     ? `$${cfg.starting_balance.toLocaleString('en-US', { maximumFractionDigits: 0 })}`
     : ''
-  return [syms, cfg.entry_tf, risk, bal, cfg.mode, `prices: ${cfg.price_source ?? 'binance'}`]
+  // The VENUE and its direction constraint, on the settings line with everything else that
+  // makes two runs incomparable. Absent from older runs' config, which is why this reads the
+  // value rather than assuming one: a run recorded before the ruling must not be labelled
+  // long-only retroactively.
+  const venue = typeof cfg.venue === 'string' ? cfg.venue : ''
+  const directions = longOnly(cfg) ? 'LONG ONLY' : ''
+  return [syms, cfg.entry_tf, risk, bal, cfg.mode, `prices: ${cfg.price_source ?? 'binance'}`,
+          venue, directions]
     .filter(Boolean)
     .join('  ·  ')
+}
+
+/** Refusals worth showing beside the P&L, ordered so the constrained direction reads first. */
+function refusals(run: Run): [string, number][] {
+  const split = run.rejected_by_direction
+  if (!split) return []
+  return Object.entries(split).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1])
 }
 
 function RunRow({ run }: { run: Run }) {
@@ -94,6 +129,18 @@ function RunRow({ run }: { run: Run }) {
           </span>
         )}
         <span style={{ fontSize: 11, color: MUTED }}>{duration(run)}</span>
+        {/* BESIDE THE P&L, NOT INSIDE THE COLLAPSED DETAIL. This number is the one that gets
+            read as "the strategy underperformed", and a mark a reader has to expand a row to
+            find does not qualify it. */}
+        {longOnly(run.config) && (
+          <span
+            data-testid="long-only-badge"
+            title="Alpaca crypto is non-marginable and not shortable — every SHORT this run produced was refused by the venue."
+            style={{ fontSize: 9, color: AMBER, border: `1px solid ${AMBER}`, borderRadius: 3, padding: '0 4px' }}
+          >
+            LONG ONLY
+          </span>
+        )}
         <span style={{ marginLeft: 'auto', fontSize: 12, color: pnlColour, fontFamily: 'var(--font-mono)' }}>
           {run.realized_pnl >= 0 ? '+' : ''}
           {run.realized_pnl.toFixed(2)}
@@ -121,6 +168,27 @@ function RunRow({ run }: { run: Run }) {
             {' · '}
             {run.decisions} decision{run.decisions === 1 ? '' : 's'}, {run.abstentions} declined
           </>
+        )}
+        {/* THE SPLIT, NOT THE TOTAL. A run that produced no shorts and a run that produced 147
+            and had every one refused have the same trades, the same P&L and the same win rate.
+            The direction of the rejections is the only thing on this panel that tells them
+            apart — a bare count does not.
+
+            "REJECTED", NOT "REFUSED BY THE VENUE", AND THE DISTINCTION IS NOT PEDANTRY.
+            `execute()` checks entry drift, the stop and the size BEFORE it ever reaches
+            `place_order`, so a SHORT can be rejected for reasons that have nothing to do with
+            Alpaca and never reach the venue check at all. Beside a LONG ONLY badge the word
+            "refused" would attribute every one of them to the ruling — a count that reads as
+            a cause. Which rejection was which is on the DecisionRecord's `rejection_reason`;
+            this line reports only what is actually being counted. */}
+        {refusals(run).length > 0 && (
+          <span
+            data-testid="refusal-split"
+            title="Every signal the strategy produced and execution declined, split by the direction asked for. Includes venue refusals AND bar-specific rejections (entry drift, size, stop); the reason for each is on its decision record."
+          >
+            {' · '}
+            {refusals(run).map(([dir, n]) => `${n} ${dir} rejected`).join(', ')}
+          </span>
         )}
       </div>
 

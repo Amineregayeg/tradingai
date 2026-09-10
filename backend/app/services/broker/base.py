@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Callable
 
+from app.core.exceptions import DirectionNotSupported
 from app.db.enums import DirectionType, OrderType
 from app.schemas.broker import Position
 
@@ -27,6 +28,53 @@ class Account:
     #: field its provenance and left the account field twelve lines above it with a silent
     #: `profit` -> `netProfit` fallback, and those are not the same quantity (`B286`).
     unrealized_pl_source: str | None = None
+
+
+@dataclass(frozen=True)
+class DirectionPolicy:
+    """WHICH DIRECTIONS A VENUE CAN TAKE, and the venue's own words for why not.
+
+    Malek ruled 2026-09-10 that the platform trades **LONG ONLY**, because Alpaca crypto is
+    non-marginable and not shortable. That is a fact about the VENUE, so it is expressed as one
+    rather than as a flag on the strategy or a branch in the loop.
+
+    **THIS OBJECT EXISTS SO THE SIMULATOR CAN BE WRONG THE SAME WAY THE VENUE IS.** The live
+    loop does not execute against `AlpacaAdapter` — it executes against `PaperBroker` or
+    `SimPropFirmBroker` (`crypto_loop.py:168`, `:794`) — so a refusal implemented only in the
+    Alpaca module would never fire in a paper run, and 147 shorts would go on filling in
+    simulation against a venue that cannot take one of them. *A simulator that permits what the
+    venue forbids is not a simulation of that venue*, which is `paper.py`'s own `lot_size`
+    lesson with the direction substituted for the size.
+
+    `reason` IS THE VENUE'S AND MUST NAME THE CONSTRAINT. It is carried, unaltered, all the way
+    into `DecisionRecord.rejection_reason`. A reason that merely restates the refusal
+    (*"order rejected"*) makes a permanent venue rule indistinguishable from a transient
+    failure, and 147 records of that shape are worse than none because they look like coverage.
+    """
+
+    venue: str
+    supported: frozenset[DirectionType]
+    reason: str
+
+    def refusal(self, direction: DirectionType) -> str | None:
+        """The venue's reason for refusing `direction`, or `None` if it can take it.
+
+        Returns rather than raises because the two callers need different shapes and BOTH are
+        correct: an in-process simulator answers with a rejection dict (the shape `cft_sim`
+        already uses for a halted account), and a remote adapter raises, because it has no fill
+        to describe for an order it never sent.
+        """
+        if direction in self.supported:
+            return None
+        return self.reason
+
+    def enforce(self, direction: DirectionType) -> None:
+        """Raise `DirectionNotSupported` if the venue cannot take this direction."""
+        reason = self.refusal(direction)
+        if reason is not None:
+            raise DirectionNotSupported(
+                venue=self.venue, direction=direction.value, reason=reason
+            )
 
 
 @dataclass
@@ -81,6 +129,19 @@ class BrokerAdapter(ABC):
     # requested list. Lets a crypto broker (CFT) stream crypto while a forex
     # broker (OANDA) streams the forex pairs passed in from startup.
     default_pairs: list[str] = []
+
+    #: The venue's direction capability, or `None` for a venue that takes both.
+    #:
+    #: **ON THE BASE CLASS FOR THE KILL-SWITCH VOCABULARY'S REASON**, one paragraph up: a ruled
+    #: property that lives in one implementation is a property of that implementation. The
+    #: consumer here is `ExecutionService`, which holds a `BrokerAdapter` and must not have to
+    #: know which venue it received.
+    #:
+    #: `None` is the honest default rather than "both directions": an adapter that has never
+    #: been asked the question has not answered it, and defaulting to a permissive *policy
+    #: object* would let a venue with a real constraint pass as one that had declared it has
+    #: none. Nothing reads this without a `None` check.
+    direction_policy: "DirectionPolicy | None" = None
 
     # ------------------------------------------------------------------
     # Simulation contract (SAFETY)

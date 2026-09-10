@@ -155,11 +155,15 @@ class LiveCryptoLoop:
                 return self._marks.get(pair, 0.0)
 
             self.paper = SimPropFirmBroker(
-                PropFirmRules(starting_balance=starting_balance), _price_source
+                PropFirmRules(starting_balance=starting_balance), _price_source,
+                direction_policy=fixed.VENUE_DIRECTION_POLICY,
             )
             self.mode = "PROP_FIRM_SIM"
         else:
-            self.paper = PaperBroker(starting_balance=starting_balance, price_fn=self._mark)
+            self.paper = PaperBroker(
+                starting_balance=starting_balance, price_fn=self._mark,
+                direction_policy=fixed.VENUE_DIRECTION_POLICY,
+            )
             self.mode = "PAPER"
         # Persist + resolve EVERY close (SL/TP tick, manual DELETE, kill switch)
         # through one hook — no close path can be silently lost from the DB or
@@ -644,7 +648,43 @@ class LiveCryptoLoop:
             # *"Snapshotted at start so a result can never be read against the wrong settings
             # later."*
             "records_rejected_signals": True,
+            # ----------------------------------------------------------------
+            # `T-0137`. THE MARK THAT KEEPS A LONG-ONLY RESULT FROM BEING READ AS A NORMAL ONE.
+            #
+            # Measured on real executed trades: 147 shorts against 146 longs. **Roughly half of
+            # every decision this engine has ever made cannot be placed on Alpaca**, so a
+            # long-only run is not a smaller sample of the same strategy — it is a different
+            # strategy, and its P&L, win rate and R-multiples are not comparable with anything
+            # recorded before the ruling.
+            #
+            # `EngineRun.config`'s own argument is why it belongs here and not in a new column:
+            # *"Snapshotted at start so a result can never be read against the wrong settings
+            # later."* Every surface that already renders a run's config is then self-marking
+            # for free — which is the whole of `B380`'s lesson: a row written correctly and a
+            # consumer that turns it back into an unmarked number is the same defect twice.
+            #
+            # **DERIVED FROM THE POLICY THE BROKER WAS ACTUALLY BUILT WITH, NOT ASSERTED.** A
+            # literal `True` here would keep claiming long-only after someone changed
+            # `fixed.VENUE_DIRECTION_POLICY`, and a config that describes a run it did not
+            # govern is worse than one that says nothing — `B238`'s class, and this file has
+            # already shipped it once.
+            "long_only": self._long_only(),
+            "venue": (
+                None if getattr(self.paper, "direction_policy", None) is None
+                else self.paper.direction_policy.venue
+            ),
         }
+
+    def _long_only(self) -> bool:
+        """Whether the broker THIS RUN EXECUTES AGAINST can take a SHORT.
+
+        Read off `self.paper`, which is the object `ExecutionService` was handed, so the answer
+        cannot disagree with what the run will actually do.
+        """
+        from app.db.enums import DirectionType
+
+        policy = getattr(self.paper, "direction_policy", None)
+        return policy is not None and DirectionType.SHORT not in policy.supported
 
     async def ensure_run(self) -> "uuid.UUID | None":
         """Adopt the active run, or open one if there is none.
@@ -784,11 +824,13 @@ class LiveCryptoLoop:
                     return self._marks.get(pair, 0.0)
 
                 self.paper = SimPropFirmBroker(
-                    PropFirmRules(starting_balance=self.starting_balance), _price_source
+                    PropFirmRules(starting_balance=self.starting_balance), _price_source,
+                    direction_policy=fixed.VENUE_DIRECTION_POLICY,
                 )
             else:
                 self.paper = PaperBroker(
-                    starting_balance=self.starting_balance, price_fn=self._mark
+                    starting_balance=self.starting_balance, price_fn=self._mark,
+                    direction_policy=fixed.VENUE_DIRECTION_POLICY,
                 )
             self.paper._on_settle = self._on_settle_cb  # noqa: SLF001
             self.execution = ExecutionService(self.paper, ExecMode.PAPER)

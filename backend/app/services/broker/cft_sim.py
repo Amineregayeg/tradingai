@@ -29,7 +29,9 @@ from typing import Awaitable, Callable
 from app.core.logging import logger
 from app.db.enums import DirectionType, OrderType
 from app.schemas.broker import Position
-from app.services.broker.base import Account, BrokerAdapter, OrderRequest
+from app.services.broker.base import (
+    Account, BrokerAdapter, DirectionPolicy, OrderRequest,
+)
 
 
 @dataclass(frozen=True)
@@ -86,7 +88,13 @@ class SimPropFirmBroker(BrokerAdapter):
         rules: PropFirmRules,
         price_source: Callable[[str], Awaitable[float]],
         currency: str = "USDT",
+        direction_policy: DirectionPolicy | None = None,
     ) -> None:
+        #: The venue's direction constraint (`T-0137`). See `PaperBroker.direction_policy` —
+        #: **both simulators need it, and for the same reason**: `broker_mode` picks between
+        #: them at `crypto_loop.py:152`, so a constraint implemented in only one would hold or
+        #: not hold depending on a setting that has nothing to do with the venue.
+        self.direction_policy: DirectionPolicy | None = direction_policy
         self.rules = rules
         self.starting_balance = float(rules.starting_balance)
         self.balance = float(rules.starting_balance)   # realized equity
@@ -385,6 +393,17 @@ class SimPropFirmBroker(BrokerAdapter):
         # calendar day the guard was evaluated against the PREVIOUS day's loss.)
         now = datetime.now(timezone.utc)
         self._roll_day(now)
+
+        # THE VENUE'S DIRECTION CONSTRAINT (`T-0137`), and it is checked BEFORE the halt.
+        #
+        # Order matters for the record's sake: a halted account refusing a SHORT would file
+        # "daily loss limit breached" against an order the venue could never have taken, and
+        # the direction split would then under-count the refusals the long-only ruling caused.
+        # The venue's answer does not depend on the account's state.
+        if self.direction_policy is not None:
+            refusal = self.direction_policy.refusal(request.direction)
+            if refusal is not None:
+                return self._reject(request, refusal)
 
         # Halted account (breached or passed) refuses every new order.
         if self._halted:

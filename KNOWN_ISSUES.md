@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-10 (B390 — `records_rejected_signals: True` IS A HARDCODED LITERAL THAT CERTIFIES ITS OWN RUN. The second instance of B389's class — intent recorded as fact — found the same evening, inside the task whose whole purpose is the thing the flag claims. Written unconditionally at snapshot time before any signal has been refused, and the only assertion on it reads the literal back, so it CANNOT FAIL. If _record_rejected_signal is never reached, the 147 refused SHORTs leave no record while run.config still certifies the rejections COMPLETE — B380 with a config key in place of a breach monitor. Remedy: the arm must assert the RECORDS (a DecisionRecord with outcome=REJECTED carrying the venue's reason, and the GROUP BY signal_dir count), not the flag. Sent to execute mid-build rather than held for review. GENERALISATION: several config-snapshot keys assert run properties and none is verified against what the run produced; that sweep has NOT been run. Also MODIFIED B389 — I graded review's SDK finding as 'driven' when it was a SOURCE READING, and review volunteered the downgrade unasked.)
+Last updated: 2026-09-11 (B391 — A VENUE CONSTRAINT ENFORCED IN THE VENUE ADAPTER IS UNREACHABLE IN EVERY PAPER RUN. The live loop builds PaperBroker/SimPropFirmBroker at two sites and hands THOSE to ExecutionService; it has never executed against a venue adapter. So the long-only refusal written the obvious way — in AlpacaAdapter.place_order — would have passed every unit arm and refused nothing in a paper run. Found before writing the enforcement, which is the only reason it is a note and not an incident. Same shape as PaperBroker ignoring lot_size, with direction substituted for size: a simulator that permits what the venue forbids is not a simulation of that venue, and it errs toward MORE fills. Remedy taken: the reason lives in alpaca.py, the policy object on BrokerAdapter, both simulators enforce it, fixed_config wires it. NOT FIXED: nothing forces a new adapter to honour direction_policy — it defaults to None and a silent exemption is exactly how lot_size was lost; after T-0138 there will be two enforcement points on the live path; and the loop's routing is covered structurally rather than driven. See B390 for the flag that would have certified the resulting silence as healthy.)
 
 ---
 
@@ -5340,6 +5340,42 @@ So `git status --porcelain` is now a FILE in the same directory as the run, writ
 > be truncated, it needs a terminal sentinel** — pytest supplies one (`N passed in Xs`), so a run
 > file not ending in a summary line is detectably incomplete without knowing what the total was.
 > *Nothing else this loop writes has that property.*
+
+#### ADDENDUM 2026-09-11 (execute, during `T-0137`) — THE `$!` HALF REPRODUCED, AND ITS CONSEQUENCE IS ONE STEP WORSE THAN THIS ENTRY SAYS
+
+This entry says the failure is that *"you will record a pid that is already dead and conclude the
+run died."* **That understates it. The wrong conclusion licenses a WRITE.**
+
+Measured, tonight. A mutation batch was launched with `setsid nohup ... &` and waited on with
+`until ! ps -p $! ; do sleep 5; done`. `$!` was the wrapper, which had already exited, so the wait
+returned **immediately** and reported the batch finished. Reading the tree at that moment found
+`engine.py` carrying a mutation marker and the log file zero bytes — **which is exactly what a
+crashed run that left its mutant behind looks like**, and that had genuinely happened earlier in
+the same session. So the mutant was "cleaned up" by copying the known-good file over it — **into a
+measurement that was still running.** The batch then completed and reported its own restore.
+
+```
+what it looked like     a mutation abandoned by a dead run       -> restore it
+what it was             a mutation under active measurement      -> the restore raced the run
+cost                    M-5b's number was measured across my own write and had to be discarded
+```
+
+**The two states are indistinguishable by inspecting the tree**, which is this entry's own
+sentence — *the artefact does not distinguish "completed" from "stopped"* — applied to the WORKING
+TREE instead of the log. The tree has no terminal sentinel at all, so the log's sentinel is the only
+thing that can date it, and the log had not flushed.
+
+**So the rule is stronger than "find the real pid with `pgrep`":** wait on the job's own TERMINAL
+OUTPUT, never on process liveness, and **never write into a tree whose measurement you have not seen
+terminate.** `pgrep` is also not sufficient on its own here — `pgrep -f` matches the watcher's own
+command line, which is the separate defect already recorded further down this file.
+
+⚠ **AND THE REPLACEMENT WAIT FAILED THE SAME WAY FOR A DIFFERENT REASON.** Written as
+`cd backend && until grep -q ... ; done; echo "SENTINEL REACHED"`, the `cd` failed (the shell was
+already there), `&&` short-circuited the loop out of existence, and the unconditional `echo`
+printed **SENTINEL REACHED** without a single second of waiting. *A wait that reports success
+without waiting is the same defect as a pid that reports death without dying* — twice in ten
+minutes, from two unrelated causes, both reading fluently afterwards.
 
 ### B151 — a control pair drawn from LIVE DATA validates the predicate's agreement with today, not the EDIT: where the discriminating case is absent from the corpus by nature, the arm must be FABRICATED or the change is untested
 
@@ -25205,3 +25241,65 @@ something verifies it against what the run actually produced**, and `EngineRun.c
 *"snapshotted at start so a result can never be read against the wrong settings later"* — is exactly
 the reasoning that makes such a key feel trustworthy. **A sweep of that config block for keys no
 consumer verifies is the countermeasure, and it has not been run.**
+
+---
+
+### B391 — A VENUE CONSTRAINT ENFORCED IN THE VENUE ADAPTER IS UNREACHABLE IN EVERY PAPER RUN. The live loop never executes against an adapter, so `alpaca.py` is the one place the long-only rule could not have worked
+
+**Found while building `T-0137`, before writing the enforcement — which is the only reason it is a
+note rather than an incident.** The obvious reading of *"a SHORT must be refused with a reason the
+venue owns"* puts the refusal in `AlpacaAdapter.place_order`. Every unit arm over that member would
+have passed. **And not one short would have been refused in a paper run.**
+
+Measured rather than reasoned:
+
+```
+crypto_loop.py:158/166   self.paper = SimPropFirmBroker(...) | PaperBroker(...)
+crypto_loop.py:168                    ExecutionService(self.paper, ExecMode.PAPER)
+crypto_loop.py:786/790   THE SAME TWO AGAIN, in _reset_broker_state
+grep place_order callers -> execution/service.py:167 and live_loop_proxy.py:142; the engine's
+                            ExecutionService holds `self.paper`, which is an in-process simulator
+```
+
+**The engine has never executed against a venue adapter.** `AlpacaAdapter` is reachable from
+`manager.py` for reads and from `/api/brokers`; it is not on the path any decision travels.
+
+#### THE GENERALISATION, WHICH IS NOT ABOUT ALPACA
+
+> **A constraint expressed where the venue lives is invisible to the simulation, and the simulation
+> is where every result this project has ever produced came from.**
+
+This is `paper.py`'s own history one level up. That class accepted `lot_size`, ignored it and
+reported success, so *"a 70/30 exit model validated in simulation was validated against a broker
+that cannot take a partial."* Same shape, with the DIRECTION substituted for the size: a simulator
+that permits what the venue forbids is not a simulation of that venue, and the disagreement is
+silent and in the comfortable direction — more fills, not fewer.
+
+**The remedy taken** was to put the venue's *reason* in `alpaca.py` (the venue owns its sentence)
+and the *policy object* on `BrokerAdapter`, with both simulators enforcing it and
+`fixed_config.VENUE_DIRECTION_POLICY` wiring the two together. The adapter refuses too, so the gate
+exists for the day the real client is wired.
+
+#### WHAT IS NOT FIXED, AND THE FIRST ONE IS THE ONE THAT WILL BITE
+
+**1. Nothing forces a NEW adapter or simulator to honour the policy.** `direction_policy` defaults
+to `None` on `BrokerAdapter`, and an adapter that never reads it is silently exempt — the same
+absence that let `PaperBroker` ignore `lot_size` for months while both LIVE adapters honoured it.
+`test_broker_contract.py` iterates every discovered adapter and is the natural home for an arm that
+drives each one with a long-only policy; **it has not been written.**
+
+**2. After part C (`T-0138`) there will be TWO enforcement points on the live path** — the
+simulator's and the adapter's — both reading one policy object today. Two enforcements of one rule
+drift the moment either grows a special case, and the second one will be reached only in
+configurations nobody runs by default.
+
+**3. The loop's routing is covered STRUCTURALLY, not by driving it.** The arms that assert a refused
+SHORT becomes a `DecisionRecord` call `_record_rejected_signal` directly; the four-line branch in
+`_tick_symbol` that connects execution to it is asserted over the AST, because that method fetches a
+live ticker price and 320 bars. **Applying the silent drop confirms the gap is real: five arms stay
+green, including both that assert nothing was opened and the one that checks the recorded row.**
+
+**Related.** `B390` is the flag that would have certified the resulting silence as healthy —
+`records_rejected_signals: True` sits in the same run's config whether or not a single refusal was
+ever written. The arm for it now asserts the rows and reads the flag only to catch the config being
+dropped entirely.

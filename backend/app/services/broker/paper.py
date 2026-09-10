@@ -16,7 +16,9 @@ from typing import Callable
 from app.core.logging import logger
 from app.db.enums import DirectionType, OrderType
 from app.schemas.broker import Position
-from app.services.broker.base import Account, BrokerAdapter, OrderRequest
+from app.services.broker.base import (
+    Account, BrokerAdapter, DirectionPolicy, OrderRequest,
+)
 
 
 class PaperPosition:
@@ -52,7 +54,21 @@ class PaperBroker(BrokerAdapter):
         starting_balance: float = 50_000.0,
         currency: str = "USDT",
         price_fn: Callable[[str], float] | None = None,
+        direction_policy: DirectionPolicy | None = None,
     ) -> None:
+        #: WHICH VENUE THIS SIMULATOR IS STANDING IN FOR, as far as direction goes (`T-0137`).
+        #:
+        #: **The live loop executes against THIS object, never against `AlpacaAdapter`**
+        #: (`crypto_loop.py:168`). So if the long-only constraint is not here it is nowhere that
+        #: a paper run can reach, and a simulation of a venue that cannot short would go on
+        #: filling shorts. That is `paper.py`'s own history repeating: this class accepted
+        #: `lot_size`, ignored it, and reported success, so a 70/30 exit model was validated
+        #: against a broker that could not take a partial.
+        #:
+        #: `None` means "both directions", which is what every existing caller gets and is why
+        #: this is a keyword with a default rather than a required argument. The DIFFERENCE
+        #: between the two settings is the thing `T-0137` has to make visible.
+        self.direction_policy: DirectionPolicy | None = direction_policy
         self.balance = float(starting_balance)        # realized equity
         self.currency = currency
         self._price_fn = price_fn
@@ -202,6 +218,35 @@ class PaperBroker(BrokerAdapter):
     async def place_order(self, request: OrderRequest) -> dict:
         if request.lot_size <= 0:
             raise ValueError("lot_size must be > 0")
+
+        # THE VENUE'S DIRECTION CONSTRAINT, CHECKED BEFORE ANYTHING IS FILLED (`T-0137`).
+        #
+        # Returns a REJECTION DICT rather than raising, and both halves of that are deliberate:
+        # the shape is the one `cft_sim._reject` already uses for a halted account, and
+        # `crypto_loop.py:1553` routes any non-FILLED status into `_record_rejected_signal`
+        # with `res["reason"]`. So the venue's sentence reaches
+        # `DecisionRecord.rejection_reason` UNALTERED, with no new plumbing and no second
+        # vocabulary for "refused".
+        #
+        # Raising here would take the opposite path: the loop has no handler around
+        # `execution.execute()`, so a SHORT would abort the bar instead of being recorded —
+        # a refusal that erases the evidence it exists to create.
+        if self.direction_policy is not None:
+            refusal = self.direction_policy.refusal(request.direction)
+            if refusal is not None:
+                logger.info(
+                    f"PaperBroker REFUSE {request.pair} {request.direction.value} "
+                    f"venue={self.direction_policy.venue}"
+                )
+                return {
+                    "status": "REJECTED",
+                    "reason": refusal,
+                    "pair": request.pair,
+                    "direction": request.direction.value,
+                    "venue": self.direction_policy.venue,
+                    "client_order_id": request.client_order_id,
+                }
+
         fill = request.price if (request.order_type != OrderType.MARKET and request.price) else self._price(request.pair)
         pos = PaperPosition(
             pair=request.pair, direction=request.direction, entry=fill,

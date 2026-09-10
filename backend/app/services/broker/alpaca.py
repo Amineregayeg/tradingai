@@ -35,7 +35,9 @@ from app.core.exceptions import BrokerError
 from app.core.logging import logger
 from app.db.enums import DirectionType
 from app.schemas.broker import Position
-from app.services.broker.base import Account, BrokerAdapter, OrderRequest
+from app.services.broker.base import (
+    Account, BrokerAdapter, DirectionPolicy, OrderRequest,
+)
 
 #: `PositionSide` values, read from the installed package: `['short', 'long']`.
 #:
@@ -55,6 +57,32 @@ ORDER_SIDES: dict[str, DirectionType] = {
 
 #: The document recording every shape this module reads.
 SHAPES = "agents/tasks/T-0136/SDK_SHAPES.md"
+
+#: **MALEK'S RULING, 2026-09-10, EXPRESSED AS THE VENUE FACT IT IS** (`T-0137`).
+#:
+#: The platform trades LONG ONLY because *Alpaca crypto is non-marginable and not shortable*.
+#: The constraint is the venue's, so the SENTENCE is the venue's too, and it is defined here —
+#: in the Alpaca module — rather than where it is enforced. Nothing else may compose this text:
+#: `paper.py` and `cft_sim.py` import this object, and a second copy of the reason is `B184`
+#: with a string, drifting from this one the first time either is edited.
+#:
+#: **IT IS NOT A HYPOTHESIS.** 147 shorts against 146 longs were measured in real executed
+#: trades, so a long-only venue removes roughly half of what this strategy does. That is exactly
+#: why the refusals must be recorded and split by direction: a run whose strategy produced no
+#: shorts and a run that produced 147 and had every one refused have the same trade list, and
+#: only the refusal record tells them apart.
+#:
+#: **The wording names the CONSTRAINT, not the refusal.** "Order rejected" would be
+#: indistinguishable from a transport failure in `DecisionRecord.rejection_reason` months later.
+ALPACA_CRYPTO_LONG_ONLY = DirectionPolicy(
+    venue="alpaca",
+    supported=frozenset({DirectionType.LONG}),
+    reason=(
+        "Alpaca crypto is non-marginable and not shortable, so this venue cannot take a SHORT. "
+        "The platform is LONG ONLY (ruled 2026-09-10). This is a permanent venue capability, "
+        "not a transient failure: the same order will be refused every time it is sent."
+    ),
+)
 
 
 class AlpacaFieldUnreadable(BrokerError):
@@ -136,6 +164,11 @@ class AlpacaAdapter(BrokerAdapter):
         self._client = client
         self._paper = bool(paper)
         self.connected: bool = False
+
+        #: `T-0137`. Declared on the INSTANCE so a reader of `manager.py` sees the constraint
+        #: attached to the adapter it constructs, and so `ExecutionService` can read it through
+        #: the `BrokerAdapter` contract without importing this module.
+        self.direction_policy: DirectionPolicy | None = ALPACA_CRYPTO_LONG_ONLY
 
         #: How many positions the last `get_positions` could not read, by reason. **A positive
         #: statement**: a silent skip and a venue with nothing to report are otherwise identical.
@@ -400,30 +433,27 @@ class AlpacaAdapter(BrokerAdapter):
     # The one write — REFUSES, and refuses EVERY direction in this phase
     # ------------------------------------------------------------------
     async def place_order(self, request: OrderRequest) -> dict:
-        """**REFUSES ALL ORDERS IN THIS PHASE, AND THE DIRECTION-INDEPENDENCE IS DELIBERATE.**
+        """**REFUSES A SHORT WITH THE VENUE'S REASON. REFUSES A LONG AS UNIMPLEMENTED.**
 
-        Malek ruled the platform trades LONG ONLY because Alpaca crypto is non-marginable and not
-        shortable, so a SHORT must be refused with a reason the venue owns, RECORDED, and COUNTED.
-        **That is `T-0137` and it is not this task.**
+        Two refusals, deliberately DIFFERENT (`T-0137`). Malek ruled the platform trades LONG
+        ONLY because Alpaca crypto is non-marginable and not shortable — a permanent venue
+        capability — while order placement itself is simply not built yet. **Collapsing the two
+        into one refusal is `B376-B`'s shape**: a raise-on-anything satisfies raise-on-shorts and
+        proves nothing about the direction, and the record it leaves says the venue refused an
+        order it would in fact accept once the member is written.
 
-        **REFUSING SHORTS *HERE* WOULD BE WORSE THAN NOT REFUSING THEM AT ALL.** The live loop
-        records whatever reason execution hands it, so an adapter that refuses shorts before the
-        venue-owned reason exists produces **147 records of the wrong shape — worse than none,
-        because they look like coverage**, and `records_rejected_signals: True` is already in
-        `EngineRun.config` asserting those records are good. `B376` had to land with `B372` for the
-        identical reason: a refusal whose consumer is not ready converts one defect into a quieter
-        one.
+        So the distinction is asserted, not just intended:
 
-        So this refuses **regardless of direction**. No direction-dependent behaviour exists in
-        this module yet, which makes a wrongly-shaped short record impossible rather than unlikely.
+        ```
+        SHORT  -> DirectionNotSupported, reason = ALPACA_CRYPTO_LONG_ONLY.reason
+        LONG   -> NotImplementedError,   which names the MEMBER and NOT the venue
+        ```
 
-        ---
-
-        **MEASURED FOR `T-0137`, BECAUSE THE TWO SIDE VOCABULARIES SET A TRAP HERE.** On a spot
-        venue **closing a long is also a `sell`**, so a refusal written as *"refuse sells"* would
-        refuse every EXIT and leave positions unclosable — the kill switch included. Whether that
-        matters depends on whether any exit reaches this member, which was measured rather than
-        assumed:
+        **WHY THIS IS SAFE TO KEY ON DIRECTION AT ALL — measured, not assumed.** The two side
+        vocabularies set a trap here: on a spot venue **closing a long is also a `sell`**, so a
+        refusal written as *"refuse sells"* would refuse every EXIT and leave positions
+        unclosable, the kill switch included. Whether that matters depends on whether any exit
+        reaches this member:
 
         ```
         place_order callers          execution/service.py:167   -- ExecutionService.execute(sig)
@@ -442,24 +472,41 @@ class AlpacaAdapter(BrokerAdapter):
                                      crypto_loop.py:1650        close_all_positions
         ```
 
-        **NO EXIT PATH REACHES `place_order`.** Two callers, one entry and one forwarder.
+        **NO EXIT PATH REACHES `place_order`.** Two callers, one entry and one forwarder — so
+        refusing `OrderRequest.direction == SHORT` cannot refuse a close, and closing a long (a
+        `sell` at the venue) is untouched. Had one exit routed through here, the refusal would
+        have had to discriminate on POSITION CONTEXT rather than on side, which is a different
+        task.
 
-        ⚠ **AND MY FIRST RUN OF THIS SCAN WAS NARROWER THAN THE QUESTION.** It excluded
-        `app/services/broker/` to drop the adapters' own `def place_order`, and that exclusion also
-        hid `live_loop_proxy.py:142`. The conclusion is unchanged — a forwarder is not an exit —
-        but **I reported "the only one" from a population that could not have contained the second
-        one.** Recorded because it is the session's recurring shape: a scan whose population is
-        narrower than its question returns a confident answer to a question it did not ask. So `T-0137`'s refusal may discriminate on
-        `OrderRequest.direction` here, and closing a long — a `sell` at the venue — is untouched by
-        it. Had one exit routed through here, the refusal would have had to discriminate on
-        position context rather than on side, which is a different task.
+        ⚠ **AND MY FIRST RUN OF THAT SCAN WAS NARROWER THAN THE QUESTION.** It excluded
+        `app/services/broker/` to drop the adapters' own `def place_order`, and that exclusion
+        also hid `live_loop_proxy.py:142`. The conclusion is unchanged — a forwarder is not an
+        exit — but **I reported "the only one" from a population that could not have contained
+        the second one.** Kept because it is the recurring shape: a scan whose population is
+        narrower than its question returns a confident answer to a question it did not ask.
+
+        ---
+
+        **THIS IS NOT WHERE THE LONG-ONLY PROPERTY IS ENFORCED FOR A PAPER RUN, AND THAT IS THE
+        FACT MOST WORTH KNOWING HERE.** The live loop does not execute against this adapter. It
+        builds `PaperBroker` or `SimPropFirmBroker` (`crypto_loop.py:168`, `:794`) and hands
+        THAT to `ExecutionService`. A refusal implemented only here would be unreachable in
+        every paper run — green arms, and 147 shorts still filling. The policy object is shared
+        with the simulators for exactly that reason; this member is the gate for the day the
+        real client is wired, not the gate the engine passes through today.
         """
+        # ORDER MATTERS: the venue's constraint is checked BEFORE the not-implemented refusal.
+        # Reversed, every SHORT would report "not implemented" — the true statement that hides
+        # the permanent one — and the record would say to try again later.
+        if self.direction_policy is not None:
+            self.direction_policy.enforce(request.direction)
+
         raise NotImplementedError(
-            "Alpaca place_order is not implemented in this phase and refuses EVERY direction. "
-            "The long-only refusal — a SHORT rejected with a venue-owned reason, recorded through "
-            "_record_rejected_signal and counted by direction — is T-0137. Refusing shorts before "
-            "that exists would write records of the wrong shape into a run whose config already "
-            "claims they are good."
+            "Alpaca place_order is not implemented yet — it is part C of ALPACA_PROGRAMME.md, "
+            "which has no task id. This refusal is about the "
+            "MEMBER, not about the venue or the direction: a LONG is acceptable to Alpaca and "
+            "will be placed here once this is written. A SHORT is refused above, permanently, "
+            "with the venue's own reason."
         )
 
     async def close_position(self, position_id: str, lot_size: float | None = None) -> dict:
