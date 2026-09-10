@@ -1,0 +1,604 @@
+"""Alpaca — the venue Malek ruled on 2026-09-10, and the reason `T-0076` stopped being a blocker.
+
+**WHY THIS ADAPTER CAN DO WHAT THE MT5 ONE COULD NOT.**
+
+    TradingClient(key, secret, paper=True)      # `paper` is a CONSTRUCTOR FLAG WE PASS
+
+`ExecutionService` refuses any adapter reporting `is_simulation=False` and `ExecMode` has no LIVE
+member — both deliberately. An MT5 broker demo could not honestly answer that flag (`T-0076`,
+unruled since 2026-08-24). **An Alpaca paper account can**, because the flag is derived from a value
+we passed rather than a venue field we interpret. **The safety model is satisfied truthfully rather
+than bypassed.**
+
+**WRITTEN AFTER INTROSPECTING THE INSTALLED SDK, WHICH IS THE WHOLE DIFFERENCE FROM `T-0106`.**
+That adapter was written from documentation and its mock encoded its own reading, so no arm could
+fail on a fact the two shared — three defects came out of it and all three were ARRANGEMENT or
+RETURN SHAPE rather than naming (`B341`, `B356`, `B359`). Nine of nine names were right. Every shape
+this module relies on is recorded in `agents/tasks/T-0136/SDK_SHAPES.md` as `inspect` output.
+
+**THE SDK IS NOT IMPORTED AT MODULE SCOPE**, for `B328`'s reason: the contract arm's discovery walk
+does `except Exception: continue`, so an adapter whose module cannot be imported is skipped IN
+SILENCE by the arm that exists to cover it. The client is injected, and the venue's vocabulary is
+carried as the enum VALUES rather than the enum objects so that no import is needed to read it.
+
+**FLAT MODULE, DELIBERATELY** — `B267`: `pkgutil.iter_modules` does not recurse, so an adapter one
+directory deep is invisible to the discovery walk while the suite stays green.
+"""
+from __future__ import annotations
+
+import asyncio
+from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
+from typing import Any, Callable
+
+from app.core.exceptions import BrokerError
+from app.core.logging import logger
+from app.db.enums import DirectionType
+from app.schemas.broker import Position
+from app.services.broker.base import Account, BrokerAdapter, OrderRequest
+
+#: `PositionSide` values, read from the installed package: `['short', 'long']`.
+#:
+#: **A POSITION is long/short and an ORDER is buy/sell — two vocabularies for one concept**, and
+#: reading one with the other's set is `B336`/`B376`'s defect with a new surface. Both were the
+#: ABSENCE of a mapping; here there are two mappings and this is the position one.
+POSITION_SIDES: dict[str, DirectionType] = {
+    "long": DirectionType.LONG,
+    "short": DirectionType.SHORT,
+}
+
+#: `OrderSide` values: `['buy', 'sell']`. Kept apart from the above ON PURPOSE.
+ORDER_SIDES: dict[str, DirectionType] = {
+    "buy": DirectionType.LONG,
+    "sell": DirectionType.SHORT,
+}
+
+#: The document recording every shape this module reads.
+SHAPES = "agents/tasks/T-0136/SDK_SHAPES.md"
+
+
+class AlpacaFieldUnreadable(BrokerError):
+    """A numeric field was PRESENT and could not be parsed (`B338`).
+
+    **Alpaca sends numbers as STRINGS** — `Position.qty` is `str`, `Position.avg_entry_price` is
+    `str` — and `Order.qty` is `Union[str, float, None]`, the same concept with two types. So
+    coercion is unavoidable here, which means this distinction is needed from the first commit
+    rather than retrofitted after an incident: **a value we cannot read is not a missing one, and
+    neither of them is a zero.**
+    """
+
+    def __init__(self, field: str, value: Any) -> None:
+        super().__init__(
+            f"Alpaca sent {field}={value!r}, which is not a number. The venue types this field "
+            f"numeric-as-string, so this is a contract violation rather than a missing optional — "
+            f"and a value we cannot read must never be floored to zero (B338).",
+            broker="alpaca",
+        )
+        self.field = field
+        self.value = value
+
+
+class AlpacaSideUnrecognised(BrokerError):
+    """A position side outside the documented set (`B336`, `B376`).
+
+    Both of those were the absence of a mapping — one over-matched with `endswith`, one
+    under-matched with set membership. **There is no value of `DirectionType` that means *I could
+    not tell***, so an unknown becomes a question rather than a direction.
+    """
+
+    def __init__(self, value: Any) -> None:
+        super().__init__(
+            f"Alpaca reported position side {value!r}, which is not one of "
+            f"{tuple(POSITION_SIDES)}. Refusing to guess a direction. NOTE: an ORDER side is "
+            f"buy/sell and a POSITION side is long/short — reading one with the other's "
+            f"vocabulary is the same defect with a different surface.",
+            broker="alpaca",
+        )
+        self.value = value
+
+
+def _dec(value: Any, field: str) -> Decimal | None:
+    """`None` stays `None`; a value we cannot READ raises (`B215`, `B338`)."""
+    if value is None:
+        return None
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise AlpacaFieldUnreadable(field, value) from exc
+
+
+def _required_dec(source: Any, field: str) -> Decimal:
+    """A field the venue's model marks REQUIRED. Absent is a violation, not a zero."""
+    value = _dec(getattr(source, field, None), field)
+    if value is None:
+        raise AlpacaFieldUnreadable(field, None)
+    return value
+
+
+class AlpacaAdapter(BrokerAdapter):
+    """Alpaca paper trading. Reads work; the one write refuses in this phase."""
+
+    broker_name = "alpaca"
+
+    #: `BTC/USD` is Alpaca's native symbol format **and already our canonical pair name** in
+    #: `fixed_config.SYMBOLS`, so unlike MT5 there is no symbol vocabulary to invent (`B305`'s
+    #: problem does not arise). Left empty so the caller's list is used.
+    default_pairs: list[str] = []
+
+    def __init__(self, client: Any, *, paper: bool = True) -> None:
+        """`client` is an `alpaca.trading.client.TradingClient` — or the mock presenting its shape.
+
+        **`paper` IS PASSED IN RATHER THAN READ BACK.** It is the same value handed to
+        `TradingClient(..., paper=paper)`, so `is_simulation` reports what we CONSTRUCTED WITH and
+        not something interpreted from an account field. Deriving it from the venue would rebuild
+        `T-0076` — a flag whose meaning depends on reading a third party's record.
+        """
+        self._client = client
+        self._paper = bool(paper)
+        self.connected: bool = False
+
+        #: How many positions the last `get_positions` could not read, by reason. **A positive
+        #: statement**: a silent skip and a venue with nothing to report are otherwise identical.
+        self.last_unreadable: list[dict] = []
+
+    # ------------------------------------------------------------------
+    # Simulation contract — TRUE, and truthfully
+    # ------------------------------------------------------------------
+    @property
+    def is_simulation(self) -> bool:
+        """**The `paper` flag we constructed the client with.**
+
+        Not derived from an account field and not per-call. `T-0106`'s `is_simulation` returned a
+        hardcoded `False` with a docstring explaining that no value was correct for an MT5 demo;
+        here the value is correct and is simply reported.
+        """
+        return self._paper
+
+    # ------------------------------------------------------------------
+    # Connection
+    # ------------------------------------------------------------------
+    async def connect(self) -> None:
+        """Alpaca is REST and stateless — one call proves the credentials.
+
+        A documented act rather than a no-op: `get_account` is the cheapest call that fails on bad
+        credentials, so "connected" means "the venue answered us", which is what a caller assumes
+        the word means.
+        """
+        await self.get_account()
+        self.connected = True
+        logger.info("Alpaca adapter connected", paper=self._paper)
+
+    async def disconnect(self) -> None:
+        """**A DOCUMENTED NO-OP** (`B285`). `TradingClient` holds no session to close; the
+        docstring is the difference between a no-op and an omission for whoever debugs a
+        connection that will not close.
+        """
+        self.connected = False
+
+    # ------------------------------------------------------------------
+    # Reads
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _require_model(value: Any, member: str) -> Any:
+        """**The venue's answer must be a MODEL, not a dict** (`B356`, and worse than it).
+
+        `TradingClient(..., raw_data=False)` is what we construct with, and **`_use_raw_data` is
+        MUTABLE AT RUNTIME** — measured: assigning `client._use_raw_data = True` takes, and 28
+        methods branch on it. So the constructor argument is a CONVENTION and anything holding the
+        client can flip it. **An arm asserting the constructor call passes while the flag is
+        flipped downstream**, which is what my first version of that arm did.
+
+        There is no backend type-checker either — `tsc` gates the frontend and nothing gates Python
+        — so `Union[Model, Dict[str, Any]]`, the one external fact that could catch a raw-dict
+        access, is unenforced. **This check is the enforcement.**
+
+        Without it the failure is silent and misdirected: every `getattr` on a dict returns the
+        default, so a raw payload full of good data reads as a payload full of absences, and
+        `get_account` would refuse for "no equity" while the equity is right there in the dict.
+        """
+        if isinstance(value, dict):
+            raise BrokerError(
+                f"Alpaca {member} returned a RAW DICT rather than a model. The client's "
+                f"`_use_raw_data` is set — it is mutable at runtime and 28 SDK methods branch on "
+                f"it. Every attribute read in this adapter would silently return None, so a full "
+                f"payload would read as an empty one. See {SHAPES}.",
+                broker="alpaca",
+            )
+        return value
+
+    async def _call(self, name: str, *args, **kwargs) -> Any:
+        """One place where a venue call becomes our error (`B340`).
+
+        `T-0106` grew seven copies of its rate-limit dispatch and five of them could be INVERTED
+        with the suite green. One dispatch from the start.
+        """
+        method = getattr(self._client, name, None)
+        if method is None:
+            raise BrokerError(
+                f"the Alpaca client has no {name!r}. Every member this adapter calls is on "
+                f"TradingClient — see {SHAPES}.", broker=self.broker_name,
+            )
+        try:
+            result = method(*args, **kwargs)
+            if asyncio.iscoroutine(result):
+                result = await result
+            return result
+        except BrokerError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise BrokerError(
+                f"Alpaca {name} failed: {type(exc).__name__}: {exc}", broker=self.broker_name,
+            ) from exc
+
+    async def get_account(self) -> Account:
+        acct = self._require_model(await self._call("get_account"), "get_account")
+        # `B377`, SAME FIELD AND A DIFFERENT VENUE. `TradeAccount.equity` is OPTIONAL on the
+        # model, and it feeds the prop-firm compliance monitor where a breach closes the account.
+        # Substituting another field silently asserts that open P&L is zero.
+        equity = getattr(acct, "equity", None)
+        if equity is None:
+            raise BrokerError(
+                "the Alpaca account payload carried no `equity`. Refusing to substitute "
+                "`cash` or `portfolio_value`: equity feeds the drawdown monitor and they are not "
+                "the same quantity (B377).", broker=self.broker_name,
+            )
+        # ⚠ `balance` USED TO FALL BACK TO `equity` HERE, WHICH IS `B377` REPRODUCED BY THE PERSON
+        # WHO FIXED IT. `cash`, `equity`, `buying_power` and `last_equity` are ALL Optional[str] on
+        # this model — B377 four times over — and cash is not equity: substituting one silently
+        # asserts that open P&L is zero, which is the exact sentence I wrote about CFT an hour ago.
+        cash = _dec(getattr(acct, "cash", None), "cash")
+        if cash is None:
+            raise BrokerError(
+                "the Alpaca account payload carried no `cash`. Refusing to substitute `equity`: "
+                "they differ by exactly the open P&L, so falling back asserts that it is zero "
+                "(B377). Both are Optional[str] on TradeAccount.",
+                broker=self.broker_name,
+            )
+        return Account(
+            account_id=str(getattr(acct, "account_number", "") or ""),
+            broker=self.broker_name,
+            balance=float(cash),
+            equity=float(_dec(equity, "equity")),
+            currency=str(getattr(acct, "currency", "USD") or "USD"),
+            margin_used=0.0,
+            margin_available=float(_dec(getattr(acct, "buying_power", None), "buying_power") or 0),
+            unrealized_pl=0.0,
+        )
+
+    async def _raw_positions(self) -> list[Any]:
+        """The venue's position objects, UNCOERCED (`B349`).
+
+        `close_all_positions` needs a symbol and nothing else. Building a full `Position` per row
+        runs every numeric through `_dec`, and after `B349` we know what that costs on a kill
+        switch: one unreadable field on one position left every position open. **A position we
+        cannot fully PARSE is not a position we cannot CLOSE.**
+        """
+        rows = await self._call("get_all_positions") or []
+        self._require_model(rows, "get_all_positions")
+        return [self._require_model(r, "get_all_positions[]") for r in rows]
+
+    async def get_positions(self) -> list[Position]:
+        return [self._to_position(raw) for raw in await self._raw_positions()]
+
+    @staticmethod
+    def _read_direction(raw: Any) -> DirectionType:
+        """`PositionSide` -> ours, mapping what is documented and RAISING on the rest."""
+        side = getattr(raw, "side", None)
+        value = getattr(side, "value", side)
+        if value is None or str(value).strip() == "":
+            raise AlpacaSideUnrecognised(None)
+        key = str(value).strip().lower()
+        if key not in POSITION_SIDES:
+            raise AlpacaSideUnrecognised(value)
+        return POSITION_SIDES[key]
+
+    @staticmethod
+    def _require_mark(current: Decimal | None, raw: Any) -> Decimal:
+        """A position we cannot MARK is not a position at breakeven (`B215`)."""
+        if current is None:
+            raise AlpacaFieldUnreadable("current_price", None)
+        return current
+
+    def _to_position(self, raw: Any) -> Position:
+        entry = _required_dec(raw, "avg_entry_price")
+        qty = _required_dec(raw, "qty")
+        current = _dec(getattr(raw, "current_price", None), "current_price")
+        reported = _dec(getattr(raw, "unrealized_pl", None), "unrealized_pl")
+        direction = self._read_direction(raw)
+        if reported is not None:
+            pnl, pnl_source = reported, "unrealized_pl"
+        else:
+            # DERIVED FROM WHAT THE VENUE DID SEND, and marked as such. Sign follows the
+            # direction: a SHORT gains when the mark falls.
+            mark = self._require_mark(current, raw)
+            move = (mark - entry) if direction is DirectionType.LONG else (entry - mark)
+            pnl, pnl_source = move * qty, "derived:(mark-entry)*qty"
+        return Position(
+            id=str(getattr(raw, "asset_id", "") or ""),
+            pair=str(getattr(raw, "symbol", "UNKNOWN")),
+            direction=direction,
+            entry_price=entry,
+            # `B215`, AND BOTH OF THESE WERE WRONG WHEN FIRST WRITTEN — in this file, by the seat
+            # that had just filed an entry about reproducing this class. Found by a mechanical
+            # sweep for the SHAPE, not by remembering.
+            #
+            # `current_price` FELL BACK TO `entry`, which does not merely default a number — it
+            # ASSERTS THE POSITION IS AT BREAKEVEN. A position we cannot mark is not a position
+            # worth zero P&L; it is one we cannot price, and our DTO has no value for that, so it
+            # raises. `close_all_positions` is unaffected: it reads raw rows and never builds these
+            # (`B349`), so an unpriceable position can still be CLOSED.
+            current_price=self._require_mark(current, raw),
+            unrealized_pnl=pnl,
+            # WHICH KEY, recorded (`B286`) — and now it can also say DERIVED. `unrealized_pl` is
+            # Optional on the venue's model, so its absence is a fact about the payload. A zero
+            # would be a fabricated number flowing into every P&L sum; the derivation uses only
+            # fields the venue DID send, and the provenance says which it is.
+            pnl_source=pnl_source,
+            produced_by=self.broker_name,
+            # SPOT CRYPTO CHARGES NO SWAP, so these are structurally absent rather than unread —
+            # `B261`'s question disappears on this venue rather than being answered.
+            swap=None,
+            commission=None,
+            r_multiple=None,
+            lot_size=qty,
+            sl=None,
+            tp=None,
+            duration_seconds=None,
+            open_time=datetime.now(timezone.utc),
+        )
+
+    async def get_orders(self, status: str | None = None) -> list[dict]:
+        orders = await self._call("get_orders") or []
+        return [
+            {
+                "id": str(getattr(o, "id", "")),
+                "pair": str(getattr(o, "symbol", "") or ""),
+                "status": str(getattr(getattr(o, "status", None), "value", getattr(o, "status", ""))),
+                "side": str(getattr(getattr(o, "side", None), "value", getattr(o, "side", ""))),
+                "qty": str(getattr(o, "qty", "") or ""),
+            }
+            for o in orders
+        ]
+
+    async def get_recent_trades(self, since: datetime | None = None) -> list[dict]:
+        """Filled orders are this venue's trade record — there is no separate deals endpoint.
+
+        **`get_orders` returns ORDERS, and only a FILLED one is a trade.** Mapping every order as a
+        trade would put unfilled intent into the record, which is `B365`'s shape: a predicate
+        ranging over the wrong population.
+        """
+        orders = await self._call("get_orders") or []
+        trades: list[dict] = []
+        for o in orders:
+            state = str(getattr(getattr(o, "status", None), "value", getattr(o, "status", "")))
+            if state.lower() != "filled":
+                continue
+            trades.append({
+                "id": str(getattr(o, "id", "")),
+                "pair": str(getattr(o, "symbol", "") or ""),
+                "side": str(getattr(getattr(o, "side", None), "value", getattr(o, "side", ""))),
+                "qty": _dec(getattr(o, "filled_qty", None), "filled_qty"),
+                "price": _dec(getattr(o, "filled_avg_price", None), "filled_avg_price"),
+            })
+        return trades
+
+    async def reference_price(self, pair: str) -> float | None:
+        """**Not abstract on the base class, and that asymmetry is a trap** (`base.py:195`).
+
+        An adapter that forgets this rejects EVERY market order as *"no reference price
+        available"*, which reads as a market-data fault and sends the debugger to the wrong
+        subsystem.
+        """
+        try:
+            position = await self._call("get_open_position", pair)
+        except BrokerError:
+            return None
+        price = _dec(getattr(position, "current_price", None), "current_price")
+        return float(price) if price is not None else None
+
+    # ------------------------------------------------------------------
+    # The one write — REFUSES, and refuses EVERY direction in this phase
+    # ------------------------------------------------------------------
+    async def place_order(self, request: OrderRequest) -> dict:
+        """**REFUSES ALL ORDERS IN THIS PHASE, AND THE DIRECTION-INDEPENDENCE IS DELIBERATE.**
+
+        Malek ruled the platform trades LONG ONLY because Alpaca crypto is non-marginable and not
+        shortable, so a SHORT must be refused with a reason the venue owns, RECORDED, and COUNTED.
+        **That is `T-0137` and it is not this task.**
+
+        **REFUSING SHORTS *HERE* WOULD BE WORSE THAN NOT REFUSING THEM AT ALL.** The live loop
+        records whatever reason execution hands it, so an adapter that refuses shorts before the
+        venue-owned reason exists produces **147 records of the wrong shape — worse than none,
+        because they look like coverage**, and `records_rejected_signals: True` is already in
+        `EngineRun.config` asserting those records are good. `B376` had to land with `B372` for the
+        identical reason: a refusal whose consumer is not ready converts one defect into a quieter
+        one.
+
+        So this refuses **regardless of direction**. No direction-dependent behaviour exists in
+        this module yet, which makes a wrongly-shaped short record impossible rather than unlikely.
+
+        ---
+
+        **MEASURED FOR `T-0137`, BECAUSE THE TWO SIDE VOCABULARIES SET A TRAP HERE.** On a spot
+        venue **closing a long is also a `sell`**, so a refusal written as *"refuse sells"* would
+        refuse every EXIT and leave positions unclosable — the kill switch included. Whether that
+        matters depends on whether any exit reaches this member, which was measured rather than
+        assumed:
+
+        ```
+        place_order callers          execution/service.py:167   -- ExecutionService.execute(sig)
+                                                                   takes a SIGNAL and builds the
+                                                                   OrderRequest from sig.direction
+                                                                   => THE ENTRY PATH
+                                     live_loop_proxy.py:142     -- a FORWARDER: it passes the same
+                                                                   request to whatever broker the
+                                                                   loop holds. Not an independent
+                                                                   caller and not an exit.
+
+        every exit call site         positions.py:154           close_position   (manual close)
+                                     kill_switch.py:67          close_all_positions
+                                     crypto_loop.py:1006        close_position   (partial exit)
+                                     crypto_loop.py:1077        close_position   (full exit)
+                                     crypto_loop.py:1650        close_all_positions
+        ```
+
+        **NO EXIT PATH REACHES `place_order`.** Two callers, one entry and one forwarder.
+
+        ⚠ **AND MY FIRST RUN OF THIS SCAN WAS NARROWER THAN THE QUESTION.** It excluded
+        `app/services/broker/` to drop the adapters' own `def place_order`, and that exclusion also
+        hid `live_loop_proxy.py:142`. The conclusion is unchanged — a forwarder is not an exit —
+        but **I reported "the only one" from a population that could not have contained the second
+        one.** Recorded because it is the session's recurring shape: a scan whose population is
+        narrower than its question returns a confident answer to a question it did not ask. So `T-0137`'s refusal may discriminate on
+        `OrderRequest.direction` here, and closing a long — a `sell` at the venue — is untouched by
+        it. Had one exit routed through here, the refusal would have had to discriminate on
+        position context rather than on side, which is a different task.
+        """
+        raise NotImplementedError(
+            "Alpaca place_order is not implemented in this phase and refuses EVERY direction. "
+            "The long-only refusal — a SHORT rejected with a venue-owned reason, recorded through "
+            "_record_rejected_signal and counted by direction — is T-0137. Refusing shorts before "
+            "that exists would write records of the wrong shape into a run whose config already "
+            "claims they are good."
+        )
+
+    async def close_position(self, position_id: str, lot_size: float | None = None) -> dict:
+        """Close by symbol, and **HONOUR `lot_size` rather than ignore it** (`T-0038`).
+
+        The contract is *honour it or refuse loudly*, and silently closing everything when a
+        caller asked for 30% is the ambiguity that contract exists to prevent. **This is not
+        theoretical here:** the exit ladder is 70% at 2R with a 30% runner (`EXIT-001`), and
+        `crypto_loop.py:1006` calls this with a `lot_size` on every partial exit — so ignoring it
+        would liquidate the runner and make the ladder unobservable.
+
+        Alpaca expresses it as `ClosePositionRequest(qty=...)`. **Imported inside the method**, for
+        `B328`'s reason: this module must stay importable without the SDK.
+        """
+        if lot_size is None:
+            result = await self._call("close_position", position_id)
+            return {"position_id": position_id, "partial": False, "result": str(result)}
+
+        from alpaca.trading.requests import ClosePositionRequest
+
+        # `qty` IS A STRING ON THIS VENUE. Passing a float would send `0.30000000000000004` for a
+        # third of a position; the venue types it as a string and the SDK does not coerce.
+        options = ClosePositionRequest(qty=str(lot_size))
+        result = await self._call("close_position", position_id, options)
+        return {"position_id": position_id, "partial": True, "qty": str(lot_size),
+                "result": str(result)}
+
+    async def close_all_positions(self) -> list[dict]:
+        """**Malek's ruled property, on its third venue** — the shape is reused, not rebuilt.
+
+        > Every position open when the switch was pulled must be reported as CLOSED, FAILED WITH A
+        > REASON, or NOT ATTEMPTED.
+
+        The dispositions come from `BrokerAdapter` (`T-0132`) rather than being redefined here — a
+        ruled property that lives in one implementation is a property of that implementation.
+
+        **AND THIS VENUE CAN EXPRESS A PER-POSITION FAILURE, WHICH CFT COULD NOT.**
+        `ClosePositionResponse.body` is an `Order` on success and `FailedClosePositionDetails` —
+        carrying `code` and `message` — on failure, with an HTTP `status` int alongside. On CFT I
+        had to record *"a partial close would still read as CLOSED"* as an unclosable gap because
+        that venue's response shape is unobserved. Here it is typed, so a failed row carries the
+        venue's own reason instead of an inference.
+        """
+        report: dict[str, dict] = {}
+        try:
+            positions = await self._raw_positions()
+        except Exception as exc:  # noqa: BLE001
+            raise BrokerError(
+                f"Alpaca close_all_positions could not enumerate the open positions, so it cannot "
+                f"report on them: {exc}. Nothing was attempted.", broker=self.broker_name,
+            ) from exc
+
+        for index, raw in enumerate(positions):
+            report[f"#{index}"] = {
+                "position_id": str(getattr(raw, "symbol", "") or "").strip(),
+                "pair": str(getattr(raw, "symbol", "UNKNOWN")),
+                "disposition": self.NOT_ATTEMPTED,
+                "status": "failed",
+                "reason": "the close loop never reached this position",
+            }
+        self.last_close_all_report = report
+
+        try:
+            for index, _raw in enumerate(positions):
+                row = report[f"#{index}"]
+                symbol = row["position_id"]
+                if not symbol:
+                    row.update(
+                        disposition=self.FAILED, status="failed",
+                        reason="the venue sent no symbol, so this position could not be addressed "
+                               "and no close was sent for it",
+                    )
+                    continue
+                row.update(
+                    disposition=self.FAILED, status="failed", _in_flight=True,
+                    reason="the close for this position was SENT and the outcome was never "
+                           "observed. The position may or may not be closed and MUST be checked "
+                           "at the venue.",
+                )
+                try:
+                    result = await self._call("close_position", symbol)
+                except Exception as exc:  # noqa: BLE001 - ANY exception, loop CONTINUES
+                    row.update(
+                        disposition=self.FAILED, status="failed", _in_flight=False,
+                        reason=f"{type(exc).__name__}: {exc}",
+                    )
+                    continue
+                row.update(**self._classify_close(result), result=str(result), _in_flight=False)
+        except BaseException as exc:  # noqa: BLE001 - CancelledError is not an Exception
+            for _row in report.values():
+                if _row.pop("_in_flight", False):
+                    _row["reason"] = (
+                        f"{type(exc).__name__}: the close for this position was SENT and the "
+                        f"outcome was NEVER OBSERVED — the loop did not survive to record it "
+                        f"({exc}). It MUST be checked at the venue."
+                    )
+            failure = BrokerError(
+                f"Alpaca close_all_positions ended abnormally after "
+                f"{sum(1 for r in report.values() if r['disposition'] != self.NOT_ATTEMPTED)} of "
+                f"{len(report)} position(s): {type(exc).__name__}: {exc}",
+                broker=self.broker_name,
+            )
+            failure.partial_report = list(report.values())  # type: ignore[attr-defined]
+            raise failure from exc
+
+        for row in report.values():
+            row.pop("_in_flight", None)
+        return list(report.values())
+
+    def _classify_close(self, result: Any) -> dict:
+        """Read the venue's own answer. **A response is not a close** (`B367`).
+
+        `ClosePositionResponse.body` is `FailedClosePositionDetails` when the close failed, and the
+        SDK does not raise for it — so a row marked CLOSED on the strength of "no exception" would
+        be stating something false, which is `B337`'s shape by a different cause.
+        """
+        body = getattr(result, "body", None)
+        code = getattr(body, "code", None)
+        message = getattr(body, "message", None)
+        if code is not None or message is not None:
+            return {
+                "disposition": self.FAILED, "status": "failed",
+                "reason": f"the venue refused this close: code={code} {message}",
+            }
+        http = getattr(result, "status", None)
+        if http is not None and int(http) >= 300:
+            return {
+                "disposition": self.FAILED, "status": "failed",
+                "reason": f"the venue answered HTTP {http} for this close, which is not a success",
+            }
+        return {"disposition": self.CLOSED, "status": "closed", "reason": None}
+
+    async def stream_prices(self, pairs: list[str], callback: Callable) -> None:
+        """Poll per pair. Alpaca has a websocket feed; this shape is what the contract requires."""
+        while self.connected:
+            for pair in pairs:
+                price = await self.reference_price(pair)
+                if price is not None:
+                    result = callback(pair, price)
+                    if asyncio.iscoroutine(result):
+                        await result
+            await asyncio.sleep(1)

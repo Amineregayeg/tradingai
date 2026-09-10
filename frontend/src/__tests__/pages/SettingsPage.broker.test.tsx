@@ -133,4 +133,69 @@ describe('B369 — MT5 is reachable from the broker form', () => {
     expect(note).toMatch(/T-0076/)
     expect(note).toMatch(/no live mode/i)
   })
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // T-0136 — Alpaca, and the arm DRIVES THE FORM (B369)
+  // ────────────────────────────────────────────────────────────────────────────
+
+  it('offers Alpaca and SENDS api_key + api_secret when it is selected', async () => {
+    const user = userEvent.setup()
+    await openBrokerForm(user)
+
+    const select = screen.getByDisplayValue(/Crypto Fund Trader/i) as HTMLSelectElement
+    expect(Array.from(select.options).some((o) => /Alpaca/i.test(o.textContent ?? ''))).toBe(true)
+
+    await user.selectOptions(select, 'alpaca')
+    await user.type(screen.getByPlaceholderText(/Alpaca API key id/i), 'PKTEST')
+    await user.type(screen.getByPlaceholderText(/Alpaca secret key/i), 'sekrit')
+    await user.click(screen.getByRole('button', { name: /^Connect$/i }))
+
+    await waitFor(() => expect(connect).toHaveBeenCalledTimes(1))
+    const payload = connect.mock.calls[0]![0] as Record<string, unknown>
+
+    // NO ASSERTION HERE READS THE COMPONENT'S SOURCE OR ITS PROPS. B369's standard: an arm
+    // checking a field exists in the JSX proves the author added it; only reading what the API
+    // client was CALLED WITH proves a user can connect.
+    expect(payload.broker).toBe('alpaca')
+    expect(payload.api_key).toBe('PKTEST')
+    expect(payload.api_secret).toBe('sekrit')
+    // The MT5 fields are dead for this venue and must not ride along.
+    expect(payload.token ?? '').not.toBe('PKTEST')
+    expect(payload.mt5_account_id ?? '').toBe('')
+  })
+
+  it('offers Alpaca as PAPER ONLY, because a live one is the object ExecutionService refuses', async () => {
+    const user = userEvent.setup()
+    await openBrokerForm(user)
+    const select = screen.getByDisplayValue(/Crypto Fund Trader/i) as HTMLSelectElement
+    await user.selectOptions(select, 'alpaca')
+
+    // `paper` is a CONSTRUCTOR FLAG, so `is_simulation` answers True truthfully. Offering "Live"
+    // would build the one object `ExecutionService` and `ExecMode` refuse — advertising a
+    // configuration that cannot trade, which is the CFT mistake in a new place.
+    expect(screen.getByText(/^Paper$/)).toBeTruthy()
+    expect(screen.queryByText(/^Live$/)).toBeNull()
+  })
+
+  it('tells the user LONG ONLY before they connect, not after a run reads short', async () => {
+    const user = userEvent.setup()
+    await openBrokerForm(user)
+    const select = screen.getByDisplayValue(/Crypto Fund Trader/i) as HTMLSelectElement
+    await user.selectOptions(select, 'alpaca')
+
+    // The central risk of the whole programme is that a silently long-only run reads as "the
+    // strategy underperformed" rather than "half the strategy never ran". The refusal path is
+    // T-0137's; saying so where the account is created costs nothing and is the earliest surface.
+    const note = screen.getByTestId('env-note').textContent ?? ''
+    expect(note).toMatch(/LONG ONLY/i)
+    expect(note).toMatch(/not shortable|non-marginable/i)
+  })
+
+  it('does NOT show the Alpaca fields for a non-Alpaca broker', async () => {
+    const user = userEvent.setup()
+    await openBrokerForm(user)
+    // The must-miss: a branch added for one broker is one edit from rendering for all of them.
+    expect(screen.queryByPlaceholderText(/Alpaca API key id/i)).toBeNull()
+    expect(screen.getByPlaceholderText(/account email/i)).toBeTruthy()
+  })
 })

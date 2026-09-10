@@ -53,17 +53,42 @@ async def test_impossible_environment_explains_itself(client):
 
 
 async def test_unsupported_broker_explains_itself(client):
-    """OANDA/Alpaca/MetaAPI were offered by the UI but cannot be constructed.
+    """A broker the factory cannot build must answer clearly rather than with a 500.
 
-    The dropdown no longer lists them, but the API must still answer clearly —
-    a stored connection, a scripted call, or a stale browser tab can all send one.
+    The dropdown no longer lists them, but the API must still answer — a stored connection, a
+    scripted call, or a stale browser tab can all send one.
+
+    **THIS ARM USED TO PROBE WITH `alpaca` AND ITS PREMISE EXPIRED.** Malek ruled Alpaca the venue
+    on 2026-09-10 and `T-0136` made it constructible, so the arm was asserting that a supported
+    broker is unsupported — **true when written and false the moment the branch landed.** It now
+    probes `oanda`, which `_make_adapter` still refuses BY DESIGN: it was deleted as the only
+    unguarded real-money path, and that deletion is a decision this arm should keep watching.
     """
-    status, detail = await _connect(client, broker="alpaca")
+    status, detail = await _connect(client, broker="oanda")
 
     assert status != 500, "an unsupported broker surfaced as a server error"
     assert status == 400
-    assert "alpaca" in detail.lower(), f"the rejected broker is not named: {detail!r}"
+    assert "oanda" in detail.lower(), f"the rejected broker is not named: {detail!r}"
     assert "unexpected error" not in detail.lower()
+
+
+async def test_alpaca_IS_supported_now_and_a_missing_credential_is_a_400(client):
+    """`T-0136`. The other half of the arm above: Alpaca left the unsupported set.
+
+    **And the STATUS CLASS is the point.** A missing `api_key`/`api_secret` is something the caller
+    must fix, so it is a 400. A 502 would say the venue failed us and send them to Alpaca's status
+    page — this file's own rule is that a configuration problem "must stay distinguishable from
+    'you configured this wrong'", and the first version of my branch raised the connection class.
+    """
+    status, detail = await _connect(client, broker="alpaca", api_key="", api_secret="")
+
+    assert status == 400, f"a missing credential surfaced as {status}, not a configuration error"
+    assert "api_key" in detail.lower() or "secret" in detail.lower(), (
+        f"the missing field is not named: {detail!r}"
+    )
+    assert "could not connect" not in detail.lower(), (
+        "the message blames the venue for a request the caller can fix"
+    )
 
 
 async def test_valid_config_is_not_rejected_as_invalid(client):

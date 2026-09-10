@@ -126,6 +126,11 @@ def test_there_are_adapters_to_check():
         # refused: a caller asking for 30% and a caller asking for everything must not get the
         # identical message, which is the ambiguity this contract exists to prevent.
         "MetaTrader5Adapter",
+        # `T-0136`. THE VENUE MALEK RULED ON 2026-09-10, named deliberately — which is what this
+        # pin is for. Its `close_position` HONOURS `lot_size` via `ClosePositionRequest(qty=)`
+        # rather than refusing, because the exit ladder is 70%-at-2R plus a 30% runner and
+        # `crypto_loop.py:1006` passes a size on every partial exit.
+        "AlpacaAdapter",
     }, (
         f"the production adapter set changed: {sorted(names)}. A new adapter must be added here "
         "deliberately — joining the guarded set silently is how a member goes unwatched."

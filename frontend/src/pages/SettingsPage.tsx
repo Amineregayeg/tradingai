@@ -37,6 +37,18 @@ import type { Settings, BrokerConnection, BrokerConnectRequest } from '@/types/a
  * separately by observe_only and the server-side ALLOW_LIVE_TRADING flag.
  */
 const BROKER_CAPABILITIES = {
+  alpaca: {
+    label: 'Alpaca (paper)',
+    // `T-0136`. **PAPER ONLY IN THE FORM, AND THAT IS THE SAFETY MODEL RATHER THAN A LIMITATION.**
+    // `paper` is a CONSTRUCTOR FLAG we pass, so `is_simulation` answers TRUE truthfully —
+    // `ExecutionService` refuses any adapter reporting False and `ExecMode` has no LIVE member,
+    // both deliberately. Offering "Live" here would build the one object those two refuse, so the
+    // dropdown would be advertising a configuration that cannot trade. That is the CFT mistake
+    // this header is about, in a new place.
+    environments: [{ value: 'practice', label: 'Paper' }],
+    envNote: 'Alpaca paper trading — no real money. LONG ONLY: Alpaca crypto is non-marginable '
+      + 'and not shortable, so short signals are refused by the venue rather than placed.',
+  },
   cryptofundtrader: {
     label: 'Crypto Fund Trader',
     environments: [{ value: 'live', label: 'Live' }],
@@ -339,7 +351,41 @@ export default function SettingsPage() {
                     />
                   </div>
 
-                  {brokerForm.broker === 'mt5' ? (
+                  {brokerForm.broker === 'alpaca' ? (
+                    <>
+                      {/* `T-0136`/`B369`. `api_key` and `api_secret` ALREADY EXIST on the connect
+                          request, so unlike MT5 this needs no schema change — but the form still
+                          branches on broker, and without this branch the backend would accept a
+                          payload the UI cannot produce. That is B369 exactly: not offering what
+                          the backend refuses, but failing to PRODUCE what it now accepts. */}
+                      <div style={{ marginBottom: 14 }}>
+                        <label style={{ fontSize: 12, color: '#8888a0', display: 'block', marginBottom: 5 }}>API Key ID</label>
+                        <input
+                          type="password"
+                          placeholder="Alpaca API key id"
+                          value={brokerForm.api_key ?? ''}
+                          onChange={(e) => setBrokerForm((f) => ({ ...f, api_key: e.target.value }))}
+                          style={{ width: '100%' }}
+                        />
+                        <div style={{ fontSize: 11, color: '#55556a', marginTop: 4 }}>
+                          From alpaca.markets → Paper Trading. Not your login password.
+                        </div>
+                      </div>
+                      <div style={{ marginBottom: 14 }}>
+                        <label style={{ fontSize: 12, color: '#8888a0', display: 'block', marginBottom: 5 }}>API Secret Key</label>
+                        <input
+                          type="password"
+                          placeholder="Alpaca secret key"
+                          value={brokerForm.api_secret ?? ''}
+                          onChange={(e) => setBrokerForm((f) => ({ ...f, api_secret: e.target.value }))}
+                          style={{ width: '100%' }}
+                        />
+                        <div style={{ fontSize: 11, color: '#55556a', marginTop: 4 }}>
+                          Shown once when the key is created — it cannot be retrieved later.
+                        </div>
+                      </div>
+                    </>
+                  ) : brokerForm.broker === 'mt5' ? (
                     <>
                       <div style={{ marginBottom: 14 }}>
                         <label style={{ fontSize: 12, color: '#8888a0', display: 'block', marginBottom: 5 }}>MetaApi Token</label>

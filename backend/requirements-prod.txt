@@ -101,3 +101,21 @@ jsonschema==4.26.0
 # BUMPING THIS: re-run the coexistence check, not just the resolution. The failure mode this pin
 # guards against is a version that resolves and does not run.
 metaapi-cloud-sdk==29.1.1
+
+# --- Alpaca (T-0136) ---
+# Malek ruled the venue on 2026-09-10. `paper=True` is a CONSTRUCTOR FLAG, which is why
+# `is_simulation` can answer truthfully here and `T-0076` stopped being a blocker.
+#
+# WHAT IT COSTS, MEASURED BY A REAL INSTALL rather than expected (T-0133's discipline):
+#
+#   3 packages added:  alpaca-py, msgpack, sseclient-py
+#   removed / downgraded / changed:  NONE          pip check: clean
+#
+# Against MetaApi's NINETEEN packages, both `aiohttp` and `requests` on top of our `httpx`, and a
+# `python-socketio` pinned four majors back. This adds no HTTP stack and displaces nothing.
+#
+# `alpaca.py` deliberately does NOT import this at module scope (B328): the contract arm's
+# discovery walk does `except Exception: continue`, so an adapter whose module cannot be imported
+# is skipped IN SILENCE by the arm that covers it. The client is injected and the venue's
+# vocabulary is carried as enum VALUES.
+alpaca-py==0.44.0

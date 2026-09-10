@@ -32,6 +32,7 @@ from app.services.broker.cft_sim import PropFirmRules, SimPropFirmBroker
 from app.services.broker.cft_bridge_adapter import CFTBridgeAdapter
 from app.services.broker.cryptofundtrader import CryptoFundTraderAdapter
 from app.services.broker.live_loop_proxy import LiveLoopBrokerProxy
+from app.services.broker.alpaca import AlpacaAdapter
 from app.services.broker.mt5 import MetaTrader5Adapter
 from app.services.broker.oanda import OANDAAdapter
 from app.services.broker.paper import PaperBroker
@@ -148,7 +149,37 @@ LIVE_ADAPTERS = LIVE_ADAPTERS + [
     ("mt5", MetaTrader5Adapter, lambda: MetaTrader5Adapter(account=object())),
 ]
 
-ALL_ADAPTERS = SIM_ADAPTERS + LIVE_ADAPTERS + PROXY_ADAPTERS
+# `T-0136`. ALPACA IS A **SIMULATION** ADAPTER WHEN CONSTRUCTED WITH `paper=True`, AND THAT IS THE
+# WHOLE POINT OF THE VENUE CHANGE. Every other entry in these lists is fixed by its class; this one
+# is fixed by a CONSTRUCTOR ARGUMENT, which is exactly why `is_simulation` can answer truthfully
+# here and why `T-0076` stopped being a blocker.
+#
+# It goes in SIM_ADAPTERS because the factory below constructs it with `paper=True`, and
+# `is_simulation` reports what we passed rather than something read back from the venue. A
+# `paper=False` Alpaca adapter WOULD belong in LIVE_ADAPTERS — that is a different object, and the
+# arms below assert the flag rather than the class name, so neither is asserted by category alone.
+# **A FOURTH CATEGORY, AND NEITHER EXISTING ONE WAS ACCEPTABLE — `B297` again, for a new reason.**
+#
+# `SIM_ADAPTERS` carries TWO meanings that no adapter had separated until now:
+#
+#   (a) `is_simulation` is True                      -- what the contract arms assert
+#   (b) an IN-PROCESS simulator you can DRIVE        -- what `test_t0105_position_provenance`
+#       with `on_tick` and a filling `place_order`       imports it for, to build real rows
+#
+# `PaperBroker` and `SimPropFirmBroker` satisfy both, so the two readings were indistinguishable.
+# **Alpaca separates them: it reports `is_simulation=True` truthfully — the `paper` flag we
+# constructed with — and it is a REMOTE venue with no `on_tick` and a `place_order` that refuses.**
+#
+# Putting it in `SIM_ADAPTERS` breaks the provenance fixture, which is the honest signal that the
+# list means something narrower than its name. Putting it in `LIVE_ADAPTERS` would assert
+# `is_simulation is False`, which is FALSE. **A registry entry chosen to clear a red is an
+# assertion nobody decided** — so it gets its own list, and the arms below take the union where
+# they mean "every adapter" and `SIM_ADAPTERS` where they mean "a simulator I can drive".
+REMOTE_SIM_ADAPTERS = [
+    ("alpaca", AlpacaAdapter, lambda: AlpacaAdapter(object(), paper=True)),
+]
+
+ALL_ADAPTERS = SIM_ADAPTERS + REMOTE_SIM_ADAPTERS + LIVE_ADAPTERS + PROXY_ADAPTERS
 
 # EVERY ADAPTER THAT IS A VENUE. Used by the arms below that are about venue behaviour, where
 # **a forwarder is a category error even when it passes.**
@@ -171,7 +202,7 @@ ALL_ADAPTERS = SIM_ADAPTERS + LIVE_ADAPTERS + PROXY_ADAPTERS
 # describing an ABSENT broker is this adapter's name. Its real property — that the name
 # forwards, and announces itself when there is nothing to forward to — is asserted by its own
 # arms further down.
-VENUE_ADAPTERS = SIM_ADAPTERS + LIVE_ADAPTERS
+VENUE_ADAPTERS = SIM_ADAPTERS + REMOTE_SIM_ADAPTERS + LIVE_ADAPTERS
 IDS = [a[0] for a in ALL_ADAPTERS]
 
 # The async interface every adapter must expose (mirrors BrokerAdapter abstract methods).

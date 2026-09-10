@@ -21,6 +21,7 @@ from app.services.broker.cryptofundtrader import CryptoFundTraderAdapter
 
 _CFT_ALIASES = {"cryptofundtrader", "cft", "match-trader", "matchtrader"}
 _MT5_ALIASES = {"mt5", "metatrader5", "metatrader", "metaapi"}
+_ALPACA_ALIASES = {"alpaca", "alpaca-py", "alpacamarkets"}
 
 
 def _make_adapter(
@@ -83,6 +84,63 @@ def _make_adapter(
         # change silently for anyone who has not deployed the bridge, and so the
         # existing adapter tests keep exercising the path they were written for.
         return CryptoFundTraderAdapter(**common)
+
+    if key in _ALPACA_ALIASES:
+        # ALPACA — the venue Malek ruled on 2026-09-10 (`T-0136`).
+        #
+        # The guard above has ALREADY RUN. It cannot be skipped by returning here, which is the
+        # property that made hoisting it a prerequisite rather than a tidy-up (`B352`), and the
+        # reason the OANDA branch was deleted from this function.
+        #
+        # **`paper` IS DERIVED FROM `environment`, AND IT IS THE SAFETY FLAG.** `is_simulation`
+        # reports it, `ExecutionService` refuses any adapter reporting `False`, and `ExecMode` has
+        # no LIVE member. So this is the single place a real-money Alpaca account could enter the
+        # system, and it does so only when the operator asked for `live` AND `ALLOW_LIVE_TRADING`
+        # is set server-side — the two conditions the guard exists to require together.
+        paper = not (environment or "").strip().lower().startswith("live") or observe_only
+        if not paper:
+            logger.warning(
+                "Constructing a LIVE (non-paper) Alpaca adapter — is_simulation will report "
+                "False and ExecutionService will refuse it",
+                broker=broker, environment=environment,
+            )
+        logger.info("Constructing Alpaca adapter", broker=broker, paper=paper,
+                    observe_only=observe_only, allow_live=allow_live)
+
+        api_key = (creds.get("api_key") or "").strip()
+        api_secret = (creds.get("api_secret") or "").strip()
+        if not api_key or not api_secret:
+            # `BrokerError` -> 400, NOT `BrokerConnectionError` -> 502. A missing credential in
+            # the REQUEST is something the caller must fix; a 502 says the venue failed us and
+            # sends them to check Alpaca's status page. `test_broker_connect_errors` states the
+            # rule directly: a configuration problem "must stay distinguishable from 'you
+            # configured this wrong'". (The MT5 branch below raises the connection class for the
+            # same shape — a pre-existing inconsistency on a superseded venue, not fixed here.)
+            raise BrokerError(
+                "Alpaca needs an API key AND secret and one of them is missing. Both go in "
+                "`api_key` / `api_secret`, which the connect request already carries — unlike MT5 "
+                "this needs no new field.",
+                broker=broker,
+            )
+
+        def _client_factory():
+            """Built here, resolved at `connect()` — the async boundary.
+
+            **The SDK is imported INSIDE this closure on purpose** (`B328`): `alpaca.py` must stay
+            importable in an image without `alpaca-py`, or the contract arm's discovery walk skips
+            the adapter in silence. Importing at module scope here would defeat that through the
+            factory instead of through the adapter.
+            """
+            from alpaca.trading.client import TradingClient
+
+            # `raw_data=False` IS PINNED AND IS NOT A DEFAULT WE INHERIT. It switches every return
+            # between a pydantic model and a dict, so it is `B356`'s trap with the variable on OUR
+            # side: adapter and mock could agree wrongly and no venue fact would contradict them.
+            return TradingClient(api_key, api_secret, paper=paper, raw_data=False)
+
+        from app.services.broker.alpaca import AlpacaAdapter
+
+        return AlpacaAdapter(_client_factory(), paper=paper)
 
     if key in _MT5_ALIASES:
         # MT5 THROUGH METAAPI — READS ONLY, AND THAT IS NOT A LIMITATION OF THIS BRANCH.

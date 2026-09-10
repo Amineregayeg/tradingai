@@ -130,6 +130,10 @@ def test_there_are_producers_to_check():
         # baseline command, which named only `test_broker_contract` and
         # `test_t0038_partial_close_contract`. A new adapter touches three populations, not two.
         "MetaTrader5Adapter",
+        # `T-0136`. THE SIXTH PRODUCER, named deliberately. All three population pins fired
+        # together this time and all three were run on purpose — `T-0106` cycle 0 learned that
+        # a new adapter touches THREE populations and found the third only in the full suite.
+        "AlpacaAdapter",
     }, (
         f"the set of Position producers changed: {sorted(c.__name__ for c in _PRODUCERS)}. "
         f"Discovered adapters: {sorted(c.__name__ for c in _all_adapters())}"
