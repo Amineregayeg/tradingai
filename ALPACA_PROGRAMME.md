@@ -121,9 +121,16 @@ impossible to miss:
   recorded and counted, not that the order failed.** A test asserting "no order was placed" passes
   against a crash.
 
-## C — The order path  ⚙️ **EXECUTING** — `T-0138`, six kill-set rows registered before any arm
+## C — The order path (BIND ONLY) ⚙️ **EXECUTING** — `T-0138`, six kill-set rows registered before any arm
 
-**Goal: the engine's orders reach the Alpaca paper account instead of the in-process simulator.**
+**Goal: the engine CAN be pointed at the Alpaca adapter instead of the in-process simulator.**
+
+**Ruled Reading A on 2026-09-11: C BINDS, it does not build the order body.** `place_order` still
+refuses, so **a run configured for Alpaca must FAIL TO START** — naming the missing member and the
+task that owns it — rather than starting and failing 146 longs one at a time. **A wall of per-order
+failures reads as a broken venue** (`B380`'s shape); one refusal at startup cannot be mistaken for a
+market condition. *"The simulator stays the default"* is not sufficient, because one config change
+defeats it.
 
 This is the old Gate 4, and it is **binding, not building** (`B350`). Three named changes, measured:
 
@@ -137,9 +144,22 @@ broker_mode                       selects between TWO SIMULATORS -- not a venue 
 `ExecMode.PAPER` remains correct because an Alpaca paper account **is** a simulation, and
 `execute()`'s assertion passes on a true flag.
 
-## D — First connection
+## D — First connection, AND the order body written against what it measures
 
-**Goal: replace assumptions with observations. Far shorter than MT5's checklist.**
+**Goal: replace assumptions with observations — and THEN implement `place_order`, whose inputs are
+exactly those observations.**
+
+> **SCOPE CORRECTION 2026-09-11, and the gap was mine.** `A3` said *"the eleven `BrokerAdapter`
+> members"*, and A shipped `place_order` REFUSING — correctly, because B's recording path did not
+> exist yet. **So the body fell between A and D and nothing owned it.** Execute found it by asking
+> whether C was *bind* or *bind and build*, which the plan did not answer.
+>
+> **It belongs here rather than in C because `D3`'s measurement IS its input:** the minimum size and
+> increment are what `size_position`'s output must be rounded to, and a sub-minimum order must
+> REFUSE rather than round to zero. **Writing the body before D means writing it on assumptions and
+> rewriting it after** — the mechanism by which this project generates its own defects.
+>
+> **So after C, Alpaca is SELECTABLE and cannot fill. After D, it trades.**
 
 **Free and needs nothing from us:** a paper account is created with an email, **globally**, and
 carries free real-time data.
