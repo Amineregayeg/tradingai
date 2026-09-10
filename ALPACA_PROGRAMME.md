@@ -141,6 +141,41 @@ carries free real-time data.
 **Gone entirely from MT5's list:** the account-type enum, the connection-state pair, the CPU-credit
 quota, the swap-inclusivity question, and the lots conversion.
 
+## E — The analysis layer must refuse a population it cannot characterise
+
+**Goal: stop the feedback loop computing corrections across runs that are not comparable.**
+
+**Found by Review while attacking my own ruling**, and it is a stronger gap than the one I had named.
+I said `long_only: true` in `EngineRun.config` would make any statistic self-marking. **It marks the
+run and nothing carries the mark to the consumer that matters:**
+
+```
+DecisionRecord.run_id                   EXISTS -- the join to EngineRun.config is AVAILABLE
+GET /feedback   last 2000 decisions ACROSS RUNS, no run filter
+                analyze(records, ...) -> result["corrections"]
+grep run_id|config|long_only in services/evaluation/feedback.py   ->   NOTHING
+```
+
+**`analyze()` cannot tell which run a decision came from, and it emits CORRECTION PROPOSALS.** So a
+population mixing long-only runs with both-direction runs produces expected-versus-actual statistics
+that are not comparable — **and the loop does not display them, it acts on them.**
+
+> **`B292` at the analysis layer:** a statistic over a population you cannot describe should say so
+> rather than produce a number.
+
+**The remedy is a refusal rather than a join** — no new field, and it fails closed.
+
+**And the refusal must NAME what it could not do**, which is the half a bare refusal loses: not
+*"cannot analyse"* but *"this population spans 2 configurations — 1,340 decisions with
+`long_only=false`, 660 with `long_only=true`."* **A bare refusal is its own `B292`** — an operator
+cannot tell *could not ask* from *nothing to say*, and the counts say exactly when it becomes
+answerable.
+
+**Scoped as its own part rather than folded into `T-0137`**, because it is about the analysis layer
+rather than the venue and it would outlive another venue change.
+
+---
+
 ---
 
 ## What gets deleted, and what is kept
