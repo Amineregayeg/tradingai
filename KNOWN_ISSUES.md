@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-05 (B385 and B386 — THE ROLLBACK THAT SAVED THE DATABASE WAS A GUARANTEE AND THE FIX SPENDS IT FOR THE WHOLE BATCH. alembic/env.py does NOT set transaction_per_migration, so ONE transaction wraps the entire upgrade run and PostgreSQL DDL is transactional — which is why production came back at 0008 with the enum unchanged: STRUCTURE, NOT LUCK, and my runbook said the opposite. But 0009 now issues op.execute('COMMIT') and there are NINE revisions, so on any run applying more than one — a fresh database, or one several revisions behind — that COMMIT commits every migration completed earlier in the same invocation and a later failure can no longer roll them back. What remains is RECOVERABLE rather than ATOMIC, working only because of IF NOT EXISTS, which is a weaker property with a different name that the runbook was promising as the stronger one. REMEDY THAT KEEPS BOTH: transaction_per_migration=True in env.py plus the ALTER TYPE in its own revision, so the transaction boundary becomes a FILE boundary and no migration issues its own COMMIT. B386: an arm IS possible — conftest uses SQLite BY CHOICE rather than by law — and THE TRAP IS THE SKIP, because absent a Postgres the arm skips and a skip is could-not-ask reported as asked-and-fine, so an arm is only a test if something FAILS when it does not run: mark them and have the preflight assert the marked set was EXECUTED rather than collected, which is B298's reconciliation pointed at a marker instead of a suite. AND RE-RUN THE ANALYSIS WHEN THE MIGRATION CHANGES, NOT ONLY THE MIGRATION: this outage was a STALE READING rather than an unrun file, since 'safe because it only does X' dies at the next edit and nothing in the tree links the two. Review's own account is that it NAMED THE GAP IN ITS VERDICT AND PASSED ANYWAY — 'treat the post-deploy step as the first execution rather than a confirmation' — and naming a gap is not covering it.)
+Last updated: 2026-09-10 (B388 — FIXING A DEFECT CLASS DOES NOT INOCULATE THE CODEBASE AGAINST IT. Filed as 'you are PRIMED to reproduce a class you just fixed' and CORRECTED: the CFT instance predates B377's filing by 71 days, so it cannot have been primed by a fix that did not exist. The class is INVITED BY THE API SHAPE — every venue offers two near-synonymous optional numerics and a fallback is the obvious way to fill one. The two mechanisms predict different things: 'primed after a fix' predicts WHEN and needs someone to remember; 'invited by the shape' predicts WHERE and is a scan runnable today. Running it found TWO MORE in the file I had just fixed — an absent P&L becoming ZERO, and an absent mark becoming the ENTRY price, which asserts the position is at BREAKEVEN — because I was searching for the instance I remembered rather than the shape. The sweep needs a must-hit control against a commit known to contain the class, or a clean result is indistinguishable from a broken scanner.)
 
 ---
 
@@ -25015,4 +25015,82 @@ instrument whose blind spot is unstated will be trusted past its width, and five
 Related: **B384**, **B385**, **B362**, **B343**, **B347**, **B369**, **B379**.
 
 ---
+
+### B388 — FIXING A DEFECT CLASS DOES NOT INOCULATE THE CODEBASE AGAINST IT. I rebuilt `B377` inside the module whose docstrings cite `B377` three times — and the sweep that followed found TWO MORE in the same file that I had just looked straight past
+
+> **HEADLINE CORRECTED.** This was filed as *"a class you have just fixed is one you are PRIMED to reproduce"*. Review measured the chronology and that causal claim is false — see the amendment below. The surviving finding is narrower and more useful.
+
+**Measured on myself, within the hour.**
+
+```
+B377, fixed on CFT      equity  = acct.get("equity", acct.get("balance"))     SILENT FALLBACK
+                        ^ they differ by exactly the open P&L, so substituting asserts it is zero
+
+alpaca.py, written ~1h later, by me, in the same session:
+                        balance = cash if cash is not None else equity        SILENT FALLBACK
+                        ^ the same two quantities, the same distance apart, the opposite direction
+```
+
+**The sentence I had written about CFT applies verbatim to the code I then wrote.** And the module
+containing it cites `B377` **three times** in its own docstrings — including one paragraph
+explaining, correctly, why `equity` must not be substituted.
+
+## ⚠ AMENDMENT — REVIEW ATTACKED THE CAUSAL HALF AND IT DOES NOT SURVIVE. THE HEADLINE IS WRONG.
+
+**Measured, and it settles it:**
+
+```
+CFT     acct.get("equity", acct.get("balance"))   a89542b   2026-06-26
+B377    filed                                               2026-09-05    -- 71 DAYS LATER
+alpaca  cash if cash is not None else equity                2026-09-10    -- an hour after the fix
+```
+
+**The first instance predates the fix by ten weeks. It cannot have been primed by a fix that did
+not exist.** So priming is at most why THIS one was fast; it is not why the class occurs.
+
+**THE CLASS IS INVITED BY THE API SHAPE.** Every venue offers two near-synonymous optional
+numerics — `equity`/`balance`, `profit`/`netProfit`, `cash`/`equity`, `NAV`/`balance` — and a
+fallback is the obvious way to fill one the venue marks optional. The shape supplies the defect;
+recency only supplies the speed.
+
+**AND THE TWO MECHANISMS PREDICT DIFFERENT THINGS, WHICH IS WHY THIS IS NOT PEDANTRY.**
+
+```
+"primed after a fix"    predicts WHEN    countermeasure: someone remembers        UNRUNNABLE
+"invited by the shape"  predicts WHERE   countermeasure: a scan over every file   RUNNABLE TODAY
+```
+
+## AND THE CORRECTED MECHANISM'S COUNTERMEASURE IMMEDIATELY FOUND TWO MORE, IN MY OWN NEW FILE
+
+Review ran the sweep — **controlled first**, 14 hits against the two commits known to contain the
+instances, so a clean result would mean something. Then against `HEAD`:
+
+```
+alpaca.py:305   current_price = current if current is not None else entry
+alpaca.py:306   unrealized_pnl = pl if pl is not None else Decimal("0")
+mt5.py:659/660  the same two, identically
+oanda.py:204    equity = float(acct.get("NAV", acct.get("balance", 0)))
+```
+
+**`:306` turns an ABSENT unrealised P&L into ZERO** — `B215` verbatim, in the file whose docstrings
+cite that family, written by the seat that had just filed this entry about reproducing it.
+**`:305` is worse in kind:** an absent mark becomes the ENTRY price, which does not default a
+number — **it asserts the position is at BREAKEVEN.**
+
+> **I had fixed the `cash → equity` fallback in that same file an hour earlier and did not see
+> these two, because I was looking for the instance I had just fixed.** Searching by recency finds
+> the one you remember; searching by shape finds the ones the API invites.
+
+Both are fixed: `current_price` refuses rather than asserting breakeven, and an absent P&L is
+**derived from fields the venue did send** with `pnl_source="derived:(mark-entry)*qty"` recording
+that it is. `mt5.py` is a superseded venue and `oanda.py:204` is unreachable from the factory.
+
+## WHAT SURVIVES, AND IT IS THE PART WORTH KEEPING
+
+**Fixing a defect class does not inoculate the codebase against it** — not the code you go on to
+write, and not the code that already contains it. **The countermeasure is a sweep for the SHAPE,
+not a memory of the fix**, and it must carry a must-hit control against a commit known to contain
+the class, or a clean result is indistinguishable from a broken scanner.
+
+**Related:** `B377`, `B215`, `B338`, `B349`, `B184`.
 
