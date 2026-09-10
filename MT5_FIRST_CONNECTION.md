@@ -1,3 +1,16 @@
+> # ⛔ SUPERSEDED 2026-09-10 — THE VENUE IS ALPACA
+>
+> **Malek ruled the platform trades on ALPACA, not MetaTrader 5, and LONG ONLY because that is
+> Alpaca's constraint on crypto.** See **[`ALPACA_PROGRAMME.md`](ALPACA_PROGRAMME.md)**.
+>
+> **This file is kept as history and is not maintained.** It is still worth reading for one
+> reason: the defect classes it produced — `B334` through `B386` — outlived their venue, and
+> several of them are about instruments rather than about MT5.
+>
+> **Nothing here should be acted on.** The adapter it describes is deleted or being deleted.
+
+---
+
 # The first MT5 connection — a checklist, in order
 
 **Everything here is a question nobody can answer without a real account.** They are scattered across

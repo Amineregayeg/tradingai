@@ -1,0 +1,181 @@
+# Alpaca — what a full working simulation needs
+
+**Malek ruled 2026-09-10: the venue is ALPACA, not MetaTrader 5, and the platform trades LONG ONLY
+because that is Alpaca's constraint on crypto.** I raised that it removes half the strategy; he
+decided with that in front of him. This document proceeds on the ruling and does not re-argue it.
+
+**The ruling supersedes `B305` for the venue** — the asset class is unchanged (BTC and ETH), the
+venue and the direction are not.
+
+---
+
+## Two things make this materially easier than MT5, and one makes it harder
+
+### ✅ EASIER — `is_simulation = True` is now TRUE, so nothing has to be relaxed
+
+**This was the hardest single problem in the MT5 programme and it dissolves.**
+
+```python
+TradingClient(key, secret, paper=True)      # paper is a CONSTRUCTOR FLAG we set
+```
+
+`ExecutionService` refuses any adapter reporting `is_simulation=False`, and `ExecMode` has no LIVE
+member — **deliberately, both of them.** An MT5 broker demo could not honestly answer that flag
+(`T-0076`, unruled since 2026-08-24, `CONTEST` never ruled at all). **An Alpaca paper account can:
+no real money is at risk, and the flag is derived from a value we pass rather than a venue field we
+interpret.**
+
+> **So the safety model is satisfied truthfully rather than bypassed.** No new `ExecMode`, no
+> weakened assertion, no ruling required from Malek. `T-0076` stops being a blocker.
+
+*(The flag's second reader — the reconciler asking "are these records a third party's" — still says
+yes, because Alpaca holds them. That tension is smaller than MT5's and it is not gone.)*
+
+### ✅ EASIER — the sizing and financing problems do not exist here
+
+```
+size_position() returns   (equity * risk_pct) / risk_per_unit   -> a float of UNITS
+Alpaca crypto accepts     fractional qty, min 0.0001 BTC, increment 0.0001, up to 9 dp
+our canonical pair name   "BTC/USD"  ==  Alpaca's native symbol format
+```
+
+**Units map to `qty` directly.** `units_to_lots()` stays at zero callers — the whole `B302`/`T-0097`
+lots problem was MT5/CFD-specific. **And spot crypto charges no swap**, so `B261` and the
+R-multiple-shift question disappear rather than being answered.
+
+### ⛔ HARDER — long-only is not a smaller strategy, it is a DIFFERENT one, and the run must say so
+
+**Measured on real executed trades:**
+
+```
+TRADES by direction     SHORT 147     LONG 146
+```
+
+**Roughly half of every decision this engine has ever executed cannot be placed on Alpaca.**
+
+> **THE CENTRAL RISK OF THIS WHOLE PROGRAMME:** a simulation that silently drops shorts reads as
+> *"the strategy underperformed."* It is not. It is *"half the strategy never ran."* **Those two
+> are indistinguishable in a P&L curve and this project has spent weeks on exactly that
+> distinction** — `B215`, `B292`, `B372`, `B380`, all of them one shape: *could not* must never be
+> recorded as *did not*.
+
+---
+
+# WHAT NEEDS TO BE DONE
+
+## A — The adapter
+
+**Goal: an `AlpacaAdapter` the platform can construct and read from.**
+
+| | |
+|---|---|
+| **A1** | Pin `alpaca-py`. Measure the transitive set against a real install, as `T-0133` did — it should be far lighter than MetaApi's 19 packages and three HTTP stacks, and that claim needs measuring rather than assuming. |
+| **A2** | `alpaca.py`, a **flat module** in `app/services/broker/` — `B267`: the contract arm's discovery walk is not recursive, and an adapter one directory deep is invisible to it while the suite stays green. |
+| **A3** | The eleven `BrokerAdapter` members. `is_simulation` returns the `paper` flag we constructed with. |
+| **A4** | Factory branch in `_make_adapter`, reaching the existing `ALLOW_LIVE_TRADING` guard rather than returning before it — `B352`, and the reason the OANDA branch was deleted. |
+| **A5** | UI: a broker option and a form branch. **`api_key` and `api_secret` already exist on the connect request**, so unlike MT5 this needs no schema change. |
+
+**What the MT5 work already bought us**, and it transfers wholly: the kill-switch disposition
+vocabulary on `base.py` is Malek's ruled property and is venue-agnostic; `close_all_positions`'
+shape — rows enumerated before the loop, report published before it runs, per-position failure
+continuing — is proven twice; and the could-not-ask work at the aggregate layer (`B372`) is not
+MT5's.
+
+## B — The long-only refusal ⛔ **the one that decides whether the simulation is readable**
+
+**Goal: every SHORT the strategy produces is REFUSED, RECORDED, and COUNTED — never dropped.**
+
+**The recording path already exists and does not need building:**
+
+```
+crypto_loop.py:1087   _record_rejected_signal(...)
+db/enums.py           REJECTED
+crypto_loop.py:646    "records_rejected_signals": True
+```
+
+**So the work is to route into it with a reason the venue owns**, and then to make the count
+impossible to miss:
+
+* **B1** — `place_order` refuses a SHORT with a reason naming the venue constraint, not a generic
+  rejection. *"Alpaca crypto is non-marginable and not shortable"* is the sentence; *"order
+  rejected"* is not.
+* **B2** — the refusal is recorded through `_record_rejected_signal` with that reason, so a short
+  appears in the record as **a decision the strategy made and the venue could not express.**
+* **B3** — **the run summary states the direction split explicitly.** `N longs taken, M shorts
+  refused by venue`. Without it the P&L is uninterpretable, and `B380` is the standing example of a
+  surface rendering an absence as a healthy number.
+* **B4** — the arm that matters: **feed the engine a SHORT signal and assert the refusal is
+  recorded and counted, not that the order failed.** A test asserting "no order was placed" passes
+  against a crash.
+
+## C — The order path
+
+**Goal: the engine's orders reach the Alpaca paper account instead of the in-process simulator.**
+
+This is the old Gate 4, and it is **binding, not building** (`B350`). Three named changes, measured:
+
+```
+crypto_loop.py:157/162, 786/790   self.paper constructed INLINE -- no injection point
+crypto_loop.py:168, 794           ExecutionService(self.paper, ExecMode.PAPER) hardcoded
+broker_mode                       selects between TWO SIMULATORS -- not a venue switch
+```
+
+**And the safety layer needs no change at all**, which is the part that was impossible for MT5:
+`ExecMode.PAPER` remains correct because an Alpaca paper account **is** a simulation, and
+`execute()`'s assertion passes on a true flag.
+
+## D — First connection
+
+**Goal: replace assumptions with observations. Far shorter than MT5's checklist.**
+
+**Free and needs nothing from us:** a paper account is created with an email, **globally**, and
+carries free real-time data.
+
+| | |
+|---|---|
+| **D1** | Wrong key vs wrong secret — are they distinguishable? The `0.1` question, and still worth two minutes. |
+| **D2** | Symbol format confirmed live: `BTC/USD` and `ETH/USD`. The legacy `BTCUSD` form also resolves; **pick one and record which**. |
+| **D3** | Minimum order size and increment for both pairs — documented as `0.0001` for BTC; confirm for ETH. **This is what `size_position`'s output must be rounded to, and a sub-minimum order must REFUSE rather than round to zero.** |
+| **D4** | What a rejection looks like, and whether a refused short is distinguishable from a rejected long. |
+
+**Gone entirely from MT5's list:** the account-type enum, the connection-state pair, the CPU-credit
+quota, the swap-inclusivity question, and the lots conversion.
+
+---
+
+## What gets deleted, and what is kept
+
+```
+DELETE   mt5.py + its arms                       3,370 lines
+DELETE   the metaapi-cloud-sdk pin               19 packages, 3 HTTP stacks, 2 unused sibling SDKs
+DELETE   token / mt5_account_id request fields   Alpaca uses api_key + api_secret, which exist
+MOTHBALL MT5_FIRST_CONNECTION.md, MT5_PROGRAMME.md   kept as history, marked superseded
+
+KEEP     the 11-member BrokerAdapter contract
+KEEP     the ruled kill-switch vocabulary on base.py, and its consumer
+KEEP     the factory's ALLOW_LIVE_TRADING guard and the credential-blob route
+KEEP     B372's could-not-ask work at the aggregate layer
+KEEP     the engine, the Binance feed, the candle history, the 44-file rule engine
+```
+
+**Do not delete the MT5 work in the same commit as the Alpaca work lands.** A revert of one should
+not resurrect the other, and the register entries that came out of it — `B334` through `B386` —
+describe defect *classes* that outlived their venue.
+
+---
+
+## The honest risks
+
+**The simulation tests the plumbing, not the strategy — and now less of the strategy than before.**
+Long-only removes 147 of 293 executed trades. **Whatever the equity curve shows, it is a curve for
+half a strategy**, and every report must carry the refused count beside it or it will be read as a
+verdict on the rules.
+
+**The R-multiple and grade apparatus was built for both directions.** Nothing breaks, but any
+statistic aggregated across a long-only run is not comparable to one from the paper broker, and
+nothing in the tree currently marks the difference.
+
+**And `B383`'s lesson applies to this document.** Every figure here is measured — the direction
+split from `trades`, the line numbers from the tree, the Alpaca limits from its own docs — except
+the claim that `alpaca-py` is lighter than MetaApi's dependency set, **which is an expectation and
+is marked as one.**
