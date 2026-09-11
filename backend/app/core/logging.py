@@ -47,8 +47,21 @@ _SECRET_PATTERNS: list[re.Pattern[str]] = [
                re.IGNORECASE),
     re.compile(r"(ALPACA_API_(?:KEY|SECRET)\s*=\s*\S+)", re.IGNORECASE),
     # Credentials in a query string. `key_id`/`secret_key` are ALPACA's names and were missing.
+    # `auth-token` is METAAPI's (`B406`): its SDK builds `?auth-token=<token>&clientId=...` into
+    # the websocket URL, and the plain `token` alternative never fired because the character
+    # before `token` is a HYPHEN, not the `?`/`&` the pattern anchors on. Right about the name,
+    # wrong about what precedes it — the same shape as the first APCA-API-* pattern, which was
+    # right about the name and wrong about the punctuation after it.
+    #
+    # **THIS RULE EXISTS FOR SINGLE-SEGMENT ACCOUNT TOKENS**, not JWTs. A JWT's signature
+    # segment is already caught by the bare-token backstop below. An ACCOUNT token
+    # (`metaapi_client.py:27-31`) evades that backstop if it lacks a lowercase letter, lacks an
+    # uppercase letter, lacks a digit, or is under 32 characters — and then only this named
+    # rule protects it. (This comment first wrote the value as `<jwt>`: it named the shape
+    # that was already safe, so a literal reader would conclude the rule was never needed.)
     re.compile(
-        r"([?&](?:api[_-]?key|api[_-]?secret|key[_-]?id|secret[_-]?key|secret|token|password)=)"
+        r"([?&](?:api[_-]?key|api[_-]?secret|key[_-]?id|secret[_-]?key|auth[_-]?token|"
+        r"secret|token|password)=)"
         r"[^&\s\"']+",
         re.IGNORECASE,
     ),

@@ -1042,13 +1042,26 @@ class LiveCryptoLoop:
             self._bind_broker(self.starting_balance)
         except Exception as exc:
             # ------------------------------------------------------------------
-            # `B401` — RESTORE THE PREVIOUS BROKER COMPLETELY, THEN REFUSE LOUDLY.
+            # `B401` — THE PREVIOUS BROKER WAS NEVER TOUCHED, SO THERE IS NOTHING TO RESTORE.
+            # REFUSE LOUDLY.
             #
-            # **THE HOOK IS CLEARED ABOVE, BEFORE THE REBUILD.** So a rebuild that raises leaves
-            # `self.paper` as the OLD broker with `_on_settle = None`, and every later close on
-            # it — SL/TP tick, manual DELETE, **and the kill switch** — is silently lost. That is
-            # `B221`'s outcome by a new route: *the switch reports a clean trigger and closes
-            # nothing.*
+            # **WHAT IS TRUE HERE NOW:** `_bind_broker` builds the replacement into a LOCAL and
+            # mutates nothing until that build succeeds. So when it raises, `self.paper` is still
+            # the previous broker **with its settle hook wired** — not repaired, never cleared.
+            # This handler has no state to fix; its only job is to refuse.
+            #
+            # ⚠ **DO NOT CLEAR THE HOOK BEFORE `_bind_broker`.** That was the first shape of this
+            # method, and it is the defect: clear-then-rebuild leaves the OLD broker in use with
+            # `_on_settle = None` whenever the rebuild raises, and every later close on it —
+            # SL/TP tick, manual DELETE, **and the kill switch** — is silently lost (`B221`'s
+            # outcome by a new route: *the switch reports a clean trigger and closes nothing*).
+            # The first fix then restored the hook in this `except`, which passes every arm
+            # checking the END state and still leaves a window.
+            # `..NEVER_TOUCHES_the_previous_broker_at_all` records every assignment to
+            # `_on_settle` and requires ZERO during a failed rebuild — so reintroducing either
+            # earlier shape turns it red. **This comment used to describe the cleared hook as the
+            # current premise of this block**, which is the kind of sentence that invites the
+            # next reader to put the line back; review caught it after the fix had landed.
             #
             # **PART 2 ARMED THIS AND MY OWN COMMENT DOCUMENTED THE SWALLOW AS CORRECT.** Before
             # the collapse this path built the simulators inline — no credentials, no network,
