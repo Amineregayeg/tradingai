@@ -16,8 +16,8 @@ import uuid
 from dataclasses import dataclass
 from enum import Enum
 
-from app.core.exceptions import DirectionNotSupported
-from app.core.logging import logger
+from app.core.exceptions import BrokerError, DirectionNotSupported
+from app.core.logging import logger, redact_for_storage
 from app.db.enums import DirectionType, OrderType
 from app.models.decision_record import (
     REJECTION_DEGENERATE_STOP,
@@ -26,6 +26,7 @@ from app.models.decision_record import (
     REJECTION_NO_REFERENCE_PRICE,
     REJECTION_THROUGH_STOP,
     REJECTION_VENUE_DIRECTION_UNSUPPORTED,
+    REJECTION_VENUE_TRANSPORT,
 )
 from app.services.broker.base import BrokerAdapter, OrderRequest
 
@@ -242,6 +243,58 @@ class ExecutionService:
                     "pair": sig.symbol, "direction": exc.direction,
                     "venue": exc.venue,
                     "sized_units": round(units, 8), "equity_at_entry": acct.equity}
+        except BrokerError as exc:
+            # ------------------------------------------------------------------
+            # `B403`'s TRANSPORT HALF. THE VENUE WAS REACHED AND FAILED.
+            #
+            # Only `DirectionNotSupported` was caught here, so a connection error, an auth
+            # rejection, a rate limit or a 5xx **propagated, aborted the bar before
+            # `_record_rejected_signal` ran, and became one log line.** Part 3 built the
+            # vocabulary; this is the catch that uses it.
+            #
+            # **A DISTINCT CODE, NOT THE VENUE-RULE ONE**, and that is the whole point: `B375` is
+            # a permanent rule made indistinguishable from a transient failure, and folding a 5xx
+            # into `VENUE_DIRECTION_UNSUPPORTED` would rebuild that confusion *inside the field
+            # built to prevent it*. One will refuse the same order forever; the other clears on
+            # its own, and they demand opposite responses.
+            #
+            # NARROW BY TYPE, not by message. `BrokerError` is the venue's own family — a message
+            # match would key the classification on prose the venue chose, which is exactly what
+            # `rejection_code` exists to stop. Anything OUTSIDE that family still raises and is
+            # recorded by `_tick_symbol` as `VENUE_RAISED`, unclassified rather than guessed at.
+            #
+            # `DirectionNotSupported` subclasses `BrokerError`, so ORDER MATTERS: it is caught
+            # above and can never reach here. Reversed, every venue rule would be filed as
+            # transport and the permanent condition would look retryable.
+            # ------------------------------------------------------------------
+            # ------------------------------------------------------------------
+            # THE MESSAGE IS REDACTED AND BOUNDED BEFORE IT IS PERSISTED.
+            #
+            # `reason` lands in `DecisionRecord.rejection_reason` — a DATABASE COLUMN — and the
+            # loguru secrets filter does not run there: it sits on the way to a log sink, and a
+            # value written to a column never passes through it. An SDK error can carry request
+            # headers, a URL with query parameters, or a response body, so the venue's own text
+            # would reach a table nothing redacts, in rows that outlive every log rotation.
+            #
+            # **THE TYPE IS THE PRIMARY FACT AND THE MESSAGE IS SECONDARY**, deliberately: the
+            # pattern list behind `redact_for_storage` is an allow-list of shapes someone thought
+            # of and cannot recognise a credential format nobody added. A name like
+            # `BrokerConnectionError` diagnoses most of what this row is for and can carry
+            # nothing.
+            #
+            # Raised by review while Malek was generating an Alpaca key and secret — the window
+            # in which this would have mattered was open at the time the code was written.
+            # ------------------------------------------------------------------
+            detail = redact_for_storage(str(exc))
+            logger.warning(f"ExecutionService[{self.mode.value}] {sig.symbol} "
+                           f"{sig.direction.value} — venue error: "
+                           f"{type(exc).__name__}: {detail}")
+            return {"status": "REJECTED",
+                    "reason": f"{type(exc).__name__}: {detail}",
+                    "rejection_code": REJECTION_VENUE_TRANSPORT,
+                    "pair": sig.symbol, "direction": sig.direction.value,
+                    "venue": getattr(exc, "broker", None),
+                    "sized_units": lot_size, "equity_at_entry": acct.equity}
         res.setdefault("status", "FILLED")
         res["mode"] = self.mode.value
         res["sized_units"] = round(units, 8)

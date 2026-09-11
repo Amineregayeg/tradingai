@@ -413,13 +413,29 @@ async def test_the_adapter_checks_the_VENUE_before_the_UNIMPLEMENTED_refusal():
 # THE TYPE ITSELF — WHY A DEDICATED EXCEPTION AND NOT `BrokerError`
 # =====================================================================================
 
-async def test_execution_catches_ONLY_the_capability_refusal_and_not_a_broken_connection():
-    """**Widening the catch to `BrokerError` would fold an outage into "the venue refused".**
+async def test_a_broken_connection_is_NOT_filed_as_a_venue_refusal():
+    """**THE CONCERN IS UNCHANGED AND THE RESOLUTION CHANGED UNDER IT** (`B403`'s transport half).
 
-    That is the confusion the dedicated type exists to prevent, and it fails in the expensive
-    direction: a network failure filed with a permanent-sounding reason, against a condition
-    that clears on its own.
+    This arm used to assert that a `BrokerConnectionError` PROPAGATES, on the argument that
+    *"widening the catch to `BrokerError` would fold an outage into 'the venue refused'"*. The
+    argument is still right — a network failure filed with a permanent-sounding reason fails in
+    the expensive direction — but **propagating turned out to be the wrong way to honour it**: the
+    raise aborted the bar before `_record_rejected_signal`, so the outage left **no row at all**,
+    absent from the denominator rather than merely mislabelled.
+
+    So `BrokerError` IS caught now, and the original concern is satisfied by a **distinct code**
+    rather than by distinct control flow: `VENUE_TRANSPORT` against
+    `VENUE_DIRECTION_UNSUPPORTED`. One clears on its own; the other refuses the same order
+    forever.
+
+    *An arm whose premise a later task changes is rewritten rather than deleted, and the reason
+    it changed is the half worth keeping.*
     """
+    from app.models.decision_record import (
+        REJECTION_VENUE_DIRECTION_UNSUPPORTED,
+        REJECTION_VENUE_TRANSPORT,
+    )
+
     class Broken(PaperBroker):
         async def place_order(self, request):
             raise BrokerConnectionError("alpaca unreachable", broker="alpaca")
@@ -427,10 +443,54 @@ async def test_execution_catches_ONLY_the_capability_refusal_and_not_a_broken_co
     broker = Broken(starting_balance=10_000.0, price_fn=lambda p: 70_000.0,
                     direction_policy=ALPACA_CRYPTO_LONG_ONLY)
     broker.on_tick(BTC, 70_000.0)
+
+    res = await ExecutionService(broker, ExecMode.PAPER).execute(_signal(DirectionType.LONG))
+
+    assert res["status"] != "FILLED"
+    assert res["rejection_code"] == REJECTION_VENUE_TRANSPORT
+    assert res["rejection_code"] != REJECTION_VENUE_DIRECTION_UNSUPPORTED, (
+        "an outage was filed as a permanent venue rule — the expensive direction"
+    )
+    assert "BrokerConnectionError" in res["reason"], (
+        "the row carries what actually happened; the code is for counting, the prose for "
+        "diagnosing"
+    )
+
+
+async def test_a_RAISING_adapter_gets_the_venue_code_too():
+    """**SURVIVOR 1, AND IT IS THE LIVE VENUE'S PATH** (review's finding).
+
+    Every other venue-refusal arm drives `PaperBroker`, which **RETURNS** a rejection dict. Only
+    an adapter **RAISES** `DirectionNotSupported` — and that handler assigns the code separately.
+    Two test files mentioned the exception; none asserted the code that handler produces.
+
+    **That is `B391`'s asymmetry, inside the arms this time:** simulators return, adapters raise,
+    and the coverage followed the returning half. **After part D the code carrying *M shorts
+    refused by venue* in production is the raising one.** Measured before writing this: mutating
+    that handler's code killed only the transport arm above, by coincidence of what it asserts.
+    """
+    from app.models.decision_record import REJECTION_VENUE_DIRECTION_UNSUPPORTED
+
+    class Raising(PaperBroker):
+        """A simulator that refuses the way an ADAPTER does — by raising."""
+
+        async def place_order(self, request):
+            ALPACA_CRYPTO_LONG_ONLY.enforce(request.direction)
+            return await super().place_order(request)
+
+    broker = Raising(starting_balance=10_000.0, price_fn=lambda p: 70_000.0)
+    broker.on_tick(BTC, 70_000.0)
     svc = ExecutionService(broker, ExecMode.PAPER)
 
-    with pytest.raises(BrokerConnectionError):
-        await svc.execute(_signal(DirectionType.LONG))
+    refused = await svc.execute(_signal(DirectionType.SHORT))
+    assert refused["rejection_code"] == REJECTION_VENUE_DIRECTION_UNSUPPORTED, (
+        "the RAISING path assigns a different code from the returning one — and the raising path "
+        "is what a real venue takes"
+    )
+    assert refused["reason"] == ALPACA_CRYPTO_LONG_ONLY.reason
+
+    filled = await svc.execute(_signal(DirectionType.LONG))
+    assert filled["status"] == "FILLED", "the control: a LONG still fills through the same path"
 
 
 async def test_DirectionNotSupported_is_a_BrokerError_so_existing_handlers_still_see_it():

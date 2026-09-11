@@ -199,7 +199,11 @@ async def test_the_idle_broker_path_does_NOT_alarm():
 
 
 async def test_the_vocabulary_is_CLOSED_and_every_code_is_distinct():
-    assert len(REJECTION_CODES) == len(set(REJECTION_CODES)) == 16
+    # 16 at part 3, 17 once `VENUE_TRANSPORT` joined (`B403`'s transport half). The number is
+    # pinned so that widening the vocabulary is a DELIBERATE edit here and a schema change in
+    # `alembic/`, never a constant someone appends to — which is the whole reason the column
+    # carries a CHECK constraint.
+    assert len(REJECTION_CODES) == len(set(REJECTION_CODES)) == 17
     for code in REJECTION_CODES:
         assert code.isupper(), f"{code} breaks the vocabulary's shape"
 
@@ -364,4 +368,192 @@ async def test_a_RAISING_rejection_still_leaves_a_row():
         "the handler swallows instead of re-raising. `_loop`'s blanket handler is CORRECT — one "
         "bad pair must not stop the engine — and narrowing it trades a silent gap for a dead "
         "engine. The defect was that the abort was not RECORDED, not that it was caught."
+    )
+
+
+# =====================================================================================
+# B403's TRANSPORT HALF — a permanent rule and a temporary failure must not share a code
+# =====================================================================================
+
+async def test_a_venue_TRANSPORT_failure_is_recorded_and_coded_apart_from_a_venue_RULE():
+    """**`B375`, and the field built to prevent it must not rebuild it.**
+
+    Only `DirectionNotSupported` was caught around `place_order`, so a connection error, an auth
+    rejection, a rate limit or a 5xx propagated, aborted the bar before the recorder ran, and
+    became one log line. Now it is a row — with a code DISTINCT from the venue-rule one, because
+    one will refuse the same order forever and the other clears on its own.
+    """
+    from app.core.exceptions import BrokerConnectionError
+    from app.models.decision_record import REJECTION_VENUE_TRANSPORT
+
+    class Unreachable(PaperBroker):
+        async def place_order(self, request):
+            raise BrokerConnectionError("alpaca unreachable", broker="alpaca")
+
+    broker = Unreachable(starting_balance=10_000.0, price_fn=lambda p: 70_000.0)
+    broker.on_tick(BTC, 70_000.0)
+    transport = await ExecutionService(broker, ExecMode.PAPER).execute(_sig())
+
+    rule = await _execute(_sig(DirectionType.SHORT, sl=71_000.0), policy=ALPACA_CRYPTO_LONG_ONLY)
+
+    assert transport["rejection_code"] == REJECTION_VENUE_TRANSPORT
+    assert rule["rejection_code"] == REJECTION_VENUE_DIRECTION_UNSUPPORTED
+    assert transport["rejection_code"] != rule["rejection_code"], (
+        "a 5xx and a permanent venue rule share a code — B375 rebuilt inside the field that "
+        "exists to prevent it"
+    )
+    assert transport["status"] != "FILLED" and transport["reason"]
+
+
+async def test_the_venue_RULE_is_caught_BEFORE_the_transport_family():
+    """`DirectionNotSupported` subclasses `BrokerError`, so **order matters**. Reversed, every
+    venue rule would be filed as transport and a permanent condition would look retryable."""
+    from app.core.exceptions import BrokerError, DirectionNotSupported
+    from app.models.decision_record import REJECTION_VENUE_TRANSPORT
+
+    assert issubclass(DirectionNotSupported, BrokerError), (
+        "if this stops being true the ordering constraint relaxes and the comment should say so"
+    )
+    res = await _execute(_sig(DirectionType.SHORT, sl=71_000.0), policy=ALPACA_CRYPTO_LONG_ONLY)
+    assert res["rejection_code"] != REJECTION_VENUE_TRANSPORT
+
+
+async def test_a_NON_broker_exception_is_left_UNCLASSIFIED_rather_than_guessed_at():
+    """The narrowing is by TYPE, not by message. Anything outside the venue's own error family
+    still raises and is recorded by `_tick_symbol` as `VENUE_RAISED` — **unclassified rather than
+    filed as transport on a guess.** A message match would key the classification on prose, which
+    is what this column exists to stop."""
+    class Odd(PaperBroker):
+        async def place_order(self, request):
+            raise ValueError("lot_size must be > 0")
+
+    broker = Odd(starting_balance=10_000.0, price_fn=lambda p: 70_000.0)
+    broker.on_tick(BTC, 70_000.0)
+
+    with pytest.raises(ValueError):
+        await ExecutionService(broker, ExecMode.PAPER).execute(_sig())
+
+
+# =====================================================================================
+# THE PERSISTED MESSAGE MUST NOT CARRY A CREDENTIAL
+# =====================================================================================
+
+#: Realistic Alpaca credential shapes. **NOT written from the redaction patterns** — that is
+#: exactly how the first version of this arm passed while the redactor leaked four of five cases:
+#: the fixture was derived from the pattern instead of from what an SDK actually produces, which
+#: is the mock encoding its author's reading, in a security control.
+_KEY = "PKTEST1234567890ABCD"
+_SECRET = "abcdEFGH" + "9" * 32
+
+CREDENTIAL_SHAPES = [
+    ("bare key in a message", f"APIError: auth failed for {_KEY}"),
+    ("bare secret in a message", f"APIError: signature mismatch {_SECRET}"),
+    # THE ONE THE FIRST VERSION WAS WRITTEN FOR AND MISSED. A stringified headers object is a
+    # Python dict repr — `{'APCA-API-KEY-ID': 'PK...'}` — with a QUOTE between the name and the
+    # colon, and `\s*[:=]` never matched it.
+    ("dict-repr header dump",
+     "ConnectError: headers={'APCA-API-KEY-ID': '%s', 'APCA-API-SECRET-KEY': '%s'}" % (_KEY, _SECRET)),
+    # Alpaca's query parameter is `key_id`, which the first list did not contain.
+    ("key_id in a URL", f"APIError: https://api.alpaca.markets/v2/orders?key_id={_KEY}&x=1"),
+    ("header with a bare colon", f"ConnectError: APCA-API-KEY-ID: {_KEY}"),
+]
+
+BENIGN_MESSAGES = [
+    "APIError: forbidden: insufficient buying power",
+    "BrokerConnectionError: Connection reset by peer (errno 104)",
+    "APIError: 429 too many requests, retry after 1s",
+]
+
+
+async def test_the_redactor_catches_every_REALISTIC_credential_shape():
+    """**A REDACTOR WITH NO CONTROL IS `B398` WEARING A SECURITY LABEL** — an instrument that
+    cannot see the thing it exists for, reporting clean.
+
+    The first version of these patterns leaked FOUR of five shapes, including both it was written
+    for, and the arm beside it passed. The manager controlled it against realistic credentials;
+    I had controlled it against my own patterns.
+    """
+    from app.core.logging import redact_for_storage
+
+    leaked = []
+    for label, message in CREDENTIAL_SHAPES:
+        out = redact_for_storage(message)
+        if _KEY in out or _SECRET in out:
+            leaked.append(label)
+    assert not leaked, f"these credential shapes survive redaction: {leaked}"
+
+
+async def test_the_redactor_leaves_ORDINARY_venue_errors_intact():
+    """**The must-miss.** A redactor that blanks everything is not a redactor — it destroys the
+    diagnostic value of the field and teaches the reader to ignore it, which is the
+    liveness-signal failure in a security control."""
+    from app.core.logging import redact_for_storage
+
+    for message in BENIGN_MESSAGES:
+        assert redact_for_storage(message) == message, (
+            f"an ordinary venue error was redacted: {message!r}"
+        )
+
+
+async def test_a_transport_failure_does_not_PERSIST_a_credential():
+    """**`rejection_reason` IS A DATABASE COLUMN AND THE LOG FILTER DOES NOT REACH IT.**
+
+    `_secrets_filter` runs on the way to a log sink; a value written to a column never passes
+    through it. `B403`'s transport fix put `str(exc)` straight into that column, and an SDK error
+    can carry request headers, a URL with query parameters, or a response body — **so the venue's
+    own text would reach a table nothing redacts, in rows that outlive every log rotation.**
+
+    Raised by review while Malek was generating an Alpaca key and secret, which is the window in
+    which it would have mattered.
+    """
+    from app.core.exceptions import BrokerConnectionError
+    from app.models.decision_record import REJECTION_VENUE_TRANSPORT
+
+    # The dict-repr shape, because that is what a real headers dump looks like.
+    leak = "ConnectError: headers={'APCA-API-KEY-ID': '%s'} url=...?key_id=%s" % (_KEY, _KEY)
+
+    class Leaky(PaperBroker):
+        async def place_order(self, request):
+            raise BrokerConnectionError(leak, broker="alpaca")
+
+    broker = Leaky(starting_balance=10_000.0, price_fn=lambda p: 70_000.0)
+    broker.on_tick(BTC, 70_000.0)
+    res = await ExecutionService(broker, ExecMode.PAPER).execute(_sig())
+
+    assert res["rejection_code"] == REJECTION_VENUE_TRANSPORT
+    assert _KEY not in res["reason"], "an API key reached the persisted reason"
+    assert "[REDACTED]" in res["reason"]
+    # THE TYPE IS THE PRIMARY FACT and carries nothing — it is what diagnoses the row when the
+    # message has been redacted down to very little.
+    assert res["reason"].startswith("BrokerConnectionError")
+
+
+async def test_the_persisted_message_is_BOUNDED():
+    """Separate from redaction and doing its own job: an SDK that renders a whole response body
+    would otherwise persist it in full, and a pattern list only removes what it recognises."""
+    from app.core.exceptions import BrokerConnectionError
+
+    class Verbose(PaperBroker):
+        async def place_order(self, request):
+            raise BrokerConnectionError("x" * 5000, broker="alpaca")
+
+    broker = Verbose(starting_balance=10_000.0, price_fn=lambda p: 70_000.0)
+    broker.on_tick(BTC, 70_000.0)
+    res = await ExecutionService(broker, ExecMode.PAPER).execute(_sig())
+
+    assert len(res["reason"]) < 400, f"persisted {len(res['reason'])} characters"
+
+
+async def test_the_pattern_list_is_a_FLOOR_and_the_type_is_what_always_holds():
+    """**The honest limitation, asserted rather than assumed.** `redact_for_storage` is an
+    allow-list of shapes someone thought of; it cannot recognise a credential format nobody added.
+    So the arm above is not a proof that nothing can leak — it is a proof that the KNOWN shapes
+    are removed, and the exception TYPE is the part that carries nothing by construction.
+    """
+    from app.core.logging import redact_for_storage
+
+    unknown = "WeirdVendorError: cred=zzz-UNRECOGNISED-FORMAT-9999"
+    assert "zzz-UNRECOGNISED-FORMAT-9999" in redact_for_storage(unknown), (
+        "if this ever stops being true the pattern list has become a ceiling and this arm should "
+        "say so — but do not rely on it: the reason the TYPE is recorded first is exactly this"
     )

@@ -45,6 +45,7 @@ _CHAIN = [
     # (`0005`, `0009`, `0010`), which is the argument for a hand-written list over a glob: the
     # cost of adding a line is what makes the omission visible at all.
     ("0010", "0010_decision_rejection_code.py", "0009"),
+    ("0011", "0011_rejection_code_transport.py", "0010"),
 ]
 
 
@@ -528,3 +529,57 @@ def test_no_migration_USES_an_enum_value_it_ADDS_in_the_same_transaction():
                 f"any COMMIT. PostgreSQL raises UnsafeNewEnumValueUsageError, and env.py runs "
                 f"every migration in ONE transaction, so splitting revisions does NOT help."
             )
+
+
+def test_the_rejection_code_backfill_writes_UNCODED_LEGACY_AND_NOTHING_ELSE():
+    """**THE ONE IRREVERSIBLE LINE IN `0010`, AND THE GUARD ABOVE DOES NOT CHECK IT.**
+
+    The chain guard verifies revisions, columns and constraints. Review mutated `0010`'s backfill
+    VALUE and **killed nothing** — so the single decision in that file that cannot be undone was
+    the one thing unguarded.
+
+    **A source-level assertion is weaker than a behavioural one and is the ONLY guard possible
+    here**, because after the migration runs the evidence it would need is gone: a legacy row
+    carrying a live code is indistinguishable from one classified at its decision site. For a
+    one-way door that is the right trade.
+
+    What must hold:
+      * the `UPDATE` sets `UNCODED_LEGACY` and no other member of the vocabulary;
+      * it is scoped to rows that are actually rejections, or rows that were never rejections
+        enter a bucket meaning *a rejection we cannot classify* and inflate the denominator this
+        column exists to make countable;
+      * **nothing parses `rejection_reason`** — a backfill derived from prose is a count
+        manufactured once and thereafter indistinguishable from a measurement.
+    """
+    import re
+
+    from app.models.decision_record import (
+        OUTCOME_REJECTED,
+        REJECTION_CODES,
+        REJECTION_UNCODED_LEGACY,
+    )
+
+    source = (_VERSIONS / "0010_decision_rejection_code.py").read_text()
+    upgrade = source[source.index("def upgrade("):source.index("def downgrade(")]
+
+    statements = re.findall(r"op\.execute\(\s*(.*?)\s*\)\n", upgrade, re.S)
+    assert statements, "the backfill statement is gone; rows predating the field carry no marker"
+    backfill = " ".join(statements)
+
+    assert REJECTION_UNCODED_LEGACY in backfill, (
+        "the backfill does not write UNCODED_LEGACY"
+    )
+    written = [c for c in REJECTION_CODES if c in backfill and c != REJECTION_UNCODED_LEGACY]
+    assert not written, (
+        f"the backfill also writes {written}. A pre-existing row carrying a LIVE code can never "
+        f"again be told from one classified at its decision site — there is no second chance at "
+        f"this line and no arm written after it runs can recover the difference."
+    )
+    assert OUTCOME_REJECTED in backfill, (
+        "the backfill is not scoped to rejections, so rows that were never rejections enter the "
+        "bucket and inflate the denominator from the migration onward"
+    )
+    assert "rejection_reason" not in backfill, (
+        "the backfill reads the PROSE. A count keyed on a sentence the venue chose, manufactured "
+        "once, is thereafter indistinguishable from a measurement."
+    )

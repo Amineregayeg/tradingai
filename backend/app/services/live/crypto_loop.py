@@ -17,7 +17,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from app.core.exceptions import BrokerError
 from app.models.decision_record import REJECTION_VENUE_RAISED
-from app.core.logging import logger
+from app.core.logging import logger, redact_for_storage
 from app.services.broker.paper import PaperBroker
 
 #: `broker_mode` values that select the ALPACA venue rather than an in-process simulator.
@@ -836,7 +836,27 @@ class LiveCryptoLoop:
             # adapter declares it; a missing one must raise here rather than answer benignly.
             "simulation_source": self.paper.simulation_source,
             "long_only": self._long_only(),
-            "venue": (
+            # `B402` — **THE VENUE THAT RAN, NOT THE POLICY'S LABEL.**
+            #
+            # This read `direction_policy.venue`, and there is ONE `DirectionPolicy` in the tree
+            # shared by all four construction sites — so it recorded `"alpaca"` on a
+            # `SimPropFirmBroker` run and on a `PaperBroker` run alike: **the name of a venue
+            # those runs never touched.** `_select_venue()` knew the answer and nothing recorded
+            # it.
+            #
+            # It lands on the analysis layer: grouping on `venue` would conclude ONE homogeneous
+            # population across simulator, paper and live — the precise failure that grouping
+            # exists to prevent, keyed on the field whose NAME promises the answer.
+            #
+            # **Contrast `long_only` directly above, which is invariant and TRUE.** Both are the
+            # same value on every run today; the difference is that `B391` made both simulators
+            # genuinely enforce the policy, so the invariant claim is a fact. **Invariant-and-true
+            # is not a defect; invariant-and-false is.** Recorded because the two look identical
+            # from the outside and the next reader will check them together.
+            "venue": self._select_venue(),
+            # The policy's OWN label, under a name that says what it is. A simulator standing in
+            # for Alpaca is a real thing to record — it just is not the venue that ran.
+            "direction_policy_venue": (
                 None if getattr(self.paper, "direction_policy", None) is None
                 else self.paper.direction_policy.venue
             ),
@@ -1803,7 +1823,10 @@ class LiveCryptoLoop:
         except Exception as exc:  # noqa: BLE001 - recorded, then re-raised to the loop's handler
             await self._record_rejected_signal(
                 pair, entry, sig,
-                f"{type(exc).__name__}: {exc}", trace, REJECTION_VENUE_RAISED,
+                # Redacted and bounded for the same reason as the transport path: this string
+                # is PERSISTED, and the log filter does not reach a database column.
+                f"{type(exc).__name__}: {redact_for_storage(str(exc))}",
+                trace, REJECTION_VENUE_RAISED,
             )
             await self._act(
                 "reject",

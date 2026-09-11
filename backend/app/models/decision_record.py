@@ -122,7 +122,16 @@ REJECTION_PROP_FIRM_WOULD_BREACH_MAX_DRAWDOWN = "PROP_FIRM_WOULD_BREACH_MAX_DRAW
 #: instance), closing that one rather than adding to it.
 REJECTION_BROKER_UNAVAILABLE = "BROKER_UNAVAILABLE"
 
-#: `place_order` RAISED. **The bar used to abort here and leave NO ROW AT ALL** (`B403`) — not an
+#: The venue was REACHED and failed — a connection error, an auth rejection, a rate limit, a 5xx
+#: (`B403`'s transport half). **DISTINCT FROM `VENUE_DIRECTION_UNSUPPORTED` ON PURPOSE, and the
+#: distinction is `B375` itself**: a permanent venue RULE and a temporary FAILURE demand opposite
+#: responses — one will refuse the same order forever, the other clears on its own. Sharing a code
+#: would rebuild that confusion *inside the field built to prevent it*.
+REJECTION_VENUE_TRANSPORT = "VENUE_TRANSPORT"
+
+#: `place_order` RAISED with something outside the venue's own error family — so it is not
+#: classifiable as a rule or as transport. **The bar used to abort here and leave NO ROW AT ALL**
+#: (`B403`) — not an
 #: unclassified row, absent from the denominator entirely, so a surface reading *"100% of
 #: rejections were direction refusals"* would be reporting the shape of a silence.
 REJECTION_VENUE_RAISED = "VENUE_RAISED"
@@ -158,6 +167,7 @@ REJECTION_CODES: tuple[str, ...] = (
     REJECTION_PROP_FIRM_WOULD_BREACH_DAILY_LOSS,
     REJECTION_PROP_FIRM_WOULD_BREACH_MAX_DRAWDOWN,
     REJECTION_BROKER_UNAVAILABLE,
+    REJECTION_VENUE_TRANSPORT,
     REJECTION_VENUE_RAISED,
     REJECTION_UNCODED_LEGACY,
     REJECTION_UNCLASSIFIED,

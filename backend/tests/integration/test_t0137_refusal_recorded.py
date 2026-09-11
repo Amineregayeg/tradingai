@@ -223,7 +223,17 @@ async def test_the_run_config_MARKS_the_run_as_long_only(bound):
         run = (await db.execute(select(EngineRun).where(EngineRun.id == run_id))).scalar_one()
 
     assert run.config["long_only"] is True
-    assert run.config["venue"] == "alpaca"
+    # `B402`. **`venue` IS THE VENUE THAT RAN; the policy's label is its own key.**
+    #
+    # This asserted `venue == "alpaca"` and was pinning a defect: there is one `DirectionPolicy`
+    # in the tree and all four construction sites share it, so the old `venue` read `"alpaca"` on
+    # a `SimPropFirmBroker` run too — the name of a venue that run never touched. The arm passed
+    # under the bug and failed under the fix, which is the shape worth noticing in itself.
+    assert run.config["venue"] == "sim", "the run executed against the prop-firm simulator"
+    assert run.config["direction_policy_venue"] == "alpaca", (
+        "and the policy it enforced is Alpaca's — a real thing to record, under a name that says "
+        "what it is"
+    )
 
     # `records_rejected_signals` is checked BELOW ITS OWN WEIGHT, deliberately.
     #
@@ -254,7 +264,10 @@ async def test_the_config_mark_is_DERIVED_from_the_broker_the_run_executes_again
     assert loop._config_snapshot()["long_only"] is False, (
         "the snapshot ignored the broker it was reading and asserted a constant"
     )
-    assert loop._config_snapshot()["venue"] is None
+    # `direction_policy_venue` follows the POLICY and is None once it is removed; `venue` follows
+    # the BROKER SELECTION and is unaffected — which is the distinction `B402` exists to make.
+    assert loop._config_snapshot()["direction_policy_venue"] is None
+    assert loop._config_snapshot()["venue"] == "sim"
 
 
 async def test_the_venue_policy_SURVIVES_A_RESET(bound):
@@ -445,5 +458,6 @@ async def test_the_run_config_describes_the_REBUILT_broker_not_the_replaced_one(
         "the run's config describes the broker it REPLACED — RunHistoryPanel renders that as a "
         "badge, so the panel would state the opposite of the truth"
     )
-    assert run.config["venue"] == "alpaca"
+    assert run.config["venue"] == "sim", "`B402`: the venue that RAN, not the policy's label"
+    assert run.config["direction_policy_venue"] == "alpaca"
     assert run.config["mode"] == loop.mode, "`mode` is the same defect on a second key"

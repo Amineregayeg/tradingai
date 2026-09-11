@@ -174,14 +174,32 @@ def problem_response(
     type_uri: str = "about:blank",
     extensions: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Build an RFC 7807 Problem Details dictionary."""
+    """Build an RFC 7807 Problem Details dictionary.
+
+    **`detail` IS REDACTED HERE, AND THIS IS THE CHOKEPOINT ON PURPOSE** (`B404`).
+
+    Every problem+json body in the app is built by this function — the `HTTPException` handler,
+    the `TradingAIError` handler, and any handler added later. Eight router sites interpolate an
+    exception into a detail (`alerts.py` ×3, `brokers.py` ×4, `calendar.py` ×1), and the two
+    `brokers.py` connect paths carry CONNECTION-ERROR text, which is exactly where a credential
+    rides. **Fixing the sites leaves the next one uncovered; fixing the builder covers the
+    contract** — `B398`'s argument, applied to a security boundary.
+
+    `title` is a type name and `instance` is `request.url.path`, which excludes the query string,
+    so neither carries a credential and neither is touched.
+    """
+    # Imported here rather than at module scope: `app.core.logging` pulls in settings, and this
+    # module is imported by the broker contract and the models — a cycle there would surface as
+    # an ImportError in a place nobody looks.
+    from app.core.logging import redact_for_response
+
     response: dict[str, Any] = {
         "type": type_uri,
         "title": title,
         "status": status,
     }
     if detail:
-        response["detail"] = detail
+        response["detail"] = redact_for_response(str(detail))
     if instance:
         response["instance"] = instance
     if extensions:

@@ -181,9 +181,23 @@ function settingsLine(cfg: Record<string, unknown> | null): string {
   // value rather than assuming one: a run recorded before the ruling must not be labelled
   // long-only retroactively.
   const venue = typeof cfg.venue === 'string' ? cfg.venue : ''
+  // B402 — the venue that RAN, and separately the policy it enforced.
+  //
+  // `venue` used to record the DirectionPolicy's label, so it read "alpaca" on simulator runs
+  // too. It now records the selection, and the policy keeps its own key. Shown ONLY when the two
+  // differ, because "sim · policy: alpaca" says something ("a simulator standing in for Alpaca")
+  // while "alpaca · policy: alpaca" is noise — and a line that repeats itself on every row is
+  // the thing readers learn to skip.
+  //
+  // Rendered at all because the value was computed, shipped and read by nothing, which is the
+  // fourth time that shape has appeared tonight. I am not waiting to be told again.
+  const policyVenue = typeof cfg.direction_policy_venue === 'string'
+    ? cfg.direction_policy_venue
+    : ''
+  const policyNote = policyVenue && policyVenue !== venue ? `policy: ${policyVenue}` : ''
   const directions = longOnly(cfg) ? 'LONG ONLY' : ''
   return [syms, cfg.entry_tf, risk, bal, cfg.mode, `prices: ${cfg.price_source ?? 'binance'}`,
-          venue, directions, flagProvenance(cfg)]
+          venue, policyNote, directions, flagProvenance(cfg)]
     .filter(Boolean)
     .join('  ·  ')
 }

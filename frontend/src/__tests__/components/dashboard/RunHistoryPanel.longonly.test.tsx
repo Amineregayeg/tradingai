@@ -339,6 +339,24 @@ describe('a long-only run must not read like an ordinary one', () => {
     expect(screen.getByTestId('uncoded-legacy-rejections')).toBeTruthy()
   })
 
+  it('names the venue that RAN and the policy it enforced, separately', async () => {
+    // B402. `venue` used to record the DirectionPolicy's label, so a SimPropFirmBroker run read
+    // "alpaca" — the name of a venue it never touched. A grouping on that field would conclude
+    // one homogeneous population across simulator, paper and live.
+    const text = await settingsText({ mode: 'PAPER', venue: 'sim',
+                                      direction_policy_venue: 'alpaca' })
+    expect(text).toMatch(/sim/)
+    expect(text).toMatch(/policy: alpaca/)
+  })
+
+  it('does not repeat itself when the venue and its policy agree', async () => {
+    // A line that says the same thing twice on every row is the thing readers learn to skip.
+    const text = await settingsText({ mode: 'PAPER', venue: 'alpaca',
+                                      direction_policy_venue: 'alpaca' })
+    expect(text).toMatch(/alpaca/)
+    expect(text).not.toMatch(/policy: alpaca/)
+  })
+
   it('survives an endpoint that has not been redeployed yet', async () => {
     // The field is absent, not empty. A panel that throws here would take the whole run
     // history down over a value it only decorates with.
