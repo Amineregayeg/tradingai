@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-11 (B400 — AN INSTRUMENT FOR THE ASSERTION-THAT-CANNOT-FAIL CLASS at agents/tools/inert_assertions.py, and the rule its one FALSE POSITIVE forced review to sharpen: not 'every operand is a literal' but 'every operand is a literal the author TRANSCRIBED from a value the code owns'. 0.3/0.1 != 3.0 asks a question of the INTERPRETER, which owns float semantics, and is a legitimate retirement condition; "endpoint" in "flag (...)" asks it of a COPY of a string alpaca.py owns, so the code can change underneath it and the line never notices. Controlled BEFORE use per B398 — four must-hits including verbatim reconstructions of both known instances — and THE CONTROL CORRECTED ITS AUTHOR: review filed `assert f() or True` as a must-MISS and the scanner was right. 4666 backend assertions, 1 flag, that flag a false positive, so the suite is genuinely clean. BLIND SPOT NAMED RATHER THAN CAVEATED: 290 frontend expect() calls unscanned, and the class is language-independent — which matters more there, because B380 and 8c907fc both bit on the frontend. B383 reproduced twice tonight, once by each seat; fix is to match on comm, not argv.)
+Last updated: 2026-09-11 (B400 AMENDMENT — THE FRONTEND HALF at agents/tools/find_inert_constructs.js, a tsc-AST walk with 10 must-hit/10 must-miss controls including 8c907fc's if(false) verbatim; frontend/src 82 files -> 0. THE FINDING IS NOT THE ZERO, IT IS WHAT THE ZERO ALMOST WAS: review's first working version passed ALL TEN of its own must-hits and MISSED a real instance execute's cruder regex had already found — expect('literal'.includes('literal')), whose subject is a CallExpression the literal test walked past. A SYNTHETIC CONTROL ENCODES THE AUTHOR'S MODEL OF THE DEFECT; A REAL INSTANCE DOES NOT, and the shape neither had thought of was invisible to the control for exactly the reason it was invisible to the tool — B398 one turn further in, an instrument whose CONTROL was blind in the same way. Review correctly told execute NOT to delete the regex: two tools with different blind spots are not redundancy, the crude one found what the principled one missed. SHARED BLIND SPOT, verified independently by manager: neither resolves a literal bound to a const, so a clean run from both excludes the class only AS WRITTEN INLINE.)
 
 ---
 
@@ -25913,3 +25913,48 @@ watched fail three times.
 shell's own argv. **The mechanical fix, since a resolution has now failed twice: capture the PID at
 launch and signal that, or match on `comm` rather than the full argv** — `ps -eo pid,comm,args` with
 `$2 ~ /^python/` cannot match a bash wrapper.
+
+#### `B400` AMENDMENT — THE FRONTEND HALF, AND THE REASON A SYNTHETIC CONTROL IS WEAKER THAN A PLANTED REAL ONE. Review's first working version passed all ten of its own must-hits and MISSED a real instance another seat had already found
+
+**`agents/tools/find_inert_constructs.js`**, a `tsc`-AST walk, with controls at
+`agents/tools/controls_ts` — ten must-hit and ten must-miss, including `8c907fc`'s `if (false)`
+verbatim. **Results: `frontend/src`, 82 files → 0. Backend, 4666 assertions → the one known false
+positive.**
+
+**THE FINDING IS NOT THE ZERO. IT IS WHAT THE ZERO ALMOST WAS.**
+
+**Review's first working version missed an inert line that execute's cruder regex had already
+found** — `expect('literal'.includes('literal'))`. The subject is a `CallExpression`, and the
+literal test walked straight past it. **Every synthetic must-hit still passed.**
+
+> **A synthetic control encodes the AUTHOR'S MODEL of the defect. A real instance does not.** Ten
+> hand-written must-hits agreed with the walker because the same person wrote both, from the same
+> understanding — and the shape neither of them had thought of was invisible to the control for
+> exactly the reason it was invisible to the tool. **Review found it only by planting the other
+> seat's actual finding as a live must-hit.**
+
+**This is `B398` one turn further in.** `B398` was an instrument that could not see its target and
+reported green. **This is an instrument whose CONTROL could not see its target either** — so the
+green was confirmed by a check built from the same blind model. **Reconstruct-from-memory controls
+are weaker than planted controls harvested from a different method or a different seat.**
+
+**AND THE CORRECT CONSEQUENCE, which review drew unprompted: it told execute NOT to delete the
+regex.** Two instruments with different blind spots are not redundancy to be tidied away — **the
+crude one found what the principled one missed.** Deleting the weaker tool on the stronger tool's
+description is how the coverage silently narrows.
+
+**THE SHARED BLIND SPOT, stated on the output rather than in a footnote, and verified independently
+by manager:**
+
+```
+const X = 'a'; expect(X.includes('b'))    NOT FLAGGED   <- neither tool resolves a bound literal
+expect('a'.includes('b'))                 flagged
+if (false)                                flagged
+```
+
+**Neither tool resolves a literal bound to a `const`.** So **a clean run from both does not exclude
+the class** — it excludes the class *as written inline*. Every inert assertion one `const` away is
+invisible to the entire apparatus, and the fix (constant propagation) is materially more work than
+either tool represents.
+
+
