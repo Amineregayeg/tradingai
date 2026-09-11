@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-11 (B401 AMENDMENT — THE ARM THAT PASSES UNDER BOTH THE STRONG AND THE WEAK FIX, a third way an assertion proves nothing alongside B397's pair: checking the END STATE cannot distinguish NEVER BROKEN from BROKEN THEN REPAIRED. Execute first restored the hook inside the except — which passes every arm and still leaves a window covering only the damage its author remembered — and the obvious arm passes under both shapes, so it could not have stopped the weaker fix shipping. The replacement records EVERY assignment to _on_settle and asserts a failed rebuild makes NONE: repair shape -> [None, cb] RED, build-into-a-local -> [] green. All three modes share one shape: the arm is satisfied by something weaker than the property. FIX AS LANDED, verified at HEAD: _bind_broker builds into a local and swaps only on success, _reset_broker_state no longer clears the hook at all so the comment that depended on the swallow is GONE rather than corrected, and the handler logs the venue and error then RE-RAISES so the reset refuses rather than opening a run against a venue it could not build.)
+Last updated: 2026-09-11 (B402 — THE RUN RECORD'S `venue` FIELD RECORDS THE DIRECTION POLICY'S LABEL, NOT THE VENUE THAT RAN. Found by review; verified by manager and it is not merely invariant, it is WRONG: "venue" reads direction_policy.venue, the only DirectionPolicy in the tree is ALPACA_CRYPTO_LONG_ONLY with venue="alpaca", and all four construction sites pass that one constant — so a run executed entirely on PaperBroker or SimPropFirmBroker records venue: "alpaca", the name of a venue it never touched. _select_venue(), which knows the answer, is recorded nowhere. IT PASSED MY OWN REVIEW: I accepted the field because it is DERIVED from the broker the run executes against rather than asserted, which is TRUE — and it is derived from a field describing the venue's POLICY rather than the venue. Derived was the wrong property to check; the question is not where a value comes from but whether it can DIFFER when the world differs. It lands on part E, which would group on `venue` and conclude a homogeneous population across simulator, paper and live — the precise failure E exists to prevent, keyed on the field whose name promises the answer. B393's sibling and strictly worse: a right value at the wrong moment versus a WRONG value at the right moment, which no ordering fix touches.)
 
 ---
 
@@ -26142,5 +26142,84 @@ just-written code.)*
 correct, and the same discipline as marking a truncated run `KILLED`: a green result about a version
 you are replacing is a number nobody should read.
 
+
+
+
+### B402 — THE RUN RECORD'S `venue` FIELD RECORDS THE DIRECTION POLICY'S LABEL, NOT THE VENUE THAT RAN. It is the constant `'alpaca'` on the in-process simulator, on plain paper and on Alpaca alike, so a consumer grouping runs by venue sees ONE venue across three brokers
+
+**Found by review running `M-6`'s differential end-to-end at `9a2480d`** — the row specifies an arm
+running the same bars on two venues and asserting the records are distinguishable. **No such arm
+exists**, so rather than report the gap I ran the differential myself. **The property holds, and the
+field named for it is not what carries it.**
+
+```
+sim     SimPropFirmBroker   venue='alpaca'  long_only=True  mode=PROP_FIRM_SIM
+paper   PaperBroker         venue='alpaca'  long_only=True  mode=PAPER
+alpaca  AlpacaAdapter       venue='alpaca'  long_only=True  mode=ALPACA_PAPER
+
+DISTINGUISHABLE: yes, on 3 of 14 fields -- broker_mode, mode, simulation_source
+IDENTICAL (11): bias_tf, engine_version, entry_tf, LONG_ONLY, max_concurrent, price_source,
+                records_rejected_signals, risk_pct, starting_balance, symbols, VENUE
+```
+
+**The mechanism, at `crypto_loop.py:811`:**
+
+```python
+"venue": (None if getattr(self.paper, "direction_policy", None) is None
+          else self.paper.direction_policy.venue),
+```
+
+**It records which venue's DIRECTION POLICY is in force, not which venue executed.** And
+`fixed_config.py:100` is `VENUE_DIRECTION_POLICY: Final = ALPACA_CRYPTO_LONG_ONLY` — **one object,
+aliased**, deliberately shared so the simulators reproduce the live venue's constraint. That sharing
+is correct and `B393`'s premise holds; I checked whether `alpaca.py:97` was a second encoding and it
+is not. **But it makes the field structurally incapable of varying: `venue` will read `'alpaca'` for
+every run on every broker until a second policy exists.**
+
+**`_select_venue()` — the function that DOES know the answer — is not what the field reads**, and its
+normalised output is recorded nowhere. What distinguishes the runs is `broker_mode`, the raw config
+string.
+
+**WHY THIS IS NOT COSMETIC, AND IT LANDS ON WORK ALREADY SCOPED.** `B399`/part E is about teaching
+the analysis layer to refuse a population it cannot characterise. **`venue` is the natural key for
+"did these runs execute on the same venue", and it answers yes for a population spanning an
+in-process simulator, plain paper and a live-venue adapter.** A consumer grouping on it concludes a
+homogeneous population across three brokers — the precise failure part E exists to prevent, keyed on
+the field whose name promises the answer.
+
+**`RunHistoryPanel.settingsLine` renders it**, so a `PaperBroker` run's settings line reads
+`... PAPER · alpaca · LONG ONLY`. A human has `mode` beside it and is only mildly misled; **an
+automated consumer has no such correction.**
+
+**The fix is small:** record `_select_venue()` under `venue` and, if the policy's label is wanted,
+record it under a name that says so — `direction_policy_venue`. One field, one fact.
+
+**Not a blocker for part 2**, whose stated goals I verified and which passes.
+
+**VERIFIED BY MANAGER, AND IT IS NOT MERELY INVARIANT — IT IS WRONG.**
+
+```
+crypto_loop.py:838   "venue": None if direction_policy is None else direction_policy.venue
+alpaca.py:97         ALPACA_CRYPTO_LONG_ONLY = DirectionPolicy(venue="alpaca", ...)
+                     the ONLY DirectionPolicy in the tree
+159,165,828,833      all four construction sites pass that same constant
+_select_venue()      returns "alpaca" | the simulator -- and is recorded NOWHERE
+```
+
+**So a run executed entirely on `PaperBroker` or `SimPropFirmBroker` records `venue: "alpaca"`.**
+Not a placeholder, not a null — **the name of a venue it never touched.** The field does not fail to
+vary; it asserts something false, and it asserts it about the safety-relevant question of where a
+run executed.
+
+**AND IT PASSED MY OWN REVIEW.** I accepted `venue` from execute on the grounds that it is *"derived
+from the broker the run actually executes against, not asserted"* — and that is **true**. The broker
+is real, the attribute is read at snapshot time, nothing is hardcoded. **It is derived from a field
+of that broker which describes the venue's POLICY rather than the venue**, and the two words are the
+same word. *Derived* was the property I checked, and it was the wrong property: **the question is
+not where a value comes from but whether it can be different when the world is different.**
+
+**That is `B393`'s sibling and strictly worse.** `B393` was a right value read at the wrong moment,
+latent because the sources coincided. **This is a wrong value read at the right moment**, and no
+ordering fix touches it.
 
 
