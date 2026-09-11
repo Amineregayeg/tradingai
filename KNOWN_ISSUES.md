@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-11 (B401 — PART 2 ROUTED THE RESET PATH THROUGH A BINDER THAT CAN NOW REFUSE, AND THE REFUSAL IS SWALLOWED. _reset_broker_state nulls self.paper._on_settle to suppress settle FOR THE DURATION of the reset, then calls _bind_broker, which restores the hook at its LAST step — so a raise during the build never reaches the restore, and a bare except Exception logs a warning and continues. Driven: old broker still in use TRUE, settle hook restored FALSE, and the broker GUARDS the hook with a None check (paper.py:177) so it SKIPS rather than raising — the suppression becomes permanent and silent. PART 2 MADE IT REACHABLE: the path previously built the simulators INLINE, unable to raise, with alpaca falling to the else; it now calls _build_broker, which for alpaca constructs an AlpacaAdapter that refuses on an endpoint/flag disagreement — B389's whole fix — so the refusal built so a misconfigured venue CANNOT TRADE is caught and discarded. B375: a permanent rule made indistinguishable from a transient failure, and B221's mechanism by a new route in a function whose docstring cites B221. TWO remedies: build into a local and swap only on success, AND let the refusal out rather than catching it broadly.)
+Last updated: 2026-09-11 (B401 AMENDMENT — THE ARM THAT PASSES UNDER BOTH THE STRONG AND THE WEAK FIX, a third way an assertion proves nothing alongside B397's pair: checking the END STATE cannot distinguish NEVER BROKEN from BROKEN THEN REPAIRED. Execute first restored the hook inside the except — which passes every arm and still leaves a window covering only the damage its author remembered — and the obvious arm passes under both shapes, so it could not have stopped the weaker fix shipping. The replacement records EVERY assignment to _on_settle and asserts a failed rebuild makes NONE: repair shape -> [None, cb] RED, build-into-a-local -> [] green. All three modes share one shape: the arm is satisfied by something weaker than the property. FIX AS LANDED, verified at HEAD: _bind_broker builds into a local and swaps only on success, _reset_broker_state no longer clears the hook at all so the comment that depended on the swallow is GONE rather than corrected, and the handler logs the venue and error then RE-RAISES so the reset refuses rather than opening a run against a venue it could not build.)
 
 ---
 
@@ -26085,4 +26085,62 @@ replace.* Minimum: restore `self.paper._on_settle = self._on_settle_cb` in the `
 against, fixed a live defect the collapse exposed, and dissolved two kill-set rows honestly. **The
 regression is in the interaction between a change and a path that change newly reaches** — not in
 any line of it, and not visible to any arm aimed at what it set out to do.
+
+#### `B401` AMENDMENT — THE ARM THAT PASSES UNDER BOTH THE STRONG AND THE WEAK FIX. A third way an assertion proves nothing, alongside `B397`'s pair: **checking the END STATE cannot distinguish *never broken* from *broken then repaired***
+
+**Execute's, found while replacing its own fix — and it is the reason the weaker fix would have
+shipped.** It had first restored the hook inside the `except`. **That passes every arm, and still
+leaves a window.**
+
+```
+the obvious arm    ..RESTORES_the_previous_brokers_settle_hook
+                   passes under NEVER CLEARED        (build into a local, swap on success)
+                   passes under CLEARED THEN REPAIRED (restore in the except)
+                   -> it could not have stopped the weaker fix
+```
+
+**Both fixes end with the hook wired, so an assertion about the final state is satisfied by both.**
+The weaker one only covers the damage its author remembered to think of; the window exists for the
+duration of the `try`, and any *other* state mutated in there is uncovered by construction.
+
+> **The arm has to assert the ABSENCE OF THE INTERMEDIATE STATE, not the correctness of the final
+> one.** Execute's replacement records **every assignment** to `_on_settle` and asserts a failed
+> rebuild makes NONE:
+>
+> ```
+> repair shape          -> [None, <cb>]   RED
+> build-into-a-local    -> []             green
+> ```
+
+**Alongside `B397`'s two** — `A != B` passing on incidental difference, `A == B` passing on identical
+brokenness — **this is a third: an end-state assertion passing on a repaired intermediate.** All
+three share one shape: *the arm is satisfied by something weaker than the property.*
+
+**THE FIX AS LANDED, verified at `HEAD` by manager:**
+
+```python
+built = self._build_broker(starting_balance)   # may raise; NOTHING mutated yet
+previous = getattr(self, "paper", None)
+if previous is not None:
+    previous._on_settle = None                 # only now, with a replacement in hand
+self.paper = built
+self.paper._on_settle = self._on_settle_cb
+```
+
+**And `_reset_broker_state` no longer clears the hook at all**, so the comment that had come to
+depend on the swallow is **gone rather than corrected** — there is no longer a line for it to sit on.
+**Remedy 2 is in as well:** the handler logs the venue and the error and then **re-raises**, so the
+reset refuses rather than opening a run against a venue it could not build.
+
+*(Execute described this as "nothing is caught". It is caught, logged with context, and re-raised —
+which is better than not catching, because the operator gets the venue and the reason. The sentence
+would mislead a reader into expecting no handler. **Fourth instance tonight of a correct action
+carrying an incorrect description**, and the only one where the description was of the author's own
+just-written code.)*
+
+**Execute killed the suite that was measuring the superseded fix rather than letting it finish** —
+correct, and the same discipline as marking a truncated run `KILLED`: a green result about a version
+you are replacing is a number nobody should read.
+
+
 
