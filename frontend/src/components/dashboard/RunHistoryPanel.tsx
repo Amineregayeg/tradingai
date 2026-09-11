@@ -77,6 +77,88 @@ function duration(run: Run): string {
   return `${(hours / 24).toFixed(1)}d`
 }
 
+/**
+ * B395 — was this run's simulation flag CHECKED, or only believed?
+ *
+ * `is_simulation` gates every execution. A remote venue's adapter verifies it against the
+ * client's real endpoint; when that endpoint cannot be read, construction still succeeds and
+ * NOTHING has verified the flag. That is the only state worth surfacing.
+ *
+ * True ONLY for the unverified case. An in-process simulator has no endpoint to check and cannot
+ * place a real order, so flagging it would fire on the engine's normal path — and a marker that
+ * fires on every run gets ignored, which is the failure it exists to prevent.
+ */
+/** The closed vocabulary `_config_snapshot` writes. Pinned backend-side by
+ *  `test_the_provenance_vocabulary_is_CLOSED`, so a reword turns an arm red there before it turns
+ *  this into a false alarm. */
+export const SRC_CHECKED = 'endpoint'
+export const SRC_IN_PROCESS = 'in-process (no endpoint to check)'
+export const SRC_NOT_CHECKED = 'flag (client endpoint unreadable)'
+
+type FlagState = 'not-recorded' | 'checked' | 'in-process' | 'not-checked' | 'unrecognised'
+
+/**
+ * ONE classifier. Both the badge and the settings line derive from it, so they cannot disagree.
+ *
+ * **`===`, NEVER `includes`, AND THIS IS A TRAP RATHER THAN A STYLE CHOICE.** The unverified
+ * value is `"flag (client endpoint unreadable)"` — **which CONTAINS the substring `"endpoint"`**.
+ * A positive match written `src.includes('endpoint')` therefore reclassifies the UNVERIFIED state
+ * as VERIFIED, the defect in its worst form. The first version of this function escaped that only
+ * because the `unreadable` test happened to run first; a reorder would have broken it and nothing
+ * said so.
+ *
+ * **AND THE FALLTHROUGH USED TO RETURN THE BENIGN STATE.** Any value outside the vocabulary — a
+ * new fourth state, a typo, a version skew between API and UI — read as *checked at endpoint*.
+ * That is the same defect this whole thread has been chasing, three layers deep now: removed from
+ * the adapter, removed from the snapshot read, and still sitting in a `return` at the bottom of a
+ * rendering helper. **An unrecognised value is an ALARM, because not knowing is precisely the
+ * state the field exists to expose.**
+ */
+function flagState(cfg: Record<string, unknown> | null): FlagState {
+  const src = cfg?.simulation_source
+  if (typeof src !== 'string') return 'not-recorded'
+  if (src === SRC_CHECKED) return 'checked'
+  if (src === SRC_IN_PROCESS) return 'in-process'
+  if (src === SRC_NOT_CHECKED) return 'not-checked'
+  return 'unrecognised'
+}
+
+function simulationUnverified(cfg: Record<string, unknown> | null): boolean {
+  const state = flagState(cfg)
+  return state === 'not-checked' || state === 'unrecognised'
+}
+
+/**
+ * The provenance as a DESCRIPTIVE token for the settings line — all four states, including the
+ * absent one.
+ *
+ * **A DESCRIPTIVE FIELD MAY OMIT ON ABSENCE; AN ALARM FIELD MAY NOT.** `venue` omits and that is
+ * correct — omission from a description reads as *unknown*. But `simulationUnverified` drives a
+ * BADGE, and omission from an alarm reads as *clear*, so a run recorded before this key existed
+ * rendered exactly like a run whose flag was checked and confirmed. That is the amendment's own
+ * defect one layer up: removed from the data layer (base raises, proxy forwards, no `getattr`
+ * default) and reappearing in the presentation layer, where absence resolves to the benign
+ * rendering.
+ *
+ * *"Reading absence as unverified would relabel history; reading it as verified is the defect."*
+ * Both true — and **"neither" is not a rendering, it is the absence of one.** The third option is
+ * *not recorded*, stated positively.
+ *
+ * **Why this one is safe to show on every row and the badge is not.** `not recorded` fires on a
+ * FINITE, SHRINKING set — every new run writes the key — so it decays to zero on its own. That is
+ * a migration marker. The liveness-signal failure is a marker that fires on every run FOREVER,
+ * which is why the badge stays reserved for `unreadable`.
+ */
+function flagProvenance(cfg: Record<string, unknown> | null): string {
+  return {
+    'not-recorded': 'flag: not recorded',
+    'checked': 'flag: checked at endpoint',
+    'in-process': 'flag: in-process',
+    'not-checked': 'flag: NOT CHECKED',
+    'unrecognised': 'flag: provenance UNRECOGNISED',
+  }[flagState(cfg)]
+}
+
 function settingsLine(cfg: Record<string, unknown> | null): string {
   if (!cfg) return 'settings not recorded'
   const risk = typeof cfg.risk_pct === 'number' ? `${(cfg.risk_pct * 100).toFixed(0)}% risk` : ''
@@ -96,7 +178,7 @@ function settingsLine(cfg: Record<string, unknown> | null): string {
   const venue = typeof cfg.venue === 'string' ? cfg.venue : ''
   const directions = longOnly(cfg) ? 'LONG ONLY' : ''
   return [syms, cfg.entry_tf, risk, bal, cfg.mode, `prices: ${cfg.price_source ?? 'binance'}`,
-          venue, directions]
+          venue, directions, flagProvenance(cfg)]
     .filter(Boolean)
     .join('  ·  ')
 }
@@ -132,6 +214,17 @@ function RunRow({ run }: { run: Run }) {
         {/* BESIDE THE P&L, NOT INSIDE THE COLLAPSED DETAIL. This number is the one that gets
             read as "the strategy underperformed", and a mark a reader has to expand a row to
             find does not qualify it. */}
+        {/* Beside the P&L, for the same reason the LONG ONLY badge is: a result read against a
+            safety flag nobody checked is a caveat that must not require expanding a row to find. */}
+        {simulationUnverified(run.config) && (
+          <span
+            data-testid="unverified-sim-badge"
+            title="This run's broker could not report which endpoint it was pointed at, so is_simulation was taken from the flag we passed rather than verified against the venue."
+            style={{ fontSize: 9, color: RED, border: `1px solid ${RED}`, borderRadius: 3, padding: '0 4px' }}
+          >
+            SIM UNVERIFIED
+          </span>
+        )}
         {longOnly(run.config) && (
           <span
             data-testid="long-only-badge"

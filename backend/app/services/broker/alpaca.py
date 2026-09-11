@@ -274,7 +274,11 @@ class AlpacaAdapter(BrokerAdapter):
         #: endpoint was unreadable* are different claims, and a reader must not have to guess
         #: which one they have.
         self.endpoint: str | None = _endpoint_of(client)
-        self.simulation_source: str = (
+        #: Stored privately and exposed through the property below, because `B395`'s amendment
+        #: made `simulation_source` a PROPERTY on `BrokerAdapter` — a data descriptor, which an
+        #: instance attribute cannot shadow. The base raising is what makes absence loud; this is
+        #: the cost of that, and it is the right trade.
+        self._simulation_source: str = (
             "endpoint" if self.endpoint is not None else "flag (client endpoint unreadable)"
         )
 
@@ -317,6 +321,13 @@ class AlpacaAdapter(BrokerAdapter):
         and must not be able to raise or to change answer between two calls.
         """
         return self._paper
+
+    @property
+    def simulation_source(self) -> str:
+        """`endpoint` when the client was ASKED where it points; the unreadable sentence when it
+        could not be. See `BrokerAdapter.simulation_source` — the base raises, so every adapter
+        must answer and a lost value cannot resolve to something reassuring."""
+        return self._simulation_source
 
     # ------------------------------------------------------------------
     # Connection

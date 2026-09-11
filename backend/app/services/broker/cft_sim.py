@@ -127,6 +127,21 @@ class SimPropFirmBroker(BrokerAdapter):
     def is_simulation(self) -> bool:
         return True
 
+    @property
+    def simulation_source(self) -> str:
+        """WHERE `is_simulation`'s answer CAME FROM (`B395`).
+
+        **`in-process` is a third state, not a missing one.** This broker has no endpoint to
+        check and is structurally incapable of a real order, so there is nothing to verify —
+        which is different from *an endpoint exists and we could not read it*, the case where
+        the safety flag is believed rather than confirmed.
+
+        **Declared here rather than defaulted at the reader**, because a default that is one of
+        the states the field distinguishes cannot report its own failure: an adapter that forgot
+        to set it would resolve to the calmest sentence available. Absent must raise.
+        """
+        return "in-process (no endpoint to check)"
+
     # ------------------------------------------------------------------
     # Connection lifecycle
     # ------------------------------------------------------------------

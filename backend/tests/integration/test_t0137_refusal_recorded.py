@@ -408,3 +408,42 @@ async def test_the_gate_is_ASKED_OF_THE_ADAPTER_and_does_not_block_the_simulator
     assert loop.paper.order_path_status() is None, (
         "the production simulator must remain startable — this is the engine's live path"
     )
+
+
+async def test_the_run_config_describes_the_REBUILT_broker_not_the_replaced_one(bound):
+    """`B393` — **the snapshot must be taken AFTER the rebuild, not before.**
+
+    `reset_run` applied the config, wrote the `EngineRun` row, and THEN rebuilt the broker, so
+    every key derived from `self.paper` described the object the run had just stopped using. The
+    comment above that block says *"Apply BEFORE snapshotting, so the run records what it will
+    actually run under rather than what it replaced"* — true of `apply_config`, and false of the
+    derived keys, which is what made it invisible.
+
+    **An arm asserting the config HAS `long_only` cannot catch this, because it does.** The two
+    brokers must differ IN THE PROPERTY, which is why this changes the policy rather than the
+    balance. Latent in production only because all four construction sites passed one shared
+    constant — old and new answers coincided and the wrong order produced a right value.
+    """
+    from app.models.engine_run import EngineRun
+
+    loop = LiveCryptoLoop()
+    await loop.ensure_run()
+
+    # Force the two to differ: the broker the run is ABOUT to stop using has no policy.
+    loop.paper.direction_policy = None
+    assert loop._config_snapshot()["long_only"] is False, "the arm cannot demonstrate anything"
+
+    await loop.reset_run(note="policy differs across the rebuild")
+
+    async with bound() as db:
+        run = (await db.execute(
+            select(EngineRun).where(EngineRun.id == loop.run_id)
+        )).scalar_one()
+
+    assert loop.paper.direction_policy is ALPACA_CRYPTO_LONG_ONLY, "the rebuild did not happen"
+    assert run.config["long_only"] is True, (
+        "the run's config describes the broker it REPLACED — RunHistoryPanel renders that as a "
+        "badge, so the panel would state the opposite of the truth"
+    )
+    assert run.config["venue"] == "alpaca"
+    assert run.config["mode"] == loop.mode, "`mode` is the same defect on a second key"

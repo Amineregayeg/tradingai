@@ -24,7 +24,7 @@ vi.mock('@/services/api', () => ({
   api: { engine: { runs: () => runs() } },
 }))
 
-import { RunHistoryPanel } from '@/components/dashboard/RunHistoryPanel'
+import { RunHistoryPanel, SRC_CHECKED, SRC_NOT_CHECKED } from '@/components/dashboard/RunHistoryPanel'
 
 const BASE = {
   id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
@@ -151,6 +151,118 @@ describe('a long-only run must not read like an ordinary one', () => {
     await waitFor(() => expect(screen.getByText(/run one/)).toBeTruthy())
     expect(screen.queryByTestId('long-only-badge')).toBeNull()
     expect(screen.queryByTestId('refusal-split')).toBeNull()
+  })
+
+  it('marks a run whose simulation flag was never VERIFIED', async () => {
+    // B395. `is_simulation` gates every execution. When the broker cannot report which endpoint
+    // it was pointed at, the flag was taken from what we passed rather than checked against the
+    // venue — and that run's results were produced under a safety claim nobody confirmed.
+    runs.mockResolvedValue([{ ...LONG_ONLY,
+      config: { ...LONG_ONLY.config, simulation_source: 'flag (client endpoint unreadable)' } }])
+    render(<RunHistoryPanel />)
+
+    const badge = await screen.findByTestId('unverified-sim-badge')
+    expect(badge.textContent).toMatch(/SIM UNVERIFIED/)
+    expect(badge.getAttribute('title')).toMatch(/verified against the venue/i)
+  })
+
+  it('does NOT mark an in-process simulator run, which is every normal run', async () => {
+    // THE CONTROL, AND IT IS THE ONE THAT MATTERS OPERATIONALLY. A simulator has no endpoint to
+    // check and cannot place a real order. A marker that fires on every run is the
+    // liveness-signal failure: routinely wrong, therefore ignored, therefore useless when it
+    // matters.
+    runs.mockResolvedValue([{ ...LONG_ONLY,
+      config: { ...LONG_ONLY.config, simulation_source: 'in-process (no endpoint to check)' } }])
+    render(<RunHistoryPanel />)
+
+    await waitFor(() => expect(screen.getByText(/run one/)).toBeTruthy())
+    expect(screen.queryByTestId('unverified-sim-badge')).toBeNull()
+  })
+
+  /** Open a row's SETTINGS block, which is where descriptive provenance lives. */
+  async function settingsText(config: Record<string, unknown>): Promise<string> {
+    runs.mockResolvedValue([{ ...BASE, config, rejected_by_direction: null }])
+    const view = render(<RunHistoryPanel />)
+    const row = await screen.findByText(/run one/)
+    row.click()
+    await waitFor(() => expect(view.container.textContent).toMatch(/SETTINGS/))
+    const text = view.container.textContent ?? ''
+    view.unmount()
+    return text
+  }
+
+  it('states POSITIVELY that an older run recorded no provenance', async () => {
+    // THE ARM THIS REPLACES ASSERTED ONLY THAT THE BADGE WAS ABSENT — which is the exact same
+    // assertion the VERIFIED case makes. So a run whose flag was checked and a run that recorded
+    // nothing rendered identically, and the arm PINNED that. It could not fail for the right
+    // reason.
+    //
+    // Reading absence as "unverified" would relabel history; reading it as verified is the
+    // defect. "Neither" is not a rendering — it is the absence of one.
+    const text = await settingsText({ mode: 'PAPER' })
+    expect(text).toMatch(/flag: not recorded/)
+    expect(screen.queryByTestId('unverified-sim-badge')).toBeNull()
+  })
+
+  it('distinguishes CHECKED from NOT RECORDED, which is the whole point', async () => {
+    const verified = await settingsText({ mode: 'PAPER', simulation_source: 'endpoint' })
+    const absent = await settingsText({ mode: 'PAPER' })
+
+    expect(verified).toMatch(/flag: checked at endpoint/)
+    expect(absent).toMatch(/flag: not recorded/)
+    expect(verified).not.toBe(absent)
+  })
+
+  it('does NOT read an unrecognised value as checked, and alarms on it', async () => {
+    // THE FALLTHROUGH USED TO RETURN THE BENIGN STATE. Any value outside the vocabulary — a new
+    // fourth state, a typo, API/UI version skew — rendered as "checked at endpoint". Not knowing
+    // is precisely the state this field exists to expose, so it is an ALARM.
+    const text = await settingsText({ mode: 'PAPER', simulation_source: 'something-new' })
+    expect(text).not.toMatch(/flag: checked at endpoint/)
+    expect(text).toMatch(/flag: provenance UNRECOGNISED/)
+  })
+
+  it('matches the vocabulary EXACTLY, because the unverified value contains "endpoint"', async () => {
+    // `"flag (client endpoint unreadable)"` contains the substring `"endpoint"`. A positive match
+    // written `includes('endpoint')` would reclassify the UNVERIFIED state as VERIFIED — the
+    // defect in its worst form. The old code escaped it only because the `unreadable` test
+    // happened to run first.
+    // ⚠ THIS LINE WAS `expect('flag (client endpoint unreadable)'.includes('endpoint'))` — TWO
+    // LITERALS I TYPED, which cannot fail. It is the TypeScript TWIN of a Python assertion review
+    // had already made me fix an hour earlier: I corrected one language and left the copy in the
+    // other. Found by a scanner, not by re-reading — the fourth instance of this class tonight
+    // and the first one re-reading did not catch.
+    //
+    // Asserted over the constants the COMPONENT owns, so the claim is true of the code.
+    expect(SRC_NOT_CHECKED.includes(SRC_CHECKED)).toBe(true)
+
+    runs.mockResolvedValue([{ ...BASE, config: { mode: 'PAPER',
+      simulation_source: 'flag (client endpoint unreadable)' }, rejected_by_direction: null }])
+    render(<RunHistoryPanel />)
+
+    const badge = await screen.findByTestId('unverified-sim-badge')
+    expect(badge).toBeTruthy()
+  })
+
+  it('alarms on an unrecognised value as well as an unreadable one', async () => {
+    runs.mockResolvedValue([{ ...BASE, config: { mode: 'PAPER', simulation_source: 'garbage' },
+                              rejected_by_direction: null }])
+    render(<RunHistoryPanel />)
+    expect(await screen.findByTestId('unverified-sim-badge')).toBeTruthy()
+  })
+
+  it('distinguishes all four provenance states', async () => {
+    const seen = new Set<string>()
+    for (const src of ['endpoint', 'in-process (no endpoint to check)',
+                       'flag (client endpoint unreadable)', undefined]) {
+      const cfg: Record<string, unknown> = { mode: 'PAPER' }
+      if (src !== undefined) cfg.simulation_source = src
+      const text = await settingsText(cfg)
+      const token = /flag: [^·]*/.exec(text)?.[0]?.trim()
+      expect(token).toBeTruthy()
+      seen.add(token as string)
+    }
+    expect(seen.size).toBe(4)
   })
 
   it('survives an endpoint that has not been redeployed yet', async () => {

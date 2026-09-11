@@ -288,6 +288,37 @@ class BrokerAdapter(ABC):
         ...
 
     # ------------------------------------------------------------------
+    @property
+    def simulation_source(self) -> str:
+        """WHERE `is_simulation`'s answer CAME FROM. Every adapter must say (`B395`).
+
+        `is_simulation` gates all execution. For a remote venue the adapter can VERIFY it
+        against the client's real endpoint; when that endpoint cannot be read the flag is
+        believed rather than confirmed — **and that is the only state worth surfacing**,
+        because it is exactly the case where nothing refused.
+
+        **THIS RAISES INSTEAD OF RETURNING A DEFAULT, AND THAT IS THE WHOLE POINT.** The first
+        version read `getattr(broker, "simulation_source", "in-process ...")`, so every way of
+        LOSING the value — a rename, a refactor, a wrapper that does not forward it — resolved
+        to the most reassuring sentence in the vocabulary. **Absence rendered as health.**
+
+        > When a fallback is one of the states a field exists to distinguish, the field cannot
+        > report its own failure. If a default is unavoidable it must be the ALARMING state,
+        > never the benign one.
+
+        **Declared HERE rather than only on the subclasses so the proxy contract arm can
+        ENUMERATE it.** Found by running that arm rather than trusting it: the member lived only
+        on `AlpacaAdapter`, so a check over `BrokerAdapter`'s members passed while the omission
+        it exists to catch sat in the tree. An instrument that cannot see the defect it was
+        built for is not a weaker instrument — it is a green light.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not declare simulation_source. is_simulation gates "
+            f"every execution, and a run must record whether that flag was CHECKED against the "
+            f"venue or only believed. A benign default here would make a lost value look safe."
+        )
+
+    # ------------------------------------------------------------------
     def order_path_status(self) -> str | None:
         """Why this adapter CANNOT place orders yet, or `None` if it can.
 

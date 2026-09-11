@@ -76,6 +76,42 @@ class LiveLoopBrokerProxy(BrokerAdapter):
         return target
 
     @property
+    def simulation_source(self) -> str:  # type: ignore[override]
+        """Forward the held broker's provenance (`B395` amendment).
+
+        **THIS CLASS HAS NO `__getattr__`** — it forwards only what it explicitly defines, so any
+        member added to `BrokerAdapter` after it was written is silently NOT forwarded. That is
+        how `order_path_status` was missed one member ago, and the fix then forwarded *that
+        member* instead of making non-forwarding loud, so the lesson did not generalise.
+
+        **THE UNBOUND ANSWER IS THE ALARM, NOT THE ALL-CLEAR**, and that is the opposite choice
+        from `order_path_status` above — deliberately. There, refusing to answer would block
+        callers over a venue the proxy cannot even name. Here, *not knowing whether the safety
+        flag was ever checked* IS the alarming state, so resolving it to a benign default would
+        be the exact defect this amendment exists to remove.
+        """
+        target = self._resolve()
+        if target is None:
+            return "unreadable (the live loop is holding no broker)"
+        return target.simulation_source
+
+    def order_path_status(self) -> str | None:
+        """Forward the venue's order-path answer (`T-0138`).
+
+        **THIS CLASS PROMISES TO FORWARD *EVERY* MEMBER AND DID NOT FORWARD THIS ONE** — I added
+        `order_path_status` to `BrokerAdapter` after this proxy was written, leaving the class
+        docstring false about its own contract (`B238`). Anything asking the manager's `paper`
+        adapter whether orders can be placed got the permissive base `None` while the real broker
+        said otherwise.
+
+        An unbound proxy answers `None` — permissive — deliberately: the loop's `start()` reads
+        `self.paper` directly, so this exists for callers reached through the manager, and a proxy
+        holding nothing must not block them on a venue it cannot even name.
+        """
+        target = self._resolve()
+        return None if target is None else target.order_path_status()
+
+    @property
     def broker_name(self) -> str:  # type: ignore[override]
         target = self._resolve()
         return getattr(target, "broker_name", "paper-proxy(unbound)")

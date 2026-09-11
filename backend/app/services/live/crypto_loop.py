@@ -15,8 +15,14 @@ import uuid
 from collections import deque
 from datetime import date, datetime, timedelta, timezone
 
+from app.core.exceptions import BrokerError
 from app.core.logging import logger
 from app.services.broker.paper import PaperBroker
+
+#: `broker_mode` values that select the ALPACA venue rather than an in-process simulator.
+#: A set rather than a literal so the spelling lives in ONE place (`B184`); `manager.py`
+#: keeps its own aliases for the CONNECT path, which is a different entry point.
+_ALPACA_MODES = {"alpaca", "alpaca_paper", "alpaca-paper"}
 from app.services.execution.service import ExecMode, ExecutionService
 from app.services.live import fixed_config as fixed
 from app.services.live import exit_shadow
@@ -148,28 +154,7 @@ class LiveCryptoLoop:
         self._partialled: set[str] = set()
         #: NY date of the last session close performed, so 19:00 fires once a day.
         self._last_session_close: date | None = None
-        if self.broker_mode == "sim":
-            from app.services.broker.cft_sim import PropFirmRules, SimPropFirmBroker
-
-            async def _price_source(pair: str) -> float:
-                return self._marks.get(pair, 0.0)
-
-            self.paper = SimPropFirmBroker(
-                PropFirmRules(starting_balance=starting_balance), _price_source,
-                direction_policy=fixed.VENUE_DIRECTION_POLICY,
-            )
-            self.mode = "PROP_FIRM_SIM"
-        else:
-            self.paper = PaperBroker(
-                starting_balance=starting_balance, price_fn=self._mark,
-                direction_policy=fixed.VENUE_DIRECTION_POLICY,
-            )
-            self.mode = "PAPER"
-        # Persist + resolve EVERY close (SL/TP tick, manual DELETE, kill switch)
-        # through one hook — no close path can be silently lost from the DB or
-        # leave its DecisionRecord stuck OPEN.
-        self.paper._on_settle = self._on_settle_cb
-        self.execution = ExecutionService(self.paper, ExecMode.PAPER)
+        self._bind_broker(starting_balance)
 
         # PRICE SOURCE — analyse the venue you execute on.
         #
@@ -349,8 +334,31 @@ class LiveCryptoLoop:
         gains/losses (real strategy decisions on real prices)."""
         # Never inject replay trades into a prop-firm challenge account — that
         # would corrupt the very pass/fail signal Agent B is measuring.
-        if self.broker_mode == "sim":
-            await self._act("engine", "Warm start skipped — prop-firm sim account stays clean")
+        #
+        # **AND THIS READ IS NOT THE SAME QUESTION AS THE OTHER TWO** (`T-0138`, `M-3`). It used
+        # to be `broker_mode == "sim"`, which happened to be equivalent while `sim` and `paper`
+        # were the only options. The real predicate is *can fabricated history be seeded into
+        # this broker at all* — and for a REAL venue the answer is no, for a different reason
+        # than the prop-firm one. Adding `alpaca` to the venue selection and leaving this read
+        # spelled the old way is exactly the four-sites defect.
+        #
+        # ⚠ **AND MY FIRST STATEMENT OF THE CONSEQUENCE WAS FALSE.** I wrote that it *"would have
+        # posted backtest trades at a live venue."* **It would not**, and the manager traced it
+        # rather than accepting it: `warmup()` places no orders. It mutates simulator internals
+        # directly — `self.paper.balance += pnl` and `self.paper._closed.append(...)` — and
+        # `AlpacaAdapter` has neither member, so selecting Alpaca and warming up raises
+        # `AttributeError`. **A loud crash at warm start, not orders at a venue.**
+        #
+        # The GUARD is still right: `broker_mode == "sim"` meant *"do not inject where injection
+        # is harmful"*, and that meaning drifted the moment the vocabulary gained a third member.
+        # **Recorded because the wrong reason was heading into a commit message**, and because it
+        # is the third time in six hours one of us was right about the action and wrong about the
+        # mechanism — each caught by re-deriving the mechanism instead of the conclusion.
+        venue = self._select_venue()
+        if venue != "paper":
+            reason = ("prop-firm sim account stays clean" if venue == "sim"
+                      else f"{venue} is a real venue — fabricated history is not postable to it")
+            await self._act("engine", f"Warm start skipped — {reason}")
             return await self.status()
         from app.services.backtest.engine import Params, run_backtest
 
@@ -621,6 +629,117 @@ class LiveCryptoLoop:
     # ------------------------------------------------------------------
     # Run lifecycle (task 2.1)
     # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # THE VENUE — one mapping, one binder, and both construction sites go through them
+    # ------------------------------------------------------------------
+    def _select_venue(self) -> str:
+        """`broker_mode` normalised to the venue actually being built (`T-0138`).
+
+        **ONE FACT IN ONE PLACE.** `broker_mode` was read at three sites and the switch is gaining
+        a third option, so a literal per site is `B184` — and it fails by selecting the SIMULATOR
+        somewhere nobody looks, which is the quiet direction.
+        """
+        mode = (self.broker_mode or "").strip().lower()
+        if mode in _ALPACA_MODES:
+            return "alpaca"
+        if mode == "sim":
+            return "sim"
+        return "paper"
+
+    def _bind_broker(self, starting_balance: float) -> None:
+        """Build the broker for the selected venue and bind everything that must follow it.
+
+        **THE INITIALISER AND THE RECONFIGURE PATH BOTH CALL THIS, AND THAT IS THE POINT.** The
+        construction, the settle hook and the `ExecutionService` each existed at TWO sites, so a
+        fix applied to one was invisible in the other while the suite stayed green — `B384` at
+        this layer. Three duplicated facts become one call.
+
+        **THE ATTRIBUTE NAME IS LOAD-BEARING AND MUST STAY `self.paper`.**
+        `LiveLoopBrokerProxy._resolve()` does `getattr(self._loop, "paper", None)` at call time,
+        and `main.py:242` registers that proxy as the manager's `paper` adapter. Renaming this
+        attribute would orphan the kill switch, the aggregate position view and close-routing in
+        silence — `B221`'s exact mechanism returning by a new route, and `B221` is the finding
+        where the switch reported a clean trigger and closed nothing. An arm pins the name.
+        """
+        self.paper = self._build_broker(starting_balance)
+        # Persist + resolve EVERY close (SL/TP tick, manual DELETE, kill switch) through one
+        # hook — no close path can be silently lost from the DB or leave its DecisionRecord
+        # stuck OPEN.
+        self.paper._on_settle = self._on_settle_cb  # noqa: SLF001
+        self.execution = ExecutionService(self.paper, ExecMode.PAPER)
+
+        # NAMED AT BIND TIME, and this is `B394`'s test applied to my own field rather than to
+        # someone else's. `simulation_source` records WHETHER the simulation claim was checked
+        # against the client's real endpoint or taken from the flag because the endpoint could
+        # not be read — and until this line its only readers were its own arms, which is the
+        # shape `B394` names: a remedy built for a real finding, with nobody asking it.
+        #
+        # An operator reading boot logs is a consumer that changes behaviour, in the same way
+        # `start()` already announces the GATE-022 suppression: *a suppression that announces
+        # itself once, at boot, is the difference between "nothing happened because the flag is
+        # off" and "nothing happened".*
+        logger.info(
+            "Broker bound", venue=self._select_venue(), mode=self.mode,
+            broker=getattr(self.paper, "broker_name", "?"),
+            is_simulation=getattr(self.paper, "is_simulation", None),
+            simulation_source=self.paper.simulation_source,
+            endpoint=getattr(self.paper, "endpoint", None),
+        )
+
+    def _build_broker(self, starting_balance: float):
+        """**THE ONE PLACE A VENUE BECOMES AN ADAPTER.**
+
+        Alpaca is a real venue reached over the network; the other two are in-process simulators.
+        The `direction_policy` is passed to the simulators because they must be wrong the same way
+        the venue is (`B391`); `AlpacaAdapter` carries its own, because it IS the venue.
+        """
+        venue = self._select_venue()
+
+        if venue == "alpaca":
+            # SDK imported inside, `B328`: this module must stay importable without `alpaca-py`.
+            from app.services.broker.alpaca import AlpacaAdapter
+
+            api_key = (os.getenv("ALPACA_API_KEY") or "").strip()
+            api_secret = (os.getenv("ALPACA_API_SECRET") or "").strip()
+            if not api_key or not api_secret:
+                # REFUSE, do not fall back to a simulator. A silent downgrade would run the
+                # engine on a different venue than the one the operator selected and record a
+                # config saying so — which is the class `B393` was filed for.
+                raise BrokerError(
+                    "broker_mode selects Alpaca but ALPACA_API_KEY / ALPACA_API_SECRET are not "
+                    "set. Refusing to fall back to a simulator: a run that silently swapped its "
+                    "venue would record results against settings it did not use.",
+                    broker="alpaca",
+                )
+
+            from alpaca.trading.client import TradingClient
+
+            # `raw_data=False` PINNED — it switches every return between a pydantic model and a
+            # dict, and `paper=True` because `ExecMode` has no LIVE member. The adapter checks
+            # that flag against the client's ACTUAL endpoint and refuses on a disagreement
+            # (`B389`), so this is asserted rather than trusted.
+            client = TradingClient(api_key, api_secret, paper=True, raw_data=False)
+            self.mode = "ALPACA_PAPER"
+            return AlpacaAdapter(client, paper=True)
+
+        if venue == "sim":
+            from app.services.broker.cft_sim import PropFirmRules, SimPropFirmBroker
+
+            async def _price_source(pair: str) -> float:
+                return self._marks.get(pair, 0.0)
+
+            self.mode = "PROP_FIRM_SIM"
+            return SimPropFirmBroker(
+                PropFirmRules(starting_balance=starting_balance), _price_source,
+                direction_policy=fixed.VENUE_DIRECTION_POLICY,
+            )
+
+        self.mode = "PAPER"
+        return PaperBroker(
+            starting_balance=starting_balance, price_fn=self._mark,
+            direction_policy=fixed.VENUE_DIRECTION_POLICY,
+        )
+
     def _config_snapshot(self) -> dict:
         """What the engine was configured to do. Stored with the run so a result
         can never be read against the wrong settings later."""
@@ -668,6 +787,26 @@ class LiveCryptoLoop:
             # `fixed.VENUE_DIRECTION_POLICY`, and a config that describes a run it did not
             # govern is worse than one that says nothing — `B238`'s class, and this file has
             # already shipped it once.
+            # `B395` — WAS THE SAFETY FLAG CHECKED, OR ONLY BELIEVED?
+            #
+            # `is_simulation` gates every execution. For a REMOTE venue the adapter verifies it
+            # against the client's real endpoint and refuses on a disagreement (`B389`) — but
+            # when the endpoint cannot be READ, construction succeeds and nothing has verified
+            # anything. **That case is the only informative one**, and until now it lived in the
+            # adapter's memory and died with the process: a run whose flag was confirmed and a
+            # run where it was assumed left identical records.
+            #
+            # THREE STATES, AND THE THIRD IS WHY THIS IS NOT A BOOLEAN. An in-process simulator
+            # has no endpoint to check, so marking it unverified would fire on the engine's
+            # normal path — a marker that fires on every run is the liveness-signal failure:
+            # routinely wrong, therefore ignored, therefore useless when it matters.
+            #
+            # **NO DEFAULT, DELIBERATELY.** This read was first written as
+            # `getattr(self.paper, "simulation_source", "in-process ...")`, which meant an
+            # adapter that failed to set it resolved to the CALMEST available sentence — absence
+            # reading as safety, on the provenance of the flag that gates execution. Every
+            # adapter declares it; a missing one must raise here rather than answer benignly.
+            "simulation_source": self.paper.simulation_source,
             "long_only": self._long_only(),
             "venue": (
                 None if getattr(self.paper, "direction_policy", None) is None
@@ -771,6 +910,35 @@ class LiveCryptoLoop:
             note = note or config.note
             label = label or config.label
 
+        # ------------------------------------------------------------------
+        # REBUILD THE BROKER **BEFORE** SNAPSHOTTING THE CONFIG (`B393`).
+        #
+        # Without this the broker would carry the previous run's balance and open positions into
+        # a run whose metrics start at zero. **But the ORDER is the fix, not the call.** The
+        # comment above says *"Apply BEFORE snapshotting, so the run records what it will
+        # actually run under rather than what it replaced"* — true of `apply_config`, and FALSE
+        # of every key derived from `self.paper` while the rebuild happened afterwards. Driven:
+        #
+        #     snapshot taken before the rebuild -> {'long_only': False, 'venue': None}
+        #     the broker the run ACTUALLY uses  -> {'long_only': True,  'venue': 'alpaca'}
+        #
+        # `RunHistoryPanel` renders that as a badge, so the panel would have stated the opposite
+        # of the truth. **Latent until now only because all four construction sites passed the
+        # same policy constant** — old and new answers coincided and the ordering error produced
+        # a correct value by accident. `T-0138` is what arms it, because its whole subject is
+        # making `self.paper` a different object with a different policy.
+        #
+        # NOT fixed by deriving those keys at read time: that turns `config` from a SNAPSHOT into
+        # a live view and contradicts the sentence the field exists on — *"snapshotted at start
+        # so a result can never be read against the wrong settings later."* A config that changes
+        # under a later reader is a worse failure than the one being fixed.
+        #
+        # AND IT IS CORRECT ON THE FAILURE PATH TOO: `_reset_broker_state` swallows its
+        # exceptions and leaves `self.paper` as the old object, so snapshotting after it still
+        # describes the broker actually in use.
+        # ------------------------------------------------------------------
+        await self._reset_broker_state()
+
         async with async_session_maker() as db:
             for row in (
                 await db.execute(select(EngineRun).where(EngineRun.ended_at.is_(None)))
@@ -786,11 +954,6 @@ class LiveCryptoLoop:
             await db.commit()
             await db.refresh(fresh)
             self.run_id = fresh.id
-
-        # Reset the in-memory simulation to match. Without this the broker would
-        # carry the previous run's balance and open positions into a run whose
-        # metrics start at zero — the same incoherence this task exists to fix.
-        await self._reset_broker_state()
 
         self.started_at = datetime.now(tz=timezone.utc)
         self._last_eval.clear()
@@ -817,23 +980,7 @@ class LiveCryptoLoop:
         """
         try:
             self.paper._on_settle = None  # noqa: SLF001 - suppress settle during reset
-            if self.broker_mode == "sim":
-                from app.services.broker.cft_sim import PropFirmRules, SimPropFirmBroker
-
-                async def _price_source(pair: str) -> float:
-                    return self._marks.get(pair, 0.0)
-
-                self.paper = SimPropFirmBroker(
-                    PropFirmRules(starting_balance=self.starting_balance), _price_source,
-                    direction_policy=fixed.VENUE_DIRECTION_POLICY,
-                )
-            else:
-                self.paper = PaperBroker(
-                    starting_balance=self.starting_balance, price_fn=self._mark,
-                    direction_policy=fixed.VENUE_DIRECTION_POLICY,
-                )
-            self.paper._on_settle = self._on_settle_cb  # noqa: SLF001
-            self.execution = ExecutionService(self.paper, ExecMode.PAPER)
+            self._bind_broker(self.starting_balance)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Broker reset failed", error=str(exc))
 
