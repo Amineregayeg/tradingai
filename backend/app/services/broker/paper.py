@@ -15,6 +15,7 @@ from typing import Callable
 
 from app.core.logging import logger
 from app.db.enums import DirectionType, OrderType
+from app.models.decision_record import REJECTION_VENUE_DIRECTION_UNSUPPORTED
 from app.schemas.broker import Position
 from app.services.broker.base import (
     Account, BrokerAdapter, DirectionPolicy, OrderRequest,
@@ -255,6 +256,7 @@ class PaperBroker(BrokerAdapter):
                 )
                 return {
                     "status": "REJECTED",
+                    "rejection_code": REJECTION_VENUE_DIRECTION_UNSUPPORTED,
                     "reason": refusal,
                     "pair": request.pair,
                     "direction": request.direction.value,

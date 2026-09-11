@@ -265,6 +265,80 @@ describe('a long-only run must not read like an ordinary one', () => {
     expect(seen.size).toBe(4)
   })
 
+  it('attributes a venue count ONLY from the structured code', async () => {
+    // B392. Until `rejection_code` existed, no surface could say "N refused by the venue": the
+    // only discriminator was prose the VENUE chose, so a count would return a confident zero the
+    // day the wording changed rather than failing. This reads the code assigned at the decision.
+    runs.mockResolvedValue([{ ...LONG_ONLY, rejected_by_code: [
+      { direction: 'SHORT', code: 'VENUE_DIRECTION_UNSUPPORTED', count: 147 },
+      { direction: 'LONG', code: 'ENTRY_DRIFT', count: 3 },
+    ] }])
+    render(<RunHistoryPanel />)
+
+    const el = await screen.findByTestId('venue-refusals')
+    expect(el.textContent).toMatch(/147 refused by venue/)
+  })
+
+  it('does not attribute a venue count when no rejection carries the venue code', async () => {
+    // The control. A count that appears whatever the data says is not a count.
+    runs.mockResolvedValue([{ ...LONG_ONLY, rejected_by_code: [
+      { direction: 'LONG', code: 'ENTRY_DRIFT', count: 3 },
+    ] }])
+    render(<RunHistoryPanel />)
+
+    await waitFor(() => expect(screen.getByText(/run one/)).toBeTruthy())
+    expect(screen.queryByTestId('venue-refusals')).toBeNull()
+  })
+
+  it('states UNCLASSIFIED rejections positively, and does not confuse them with legacy rows',
+     async () => {
+    // The two unknowns must not share a rendering either. UNCODED_LEGACY predates the field and
+    // decays to zero on its own; UNCLASSIFIED is a decision site that set no code — a defect.
+    runs.mockResolvedValue([{ ...LONG_ONLY,
+      rejected_by_code: [{ direction: 'SHORT', code: 'UNCLASSIFIED', count: 4 }],
+      rejections_unclassified: 4, rejections_uncoded_legacy: 11 }])
+    render(<RunHistoryPanel />)
+
+    const el = await screen.findByTestId('unclassified-rejections')
+    expect(el.textContent).toMatch(/4 UNCLASSIFIED/)
+    expect(el.getAttribute('title')).toMatch(/not a legacy row/i)
+
+    // ⚠ THIS ARM USED TO ASSERT `not.toMatch(/11/)` AND NOTHING ELSE ABOUT THE LEGACY COUNT —
+    // pinning the SILENCE of a value that was computed, typed, shipped and rendered nowhere.
+    // Both numbers must be visible and SEPARATE: one is a shrinking migration remnant, the
+    // other is a classifier defect, and a reader must be able to tell which they have.
+    const legacy = screen.getByTestId('uncoded-legacy-rejections')
+    expect(legacy.textContent).toMatch(/11 pre-code/)
+    expect(el.textContent).not.toMatch(/11/)
+  })
+
+  it('shows the legacy remnant even when there is no alarm', async () => {
+    // The migration marker is descriptive and fires on a finite, shrinking set, so it appears
+    // on its own. Rendering it only alongside an alarm would hide it exactly when the
+    // classification is healthy — which is most of the time.
+    runs.mockResolvedValue([{ ...LONG_ONLY,
+      rejected_by_code: [{ direction: 'SHORT', code: 'UNCODED_LEGACY', count: 11 }],
+      rejections_unclassified: 0, rejections_uncoded_legacy: 11 }])
+    render(<RunHistoryPanel />)
+
+    const legacy = await screen.findByTestId('uncoded-legacy-rejections')
+    expect(legacy.textContent).toMatch(/11 pre-code/)
+    expect(legacy.getAttribute('title')).toMatch(/predate/i)
+    expect(screen.queryByTestId('unclassified-rejections')).toBeNull()
+  })
+
+  it('does not alarm on legacy rows alone', async () => {
+    // A marker that fires on a shrinking migration remnant would train the reader to ignore it.
+    runs.mockResolvedValue([{ ...LONG_ONLY,
+      rejected_by_code: [{ direction: 'SHORT', code: 'UNCODED_LEGACY', count: 11 }],
+      rejections_unclassified: 0, rejections_uncoded_legacy: 11 }])
+    render(<RunHistoryPanel />)
+
+    await waitFor(() => expect(screen.getByText(/run one/)).toBeTruthy())
+    expect(screen.queryByTestId('unclassified-rejections')).toBeNull()
+    expect(screen.getByTestId('uncoded-legacy-rejections')).toBeTruthy()
+  })
+
   it('survives an endpoint that has not been redeployed yet', async () => {
     // The field is absent, not empty. A panel that throws here would take the whole run
     // history down over a value it only decorates with.

@@ -678,6 +678,20 @@ class V1ExitModel(RuleImplementation):
         return ExitSimulation(
             plan=plan,
             events=tuple(events),
+            # ⚠ THESE TWO READ THE SAME QUANTITY AT DIFFERENT PRECISIONS, AND CAN CONTRADICT.
+            #
+            # `runner_open` tests the UNROUNDED value; `remaining_fraction` reports the ROUNDED
+            # one. A remainder under `5e-11` therefore yields `runner_open=True` alongside
+            # `remaining_fraction=0.0` — **a record that contradicts itself**, read as data by
+            # rule-conformance rather than raising anywhere.
+            #
+            # Left as-is DELIBERATELY, and the reason is the scope rather than the risk. Reaching
+            # it needs roughly ten successive partials, so it is as unreachable as the sibling in
+            # `execution/service.py` that `B403` came from — where the same shape (`units > 0`
+            # then `round(units, 8)`) sent `0.0` to a broker that raises. **That one was fixed
+            # because it destroyed evidence; this one produces a self-contradicting row, which is
+            # visible.** Recorded here so the next person to touch this line inherits the
+            # measurement instead of rediscovering it.
             runner_open=remaining > 0.0,
             ticks_seen=ticks_seen,
             remaining_fraction=round(remaining, 10),

@@ -25,6 +25,7 @@ from typing import Any, Callable
 
 from app.core.logging import logger
 from app.schemas.broker import Position
+from app.models.decision_record import REJECTION_BROKER_UNAVAILABLE
 from app.services.broker.base import Account, BrokerAdapter, OrderRequest
 
 
@@ -174,7 +175,15 @@ class LiveLoopBrokerProxy(BrokerAdapter):
     async def place_order(self, request: OrderRequest) -> dict:
         target = self._target()
         if target is None:
-            return {"status": "rejected", "reason": self.unavailable_reason}
+            # A LEGITIMATE IDLE STATE, and its code must NOT alarm. The engine holding no
+            # broker while something asks it to trade is expected; leaving this path off the
+            # vocabulary would have landed it in `UNCLASSIFIED` — the liveness-signal failure
+            # arriving through the ENUMERATION rather than through the default.
+            #
+            # It also gives `unavailable_reason` its first reader.
+            return {"status": "rejected",
+                    "rejection_code": REJECTION_BROKER_UNAVAILABLE,
+                    "reason": self.unavailable_reason}
         return await target.place_order(request)
 
     async def close_position(self, position_id: str, lot_size: float | None = None) -> dict:

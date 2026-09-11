@@ -19,6 +19,14 @@ from enum import Enum
 from app.core.exceptions import DirectionNotSupported
 from app.core.logging import logger
 from app.db.enums import DirectionType, OrderType
+from app.models.decision_record import (
+    REJECTION_DEGENERATE_STOP,
+    REJECTION_ENTRY_DRIFT,
+    REJECTION_NON_POSITIVE_SIZE,
+    REJECTION_NO_REFERENCE_PRICE,
+    REJECTION_THROUGH_STOP,
+    REJECTION_VENUE_DIRECTION_UNSUPPORTED,
+)
 from app.services.broker.base import BrokerAdapter, OrderRequest
 
 
@@ -124,15 +132,23 @@ class ExecutionService:
             if mark is None or mark <= 0:
                 # Abstain rather than size off a price we know we will not get.
                 return {"status": "rejected",
+                        "rejection_code": REJECTION_NO_REFERENCE_PRICE,
                         "reason": "no reference price available; refusing to size a market order"}
 
             intended_risk = abs(sig.entry - sig.sl)
             if intended_risk <= 0:
-                return {"status": "rejected", "reason": "non-positive size / stop"}
+                # DEGENERATE_STOP, not NON_POSITIVE_SIZE. The string below is byte-identical to
+                # the one at the sizing guard, and the two are different decisions with opposite
+                # remedies: this is `entry == sl` — a STRATEGY DEFECT — while the other is equity
+                # against stop width. The prose cannot separate them; the code must.
+                return {"status": "rejected",
+                        "rejection_code": REJECTION_DEGENERATE_STOP,
+                        "reason": "non-positive size / stop"}
 
             drift_r = abs(mark - sig.entry) / intended_risk
             if drift_r > self.max_entry_drift_r:
                 return {"status": "rejected",
+                        "rejection_code": REJECTION_ENTRY_DRIFT,
                         "reason": (f"price moved {drift_r:.2f}R from the signal entry "
                                    f"({sig.entry:.2f} -> {mark:.2f}); "
                                    f"limit {self.max_entry_drift_r:.2f}R")}
@@ -144,14 +160,30 @@ class ExecutionService:
             long = sig.direction == DirectionType.LONG
             if (long and mark <= sig.sl) or (not long and mark >= sig.sl):
                 return {"status": "rejected",
+                        "rejection_code": REJECTION_THROUGH_STOP,
                         "reason": (f"market {mark:.2f} is already through the stop {sig.sl:.2f}; "
                                    "the setup is invalidated")}
 
             sizing_price = mark
 
         units = size_position(acct.equity, sig.risk_pct, sizing_price, sig.sl)
-        if units <= 0:
-            return {"status": "rejected", "reason": "non-positive size / stop"}
+
+        # **THE GUARD MUST TEST WHAT IS ACTUALLY PASSED, NOT WHAT WAS COMPUTED.**
+        #
+        # This read `if units <= 0` while the order below sends `round(units, 8)`, so a value in
+        # `(0, 5e-9)` passed the check and arrived at the broker as `0.0` — where both running
+        # simulators raise `ValueError("lot_size must be > 0")`, the bar aborts, and **no row is
+        # written at all** (`B403`). Measured: a stop distance of 1e12 on a 70k instrument gives
+        # `units=5e-11`, `units > 0` True, `round(units, 8)` 0.0.
+        #
+        # That takes a corrupt signal rather than a market condition, so it is rare — **which is
+        # exactly why the record matters**: nobody reconstructs a 1e12 stop from a log line six
+        # weeks later. Rounding first makes the guard and the argument agree.
+        lot_size = round(units, 8)
+        if lot_size <= 0:
+            return {"status": "rejected",
+                    "rejection_code": REJECTION_NON_POSITIVE_SIZE,
+                    "reason": "non-positive size / stop"}
 
         if self.mode == ExecMode.OBSERVE:
             # ----------------------------------------------------------------
@@ -179,7 +211,7 @@ class ExecutionService:
 
         req = OrderRequest(
             pair=sig.symbol, direction=sig.direction, order_type=sig.order_type,
-            lot_size=round(units, 8),
+            lot_size=lot_size,
             price=None if sig.order_type == OrderType.MARKET else sig.entry,
             sl=sig.sl, tp=sig.tp,
             client_order_id=sig.client_order_id or f"sig-{uuid.uuid4().hex[:8]}",
@@ -206,6 +238,7 @@ class ExecutionService:
             logger.info(f"ExecutionService[{self.mode.value}] {sig.symbol} "
                         f"{sig.direction.value} refused by {exc.venue}: {exc.reason}")
             return {"status": "REJECTED", "reason": exc.reason,
+                    "rejection_code": REJECTION_VENUE_DIRECTION_UNSUPPORTED,
                     "pair": sig.symbol, "direction": exc.direction,
                     "venue": exc.venue,
                     "sized_units": round(units, 8), "equity_at_entry": acct.equity}

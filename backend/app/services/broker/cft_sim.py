@@ -28,6 +28,25 @@ from typing import Awaitable, Callable
 
 from app.core.logging import logger
 from app.db.enums import DirectionType, OrderType
+from app.models.decision_record import (
+    REJECTION_PROP_FIRM_HALTED,
+    REJECTION_PROP_FIRM_HALTED_DAILY_LOSS,
+    REJECTION_PROP_FIRM_HALTED_MAX_DRAWDOWN,
+    REJECTION_PROP_FIRM_TARGET_REACHED,
+    REJECTION_PROP_FIRM_WOULD_BREACH_DAILY_LOSS,
+    REJECTION_PROP_FIRM_WOULD_BREACH_MAX_DRAWDOWN,
+    REJECTION_VENUE_DIRECTION_UNSUPPORTED,
+)
+
+#: `_halt_reason()`'s four values mapped to codes. **Read from that member, not invented:**
+#: `profit_target_reached | <breach_reason> | account_halted`, where `_breach_reason` is
+#: `daily_loss_limit` or `max_drawdown`.
+_HALT_CODES = {
+    "profit_target_reached": REJECTION_PROP_FIRM_TARGET_REACHED,
+    "daily_loss_limit": REJECTION_PROP_FIRM_HALTED_DAILY_LOSS,
+    "max_drawdown": REJECTION_PROP_FIRM_HALTED_MAX_DRAWDOWN,
+    "account_halted": REJECTION_PROP_FIRM_HALTED,
+}
 from app.schemas.broker import Position
 from app.services.broker.base import (
     Account, BrokerAdapter, DirectionPolicy, OrderRequest,
@@ -329,10 +348,11 @@ class SimPropFirmBroker(BrokerAdapter):
                 logger.warning("cft_sim on_settle hook failed", exc_info=True)
         return ev
 
-    def _reject(self, request: OrderRequest, reason: str) -> dict:
+    def _reject(self, request: OrderRequest, reason: str, code: str) -> dict:
         logger.info(f"cft_sim REJECT {request.pair} {request.direction.value} reason={reason}")
         return {
             "status": "REJECTED",
+            "rejection_code": code,
             "reason": reason,
             "pair": request.pair,
             "direction": request.direction.value,
@@ -418,11 +438,18 @@ class SimPropFirmBroker(BrokerAdapter):
         if self.direction_policy is not None:
             refusal = self.direction_policy.refusal(request.direction)
             if refusal is not None:
-                return self._reject(request, refusal)
+                return self._reject(request, refusal, REJECTION_VENUE_DIRECTION_UNSUPPORTED)
 
         # Halted account (breached or passed) refuses every new order.
         if self._halted:
-            return self._reject(request, self._halt_reason())
+            # SIX CODES, NOT ONE `PROP_FIRM_RULE`. A single bucket would be **lossier than the
+            # string it replaces** — the one direction a structuring change must never go — and
+            # the distinctions it destroys are the useful ones: *already halted* (stop the engine)
+            # against *would breach* (size down) are opposite remedies; daily loss resets where
+            # drawdown does not; and `profit_target_reached` is a **SUCCESS**, so counting a
+            # PASSED challenge as a rejection is wrong in the flattering direction.
+            return self._reject(request, self._halt_reason(), _HALT_CODES.get(
+                self._halt_reason(), REJECTION_PROP_FIRM_HALTED))
 
         fill = (
             float(request.price)
@@ -434,10 +461,12 @@ class SimPropFirmBroker(BrokerAdapter):
         # breach the daily-loss or max-drawdown limit, refuse before accepting.
         worst = abs(fill - float(request.sl)) * float(request.lot_size) if request.sl is not None else 0.0
         if (self._day_pnl - worst) <= -self._daily_loss_amt():
-            return self._reject(request, "would_breach_daily_loss")
+            return self._reject(request, "would_breach_daily_loss",
+                                REJECTION_PROP_FIRM_WOULD_BREACH_DAILY_LOSS)
         equity_now = self.balance + self._unrealized()
         if (equity_now - worst) <= self._drawdown_floor():
-            return self._reject(request, "would_breach_max_drawdown")
+            return self._reject(request, "would_breach_max_drawdown",
+                                REJECTION_PROP_FIRM_WOULD_BREACH_MAX_DRAWDOWN)
 
         self._trading_days.add(self._current_day)
         pos = SimPosition(

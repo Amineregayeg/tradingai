@@ -47,6 +47,11 @@ interface Run {
   /** Refusals split by the direction the strategy asked for. A `GROUP BY`, not a counter. */
   rejected_by_direction?: Record<string, number> | null
   rejections?: number
+  rejected_by_code?: CodedRejection[] | null
+  /** A decision site set no code. A DEFECT, and it alarms. */
+  rejections_unclassified?: number
+  /** Predates the field: finite, shrinking, decays to zero on its own. NOT an alarm. */
+  rejections_uncoded_legacy?: number
 }
 
 /**
@@ -183,6 +188,28 @@ function settingsLine(cfg: Record<string, unknown> | null): string {
     .join('  ·  ')
 }
 
+/** One `GROUP BY signal_dir, rejection_code` row as the API returns it. */
+interface CodedRejection { direction: string; code: string; count: number }
+
+/**
+ * B392 — the venue-attributed count, and it is legitimate ONLY because it reads the CODE.
+ *
+ * Until `rejection_code` landed, no surface could say "N shorts refused by the venue": the only
+ * discriminator was `rejection_reason`, free text, so a count would have been keyed on a sentence
+ * the VENUE chose — returning a confident zero the day the wording changed rather than failing.
+ * And two decision sites emit one byte-identical string, so the prose cannot separate them even
+ * in principle.
+ *
+ * This reads the structured field assigned AT THE DECISION. Never match the prose here.
+ */
+const CODE_VENUE_DIRECTION = 'VENUE_DIRECTION_UNSUPPORTED'
+
+function venueRefusals(run: Run): number {
+  return (run.rejected_by_code ?? [])
+    .filter((e) => e.code === CODE_VENUE_DIRECTION)
+    .reduce((n, e) => n + e.count, 0)
+}
+
 /** Refusals worth showing beside the P&L, ordered so the constrained direction reads first. */
 function refusals(run: Run): [string, number][] {
   const split = run.rejected_by_direction
@@ -274,6 +301,47 @@ function RunRow({ run }: { run: Run }) {
             "refused" would attribute every one of them to the ruling — a count that reads as
             a cause. Which rejection was which is on the DecisionRecord's `rejection_reason`;
             this line reports only what is actually being counted. */}
+        {/* THE VENUE-ATTRIBUTED COUNT, sourced from the code. This is the sentence the whole
+            of B392 was filed to make sayable — and it sits beside the P&L because that is where
+            "the strategy underperformed" gets concluded. */}
+        {venueRefusals(run) > 0 && (
+          <span data-testid="venue-refusals">
+            {' · '}
+            {venueRefusals(run)} refused by venue
+          </span>
+        )}
+        {/* A POSITIVE STATEMENT that the classification is incomplete. Absent rather than zero
+            would be a silence the reader has to notice — and UNCLASSIFIED means a decision site
+            set no code, which is a defect, not a migration remnant. */}
+        {/* THE MIGRATION REMNANT, SHOWN — and it belongs here rather than in a badge.
+            It was computed, typed, shipped in the API and rendered NOWHERE, while an arm
+            asserted the number did NOT appear: pinning the silence. That is B394 one surface
+            over from part 2's provenance, and the argument for showing it is one I had already
+            made there and failed to apply: `uncoded_legacy` fires on a FINITE, SHRINKING set —
+            every new rejection carries a code — so it decays to zero on its own. That is a
+            migration marker, not the liveness-signal failure, which is a marker that fires on
+            every run FOREVER. Descriptive, so it reads plainly; the badge stays reserved for
+            UNCLASSIFIED, which is a defect. */}
+        {(run.rejections_uncoded_legacy ?? 0) > 0 && (
+          <span
+            data-testid="uncoded-legacy-rejections"
+            title="These rejections predate the rejection_code field. Knowably unknowable, finite, and shrinking as new runs record codes — not a classifier gap."
+            style={{ color: MUTED }}
+          >
+            {' · '}
+            {run.rejections_uncoded_legacy} pre-code
+          </span>
+        )}
+        {(run.rejections_unclassified ?? 0) > 0 && (
+          <span
+            data-testid="unclassified-rejections"
+            title="These rejections carry no code from their decision site. A classifier gap, not a legacy row."
+            style={{ color: AMBER }}
+          >
+            {' · '}
+            {run.rejections_unclassified} UNCLASSIFIED
+          </span>
+        )}
         {refusals(run).length > 0 && (
           <span
             data-testid="refusal-split"

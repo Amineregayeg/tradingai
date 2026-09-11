@@ -75,6 +75,101 @@ DECISION_OUTCOMES: tuple[str, ...] = (
     OUTCOME_REJECTED,
 )
 
+# rejection_code ----------------------------------------------------------
+#
+# **`B392`: "M SHORTS REFUSED BY VENUE" IS NOT COUNTABLE FROM PROSE.** `rejection_reason` is free
+# `Text`, and a count that matched it would be keyed on a sentence the VENUE chose — returning a
+# confident zero the day the wording changes rather than failing. This is the structured half;
+# the prose stays, unaltered, for diagnosis.
+#
+# **ONE MEMBER PER DECISION, NOT PER SENTENCE, AND THE VOCABULARY WAS GREPPED FROM THE DECISION
+# SITES RATHER THAN INVENTED.** Two facts from that grep shaped it:
+#
+#   * `service.py:130` and `:153` emit the BYTE-IDENTICAL string `"non-positive size / stop"` for
+#     two different decisions — a degenerate stop (entry == sl, a strategy defect) and a size that
+#     came out non-positive (equity against stop width). **Opposite remedies.** The prose cannot
+#     separate them even in principle, so here the code is strictly MORE informative than the text
+#     it sits beside.
+#   * the prop-firm family splits SIX ways, not one. A single `PROP_FIRM_RULE` would be **lossier
+#     than the string it replaces** — the one direction a structuring change must never go — and
+#     `PROFIT_TARGET_REACHED` is the proof: a PASSED challenge refusing new orders, bucketed as a
+#     rejection, is wrong in the flattering direction. *Already halted* and *would breach* also
+#     carry opposite remedies (stop the engine vs size down), and daily loss resets where drawdown
+#     does not.
+#
+# ⚠ **A DIFFERENT `rejection_reason` LIVES IN `gate_027_stop_ladder.py`** — `NONE`,
+# `NOT_LOCATABLE`, `RR_BELOW_2R` — over RULE CANDIDATES, not orders. **Same field name, different
+# axis.** It is NOT part of this vocabulary, and it is named here because the next person building
+# this list will grep the name and find both.
+REJECTION_NO_REFERENCE_PRICE = "NO_REFERENCE_PRICE"
+REJECTION_DEGENERATE_STOP = "DEGENERATE_STOP"
+REJECTION_ENTRY_DRIFT = "ENTRY_DRIFT"
+REJECTION_THROUGH_STOP = "THROUGH_STOP"
+REJECTION_NON_POSITIVE_SIZE = "NON_POSITIVE_SIZE"
+REJECTION_VENUE_DIRECTION_UNSUPPORTED = "VENUE_DIRECTION_UNSUPPORTED"
+REJECTION_PROP_FIRM_TARGET_REACHED = "PROP_FIRM_TARGET_REACHED"
+REJECTION_PROP_FIRM_HALTED_DAILY_LOSS = "PROP_FIRM_HALTED_DAILY_LOSS"
+REJECTION_PROP_FIRM_HALTED_MAX_DRAWDOWN = "PROP_FIRM_HALTED_MAX_DRAWDOWN"
+REJECTION_PROP_FIRM_HALTED = "PROP_FIRM_HALTED"
+REJECTION_PROP_FIRM_WOULD_BREACH_DAILY_LOSS = "PROP_FIRM_WOULD_BREACH_DAILY_LOSS"
+REJECTION_PROP_FIRM_WOULD_BREACH_MAX_DRAWDOWN = "PROP_FIRM_WOULD_BREACH_MAX_DRAWDOWN"
+
+#: The engine held no broker when something asked it to trade. **A LEGITIMATE IDLE STATE, and it
+#: must NOT alarm.** Enumerating it is the whole point: we hardened every fallback so that absence
+#: alarms, and a real idle path left off the list would land in the alarming bucket — the
+#: liveness-signal failure arriving through the ENUMERATION rather than through the default.
+#: It also gives `LiveLoopBrokerProxy.unavailable_reason` its first reader (`B394`'s first
+#: instance), closing that one rather than adding to it.
+REJECTION_BROKER_UNAVAILABLE = "BROKER_UNAVAILABLE"
+
+#: `place_order` RAISED. **The bar used to abort here and leave NO ROW AT ALL** (`B403`) — not an
+#: unclassified row, absent from the denominator entirely, so a surface reading *"100% of
+#: rejections were direction refusals"* would be reporting the shape of a silence.
+REJECTION_VENUE_RAISED = "VENUE_RAISED"
+
+#: **THE TWO UNKNOWNS, AND THEY MUST NEVER SHARE A VALUE.**
+#:
+#: `UNCODED_LEGACY` predates the field: knowably unknowable, **finite and SHRINKING**, so it is a
+#: migration marker that decays to zero on its own and is safe to show on every row.
+#: `UNCLASSIFIED` is a NEW rejection nothing coded — **a defect, and it must ALARM.**
+#:
+#: Collapsing them is `B215`'s could-not-ask/did-not conflation on a new field: a new uncoded row
+#: landing in the legacy bucket means the bucket never decays, the alarm never fires, and the
+#: failure is invisible for exactly as long as the legacy rows exist.
+#:
+#: **AND THE LEGACY ROWS ARE NEVER BACKFILLED FROM THE PROSE.** That would be a count keyed on
+#: vocabulary the venue chose, manufactured once and thereafter indistinguishable from a
+#: measurement. If a backfill is ever done, the code must carry its own provenance —
+#: `recorded` vs `inferred` — or a parsed count becomes unreadable as a measured one.
+REJECTION_UNCODED_LEGACY = "UNCODED_LEGACY"
+REJECTION_UNCLASSIFIED = "UNCLASSIFIED"
+
+REJECTION_CODES: tuple[str, ...] = (
+    REJECTION_NO_REFERENCE_PRICE,
+    REJECTION_DEGENERATE_STOP,
+    REJECTION_ENTRY_DRIFT,
+    REJECTION_THROUGH_STOP,
+    REJECTION_NON_POSITIVE_SIZE,
+    REJECTION_VENUE_DIRECTION_UNSUPPORTED,
+    REJECTION_PROP_FIRM_TARGET_REACHED,
+    REJECTION_PROP_FIRM_HALTED_DAILY_LOSS,
+    REJECTION_PROP_FIRM_HALTED_MAX_DRAWDOWN,
+    REJECTION_PROP_FIRM_HALTED,
+    REJECTION_PROP_FIRM_WOULD_BREACH_DAILY_LOSS,
+    REJECTION_PROP_FIRM_WOULD_BREACH_MAX_DRAWDOWN,
+    REJECTION_BROKER_UNAVAILABLE,
+    REJECTION_VENUE_RAISED,
+    REJECTION_UNCODED_LEGACY,
+    REJECTION_UNCLASSIFIED,
+)
+
+#: Codes that mean **nobody classified this**, as opposed to a coded decision. `UNCLASSIFIED`
+#: alarms; `UNCODED_LEGACY` does not. A surface must be able to ask which it has.
+REJECTION_CODES_UNKNOWN: tuple[str, ...] = (
+    REJECTION_UNCODED_LEGACY,
+    REJECTION_UNCLASSIFIED,
+)
+
 # cohort ------------------------------------------------------------------
 COHORT_REPLAY = "replay"
 COHORT_BACKTEST = "backtest"
@@ -358,13 +453,37 @@ class DecisionRecord(Base):
     #: parsing — so putting the reason only there would recreate the problem in the commit
     #: that fixes it.
     #:
-    #: **STORED RAW, NOT CLASSIFIED.** The five rejection sites in `execution/service.py`
-    #: split three ordinary MARKET CONDITIONS (no reference price, drift beyond threshold,
-    #: market already through the stop) against two PRODUCER DEFECTS (non-positive size or
-    #: stop, twice). *A corpus that cannot tell a market condition from a fault rebuilds
-    #: `B215` in a second place*, and a classification chosen now would fix that split
-    #: before anyone has counted it.
+    #: **STORED RAW, AND NOW CLASSIFIED BESIDE RATHER THAN INSTEAD** (`B392`, `T-0138`).
+    #:
+    #: This used to say *"STORED RAW, NOT CLASSIFIED"*, and gave a reason that was correct at the
+    #: time: *"a classification chosen now would fix that split before anyone has counted it."*
+    #: **The counting is what forced it.** `GROUP BY signal_dir` over `REJECTED` cannot answer
+    #: *M shorts refused by venue* without matching this text — a count keyed on a sentence the
+    #: VENUE chose, which returns a confident zero the day the wording changes rather than
+    #: failing.
+    #:
+    #: So `rejection_code` carries the classification and **this field is unchanged**: free text,
+    #: the venue's own words, for diagnosis. The structured field is for counting; the prose is
+    #: for reading. Neither is derived from the other — deriving the code from this text is
+    #: exactly the defect the code exists to remove.
+    #:
+    #: **AND THE OLD COMMENT UNDERSTATED ITS OWN SPLIT.** It counted *"two PRODUCER DEFECTS
+    #: (non-positive size or stop, twice)"* as one category seen twice. They are two DECISIONS
+    #: with opposite remedies — a degenerate stop is a strategy defect, a non-positive size is
+    #: equity against stop width — emitting a byte-identical string. `rejection_code` separates
+    #: them; this field never could.
     rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    #: WHICH DECISION produced the rejection, assigned AT THE DECISION SITE (`B392`).
+    #:
+    #: Nullable ONLY because rows predating the field exist; the migration backfills those with
+    #: `UNCODED_LEGACY` rather than with any live code, and that is a one-way door — once a
+    #: pre-existing row carries a live code, nothing can tell it from one classified at the
+    #: decision.
+    #:
+    #: **NEVER DERIVED FROM `rejection_reason`.** See the vocabulary above: two decision sites
+    #: emit one identical string, so the prose cannot separate them even in principle.
+    rejection_code: Mapped[str | None] = mapped_column(String, nullable=True)
 
     # Which population this decision belongs to ----------------------------
     cohort: Mapped[str] = mapped_column(
@@ -423,6 +542,14 @@ class DecisionRecord(Base):
         CheckConstraint(
             f"outcome IS NULL OR {_sql_in('outcome', DECISION_OUTCOMES)}",
             name="ck_decision_records_outcome",
+        ),
+        # The rejection vocabulary is CLOSED at the database, for the reason every other closed
+        # column here is: a value the constant allows and the database refuses, or the reverse,
+        # is a difference only a real insert can find (`T-0084`). A code outside this set is a
+        # classifier that invented one, and it must not become a bucket nobody notices.
+        CheckConstraint(
+            f"rejection_code IS NULL OR {_sql_in('rejection_code', REJECTION_CODES)}",
+            name="ck_decision_records_rejection_code",
         ),
         CheckConstraint(
             _sql_in("cohort", DECISION_COHORTS),

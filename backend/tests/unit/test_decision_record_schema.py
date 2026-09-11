@@ -39,6 +39,12 @@ _CHAIN = [
     # `B378`/`B380`. The chain guard fired for this one exactly as designed — a migration on disk
     # that nothing replays is a migration nothing tests, and it caught mine in the full suite.
     ("0009", "0009_compliance_unavailable.py", "0008"),
+    # And it fired for MINE too, in the full suite, three failures at once — the chain, the
+    # columns and the constraints. `B392`'s migration was on disk, its arms were green, and
+    # nothing here replayed it. **The guard has now caught the same class three times running**
+    # (`0005`, `0009`, `0010`), which is the argument for a hand-written list over a glob: the
+    # cost of adding a line is what makes the omission visible at all.
+    ("0010", "0010_decision_rejection_code.py", "0009"),
 ]
 
 
@@ -261,6 +267,17 @@ def test_migration_check_constraints_match_model():
         # would drop the row and destroy the evidence of the defect.
         "ck_decision_records_decided_by",
         "ck_decision_records_only_rule_engine_names_a_rule",
+        # `B392`. The rejection vocabulary is closed at the database for the same reason as the
+        # three above: a value the constant allows and the database refuses — or the reverse — is
+        # a difference only a real insert can find, and a classifier that invents a code must
+        # fail at insert rather than quietly creating a bucket nobody notices.
+        #
+        # **NOTE WHAT IS NOT CONSTRAINED: NULL.** A row may carry no code, and must be able to.
+        # `_record_rejected_signal` turns an absent code into `UNCLASSIFIED`, but rows written by
+        # any other path — or before the field existed — have to be STORABLE, or the write sites
+        # that swallow bookkeeping errors would drop them and destroy the evidence. Same
+        # asymmetry as `decided_by`'s two defect states, two columns over.
+        "ck_decision_records_rejection_code",
     }
 
 

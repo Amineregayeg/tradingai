@@ -204,6 +204,55 @@ async def engine_runs(request: Request, user_id: CurrentUser, db: DBSession) -> 
         rejected_by_direction = {
             (row[0] or "UNKNOWN"): int(row[1]) for row in by_direction
         }
+
+        # ------------------------------------------------------------------
+        # `B392`. THE SPLIT THAT MAKES "M SHORTS REFUSED BY VENUE" COUNTABLE.
+        #
+        # `GROUP BY signal_dir, rejection_code` — over the CODE, never over `rejection_reason`.
+        # Matching the prose would key a count on a sentence the venue chose, returning a
+        # confident zero the day the wording changes rather than failing; and two decision sites
+        # emit one byte-identical string, so the text cannot separate them even in principle.
+        #
+        # **NO ROW IS FILTERED OUT.** Excluding rows the classifier could not code would report a
+        # clean population that never existed — and the two uncoded values mean different things:
+        # `UNCODED_LEGACY` predates the field and SHRINKS to zero on its own, while `UNCLASSIFIED`
+        # is a decision site that set no code, which is a defect. Both stay in the denominator and
+        # both are named, so a reader can tell a migration remnant from an alarm.
+        # ------------------------------------------------------------------
+        from app.models.decision_record import (
+            REJECTION_CODES_UNKNOWN, REJECTION_UNCLASSIFIED,
+        )
+
+        by_code = (
+            await db.execute(
+                select(
+                    DecisionRecord.signal_dir,
+                    DecisionRecord.rejection_code,
+                    func.count(DecisionRecord.id),
+                )
+                .where(
+                    DecisionRecord.run_id == r.id,
+                    DecisionRecord.outcome == OUTCOME_REJECTED,
+                )
+                .group_by(DecisionRecord.signal_dir, DecisionRecord.rejection_code)
+            )
+        ).all()
+        rejected_by_code = [
+            {"direction": row[0] or "UNKNOWN",
+             "code": row[1] or REJECTION_UNCLASSIFIED,
+             "count": int(row[2])}
+            for row in by_code
+        ]
+        # A POSITIVE STATEMENT that the classification is incomplete, rather than a silence the
+        # reader has to notice. `unclassified` is the alarm; `uncoded_legacy` is a migration
+        # marker that decays on its own.
+        rejections_unclassified = sum(
+            e["count"] for e in rejected_by_code if e["code"] == REJECTION_UNCLASSIFIED
+        )
+        rejections_uncoded_legacy = sum(
+            e["count"] for e in rejected_by_code
+            if e["code"] in REJECTION_CODES_UNKNOWN and e["code"] != REJECTION_UNCLASSIFIED
+        )
         out.append({
             "id": str(r.id),
             "started_at": r.started_at.isoformat() if r.started_at else None,
@@ -219,6 +268,9 @@ async def engine_runs(request: Request, user_id: CurrentUser, db: DBSession) -> 
             "abstentions": int(decisions[1] or 0),
             "rejected_by_direction": rejected_by_direction,
             "rejections": sum(rejected_by_direction.values()),
+            "rejected_by_code": rejected_by_code,
+            "rejections_unclassified": rejections_unclassified,
+            "rejections_uncoded_legacy": rejections_uncoded_legacy,
         })
     return out
 

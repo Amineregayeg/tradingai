@@ -16,6 +16,7 @@ from collections import deque
 from datetime import date, datetime, timedelta, timezone
 
 from app.core.exceptions import BrokerError
+from app.models.decision_record import REJECTION_VENUE_RAISED
 from app.core.logging import logger
 from app.services.broker.paper import PaperBroker
 
@@ -1340,7 +1341,8 @@ class LiveCryptoLoop:
         )
 
     async def _record_rejected_signal(
-        self, pair: str, entry_df, sig, reason: str, trace
+        self, pair: str, entry_df, sig, reason: str, trace,
+        rejection_code: str | None = None,
     ) -> None:
         """Persist a signal the strategy PRODUCED and execution REFUSED (`B271`).
 
@@ -1367,7 +1369,8 @@ class LiveCryptoLoop:
 
             from app.db.session import async_session_maker
             from app.models.decision_record import (
-                COHORT_PAPER, OUTCOME_REJECTED, Attribution, DecisionRecord,
+                COHORT_PAPER, OUTCOME_REJECTED, REJECTION_UNCLASSIFIED, Attribution,
+                DecisionRecord,
             )
 
             entry = float(sig.entry)
@@ -1389,6 +1392,12 @@ class LiveCryptoLoop:
                 # would put a number nobody observed into the feedback loop's population.
                 outcome=OUTCOME_REJECTED,
                 rejection_reason=str(reason),
+                # **ABSENT MEANS NOBODY CLASSIFIED IT, AND THAT ALARMS** (`B392`). The default is
+                # the alarming state, never the benign one: a rejection arriving with no code is
+                # a decision site that did not set one, which is a defect — and it must not be
+                # confused with `UNCODED_LEGACY`, which means *predates the field*, is finite,
+                # and decays to zero on its own.
+                rejection_code=rejection_code or REJECTION_UNCLASSIFIED,
                 cohort=COHORT_PAPER,
                 run_id=self.run_id,
                 **Attribution.ict().as_columns(),
@@ -1769,7 +1778,39 @@ class LiveCryptoLoop:
         # behaviour does, which is the same staging T-0036 used for the news verdict.
         exit_shadow.record_from_loop(trace, sig)
         await self._act("signal", f"{pair} {sig.direction.value} setup @ {sig.entry:.0f}")
-        res = await self.execution.execute(sig)
+        # ------------------------------------------------------------------
+        # A RAISING REJECTION MUST LEAVE A ROW (`B403`).
+        #
+        # `execute()` catches `DirectionNotSupported` and nothing else, and there is no handler
+        # between here and `_loop`'s blanket `except` — so any other raise from `place_order`
+        # **aborted the bar before `_record_rejected_signal` ran and left NO ROW AT ALL.** Not an
+        # unclassified row: absent from the denominator entirely. A surface reading *"100% of
+        # rejections were direction refusals"* would then be reporting the shape of a silence,
+        # which is the population defect part 3 exists to prevent, arriving one layer earlier.
+        #
+        # LIVE ON THE RUNNING BROKERS, not only on Alpaca: both simulators raise
+        # `ValueError("lot_size must be > 0")`, reachable when sizing rounds to zero — rare,
+        # because it needs a corrupt signal, **and rare is the argument FOR recording it**, since
+        # nobody reconstructs a 1e12 stop distance from a log line six weeks later.
+        #
+        # NOT FIXED BY NARROWING `_loop`'s HANDLER. That handler is correct — one bad pair must
+        # not stop the engine — and narrowing it trades a silent gap for a dead engine. The defect
+        # is that the abort was not RECORDED. `service.py:189` is the precedent: it already does
+        # exactly this, for the one exception type it knew about.
+        # ------------------------------------------------------------------
+        try:
+            res = await self.execution.execute(sig)
+        except Exception as exc:  # noqa: BLE001 - recorded, then re-raised to the loop's handler
+            await self._record_rejected_signal(
+                pair, entry, sig,
+                f"{type(exc).__name__}: {exc}", trace, REJECTION_VENUE_RAISED,
+            )
+            await self._act(
+                "reject",
+                f"{pair} {sig.direction.value} setup NOT taken — the broker raised "
+                f"{type(exc).__name__}",
+            )
+            raise
         if res.get("status") == "FILLED":
             logger.info("Live paper entry", pair=pair, dir=sig.direction.value, fill=res.get("fill"))
             # STAGE B. The plan EXIT-001 produces is now EXECUTED, not merely recorded.
@@ -1808,10 +1849,17 @@ class LiveCryptoLoop:
             # NEVER drop a generated signal silently. A rejection (non-positive
             # size, or a sim-mode prop-firm breach) is surfaced with its reason.
             reason = res.get("reason") or res.get("status") or "rejected"
+            # `res.get("rejection_code")` is deliberately NOT defaulted here. A missing code means
+            # the decision site did not set one, and `_record_rejected_signal` turns that into
+            # `UNCLASSIFIED`, which alarms. Supplying a plausible code at this layer would be
+            # inventing a classification the decision never made — and this line already invents
+            # the PROSE fallback `"rejected"`, a literal no decision site produced, which is why
+            # the code must not follow it.
+            code = res.get("rejection_code")
             logger.info("Live signal not filled", pair=pair, dir=sig.direction.value, reason=reason)
             # `B271`: the bar was previously observable only in a maxlen=80 deque that is
             # cleared on start. It is now a row.
-            await self._record_rejected_signal(pair, entry, sig, reason, trace)
+            await self._record_rejected_signal(pair, entry, sig, reason, trace, code)
             await self._act(
                 "reject",
                 f"{pair} {sig.direction.value} setup NOT taken — {reason}",
