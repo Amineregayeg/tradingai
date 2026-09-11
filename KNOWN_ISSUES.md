@@ -25541,30 +25541,6 @@ function is how `B184` starts.
 **NOT A BLOCKER for part 1**, which passed: the refusal path is correct in both directions and was
 verified by driving it, not by reading it.
 
-### B395 — `simulation_source` RECORDS WHETHER THE SAFETY FLAG WAS EVER ACTUALLY CHECKED, AND NOTHING KEEPS IT. A run whose `is_simulation` was verified against the endpoint and a run where it was merely believed are identical in every record we hold
-
-**Found by review reviewing `T-0138` part 1, applying `B394`'s tell to a field that landed the same
-night the tell was written.** Instance six.
-
-`B389`'s remedy made construction refuse on a KNOWN disagreement between the `paper` flag and the
-client's `base_url`. **`simulation_source` names which of the two the answer came from.**
-
-**THE ASYMMETRY IS THE FINDING.** When the endpoint IS readable, construction refuses on
-disagreement, so the field tells you nothing you did not already get from the fact that the object
-exists. **Its only informative value is the value meaning THE CHECK COULD NOT RUN — a test double,
-or an SDK that renamed a private attribute — and that is exactly the case where nothing has verified
-the safety flag that gates all execution.**
-
-```
-_config_snapshot, 13 keys   broker_mode mode symbols entry_tf bias_tf risk_pct starting_balance
-                            max_concurrent price_source engine_version records_rejected_signals
-                            long_only venue
-simulation provenance       RECORDED NOWHERE
-the only is_simulation in the loop   a COMMENT at :132
-```
-
-**So the distinction is produced and then discarded** — `B215`/`B292` landing on the safety flag
-itself, and `B366`'s boundary exactly: computed, then dropped before anything could read it.
 
 **REMEDY — the run record, not the log.** Execute's first fix logged it with the venue, mode and
 endpoint, having checked `serialize=True` so the kwargs reach the JSON sink. **That is real and it
@@ -25578,7 +25554,6 @@ that it held `B395` for the reset-path finding. **It checked the ledger rather t
 the highest previously claimed was 393, and concluded the bid never landed** — so `B395` is this
 finding and the reset-path finding has no id reserved. *Bid it when you write it rather than assume
 a number you do not hold.*
-
 
 #### `B395` AMENDMENT — THE PROPOSED FIX REINTRODUCES THE DEFECT, BECAUSE THE THIRD STATE IS INFERRED FROM THE ATTRIBUTE BEING ABSENT and the fallback points at the REASSURING answer
 
@@ -25818,3 +25793,4 @@ run are a THIRD bucket that must be named in the composition, not folded into ei
 **Checked so nobody re-checks it:** `DecisionRecord` carries no user or account column, so the
 unfiltered `select()` is single-tenant rather than a cross-account leak; `user_id` on the endpoint is
 auth only.
+
