@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-11 (B403 AMENDMENT — IT IS LIVE TODAY, and BOTH prior reachability claims were wrong including MY correction of review's. Review said every LONG on Alpaca vanishes today: wrong, start()'s gate refuses the run. I said armed for part D, not live: WRONG, and the worse error. PaperBroker and SimPropFirmBroker — the brokers actually running — raise ValueError('lot_size must be > 0') from place_order, and the ONLY catch around place_order is except DirectionNotSupported, so the ValueError propagates, aborts _tick_symbol before _record_rejected_signal, and becomes one log line. service.py:182 passes lot_size=round(units, 8), which is 0.0 for a small enough size — so A SIGNAL WHOSE SIZE ROUNDS TO ZERO PRODUCES NO ROW, on every run this engine has made. THE TIDIER-CLAIM FAILURE EXACTLY: I checked review's claim, found the gate, was right, then generalised from 'the Alpaca path is gated' to 'the defect is not live' without checking the brokers that were executing — and the generalisation was neat AND flattering, resolving into 'the gate I required already closes this'. Part 3's transport code is therefore urgent rather than anticipatory.)
+Last updated: 2026-09-11 (B405 — MIGRATIONS 0010 AND 0011 BUILD THEIR CHECK FROM THE LIVE REJECTION_CODES, so a revision number means whatever the model file says on the day it runs. Consistent today: exactly one code (VENUE_TRANSPORT) was added after 0010 landed, and 0011's downgrade removes exactly that one. Latent until the next vocabulary change. Remedy is frozen literal tuples, deliberately NOT applied before C landed because it would change the three files the real-server migration test is pinned to by hash. That test PASSED on a scratch copy of production: seeded, name-guarded, checked against the database. Also B404 ADDENDUM: PRODUCTION HAS NO FINNHUB KEY CONFIGURED ('key not set' every hourly refresh, 0 HTTP-error lines in 5 days of logs), so nothing has leaked or can leak today and nothing needs rotating. The endpoint IS authenticated, and the deployed build's logs are NOT redacted for token=, since that pattern exists only in the uncommitted fix. The manager got both of those wrong first: a grep blind to the CurrentUser alias, and a check against the working tree instead of the deployed code.)
 
 ---
 
@@ -26243,6 +26243,45 @@ paper run genuinely does refuse shorts. The field describes the run correctly.
 
 
 
+#### ADDENDUM (execute, 2026-09-11) — THE ARMS FOR THIS FIELD WERE POINTED BACKWARDS, AND A ZERO-KILL CONTROL IS HOW YOU SEE IT
+
+**Two arms asserted the defect.** `assert run.config["venue"] == "alpaca"`, written in `T-0138`
+part 2 and green for the entire time `venue` reported a venue the run never touched — **they went
+RED the moment the field became correct.**
+
+> **An arm that passes under the bug and fails under the fix is not weak coverage. It is coverage
+> pointed BACKWARDS.**
+
+**The tell is worth more than the instance, because the instinct it corrects is the natural one.**
+Running the must-hit control on the fix produced **ZERO kills**:
+
+```
+mutate `venue` back to the policy label   ->   0 arms died
+```
+
+The reflex reading of a zero is *"this behaviour has no coverage"*. **It can equally mean the
+coverage exists and asserts the opposite**, and the two need opposite responses — write an arm, or
+*correct* an arm that is actively defending the defect. A zero-kill control cannot tell them apart;
+only reading the arms that touch the symbol can. `grep -rl <field> tests/` before concluding
+anything from a zero.
+
+**And this is the inverse of the failure the same task filed under `B398`**: there, an instrument
+could not see the defect it was built for and reported green. Here, the instruments saw it
+perfectly and were aimed the wrong way. **Both present as a passing suite; neither is visible in a
+coverage number.**
+
+#### AND THE SURVIVOR ON THE ADJACENT ROW WAS *ACCIDENTAL*, NOT ABSENT
+
+Review reported that nothing drives `service.py:241` — the handler that catches
+`DirectionNotSupported` and assigns the code, which is the path a **raising** adapter takes while
+every arm drove the **returning** simulator (`B391`'s asymmetry, now inside the arms).
+
+**Measured, and it is the sharper version:** mutating that handler's code killed exactly ONE arm —
+a transport arm asserting something adjacent, by coincidence. **A mutation report reading
+`1 killed` is indistinguishable from real coverage**, and accidental coverage is worse than none
+because it is affirmatively reassuring. Closed with an arm that refuses the way an adapter does,
+and controlled by name.
+
 ### B403 — A THIRD OUTCOME THAT PRODUCES NO ROW. An exception from `place_order` aborts `_tick_symbol` BEFORE `_record_rejected_signal`, and `_loop`'s blanket `except Exception` turns it into one warning line — and that is the outcome of **every LONG signal on Alpaca today**
 
 **Found by review stress-testing `M-9`'s arm design for `T-0138` part 3** — the arm sweeps for sites
@@ -26389,3 +26428,178 @@ a provision for part D. **The population part 3 counts over is already missing e
 signal**, today, on every run this engine has made since the blanket handler existed.
 
 
+
+#### `B403` ADDENDUM — **NEVER FORMAT AN EXCEPTION'S REQUEST.** The fix records `str(exc)` into a DURABLE COLUMN, and the credential is one attribute away the entire time
+
+**Written before `D` rather than after, because `D` is the task that will actually make HTTP
+requests**, and the natural thing to reach for while debugging a failing order is *more context in
+the error* — the request, the headers, the full response. **That is the one edit that turns this
+line into a credential in a database column.**
+
+```python
+"reason": f"{type(exc).__name__}: {exc}",     # -> DecisionRecord.rejection_reason
+```
+
+**WHY IT IS SAFE TODAY, measured with a non-credential sentinel:**
+
+```
+alpaca-py transport      requests
+credential travels in    HEADERS (APCA-API-KEY-ID / APCA-API-SECRET-KEY), NOT the query string
+str(APIError)            the venue's response body only     carries it: NO
+str(ConnectionError)     "Connection refused"               carries it: NO
+traceback                                                   carries it: NO
+exc.request.headers                                         carries it: YES
+```
+
+**AND THE BOUND, WHICH IS THE LOAD-BEARING HALF.** *"`str(exc)` is safe"* **is not the rule.** That
+is a property of these two exception types in this SDK at this version — not of the format string.
+**A different client library stringifies differently, and the proof is one entry along: `B404` is
+this exact mistake with `httpx`, where `__str__` DOES carry the full URL.**
+
+**THE RULE IS ABOUT WHAT WE FORMAT, NOT ABOUT WHAT THE EXCEPTION HAPPENS TO CONTAIN:**
+
+> **Never format, log or record an exception's attached request or internals** — `exc.request`,
+> `exc.request.headers`, `repr(exc)`, `vars(exc)`, `exc.__dict__`, or any full-request dump. Format
+> the TYPE and the message, and nothing that reaches back to what was sent.
+
+**THE CHECKABLE VERSION, and one grep is not enough.** The carrier is **the URL**, so the question
+is not *"does `str(exc)` leak"* but **"does this client put the secret in the URL, AND does anything
+format an exception from it?"** Two sweeps, intersected:
+
+```
+secrets into query params   a params-style dict keyed token / api_key / secret / password
+exceptions formatted        any logging or record-writing call whose argument is {exc} or str(exc)
+```
+
+**Alone each is noise; intersected they gave one true positive and three explained negatives.** A
+sweep for `.request` / `.headers` / `__dict__` alone **misses a bare `{exc}`**, which is most of the
+call sites — that axis is wrong on its own.
+
+**AND THE ASYMMETRY THAT MAKES THIS AN ENTRY RATHER THAN A COMMENT:** `rejection_reason` is a
+**durable column**, not a log line. A log rotates; **a column is read back weeks later and copied
+into reports.** The same careless edit is recoverable in one and permanent in the other.
+
+### B404 — A LIVE CREDENTIAL IN THE LOGS, and it fires precisely on `401`. `finnhub` authenticates by QUERY PARAM and logs `{exc}`, and `httpx` puts the whole URL in the message
+
+**Found by building `B403`'s addendum into a checkable sweep** — the abstract warning *"a different
+library will stringify differently"* had an instance in the tree already.
+
+```
+finnhub.py:287   params = {..., "token": self._api_key}          <- auth by QUERY PARAM
+finnhub.py:296   resp = await client.get(url, params=params)        (httpx)
+finnhub.py:299   logger.error(f"... {exc.response.status_code}: {exc}")
+```
+
+**Measured with a non-credential sentinel:** `httpx.HTTPStatusError.__str__` renders
+`Client error '401 Unauthorized' for url 'https://finnhub.io/api/v1/calendar/economic?token=<TOKEN>'`
+— **the token, in plaintext, in the logs.**
+
+**THE TRIGGER IS THE WORST POSSIBLE ONE.** A wrong, expired or revoked key is what produces a `401`,
+**so the line leaks the token exactly when someone is debugging the key** — the moment they are most
+likely to paste the log into a chat or an issue.
+
+**NOT AFFECTED, checked so nobody re-checks it:** `cryptofundtrader.py:372` sends `password` in a
+**JSON body**, so the URL carries nothing. `manager.py:366`'s `api_key` is the creds dict assembled
+for `encrypt_credentials` — not a request. `finnhub.py:426`/`:440` are **Redis** cache errors.
+**Alpaca is clean** — header auth, and neither `APIError` nor the `requests` family puts it in
+`str(exc)`.
+
+**UNSETTLED: `finnhub.py:304`** — `except Exception` on the same request. Whether it carries the URL
+depends on the type; `HTTPStatusError` is already caught above and most httpx transport errors do
+not. **Same shape, unverified — fix it alongside rather than reason about it.**
+
+**FIX:** do not format the exception. `logger.error("... %s for %s", exc.response.status_code,
+exc.request.url.copy_with(query=None))` — and `exc.request.url` is safe there **only because the
+query is explicitly stripped**, which is worth the comment beside it.
+
+#### `B404` ADDENDUM (manager) — WHAT REACHES WHERE, MEASURED AGAINST THE DEPLOYED BUILD, AND THE ANSWER THAT MATTERS MOST: PRODUCTION HAS NO FINNHUB KEY, SO NOTHING HAS LEAKED OR CAN LEAK TODAY
+
+**Four claims were made about this entry's reach in one morning, and three were wrong in some part.
+The order matters, because each correction was checked against something different.**
+
+```
+review    "a live credential IN THE LOGS"        right about the DEPLOYED code, missed that no key is set
+manager   "not the logs; unauthenticated"        WRONG twice -- see below
+execute   "the endpoint is AUTHENTICATED"        RIGHT, verified by reading the dependency
+manager   "production has no key configured"     measured in production's own logs
+```
+
+**1. THE ENDPOINT IS AUTHENTICATED.** `get_today_calendar(user_id: CurrentUser)`, where
+`CurrentUser = Annotated[str, Depends(current_user)]`. **The manager reported it unauthenticated
+after grepping `calendar.py` for the literal strings `current_user` and `Depends`, and the alias
+matched neither.** A vocabulary-keyed scan went blind. Execute corrected it.
+
+**2. THE LOGS ARE NOT CLEAN IN THE DEPLOYED BUILD, and the manager said they were.** The manager
+checked the log filter against the **working tree**, which already held Execute's uncommitted
+redactor fix. **The `token=` query-string pattern exists only in that uncommitted change:**
+
+```
+working tree   token= pattern: 1      HEAD: 0      deployed 2ba994e: 0
+control        sk-ant pattern: present at HEAD and at 2ba994e (the check can see)
+```
+
+**So in the deployed code, a Finnhub HTTP error would write the key to the logs AND put it in the
+response body.** Review's original "in the logs" was right about what's running. **The manager
+verified the fix and reported it as the state of production**, measuring the candidate instead of
+the running system.
+
+**3. AND NONE OF IT IS REACHABLE IN PRODUCTION TODAY: NO KEY IS CONFIGURED.** Measured over the api
+container's retained logs (5 days, 124,158 lines; json-file rotation caps them at 3 x 10 MB):
+
+```
+"Finnhub API key not set; returning empty calendar"   every hourly refresh
+Finnhub HTTP-error lines                               0
+Finnhub lines carrying token=                          0     (control: 14 Finnhub lines found)
+```
+
+**Both paths return before any HTTP request is made** (`calendar.py:18`, and
+`_fetch_from_finnhub:283`), so there's no request, no exception and no key to leak. **Nothing needs
+rotating for production.** The defect is real in the code and is fixed before a key is ever
+configured, which is the right order.
+
+> **The lesson in the ordering:** the entry went from "live leak, rotate now" to "nothing has leaked
+> and nothing can yet" without the code changing, only the question. **"Can it leak" was answered
+> three times against the mechanism, and "has it leaked" was answered once against production.** A
+> reachable path is not an occurring event, and here the occurrence check was also the one that
+> decided what Malek should do.
+
+**FIX (Execute), at a lower chokepoint than the one the manager named.** Redaction happens in
+`problem_response`, which builds every problem+json body, so it covers `http_exception_handler`,
+`trading_ai_error_handler` (which was **not** clean) and any handler added later. **Eight
+interpolating sites across three routers** (`alerts.py` x3, `brokers.py` x4, `calendar.py` x1).
+`calendar.py` no longer forwards the upstream message. Controlled with a genuine
+`httpx.HTTPStatusError`, plus a premise arm that asserts its `str()` really carries the key.
+
+### B405 — MIGRATIONS 0010 AND 0011 BUILD THEIR CHECK FROM THE LIVE `REJECTION_CODES`, so a revision number means whatever the model file says on the day it runs. Consistent today; latent until the next vocabulary change
+
+**Found by manager reading both migrations before running them against a real server for
+`T-0138`.** Both import from `app.models.decision_record`, and both build
+`ck_decision_records_rejection_code` from `REJECTION_CODES` **as it is when the migration runs**,
+not as it was when the migration was written.
+
+```
+0010  CHECK (rejection_code IS NULL OR rejection_code IN (<live REJECTION_CODES>))
+0011  drop + recreate from <live REJECTION_CODES>
+      downgrade: <live REJECTION_CODES> minus "VENUE_TRANSPORT"
+```
+
+**Consistent today, and that was checked, not assumed.** Exactly one code, `VENUE_TRANSPORT`, was
+added after 0010 landed at `fcabf6e`, and 0011's downgrade removes exactly that one, so the
+downgraded constraint equals 0010 as written. **Production is at 0009, so neither has been applied
+anywhere.**
+
+**WHERE IT BITES:** at the next vocabulary change. Add a code for 0012 and 0011's downgrade will leave
+a "0010" constraint that permits a code 0010 never knew about. Worse, a revision number stops naming
+one schema: two databases both at 0010 can hold different constraints depending on when each
+upgraded. **A migration's meaning has to be fixed when it's written, and importing a live constant
+makes it change every time the constant changes.**
+
+**REMEDY:** frozen literal tuples inside each migration, equal to what each produces with the
+landed code. **Deliberately NOT applied before C landed**, because it would have changed the three
+files the real-server test is pinned to (`agents/tasks/T-0138/MIGRATION_TEST.md`, by hash).
+
+**THE TEST ITSELF, so this entry isn't read as "the migrations are unverified":** scratch copy of
+production restored from the verified nightly, two REJECTED rows seeded first, database name guarded
+inside the container, and every result checked against the database: upgrade, backfill (**0 of
+1,678** non-rejected rows touched), constraint enforcement both ways, the documented downgrade
+refusal, a clean downgrade, and a re-upgrade. **All passed. Production untouched.**
