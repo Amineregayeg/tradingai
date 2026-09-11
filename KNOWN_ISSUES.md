@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-11 (B394 — FOUR MECHANISMS BUILT THE SAME WEEK, EACH CORRECT, EACH WITH NO CONSUMER: LiveLoopBrokerProxy.unavailable_reason has no reader, records_rejected_signals has no verifier, 0 of EngineRun.config's 13 keys are verified or read by an automated consumer, and venue_would_refuse is read only by tests. Every one was built AS THE REMEDY TO A REAL FINDING, so each closed its finding on paper while leaving the harm intact — B292's could-not-ask inverted once more: the ability to ask was BUILT and nobody asks. The tell is checkable: when a remedy is a new field or reason string, ask WHICH EXISTING CONSUMER CHANGES BEHAVIOUR, and if the answer is 'a future one' the remedy is a note with a type annotation. IT RESHAPES PART E: the sweep measured /feedback reading NONE of the config (0 hits at HEAD), so part E does not fix a consumer that reads these badly — it BUILDS THE FIRST CONSUMER THAT READS THEM AT ALL, which is larger than the plan said. Also MODIFIED B221 — FIXED, core defect confirmed: main.py:242 registers LiveLoopBrokerProxy and _resolve reads loop.paper AT CALL TIME, so the rebind is followed and the orphan is gone. The residual [] -> 0 closed 0 failed is carved out precisely so it is not re-diagnosed as B221.)
+Last updated: 2026-09-11 (B397 — THE TWO WAYS AN EQUIVALENCE ARM PASSES WHILE PROVING NOTHING, exact mirrors, both hit tonight hours apart: A!=B passes on incidental difference because two runs ALWAYS differ somewhere, and A==B passes on IDENTICAL BROKENNESS — _fingerprint compared a BOUND METHOD with `is`, which is never true, so settle_wired was False on both sides and the equality passed. Countermeasures are arms, not habits: name WHAT differs plus a negative control that must fail; and assert the fingerprint's CONTENT, since agreement between two unknowns is not a measurement. B396 — A GUARD WHOSE VOCABULARY GREW STOPS COVERING ITS CASE SILENTLY: warmup() skipped injection for broker_mode == 'sim', which meant 'every account where injection is harmful' only while sim and paper were the whole vocabulary; the consequence was MEASURED rather than asserted after the first statement of it was wrong — warmup places no orders, it mutates simulator internals, so Alpaca raises AttributeError rather than posting trades at a venue. B395 — simulation_source records whether the safety flag was EVER CHECKED and nothing keeps it, so a verified run and a merely-believed run are identical in every record; remedy is _config_snapshot, not the log.)
 
 ---
 
@@ -25493,3 +25493,157 @@ docstring claims it *"forwards every member to `loop.paper` at call time"* and d
 `order_path_status`, added to `BrokerAdapter` after the proxy was written. **A contract docstring
 that is false about itself** — execute found it in its own hour-old work and is forwarding it with
 `T-0138`'s wiring.
+
+### B395 — THE ONLY INFORMATIVE VALUE OF `simulation_source` IS THE ONE MEANING "I COULD NOT CHECK", and nothing reads it, so a verified paper run and an unverifiable one are identical in every record we keep
+
+**Found by review attacking `T-0138` part 1 at `a212f5d`, on the manager's instruction to ask
+`B394`'s question of the new field.** The answer came back yes, and then came back worse.
+
+**`B394`'s tell, applied literally:** *which existing consumer changes behaviour because of it?*
+**None.** One producer (`alpaca.py:277`), one docstring mention, three assertions in
+`test_t0138_order_path.py`, **no reader in `app/` or in the frontend.** That alone makes it
+instance six.
+
+**But the shape is sharper than "no consumer yet", and the sharper version is why this is worth
+fixing rather than deleting.** Driven against the installed SDK, all five cases:
+
+```
+paper=True,  endpoint agrees      -> CONSTRUCTS   source='endpoint'
+paper=False, endpoint agrees      -> CONSTRUCTS   source='endpoint'
+paper=True  + LIVE  url_override  -> REFUSES
+paper=False + PAPER url_override  -> REFUSES
+endpoint UNREADABLE (either flag) -> CONSTRUCTS   source='flag (client endpoint unreadable)'
+```
+
+**The field is the constant `'endpoint'` in every case where the check actually ran.** Its only
+other value is emitted exactly where construction does **not** refuse because the endpoint could
+not be read — **the one case in which nothing has verified the safety flag.** So the field's
+informative value and the field's unread-ness coincide: *the only time it says anything, nobody is
+listening.*
+
+**THE DOWNSTREAM CONSEQUENCE, and it is why this is not cosmetic.** A run whose `is_simulation` was
+**confirmed** against the endpoint and a run where it was merely **believed** are identical in every
+record we keep. That is `B215`/`B292`'s *could-not-ask recorded as did-not* landing on **the safety
+flag itself**, and `B366`'s boundary — produced, then discarded at the edge of the adapter.
+
+**THE FIX IS CHEAP AND ITS CONSUMER ALREADY EXISTS.** `_config_snapshot` at `a212f5d` carries 13
+keys — `broker_mode, mode, symbols, entry_tf, bias_tf, risk_pct, starting_balance, max_concurrent,
+price_source, engine_version, records_rejected_signals, long_only, venue` — of which `long_only` and
+`venue` are **both derived from the same adapter**. None records simulation provenance; the only
+`is_simulation` in the entire loop is a comment at `:132`. Putting the source in that dict inherits
+`RunHistoryPanel.tsx` as a consumer for free, and moves *"we never checked"* out of the adapter's
+memory and into the run record, where the person reading a bad run can see it.
+
+**FIX IT IN ONE EDIT WITH `B393`.** Both land in `_config_snapshot` and part 2 is already editing it:
+**`B393` moves WHEN the snapshot is taken, `B395` adds WHAT it records.** Two passes over one
+function is how `B184` starts.
+
+**NOT A BLOCKER for part 1**, which passed: the refusal path is correct in both directions and was
+verified by driving it, not by reading it.
+
+### B395 — `simulation_source` RECORDS WHETHER THE SAFETY FLAG WAS EVER ACTUALLY CHECKED, AND NOTHING KEEPS IT. A run whose `is_simulation` was verified against the endpoint and a run where it was merely believed are identical in every record we hold
+
+**Found by review reviewing `T-0138` part 1, applying `B394`'s tell to a field that landed the same
+night the tell was written.** Instance six.
+
+`B389`'s remedy made construction refuse on a KNOWN disagreement between the `paper` flag and the
+client's `base_url`. **`simulation_source` names which of the two the answer came from.**
+
+**THE ASYMMETRY IS THE FINDING.** When the endpoint IS readable, construction refuses on
+disagreement, so the field tells you nothing you did not already get from the fact that the object
+exists. **Its only informative value is the value meaning THE CHECK COULD NOT RUN — a test double,
+or an SDK that renamed a private attribute — and that is exactly the case where nothing has verified
+the safety flag that gates all execution.**
+
+```
+_config_snapshot, 13 keys   broker_mode mode symbols entry_tf bias_tf risk_pct starting_balance
+                            max_concurrent price_source engine_version records_rejected_signals
+                            long_only venue
+simulation provenance       RECORDED NOWHERE
+the only is_simulation in the loop   a COMMENT at :132
+```
+
+**So the distinction is produced and then discarded** — `B215`/`B292` landing on the safety flag
+itself, and `B366`'s boundary exactly: computed, then dropped before anything could read it.
+
+**REMEDY — the run record, not the log.** Execute's first fix logged it with the venue, mode and
+endpoint, having checked `serialize=True` so the kwargs reach the JSON sink. **That is real and it
+is the wrong surface.** A log answers *what happened at 01:14*; the run record answers *was this
+run's safety flag ever actually checked*, which is the question asked while reading a bad run weeks
+later. **`_config_snapshot` inherits a consumer for free — `RunHistoryPanel` already renders that
+block — and part 2 is already editing that function for `B393`, so it is one edit rather than two.**
+
+**Review's own correction, recorded because it is the discipline working:** it had been carrying
+that it held `B395` for the reset-path finding. **It checked the ledger rather than the file, found
+the highest previously claimed was 393, and concluded the bid never landed** — so `B395` is this
+finding and the reset-path finding has no id reserved. *Bid it when you write it rather than assume
+a number you do not hold.*
+
+### B396 — A GUARD WHOSE VOCABULARY GREW STOPS COVERING THE CASE IT WAS WRITTEN FOR, SILENTLY. `warmup()` skipped injection for `broker_mode == "sim"`, which meant "every account where injection is harmful" only while `sim` and `paper` were the whole vocabulary
+
+**Found by execute on `M-3`'s third read** — the mutation that adds a venue to one `broker_mode` site
+and not the others — and it is the reason that row was worth three reads rather than one.
+
+```
+warmup()   if self.broker_mode == "sim":  skip, "prop-firm sim account stays clean"
+```
+
+**The comment states the real rule:** *never inject replay trades into an account where that would
+corrupt the signal being measured.* **The code states a narrower one** — *skip for `sim`* — and the
+two were the same predicate only while the vocabulary had two members.
+
+**THE CONSEQUENCE, MEASURED RATHER THAN ASSERTED, because the first statement of it was wrong.**
+Execute reported this as *"would have posted backtest trades at a live venue."* **It would not.**
+`warmup()` places no orders:
+
+```
+self.paper.balance += pnl                     AlpacaAdapter: no such member (grep, 0 hits)
+self.paper._closed.append({...})              AlpacaAdapter: no such member (grep, 0 hits)
+```
+
+**It mutates in-process simulator internals directly, so selecting Alpaca raises `AttributeError` at
+warm start.** A loud crash, not a silent corruption and not orders at a venue. **The fix is right and
+the harm was overstated; both belong in the record.**
+
+**THE CLASS — this is `scanners-keyed-on-vocabulary-go-blind` applied to a GUARD rather than a
+scan**, and it is worse in a guard. A scan keyed on a stale word returns a confident zero, which at
+least gets read. **A guard keyed on a stale word simply stops firing, and its silence is
+indistinguishable from having correctly decided not to act.** The remedy is the same shape: ask the
+selector (`_select_venue()`) rather than comparing against a literal, **and NAME which venue was
+declined**, so the guard's silence becomes a statement.
+
+### B397 — THE TWO WAYS AN EQUIVALENCE ARM PASSES WHILE PROVING NOTHING, and they are exact mirrors. `A != B` passes on incidental difference; `A == B` passes on IDENTICAL BROKENNESS
+
+**Both were hit tonight, hours apart, on the same task pair — and the second was found only because
+the first had been named.** Filed together because between them they cover every differential and
+every equivalence arm `T-0138` still has to write.
+
+```
+A != B   two runs ALWAYS differ somewhere -- a run id, a timestamp, an ordering, a nonce.
+         An arm asserting THAT THEY DIFFER collects that for free and reports a pass while
+         the property is broken.                                    (review, T-0137)
+
+A == B   two brokers built by paths that are BOTH broken agree perfectly.
+         _fingerprint compared `_on_settle is loop._on_settle_cb`; `_on_settle_cb` is a
+         BOUND METHOD, so every access mints a new object and `is` is NEVER true.
+         `settle_wired` was False on BOTH sides and the equality passed.   (execute, T-0138)
+```
+
+**I had the first one backwards when I raised it** — I told review a differential fails when both
+sides are broken identically, and review corrected me: identical sides make a differential FAIL,
+which is the arm working. **The mirror is where identical brokenness passes, and that is the
+equivalence arm, which is what execute then hit.**
+
+**THE COUNTERMEASURE IS THE SAME ONE IN BOTH DIRECTIONS AND IT IS NOT A REVIEW HABIT, IT IS AN ARM:**
+
+```
+A != B   NAME what differs (the short COUNT, not the outputs), and add a NEGATIVE CONTROL --
+         make the sides identical IN THE PROPERTY while still differing incidentally; the arm
+         MUST fail. If it still passes it is reading noise and always was.
+A == B   assert the fingerprint's CONTENT, not only that two fingerprints agree. Agreement
+         between two unknowns is not a measurement.
+```
+
+**`is` on a bound method is the specific trap and it is not obscure** — `obj.method is obj.method`
+is `False` in CPython for every object in this tree. **Any arm comparing callables with `is` is
+suspect on sight.**
