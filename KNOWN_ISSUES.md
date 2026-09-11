@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-11 (B398 — A CONTRACT ARM THAT ENUMERATES THE CONTRACT CANNOT SEE A MEMBER THAT WAS NEVER ON IT. The arm the manager ordered after the proxy twice failed to forward a member was written, run against the tree with the simulation_source omission PRESENT, and PASSED — because simulation_source was never on BrokerAdapter, only on AlpacaAdapter as an instance attribute, so the defect was outside the arm's population by construction. An instrument that cannot see the defect it was built for is not a weaker instrument, it is a GREEN LIGHT; shipped unrun against known-bad, C would have carried a contract check that certifies nothing. Fix changes shape: declare simulation_source ON BrokerAdapter with the base RAISING, which makes absence loud AND the member enumerable — a benign default on the base would have reintroduced B395's amendment one level up. The allow-list is explicit names with reasons, never a predicate, because a predicate silently absorbs the next omission. FOURTH instance in two days of one shape: a population narrowed for a good reason then read as the whole; the only countermeasure that has worked is a must-hit control.)
+Last updated: 2026-09-11 (B399 — /feedback PROPOSES CORRECTIONS ACROSS REPLAY, BACKTEST, PAPER AND LIVE DECISIONS POOLED INTO ONE POPULATION, and across every instrument. cohort is NOT NULL, is in the dict the consumer receives (engine.py:53), and analyze() never reads it — controlled zero, with expected_r/realized_r/outcome nonzero proving the grep works. symbol is zero in the same breath. It is a DESIGN ACCOMMODATION, not an oversight: feedback.py:82 states the vocabulary is tolerant of both the DecisionRecord and backtest engine vocabularies. So part E is REMEDIAL, not preventive — the pooling predates long_only entirely, which inverts the framing I gave review. The config axis is severed one layer earlier: _serialize_decision emits 20 keys and run_id is not among them (B366). COULD-NOT-ASK stated rather than zeroed: no DB reachable, and review correctly DECLINED to reach production on a peer's ask, so run counts are unknown and must not be reported as zero. TIER 1 refuses on cohort with no schema change, no join and no caller change, covering the axis where harm is possible today; TIER 2 adds run_id to the serializer plus an O(runs) join.)
 
 ---
 
@@ -25752,3 +25752,69 @@ execute   contract arm enumerating the contract     the member was off-contract 
 narrowing is what made the instrument finish, or exist at all. **The only countermeasure that has
 worked is a must-hit control: run it against a state known to contain the defect, and treat a pass
 there as a broken instrument rather than a clean tree.**
+
+### B399 — `/feedback` PROPOSES CORRECTIONS ACROSS REPLAY, BACKTEST, PAPER AND LIVE DECISIONS POOLED INTO ONE POPULATION, and across every instrument. The discriminator is NOT NULL, is handed to the consumer, and is never read
+
+**Found by review scoping part E, answering the question *has the harm occurred or is it only
+reachable*. The answer inverts the framing I gave it.** I asked whether `long_only` mixing had
+happened yet. **It has not and cannot — `long_only` landed hours ago. But the pooling is already
+happening on two axes that predate it entirely, and part E is therefore REMEDIAL, not preventive.**
+
+**MEASURED, WITH A WORKING CONTROL — the control is the whole point, because three of these numbers
+are zeros:**
+
+```
+in feedback.py (658 lines)     expected_r 9   realized_r 16   outcome 10   <- the grep WORKS
+                               cohort 0   symbol 0   run_id 0   config 0   long_only 0
+engine.py:53                   "cohort": r.cohort,        <- IT IS IN THE DICT THE CONSUMER GETS
+decision_record.py:370-372     cohort  nullable=FALSE     <- every record has one
+                               replay | backtest | paper | live
+```
+
+**So the discriminator is present in every record, delivered to `analyze()`, and unread.**
+`/feedback` takes the last 2000 decisions across all four cohorts and **emits correction
+proposals** — and the loop does not display those, it acts on them. **`symbol` is zero in the same
+breath**, so it also pools across instruments.
+
+**THIS IS A DESIGN ACCOMMODATION, NOT AN OVERSIGHT**, which is why no one has tripped over it:
+`feedback.py:82` states the outcome vocabulary is *"tolerant of both the `DecisionRecord` vocab and
+the backtest engine vocab."* **Mixing populations was accommodated deliberately at the boundary.**
+
+**AND THE CONFIG AXIS IS SEVERED ONE LAYER EARLIER.** `_serialize_decision` emits 20 keys and
+`run_id` is not among them, though `DecisionRecord.run_id` exists and is indexed. **The join key is
+destroyed at the boundary** — `B366`, produced then discarded — which is why `B394` concluded the
+analysis layer "reads none of the config". It cannot.
+
+**COULD-NOT-ASK, STATED RATHER THAN ZEROED.** Review could not measure how many runs exist or what
+the last-2000 window spans: **no database reachable from this session** — nothing on 5432/5433, no
+`.env`, `DATABASE_URL` unset, no sqlite file, no backend holding a connection. **Production exists
+and review declined to reach it**, correctly: an outward action on a peer's ask is not a peer's to
+authorise. **The three numbers are unknown and must not be reported as zero by anyone.**
+
+**REMEDY IN TWO TIERS, and tier 1 is far cheaper than `B394` implied.**
+
+```
+TIER 1  refuse on cohort    NO schema change, NO join, NO caller change, NO new data.
+                            The discriminator is already in every record. One function in
+                            feedback.py plus a reason string -- and it covers the axis where
+                            harm is possible TODAY.
+TIER 2  the config axes     one line putting run_id into _serialize_decision, plus the join.
+                            Composition counts are O(runs), not O(decisions): one GROUP BY over
+                            engine_runs joined on an indexed run_id, or DISTINCT run_id then one
+                            WHERE id IN (...).
+```
+
+**The refusal that NAMES what it could not do is already this module's house style** —
+`abstain_reason` on thin evidence, `RISK_PCT_REFUSAL` as a named reason, and `A11` excluding a
+population for a stated reason. **E extends an existing mechanism rather than inventing one.**
+
+**KILL-SET ROW PRE-REGISTERED BEFORE E'S CODE EXISTS**, and it is the `B395` amendment for the third
+time tonight: if the composition arrives through `params` as an optional key, **`params` WITHOUT that
+key must mean *uncharacterised, refuse* — never *fine*.** The 8 existing `analyze()` call sites pass
+`{"risk_pct": 0.01}` and would silently take the benign branch. **A fallback that is one of the
+states the field exists to distinguish.** Plus: `run_id` is nullable, so decisions belonging to no
+run are a THIRD bucket that must be named in the composition, not folded into either side.
+
+**Checked so nobody re-checks it:** `DecisionRecord` carries no user or account column, so the
+unfiltered `select()` is single-tenant rather than a cross-account leak; `user_id` on the endpoint is
+auth only.
