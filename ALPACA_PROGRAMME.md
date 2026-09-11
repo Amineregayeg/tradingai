@@ -121,7 +121,17 @@ impossible to miss:
   recorded and counted, not that the order failed.** A test asserting "no order was placed" passes
   against a crash.
 
-## C — The order path (BIND ONLY) ⚙️ **EXECUTING** — `T-0138`, six kill-set rows registered before any arm
+## C — The order path (BIND ONLY)  ✅ **DONE** — `T-0138`, passed review as one unit at `a66239d`
+
+> **Landed across five commits:** `a212f5d` (safety flag must agree with the endpoint; a run that
+> can't place orders refuses to start), `d7f5b15` (one venue selection, one binder), `fcabf6e`
+> (structured rejection codes), `f81e222` (a failed rebuild no longer leaves the old broker deaf) and
+> `34cb5a8` (the venue label, recording of venue errors, the response redactor, part 3's survivors).
+> **Migrations 0010 and 0011 were run against a real server** (a scratch copy of production) before
+> landing, and the committed bytes match the tested ones
+> (`agents/tasks/T-0138/MIGRATION_TEST.md`). Review reproduced every suite itself and verified all
+> four silent-failure rows by mutation. **Alpaca is now selectable but can't fill orders. That's
+> D's job.** — `T-0138`, six kill-set rows registered before any arm
 
 **Goal: the engine CAN be pointed at the Alpaca adapter instead of the in-process simulator.**
 
