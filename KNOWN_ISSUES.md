@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-11 (B402 — THE RUN RECORD'S `venue` FIELD RECORDS THE DIRECTION POLICY'S LABEL, NOT THE VENUE THAT RAN. Found by review; verified by manager and it is not merely invariant, it is WRONG: "venue" reads direction_policy.venue, the only DirectionPolicy in the tree is ALPACA_CRYPTO_LONG_ONLY with venue="alpaca", and all four construction sites pass that one constant — so a run executed entirely on PaperBroker or SimPropFirmBroker records venue: "alpaca", the name of a venue it never touched. _select_venue(), which knows the answer, is recorded nowhere. IT PASSED MY OWN REVIEW: I accepted the field because it is DERIVED from the broker the run executes against rather than asserted, which is TRUE — and it is derived from a field describing the venue's POLICY rather than the venue. Derived was the wrong property to check; the question is not where a value comes from but whether it can DIFFER when the world differs. It lands on part E, which would group on `venue` and conclude a homogeneous population across simulator, paper and live — the precise failure E exists to prevent, keyed on the field whose name promises the answer. B393's sibling and strictly worse: a right value at the wrong moment versus a WRONG value at the right moment, which no ordering fix touches.)
+Last updated: 2026-09-11 (B403 — A SIGNAL WHOSE ORDER RAISES PRODUCES NO ROW AT ALL. _tick_symbol has no try/except around execute(), so an exception from place_order aborts the bar before _record_rejected_signal and is swallowed by the loop's blanket handler as one log line — contradicting the invariant stated SIX LINES ABOVE the call, 'NEVER drop a generated signal silently'. Only DirectionNotSupported is caught, and service.py:208's own comment states the hazard exactly. REACHABILITY CORRECTED: review reported longs vanishing on Alpaca TODAY; they cannot, because start()'s order_path_status gate refuses an Alpaca run before reset_run. ARMED FOR PART D, not live — and what it is armed with is worse than the headline: when D writes the body the gate opens and NotImplementedError disappears, but network, auth, rate-limit and 5xx exceptions remain uncaught, so A TRANSPORT FAILURE ON ANY ORDER PRODUCES NO RECORD, which is indistinguishable from the strategy never generating a signal. Part 3's vocabulary therefore needs a TRANSPORT code distinct from the venue code or B375 recurs inside the field built to prevent it. The gate is SELF-RETIRING: test_t0138_order_path_gate asserts the biconditional, so writing the body turns it red and forces the override's removal.)
 
 ---
 
@@ -26241,4 +26241,78 @@ paper run genuinely does refuse shorts. The field describes the run correctly.
 
 
 
+
+
+### B403 — A THIRD OUTCOME THAT PRODUCES NO ROW. An exception from `place_order` aborts `_tick_symbol` BEFORE `_record_rejected_signal`, and `_loop`'s blanket `except Exception` turns it into one warning line — and that is the outcome of **every LONG signal on Alpaca today**
+
+**Found by review stress-testing `M-9`'s arm design for `T-0138` part 3** — the arm sweeps for sites
+returning a rejection DICT, so I asked what reaches the record without ever being one. **Measured
+over the AST, not read:**
+
+```
+_tick_symbol   1643-1818   try/except blocks covering `await self.execution.execute(sig)`:  0
+_loop          2052-2063   except Exception -> logger.warning("Live loop symbol error") -> continue
+```
+
+**The chain:** an exception from `place_order` propagates out of `execute()`, aborts `_tick_symbol`
+**before** `_record_rejected_signal` and before the `_act("reject", …)`, is caught by `_loop`'s
+blanket handler, becomes one log line, and the loop moves to the next symbol.
+
+**IT CONTRADICTS A STATED INVARIANT, in the same function.** `crypto_loop.py:1808` reads *"NEVER drop
+a generated signal silently. A rejection … is surfaced with its reason."* `_record_rejected_signal`'s
+docstring cites `B271` — *"the bar was previously observable only in a `maxlen=80` deque that is
+cleared on start. It is now a row."* **On this path it is not a row.** The invariant holds for every
+rejection that RETURNS and fails for every one that RAISES.
+
+**AND IT IS NOT HYPOTHETICAL — it is the normal path on the live venue.** `AlpacaAdapter.place_order`
+raises **`NotImplementedError` for LONG** (body scoped to part D) and `DirectionNotSupported` for
+SHORT. **Only the second is caught**, at `service.py:208`, which converts it to a rejection dict —
+and the comment there states the hazard exactly: *"a raise would abort the bar (the loop has no
+handler around this call)."* **The comment is right, the catch covers one exception type, and
+everything else falls through it.**
+
+So on Alpaca today: **shorts are recorded as venue refusals and longs vanish.**
+
+**WHY IT LANDS ON `B392`/PART 3 DIRECTLY.** Part 3 exists so `GROUP BY signal_dir, rejection_code`
+answers *M shorts refused by venue*. **Over this population that count is not wrong about M — it is
+wrong about what M MEANS**, because the denominator excludes every long that never produced a row.
+A surface reading *"100% of rejections were direction refusals"* would be reporting the shape of a
+silence. `B399`'s uncharacterised population, one layer earlier than the analysis it was found in.
+
+**`M-9`'s arm cannot see this and should not be asked to** — it sweeps returned dicts, and this path
+returns nothing. It needs its own row: **a raising rejection path must produce a record.**
+
+**THE FIX IS NOT THE BLANKET HANDLER.** `_loop` catching `Exception` per symbol is correct — one bad
+pair must not stop the engine. **The gap is that the abort is not RECORDED**, so the fix belongs at
+`_tick_symbol`: catch around `execute()`, record the signal with a code saying *the venue raised*,
+then re-raise or continue. `ExecutionService:208` is the precedent — it already does exactly this
+for the one exception type it knows.
+
+
+**REACHABILITY — CORRECTED, because *armed* and *occurring* are not the same claim and this register
+has spent the night on that distinction.** Review reported *"on Alpaca today: shorts are recorded as
+venue refusals, and longs vanish."* **Longs cannot vanish today, because no Alpaca run can start.**
+
+```
+crypto_loop.py:1859   start():  blocked = self.paper.order_path_status()
+                      if blocked is not None -> refuse, BEFORE reset_run
+alpaca.py:577         returns a reason today ("the order path is not written yet")
+```
+
+**AND WHAT IT IS ARMED WITH IS WORSE THAN THE HEADLINE.** When D writes `place_order`'s body,
+`order_path_status()` returns `None`, the gate opens, and `NotImplementedError` disappears — **but
+every OTHER exception remains uncaught**: a network failure, an auth rejection, a rate limit, a 5xx
+from the venue. **Each produces no row.**
+
+> **So the durable defect is not *longs vanish*. It is *a transport failure on ANY order produces no
+> record*** — which is strictly worse, because a venue refusal at least has a reason someone could
+> read, while this is indistinguishable from the strategy never having generated a signal. `B215`'s
+> family at the execution boundary: **could not** recorded as **did not**, by omission rather than by
+> a wrong value.
+
+**THE GATE IS SELF-RETIRING, AND THAT IS WHY THIS LANDS ON D RATHER THAN BEING FORGOTTEN.**
+`test_t0138_order_path_gate` asserts the **biconditional** — the refusal reason present AND
+`place_order` raising `NotImplementedError`. **Writing the body turns that arm RED and forces the
+override's removal.** A comment asking a future reader to remember would not. **So D cannot open the
+gate without being made to look at it**, and this entry is what it must find when it does.
 
