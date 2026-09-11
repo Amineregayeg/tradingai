@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-11 (B403 — A SIGNAL WHOSE ORDER RAISES PRODUCES NO ROW AT ALL. _tick_symbol has no try/except around execute(), so an exception from place_order aborts the bar before _record_rejected_signal and is swallowed by the loop's blanket handler as one log line — contradicting the invariant stated SIX LINES ABOVE the call, 'NEVER drop a generated signal silently'. Only DirectionNotSupported is caught, and service.py:208's own comment states the hazard exactly. REACHABILITY CORRECTED: review reported longs vanishing on Alpaca TODAY; they cannot, because start()'s order_path_status gate refuses an Alpaca run before reset_run. ARMED FOR PART D, not live — and what it is armed with is worse than the headline: when D writes the body the gate opens and NotImplementedError disappears, but network, auth, rate-limit and 5xx exceptions remain uncaught, so A TRANSPORT FAILURE ON ANY ORDER PRODUCES NO RECORD, which is indistinguishable from the strategy never generating a signal. Part 3's vocabulary therefore needs a TRANSPORT code distinct from the venue code or B375 recurs inside the field built to prevent it. The gate is SELF-RETIRING: test_t0138_order_path_gate asserts the biconditional, so writing the body turns it red and forces the override's removal.)
+Last updated: 2026-09-11 (B403 AMENDMENT — IT IS LIVE TODAY, and BOTH prior reachability claims were wrong including MY correction of review's. Review said every LONG on Alpaca vanishes today: wrong, start()'s gate refuses the run. I said armed for part D, not live: WRONG, and the worse error. PaperBroker and SimPropFirmBroker — the brokers actually running — raise ValueError('lot_size must be > 0') from place_order, and the ONLY catch around place_order is except DirectionNotSupported, so the ValueError propagates, aborts _tick_symbol before _record_rejected_signal, and becomes one log line. service.py:182 passes lot_size=round(units, 8), which is 0.0 for a small enough size — so A SIGNAL WHOSE SIZE ROUNDS TO ZERO PRODUCES NO ROW, on every run this engine has made. THE TIDIER-CLAIM FAILURE EXACTLY: I checked review's claim, found the gate, was right, then generalised from 'the Alpaca path is gated' to 'the defect is not live' without checking the brokers that were executing — and the generalisation was neat AND flattering, resolving into 'the gate I required already closes this'. Part 3's transport code is therefore urgent rather than anticipatory.)
 
 ---
 
@@ -26315,4 +26315,77 @@ from the venue. **Each produces no row.**
 `place_order` raising `NotImplementedError`. **Writing the body turns that arm RED and forces the
 override's removal.** A comment asking a future reader to remember would not. **So D cannot open the
 gate without being made to look at it**, and this entry is what it must find when it does.
+
+
+#### `B403` AMENDMENT — MY REACHABILITY CLAIM WAS WRONG, AND THE CORRECTION MAKES THE FINDING LIVE ON THE VENUE ACTUALLY RUNNING
+
+**Execute corrected it and Execute is right.** The entry says the no-row outcome is *"every LONG
+signal on Alpaca today"*. **It is not reachable in production:** `AlpacaAdapter.order_path_status()`
+returns a reason — *"Alpaca's order path is not written yet"* — and the start gate refuses a run
+whose `order_path_status()` is not `None`, **so no Alpaca run can start.**
+
+**I verified that gate myself hours earlier**, as part 1's `M-10`, by relocating it below `reset_run`
+and watching the arm die. **I then measured the adapter's behaviour and reported it as an occurring
+event.** That is *a reachable path is not an occurring event* — measuring the mechanism is not
+measuring the occurrence — committed by the reviewer who filed it.
+
+**BUT THE DEFECT IS NOT ALPACA-SPECIFIC, AND THAT IS WHAT MAKES IT LIVE.** Measured over the AST of
+the two brokers that ARE running:
+
+```
+cft_sim.place_order:404   raise ValueError('lot_size must be > 0')   + self._fetch_price(...) can raise
+paper.place_order:235     raise ValueError('lot_size must be > 0')
+```
+
+**Any raise from any `place_order` produces the no-row outcome** — these two, a transport error, a
+`BrokerError` from the manager path. **So the abort-without-a-record is reachable on the engine's
+normal path today**, and Alpaca is the loudest future instance rather than the only one.
+
+**The code is therefore `VENUE_RAISED`** — execute's naming, and right: not named for a venue or a
+task, with the exception type and message carried in the prose. **The structured field for counting,
+the prose for diagnosing**, which is the division `B392` exists to create.
+
+**What survives unchanged:** the mechanism, the AST measurement of the handler chain, the
+contradiction with `:1808`'s *"NEVER drop a generated signal silently"*, the consequence for part 3's
+denominator, and the constraint that `_loop`'s blanket handler must NOT be narrowed.
+
+#### `B403` AMENDMENT — IT IS LIVE TODAY, ON THE BROKERS ACTUALLY RUNNING, AND BOTH PRIOR REACHABILITY CLAIMS WERE WRONG — INCLUDING THE MANAGER'S CORRECTION OF REVIEW'S
+
+**Three statements about reachability, in order, each correcting the last:**
+
+```
+review    "every LONG on Alpaca vanishes TODAY"          WRONG -- start()'s gate refuses the run
+manager   "armed for part D, not live"                   WRONG -- and this is the worse error
+truth     LIVE NOW, on PaperBroker and SimPropFirmBroker, by a THIRD exception neither named
+```
+
+```
+paper.py     place_order:  raise ValueError("lot_size must be > 0")
+cft_sim.py   place_order:  raise ValueError("lot_size must be > 0")
+service.py   the ONLY catch around place_order:  except DirectionNotSupported
+service.py:182   lot_size=round(units, 8)     <- rounds to 0.0 for a small enough size
+```
+
+**`ValueError` is not `DirectionNotSupported`, so it is not caught.** It propagates out of
+`execute()`, aborts `_tick_symbol` before `_record_rejected_signal`, and becomes one line from the
+loop's blanket handler. **So a signal whose computed size rounds to zero at 8dp produces NO ROW, on
+the brokers running right now** — and a size rounding to zero is not exotic: it is what `size_position`
+returns whenever risk is small relative to the stop distance, which is `D3`'s *"a sub-minimum order
+must REFUSE rather than round to zero"* arriving early and unrecorded.
+
+**THE MANAGER'S ERROR IS THE ONE WORTH KEEPING, because it is the tidier-claim failure exactly.** I
+checked review's claim about Alpaca, found the gate, and was right. **Then I generalised from *the
+Alpaca path is gated* to *the defect is not live* without checking the brokers that were actually
+executing** — and the generalisation was neat, which is what stopped me looking further. **A
+correction that resolves into a tidy story is the one to re-check**, and mine resolved into *"the
+gate manager required already closes this"*, which is a flattering shape as well as a tidy one.
+
+**So both of us were right about what we corrected and wrong in what we concluded from it** — the
+third instance tonight of *correct action, incorrect description*, this time with the description
+being a reachability claim rather than a mechanism.
+
+**PART 3 CONSEQUENCE, UNCHANGED BUT NOW URGENT RATHER THAN ANTICIPATORY:** the transport code is not
+a provision for part D. **The population part 3 counts over is already missing every zero-size
+signal**, today, on every run this engine has made since the blanket handler existed.
+
 
