@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-11 (B400 AMENDMENT 2 — THE BLIND SPOT IS EMPTY AND THE FRONTEND TIER IS CLOSED; DO NOT BUILD CONSTANT PROPAGATION. Sized on the manager's instruction to measure before fixing: backend 4666 assertions with 1 inline literal (the known float check) and ZERO same-file consts, frontend 290 expect() with zero of both. Review then wired same-file primitive-const resolution into the TS walker, verified independently by manager in both directions. THE COUNT WAS WRONG TWICE FIRST, the same way each time: an accumulator (violations = 0 then +=) and a builder (mismatches = [] then .append) both read as constants, and an hour earlier the TS walker called a React ref test inert for the same reason — A CONSTANT BINDING IS NOT A CONSTANT VALUE, in both languages, and an instrument resolving constants must restrict to IMMUTABLE PRIMITIVES or it calls live assertions inert, which is the direction that gets a guard switched off. One confident zero caught: the sizer reported 0 assertions because the shell cwd had reset, and now REFUSES rather than reporting an unearned zero. AND 144 of 290 frontend subjects root at an IMPORTED name, which is not a blind spot but the correct shape — change the constant and the assertion moves; an unreachable tier is not automatically a gap.)
+Last updated: 2026-09-11 (B401 — PART 2 ROUTED THE RESET PATH THROUGH A BINDER THAT CAN NOW REFUSE, AND THE REFUSAL IS SWALLOWED. _reset_broker_state nulls self.paper._on_settle to suppress settle FOR THE DURATION of the reset, then calls _bind_broker, which restores the hook at its LAST step — so a raise during the build never reaches the restore, and a bare except Exception logs a warning and continues. Driven: old broker still in use TRUE, settle hook restored FALSE, and the broker GUARDS the hook with a None check (paper.py:177) so it SKIPS rather than raising — the suppression becomes permanent and silent. PART 2 MADE IT REACHABLE: the path previously built the simulators INLINE, unable to raise, with alpaca falling to the else; it now calls _build_broker, which for alpaca constructs an AlpacaAdapter that refuses on an endpoint/flag disagreement — B389's whole fix — so the refusal built so a misconfigured venue CANNOT TRADE is caught and discarded. B375: a permanent rule made indistinguishable from a transient failure, and B221's mechanism by a new route in a function whose docstring cites B221. TWO remedies: build into a local and swap only on success, AND let the refusal out rather than catching it broadly.)
 
 ---
 
@@ -26011,4 +26011,78 @@ everywhere in it.
 
 
 
+
+
+### B401 — THE REFUSAL `B389` EXISTS TO PRODUCE IS SWALLOWED BY THE PATH `T-0138` ROUTED THROUGH IT. A failed rebuild leaves the OLD broker running with its settle hook permanently `None`, so every later close — SL/TP, manual, **kill switch** — is silently lost
+
+**Found by review attacking `T-0138` part 2 at `9a2480d`. Driven, not read.** The collapse is correct
+and its stated goals landed; **this is a latent swallow that the collapse ARMED**, in the exact shape
+of `B393` — harmless while the body could not fail, live the moment it could.
+
+```
+_reset_broker_state():
+    self.paper._on_settle = None          # suppress settle during the reset
+    self._bind_broker(...)                # <- NEW in part 2, and it can now REFUSE
+except Exception:
+    logger.warning("Broker reset failed") # and continue
+```
+
+**`_bind_broker` restores the hook at its last step**, after `self.paper = self._build_broker(...)`
+succeeds. **If the build raises, that line is never reached and nothing else restores it.** Measured
+at `9a2480d`:
+
+```
+BEFORE  broker=SimPropFirmBroker  settle_hook=set
+AFTER   broker=SimPropFirmBroker  settle_hook=None
+  old broker still in use?  True        settle hook restored?  False
+```
+
+**And the broker guards the hook with a `None` check, so it does not raise — it skips.** The
+suppression intended to last for the duration of a reset becomes permanent, in silence.
+
+**WHAT PART 2 CHANGED, AND IT IS THE WHOLE OF IT.** Before, this path built `SimPropFirmBroker` or
+`PaperBroker` inline — in-process, no credentials, no network, effectively incapable of raising;
+`alpaca` fell to the `else` and built a `PaperBroker`. After, it calls `_build_broker`, which for
+`broker_mode == "alpaca"` constructs a `TradingClient` and an `AlpacaAdapter` that **deliberately
+refuses on an endpoint/flag disagreement — `B389`'s entire fix — and raises with no credentials.**
+
+**So the refusal built so a misconfigured venue cannot trade is caught and discarded, and the engine
+continues on the old broker.** `B389` inverted by the path that now depends on it.
+
+**THE BINDER'S OWN DOCSTRING STATES THE HARM:** the hook exists so *"no close path can be silently
+lost from the DB or leave its `DecisionRecord` stuck OPEN"* — SL/TP tick, manual DELETE, **and the
+kill switch**. The same docstring cites `B221`, *"the finding where the switch reported a clean
+trigger and closed nothing."* **This is B221's outcome by a new route.**
+
+**AND THE COMMENT ABOVE THE CALL SITE NOW DEPENDS ON THE SWALLOW:**
+
+> *"AND IT IS CORRECT ON THE FAILURE PATH TOO: `_reset_broker_state` swallows its exceptions and
+> leaves `self.paper` as the old object, so snapshotting after it still describes the broker
+> actually in use."*
+
+**That reasoning is RIGHT about the snapshot and silent about what the swallow leaves behind.** It is
+`B386` — complete on one axis, silent on the adjacent one — and worse than an oversight, because it
+promotes the swallow from an accident to a documented invariant. The next reader will preserve it.
+
+**NO ARM COVERS A FAILING REBUILD.** `test_the_mode_TRACKS_THE_REBUILT_BROKER` drives the reconfigure
+path correctly — `sim -> paper`, both of which succeed. Nothing exercises a rebuild that raises, and
+a grep across `tests/` for the reset failing, or for `_on_settle` being restored, returns nothing.
+
+**THE FIX, and the pattern already exists in this file.** A reset that cannot build its broker must
+not leave the engine running as though it had. Either restore the previous broker **completely,
+hook included**, or refuse loudly — `order_path_status()`'s start gate is the precedent, and it was
+placed BEFORE `reset_run` for the same reason: *do not destroy the thing you are refusing to
+replace.* Minimum: restore `self.paper._on_settle = self._on_settle_cb` in the `except`.
+
+**The arm:** make `_build_broker` raise, then assert the settle hook is not `None`. It fails today.
+
+
+**TWO DISTINCT REMEDIES, and doing only the first leaves the worse half in place.**
+
+```
+
+**WHY THIS IS THE CASE FOR REVIEW EXISTING.** Part 2 was correct on every row it was written
+against, fixed a live defect the collapse exposed, and dissolved two kill-set rows honestly. **The
+regression is in the interaction between a change and a path that change newly reaches** — not in
+any line of it, and not visible to any arm aimed at what it set out to do.
 
