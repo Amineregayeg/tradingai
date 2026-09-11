@@ -747,8 +747,12 @@ class LiveCryptoLoop:
             # that flag against the client's ACTUAL endpoint and refuses on a disagreement
             # (`B389`), so this is asserted rather than trusted.
             client = TradingClient(api_key, api_secret, paper=True, raw_data=False)
+            # CONSTRUCT FIRST, LABEL SECOND (`B407`). This is exactly where `B389` refuses, so
+            # assigning `self.mode` on the line above — as it was — flipped the label to
+            # `ALPACA_PAPER` over a broker that was never built.
+            adapter = AlpacaAdapter(client, paper=True)
             self.mode = "ALPACA_PAPER"
-            return AlpacaAdapter(client, paper=True)
+            return adapter
 
         if venue == "sim":
             from app.services.broker.cft_sim import PropFirmRules, SimPropFirmBroker
@@ -756,17 +760,19 @@ class LiveCryptoLoop:
             async def _price_source(pair: str) -> float:
                 return self._marks.get(pair, 0.0)
 
-            self.mode = "PROP_FIRM_SIM"
-            return SimPropFirmBroker(
+            sim = SimPropFirmBroker(
                 PropFirmRules(starting_balance=starting_balance), _price_source,
                 direction_policy=fixed.VENUE_DIRECTION_POLICY,
             )
+            self.mode = "PROP_FIRM_SIM"   # only once the constructor has returned (`B407`)
+            return sim
 
-        self.mode = "PAPER"
-        return PaperBroker(
+        paper = PaperBroker(
             starting_balance=starting_balance, price_fn=self._mark,
             direction_policy=fixed.VENUE_DIRECTION_POLICY,
         )
+        self.mode = "PAPER"               # only once the constructor has returned (`B407`)
+        return paper
 
     def _config_snapshot(self) -> dict:
         """What the engine was configured to do. Stored with the run so a result
@@ -1045,8 +1051,10 @@ class LiveCryptoLoop:
             # `B401` — THE PREVIOUS BROKER WAS NEVER TOUCHED, SO THERE IS NOTHING TO RESTORE.
             # REFUSE LOUDLY.
             #
-            # **WHAT IS TRUE HERE NOW:** `_bind_broker` builds the replacement into a LOCAL and
-            # mutates nothing until that build succeeds. So when it raises, `self.paper` is still
+                # **WHAT IS TRUE HERE NOW:** `_bind_broker` builds the replacement into a LOCAL and
+            # mutates nothing until that build succeeds — including `self.mode`, which
+            # `_build_broker` now assigns only after its constructor returns (`B407`: it used to
+            # assign it one line BEFORE, which made this sentence false for the label). So when it raises, `self.paper` is still
             # the previous broker **with its settle hook wired** — not repaired, never cleared.
             # This handler has no state to fix; its only job is to refuse.
             #

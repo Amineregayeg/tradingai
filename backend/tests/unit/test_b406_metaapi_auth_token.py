@@ -104,3 +104,25 @@ def test_the_rest_of_the_url_survives():
     out = redact_for_response(_rendered())
     assert "agiliumtrade.ai" in out
     assert "clientId" in out
+
+
+def test_the_query_rule_is_ANCHORED_and_does_not_fire_inside_a_longer_name():
+    """**THE MUST-MISS FOR THE `[?&]` ANCHOR** (review's finding).
+
+    `test_the_rest_of_the_url_survives` guards against redacting the WHOLE URL; it says nothing
+    about the NAME BOUNDARY. The query rule requires `?` or `&` immediately before the parameter
+    name — which is exactly why it missed `?auth-token=` in the first place, and is also what keeps
+    it from firing on `?xauth-token=`, whose name merely CONTAINS one we redact. A later
+    "simplification" to `\\b` would match `token=` inside `xauth-token=` and over-redact silently;
+    nothing else would notice.
+
+    The value is the account token the backstop provably cannot see
+    (`test_the_backstop_CANNOT_see_the_account_token`), so a pass here is the ANCHOR's doing and
+    not the backstop's — the same isolation the B406 arms needed.
+    """
+    kept = f"wss://h/ws?xauth-token={_ACCOUNT_TOKEN}&clientId=1"
+    assert redact_for_response(kept) == kept, (
+        "the query rule fired inside a longer parameter name — its `[?&]` anchor was loosened"
+    )
+    # And the anchored form right beside it still redacts, so the pair pins the boundary exactly.
+    assert _ACCOUNT_TOKEN not in redact_for_response(f"wss://h/ws?auth-token={_ACCOUNT_TOKEN}")

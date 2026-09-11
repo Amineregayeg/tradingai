@@ -478,3 +478,80 @@ async def test_a_failed_rebuild_NEVER_TOUCHES_the_previous_broker_at_all(monkeyp
         f"the repair only covers the damage someone remembered."
     )
     assert loop.paper._on_settle == loop._on_settle_cb
+
+
+# =====================================================================================
+# B407 — THE BUILDER MUST NOT MUTATE `self.mode` BEFORE THE CONSTRUCTION SUCCEEDS
+# =====================================================================================
+
+@pytest.mark.parametrize("branch", ["alpaca", "sim", "paper"])
+async def test_a_constructor_that_RAISES_leaves_mode_unchanged(branch, monkeypatch):
+    """**`B407`, and it made a comment of mine false.** `_bind_broker`'s comment says the rebuild
+    *"mutates nothing until that build succeeds"* — true of `self.paper` and the settle hook, and
+    FALSE of `self.mode`: every branch of `_build_broker` assigned the mode on the line BEFORE the
+    constructor. So a refusal — and `AlpacaAdapter` refuses on an endpoint/flag disagreement
+    (`B389`) — left the broker and hook intact with `mode` flipped over a simulator.
+
+    Latent as called today (paper=True, no `url_override`, no SDK env override), and
+    `_config_snapshot` is not reached on that path. **The fix makes the comment true rather than
+    softening it**, and this arm drives every branch, because the defect was in all three.
+    """
+    import app.services.broker.alpaca as alpaca_mod
+    import app.services.broker.cft_sim as cft_mod
+    import app.services.live.crypto_loop as loop_mod
+
+    def _refuse(*a, **k):
+        raise RuntimeError("constructor refused")
+
+    loop = LiveCryptoLoop()
+    # A SENTINEL NO BRANCH CAN ASSIGN. The first version took `before = loop.mode`, and the loop
+    # starts in sim mode — so the SIM branch, which wrongly assigned `"PROP_FIRM_SIM"` before its
+    # constructor raised, "changed" the mode to the value it already had and the arm PASSED on
+    # the defect. Unchanged-by-coincidence reads exactly like unchanged. Caught by running the arm
+    # against the unfixed code and finding one of three branches green.
+    loop.mode = before = "SENTINEL_MODE_BEFORE_REBUILD"
+
+    if branch == "alpaca":
+        monkeypatch.setenv("ALPACA_API_KEY", "key")
+        monkeypatch.setenv("ALPACA_API_SECRET", "secret")
+        monkeypatch.setattr(alpaca_mod, "AlpacaAdapter", _refuse)   # where B389 refuses
+    elif branch == "sim":
+        monkeypatch.setattr(cft_mod, "SimPropFirmBroker", _refuse)
+    else:
+        monkeypatch.setattr(loop_mod, "PaperBroker", _refuse)
+
+    loop.broker_mode = branch
+    with pytest.raises(RuntimeError):
+        loop._build_broker(5_000.0)
+
+    assert loop.mode == before, (
+        f"the {branch} constructor refused and `mode` still became {loop.mode!r} — the run would "
+        f"be labelled with a broker that was never built"
+    )
+
+
+async def test_a_refused_RESET_leaves_mode_AND_broker_describing_the_same_thing(monkeypatch):
+    """**The shape it has in production**: through the reset path, not the builder alone. After a
+    refused rebuild, `mode` and the broker actually in use must still agree — a `mode` of
+    `ALPACA_PAPER` over a `SimPropFirmBroker` is exactly the mislabelled run `B393` was filed for."""
+    import app.services.broker.alpaca as alpaca_mod
+
+    def _refuse(*a, **k):
+        raise RuntimeError("constructor refused")
+
+    monkeypatch.setenv("ALPACA_API_KEY", "key")
+    monkeypatch.setenv("ALPACA_API_SECRET", "secret")
+    monkeypatch.setattr(alpaca_mod, "AlpacaAdapter", _refuse)
+
+    loop = LiveCryptoLoop()
+    loop.mode = "SENTINEL_MODE_BEFORE_REBUILD"
+    broker_before, mode_before = loop.paper, loop.mode
+    loop.broker_mode = "alpaca"
+
+    with pytest.raises(RuntimeError):
+        await loop._reset_broker_state()
+
+    assert loop.paper is broker_before
+    assert loop.mode == mode_before, (
+        f"mode says {loop.mode!r} while the broker in use is {type(loop.paper).__name__}"
+    )
