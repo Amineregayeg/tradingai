@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-11 (B406 — THE LANDED RESPONSE REDACTOR MISSES auth-token=, the parameter MetaApi's SDK builds into its websocket URL. _redact's query-string pattern needs ? or & IMMEDIATELY before the name, and in ?auth-token= the character before token is '-'. B404 is closed for Finnhub; the class is not. The carrier lives in the SDK, not our code, so a call-site sweep of our tree cannot see it; review found it by reading installed SDK source. Whether a MetaApi connect failure's str(exc) actually contains the URL is UNMEASURED. OCCURRENCE measured in production: one broker connection, cryptofundtrader; ZERO MT5/MetaApi rows, so it is unreachable. Remedy is one alternation plus a control arm, deferred until C passes review so the shared tree isn't edited under a review measurement.)
+Last updated: 2026-09-11 (B407 — _build_broker ASSIGNS self.mode BEFORE CONSTRUCTING THE ADAPTER, so a refused rebuild leaves the broker and hook intact but mode flipped to ALPACA_PAPER over a simulator. Found by review checking 1d28275, whose new comment says _bind_broker 'mutates nothing until the build succeeds': true of self.paper and the hook, false of self.mode. Occurrence checked before severity: _config_snapshot does not read it on that path, so no run record is wrong; only status() and start()'s log line. And as called it CANNOT FIRE: paper=True, no url_override, and alpaca-py has no env override for the base URL. LATENT, armed by any of three ordinary edits. Fix: construct first, then assign mode, in all three branches, with an arm that forces the constructor to raise.)
 
 ---
 
@@ -26705,3 +26705,60 @@ passes with or without the fix.
 
 **Fifth vacuous arm of mine across `T-0137`/`T-0138`, and every one was caught the same way:
 running it against a known-bad state before trusting it.**
+
+### B407 — `_build_broker` ASSIGNS `self.mode` BEFORE CONSTRUCTING THE ADAPTER, so a refused rebuild leaves `status()` naming `ALPACA_PAPER` over a simulator that is still running — and the B401 comment landed at `1d28275` says the rebuild mutates nothing until it succeeds. LATENT: the one raise in the window is unreachable as called
+
+**Found by review checking `1d28275` — the rewritten B401 comment makes a claim the code does not
+support.** The comment in `_reset_broker_state`'s `except`:
+
+> *"`_bind_broker` builds the replacement into a LOCAL and mutates nothing until that build succeeds."*
+
+**True of `self.paper` and of the settle hook. False of `self.mode`.** `_build_broker`'s Alpaca branch:
+
+```
+line 33   client = TradingClient(api_key, api_secret, paper=True, raw_data=False)
+line 34   self.mode = "ALPACA_PAPER"            <- MUTATES
+line 35   return AlpacaAdapter(client, paper=True)   <- the construction that can raise (B389)
+```
+
+**Driven, with the constructor forced to refuse:**
+
+```
+reset raised            BrokerError             (correct: the reset is refused)
+self.paper unchanged    True   (SimPropFirmBroker)
+settle hook intact      True                    (B401's fix holds)
+self.mode               'PROP_FIRM_SIM' -> 'ALPACA_PAPER'
+```
+
+**WHAT READS THE WRONG VALUE, measured over the AST:** `status()` (`:302`) and `start()`'s log line
+(`:1975`). **`_config_snapshot()` does NOT** — `reset_run` stops at the re-raise (`:60`) before the
+snapshot (`:69`), so **no `EngineRun` row records the wrong mode.** The harm is bounded to the live
+status display and a log line: the operator's engine page names Alpaca over a run on the simulator.
+
+**WHY IT IS LATENT, and it is the only reason.** The single raise in `AlpacaAdapter.__init__` is
+B389's endpoint mismatch (`:293`), guarded by `(self.endpoint == PAPER_ENDPOINT) != self._paper`.
+`_build_broker` passes `paper=True` and **no `url_override`**, and alpaca-py decides the endpoint only
+from those two arguments — **there is no environment override** (checked in the installed SDK). So as
+called, the window between the mutation and the construction cannot raise.
+
+**It is armed by any of three ordinary edits:** a `url_override` in `_build_broker` (the SDK's own
+docstring offers it *"for proxy/testing"*), any new check in `AlpacaAdapter.__init__`, or any fallible
+work moved into the window. The simulator branches share the shape: `self.mode = "PROP_FIRM_SIM"`
+precedes `SimPropFirmBroker(...)`.
+
+**The same shape as `B393` and as the calendar leak in `B404`:** safe only because of how one call is
+arranged, not because the code is built to be safe.
+
+**FIX, and it makes the comment true rather than softening it:** construct first, assign after —
+
+```python
+adapter = AlpacaAdapter(client, paper=True)
+self.mode = "ALPACA_PAPER"
+return adapter
+```
+
+— in all three branches, or return `(broker, mode)` and let `_bind_broker` assign both once the build
+has succeeded. **Arm:** force the constructor to raise; assert `self.mode` is unchanged. It fails today.
+
+**Not a blocker for `1d28275`**, whose purpose — B406, and removing a sentence that argued for the
+defect — it meets.
