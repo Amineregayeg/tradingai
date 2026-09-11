@@ -25579,6 +25579,56 @@ the highest previously claimed was 393, and concluded the bid never landed** —
 finding and the reset-path finding has no id reserved. *Bid it when you write it rather than assume
 a number you do not hold.*
 
+
+#### `B395` AMENDMENT — THE PROPOSED FIX REINTRODUCES THE DEFECT, BECAUSE THE THIRD STATE IS INFERRED FROM THE ATTRIBUTE BEING ABSENT and the fallback points at the REASSURING answer
+
+**Found by review while endorsing execute's own refinement, before part 2 landed.** Execute was
+right that the vocabulary needs three states — `endpoint`, `unreadable`, `in-process` — because a
+marker that fires on every run is the liveness-signal failure. **The three states are correct. The
+way the third one is DERIVED is not.**
+
+The shape, already in the tree at `crypto_loop.py:673` in the bind-time log line:
+
+```python
+simulation_source=getattr(self.paper, "simulation_source", "n/a (in-process)"),
+```
+
+**`in-process` is what you get when the attribute is MISSING.** So every way of losing the
+attribute — a rename, a refactor, a wrapper that does not forward it — reads as *"a simulator, no
+endpoint to check, structurally incapable of a real order"*: **the most reassuring string in the
+vocabulary.** The failure direction is exactly inverted; absence is rendered as health (`B380`).
+
+**AND IT IS NOT HYPOTHETICAL — the wrapper already exists and already does this.**
+`LiveLoopBrokerProxy` has **no `__getattr__`**; it forwards only the members it explicitly defines,
+and `simulation_source` is not among them. Driven, one adapter, one run:
+
+```
+direct  : is_simulation=True  simulation_source='flag (client endpoint unreadable)'   <- the alarm
+proxy   : is_simulation=True  simulation_source='n/a (in-process)'                    <- the all-clear
+```
+
+**Same object, same unreadable endpoint.** The proxy silently converts the single informative value
+into the one meaning *nothing to check here* — and `is_simulation` **does** forward correctly, so
+the two fields disagree and the one that is wrong is the one nothing can cross-check.
+
+**This is `B394`'s fifth instance recurring one member later.** That instance was the proxy failing
+to forward `order_path_status`, a member added to `BrokerAdapter` after the proxy was written, under
+a docstring claiming it *"forwards every member to `loop.paper` at call time"*. The lesson did not
+generalise because the fix was to forward *that* member rather than to make non-forwarding loud.
+
+**THE FIX, and it costs three lines because the pattern already exists.** `is_simulation` is a
+property on `PaperBroker:49`, on `SimPropFirmBroker:127`, and forwarded by the proxy at `:106`.
+**Give `simulation_source` exactly that treatment** — defined on all three brokers, forwarded by the
+proxy — and the snapshot reads `self.paper.simulation_source` **with no default at all.** A missing
+attribute then raises where it is introduced instead of resolving to the calmest sentence available.
+
+**The general rule this is the third instance of:** when a fallback value is one of the states the
+field is meant to distinguish, the field cannot report its own failure. If a default is unavoidable,
+**it must be the alarming state, never the benign one.**
+
+*(Filed as an amendment rather than a new id because it is inseparable from `B395`'s remedy. If the
+manager would rather it carry its own number, I will bid one — I am not taking one from the file.)*
+
 ### B396 — A GUARD WHOSE VOCABULARY GREW STOPS COVERING THE CASE IT WAS WRITTEN FOR, SILENTLY. `warmup()` skipped injection for `broker_mode == "sim"`, which meant "every account where injection is harmful" only while `sim` and `paper` were the whole vocabulary
 
 **Found by execute on `M-3`'s third read** — the mutation that adds a venue to one `broker_mode` site
