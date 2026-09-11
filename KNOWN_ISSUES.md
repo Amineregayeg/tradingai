@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-11 (B405 — MIGRATIONS 0010 AND 0011 BUILD THEIR CHECK FROM THE LIVE REJECTION_CODES, so a revision number means whatever the model file says on the day it runs. Consistent today: exactly one code (VENUE_TRANSPORT) was added after 0010 landed, and 0011's downgrade removes exactly that one. Latent until the next vocabulary change. Remedy is frozen literal tuples, deliberately NOT applied before C landed because it would change the three files the real-server migration test is pinned to by hash. That test PASSED on a scratch copy of production: seeded, name-guarded, checked against the database. Also B404 ADDENDUM: PRODUCTION HAS NO FINNHUB KEY CONFIGURED ('key not set' every hourly refresh, 0 HTTP-error lines in 5 days of logs), so nothing has leaked or can leak today and nothing needs rotating. The endpoint IS authenticated, and the deployed build's logs are NOT redacted for token=, since that pattern exists only in the uncommitted fix. The manager got both of those wrong first: a grep blind to the CurrentUser alias, and a check against the working tree instead of the deployed code.)
+Last updated: 2026-09-11 (B406 — THE LANDED RESPONSE REDACTOR MISSES auth-token=, the parameter MetaApi's SDK builds into its websocket URL. _redact's query-string pattern needs ? or & IMMEDIATELY before the name, and in ?auth-token= the character before token is '-'. B404 is closed for Finnhub; the class is not. The carrier lives in the SDK, not our code, so a call-site sweep of our tree cannot see it; review found it by reading installed SDK source. Whether a MetaApi connect failure's str(exc) actually contains the URL is UNMEASURED. OCCURRENCE measured in production: one broker connection, cryptofundtrader; ZERO MT5/MetaApi rows, so it is unreachable. Remedy is one alternation plus a control arm, deferred until C passes review so the shared tree isn't edited under a review measurement.)
 
 ---
 
@@ -26603,3 +26603,52 @@ production restored from the verified nightly, two REJECTED rows seeded first, d
 inside the container, and every result checked against the database: upgrade, backfill (**0 of
 1,678** non-rejected rows touched), constraint enforcement both ways, the documented downgrade
 refusal, a clean downgrade, and a re-upgrade. **All passed. Production untouched.**
+
+### B406 — THE LANDED RESPONSE REDACTOR MISSES `auth-token=`, the parameter MetaApi's SDK puts in its websocket URL. B404's class has a second carrier, invisible to any sweep of our own code. Unreachable in production: zero MT5 connections
+
+**Found by review sweeping B404's class across every outbound integration; the production occurrence
+was checked by manager.** B404 is closed for Finnhub. **The class is not closed.**
+
+```
+problem_response, Finnhub-shaped detail (?token=)     token in response body: False   <- B404 fixed
+problem_response, MetaApi ws url (?auth-token=)       token in response body: True    <- this entry
+```
+
+**WHY IT MISSES:** `_redact`'s query-string pattern needs `?` or `&` **immediately** before the
+parameter name. In `?auth-token=`, the character before `token` is `-`. The pattern is right about
+`token`, and the leak goes through the prefix. That's the same way the Alpaca redactor was right
+about the header name and wrong about the quote next to it.
+
+**WHERE THE CARRIER LIVES, which is the finding:** not in our code. MetaApi's SDK builds
+`f'{server_url}?auth-token={self._token}&clientId=...'` (`metaapi_websocket_client.py:654`,
+`:1570`), and its own `logger.py:137` special-cases `?auth-token=`, so the SDK knows its strings
+carry it. **A call-site sweep of our tree can't see a secret inside a dependency.** Review found it
+by reading installed SDK source, and says plainly that its sweep can't see client-level defaults,
+SDK internals, `urlencode`-built URLs, or a secret whose variable name doesn't look secret.
+
+**THE PATH:** `manager.py:460` wraps a connect failure as `BrokerConnectionError(detail=str(exc))`,
+which goes to `brokers.py:88` / `:173`, then `problem_response`.
+
+**WHAT IS NOT MEASURED, and review declined to reason it into a verdict:** whether a MetaApi
+connect failure's `str(exc)` actually contains that URL. python-socketio connect errors usually
+don't. Driving it needs a real network attempt with retry backoff, so it needs a deliberate harness
+rather than a quick probe.
+
+**OCCURRENCE, measured by manager in production (counts only; `encrypted_creds` never selected):**
+
+```
+broker_connections   cryptofundtrader  rows=1  connected=1  with_creds=1
+                     total rows = 1    MT5/MetaApi rows = 0
+```
+
+**So there's no stored MetaApi credential and no MetaApi connect from stored state. It's
+unreachable in production.** The only route is someone submitting MT5 credentials through the
+authenticated connect endpoint, and then the token echoed back is the one the caller just typed in.
+MT5 is also the superseded venue.
+
+**REMEDY:** add `auth[_-]?token` to the query-string alternation in `_redact`, with a control arm
+built from the SDK's real URL shape. This is outside the migration test's pinned set (`logging.py`
+isn't imported by `0010`/`0011`). **It's deliberately deferred until review has passed C as a unit**,
+because editing `logging.py` in the shared tree while review runs C's suites would put an unreviewed
+edit under a review measurement. That's B384's precondition. The durable fix is the one the Alpaca
+programme already names: delete the MT5 code and the `metaapi-cloud-sdk` pin.
