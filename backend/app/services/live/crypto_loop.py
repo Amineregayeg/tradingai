@@ -661,7 +661,34 @@ class LiveCryptoLoop:
         silence — `B221`'s exact mechanism returning by a new route, and `B221` is the finding
         where the switch reported a clean trigger and closed nothing. An arm pins the name.
         """
-        self.paper = self._build_broker(starting_balance)
+        # ------------------------------------------------------------------
+        # BUILD INTO A LOCAL AND SWAP ONLY ON SUCCESS (`B401`).
+        #
+        # **NOTHING IS MUTATED UNTIL THE NEW BROKER EXISTS.** `_build_broker` can raise — it
+        # constructs a `TradingClient` and an `AlpacaAdapter` that refuses on an endpoint/flag
+        # disagreement (`B389`) and refuses outright with no credentials — so a rebuild that
+        # fails must leave the previous broker EXACTLY as it was, hook included.
+        #
+        # This replaced a version that cleared the old hook first and restored it in an
+        # `except`. **That is the weaker shape: it repairs the damage rather than not doing
+        # it**, and it only repairs the damage someone remembered to think of. Here the failure
+        # window does not exist, at BOTH call sites, by construction.
+        #
+        # `B401` is what happens without it: `_reset_broker_state` cleared `_on_settle` for the
+        # duration of a reset, the rebuild raised, and the OLD broker stayed in use **deaf** —
+        # every later close on it silently dropped, kill switch included, because `paper.py`
+        # guards the hook with a `None` check that SKIPS rather than raises. A suppression
+        # scoped to a reset became permanent for the life of the process.
+        # ------------------------------------------------------------------
+        built = self._build_broker(starting_balance)
+
+        previous = getattr(self, "paper", None)
+        if previous is not None:
+            # Suppress the OUTGOING broker's settles now that a replacement exists, so the
+            # teardown cannot persist phantom closes into the run being started.
+            previous._on_settle = None  # noqa: SLF001
+
+        self.paper = built
         # Persist + resolve EVERY close (SL/TP tick, manual DELETE, kill switch) through one
         # hook — no close path can be silently lost from the DB or leave its DecisionRecord
         # stuck OPEN.
@@ -933,9 +960,17 @@ class LiveCryptoLoop:
         # so a result can never be read against the wrong settings later."* A config that changes
         # under a later reader is a worse failure than the one being fixed.
         #
-        # AND IT IS CORRECT ON THE FAILURE PATH TOO: `_reset_broker_state` swallows its
+        # AND IT IS CORRECT ON THE FAILURE PATH TOO — but the reason changed, and the first
+        # version of this sentence was the defect. It read: *"`_reset_broker_state` swallows its
         # exceptions and leaves `self.paper` as the old object, so snapshotting after it still
-        # describes the broker actually in use.
+        # describes the broker actually in use."* **Right about the snapshot, silent about what
+        # the swallow left behind** — a previous broker whose settle hook had been cleared for a
+        # rebuild that never happened (`B401`). Worse than missing it: it promoted the swallow to
+        # a documented invariant the next reader would have preserved.
+        #
+        # `_reset_broker_state` now RESTORES the previous broker and RE-RAISES, so this line is
+        # never reached on a failed rebuild — the reset refuses instead of opening a run against
+        # a venue that could not be built.
         # ------------------------------------------------------------------
         await self._reset_broker_state()
 
@@ -978,11 +1013,42 @@ class LiveCryptoLoop:
         that fires the settle hook, which would persist phantom closes into the
         NEW run. A reset must leave no trace in the run it is starting.
         """
+        # THE HOOK IS NO LONGER CLEARED HERE. `_bind_broker` suppresses the OUTGOING broker only
+        # after the replacement has been built, so a failed rebuild cannot leave this one deaf.
+        # The comment that used to sit on this line — *"suppress settle during reset"* — was true
+        # only if the reset COMPLETED, and part 2 created a path where it does not (`B401`).
         try:
-            self.paper._on_settle = None  # noqa: SLF001 - suppress settle during reset
             self._bind_broker(self.starting_balance)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Broker reset failed", error=str(exc))
+        except Exception as exc:
+            # ------------------------------------------------------------------
+            # `B401` — RESTORE THE PREVIOUS BROKER COMPLETELY, THEN REFUSE LOUDLY.
+            #
+            # **THE HOOK IS CLEARED ABOVE, BEFORE THE REBUILD.** So a rebuild that raises leaves
+            # `self.paper` as the OLD broker with `_on_settle = None`, and every later close on
+            # it — SL/TP tick, manual DELETE, **and the kill switch** — is silently lost. That is
+            # `B221`'s outcome by a new route: *the switch reports a clean trigger and closes
+            # nothing.*
+            #
+            # **PART 2 ARMED THIS AND MY OWN COMMENT DOCUMENTED THE SWALLOW AS CORRECT.** Before
+            # the collapse this path built the simulators inline — no credentials, no network,
+            # effectively unable to raise. `_build_broker` can: it constructs a `TradingClient`
+            # and an `AlpacaAdapter` that refuses on an endpoint/flag disagreement (`B389`) and
+            # raises with no credentials. **So the refusal built so a misconfigured venue cannot
+            # trade was being caught and discarded.**
+            #
+            # RE-RAISED RATHER THAN LOGGED, because swallowing here reintroduces one level up the
+            # exact defect `_build_broker` refuses internally: a run that silently swapped its
+            # venue. An endpoint/flag disagreement is a DECISION, not a failure, and `B375` is
+            # what a swallowed decision becomes — a permanent rule made indistinguishable from a
+            # transient one. `order_path_status()`'s gate sits BEFORE `reset_run` on the same
+            # principle: **do not destroy the thing you are refusing to replace.**
+            # ------------------------------------------------------------------
+            logger.error(
+                "Broker rebuild FAILED — the previous broker is untouched, and the reset is "
+                "refused rather than opening a run against a venue we could not build",
+                error=str(exc), broker_mode=self.broker_mode,
+            )
+            raise
 
     async def _shadow_evaluate(self, pair: str, entry_df, engine_policy: str | None = None) -> None:
         """Emit one contract `setup_evaluation` for this bar. Never raises.

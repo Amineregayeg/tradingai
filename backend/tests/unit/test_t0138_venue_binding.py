@@ -376,3 +376,105 @@ async def test_the_provenance_vocabulary_is_CLOSED():
         "compare with `===` and not `includes()`. If this ever stops being true, that constraint "
         "relaxes and `RunHistoryPanel.flagState` can be simplified."
     )
+
+
+# =====================================================================================
+# B401 — A FAILED REBUILD MUST NOT LEAVE THE PREVIOUS BROKER DEAF
+# =====================================================================================
+
+async def test_a_failed_rebuild_RESTORES_the_previous_brokers_settle_hook(monkeypatch):
+    """**PART 2 ARMED THIS AND MY OWN COMMENT CALLED THE SWALLOW CORRECT.**
+
+    `_reset_broker_state` clears `_on_settle` BEFORE rebuilding, so a rebuild that raises left the
+    OLD broker in place with no settle hook — and every later close on it, **including the kill
+    switch**, silently lost. `B221`'s outcome by a new route: the switch reports a clean trigger
+    and closes nothing.
+
+    Before the collapse this path built the simulators inline and could not realistically raise.
+    `_build_broker` can — it constructs a `TradingClient` and an adapter that refuses with no
+    credentials — **so the refusal built to stop a misconfigured venue trading was being caught
+    and discarded.**
+    """
+    monkeypatch.delenv("ALPACA_API_KEY", raising=False)
+    monkeypatch.delenv("ALPACA_API_SECRET", raising=False)
+
+    loop = LiveCryptoLoop()
+    old = loop.paper
+    assert old._on_settle is not None, "the arm cannot demonstrate anything"
+
+    loop.broker_mode = "alpaca"
+    with pytest.raises(Exception):
+        await loop._reset_broker_state()
+
+    assert loop.paper is old, "the previous broker must be kept when the rebuild fails"
+    assert loop.paper._on_settle == loop._on_settle_cb, (
+        "the previous broker was left DEAF — every close on it, kill switch included, is lost"
+    )
+
+
+async def test_a_failed_rebuild_REFUSES_rather_than_trading_on_the_wrong_venue(monkeypatch):
+    """Swallowing here reintroduces one level up the exact defect `_build_broker` refuses
+    internally — a run that silently swapped its venue. `order_path_status()`'s gate sits before
+    `reset_run` on the same principle: **do not destroy the thing you are refusing to replace.**"""
+    from app.core.exceptions import BrokerError
+
+    monkeypatch.delenv("ALPACA_API_KEY", raising=False)
+    monkeypatch.delenv("ALPACA_API_SECRET", raising=False)
+
+    loop = LiveCryptoLoop()
+    loop.broker_mode = "alpaca"
+    with pytest.raises(BrokerError) as exc:
+        await loop._reset_broker_state()
+    assert "ALPACA_API_KEY" in str(exc.value), "the refusal must name what was missing"
+
+
+async def test_a_SUCCESSFUL_rebuild_is_unaffected():
+    """The control — a failure path that also breaks the success path is not a fix."""
+    loop = LiveCryptoLoop()
+    before = id(loop.paper)
+    await loop._reset_broker_state()
+
+    assert id(loop.paper) != before
+    assert loop.paper._on_settle == loop._on_settle_cb
+    assert loop.execution.broker is loop.paper
+
+
+async def test_a_failed_rebuild_NEVER_TOUCHES_the_previous_broker_at_all(monkeypatch):
+    """**THE STRONGER PROPERTY, AND THE ONE THE OTHER ARM CANNOT SEE.**
+
+    `..RESTORES_the_previous_brokers_settle_hook` passes under either remedy: *never cleared* and
+    *cleared then repaired in an `except`* both end with the hook wired. **They are not equally
+    safe** — a repair fixes the damage someone remembered to think of, and the first version of
+    this fix was the repair.
+
+    So this records every assignment to `_on_settle` and asserts a failed rebuild makes **none**.
+    Under the repair shape it sees `[None, <cb>]`; under build-into-a-local it sees `[]`, because
+    the failure window does not exist rather than being closed.
+    """
+    monkeypatch.delenv("ALPACA_API_KEY", raising=False)
+    monkeypatch.delenv("ALPACA_API_SECRET", raising=False)
+
+    loop = LiveCryptoLoop()
+
+    assignments: list = []
+    real = type(loop.paper)
+
+    class Recording(real):  # type: ignore[misc,valid-type]
+        def __setattr__(self, name, value):
+            if name == "_on_settle":
+                assignments.append(value)
+            super().__setattr__(name, value)
+
+    loop.paper.__class__ = Recording
+    assignments.clear()
+
+    loop.broker_mode = "alpaca"
+    with pytest.raises(Exception):
+        await loop._reset_broker_state()
+
+    assert assignments == [], (
+        f"the previous broker was mutated during a failed rebuild: {assignments!r}. Even when "
+        f"repaired afterwards, that is a window in which a close would have been dropped — and "
+        f"the repair only covers the damage someone remembered."
+    )
+    assert loop.paper._on_settle == loop._on_settle_cb
