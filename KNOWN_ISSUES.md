@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-11 (B399 AMENDMENT — THERE IS A THIRD AXIS AND TIER 1 DOES NOT COVER IT. F6, audited 2026-08-13, measured it a MONTH before part E was scoped: DecisionRecord has NO field for HOW a trade closed — exit_reason/close_reason/exit_kind/forced are zero hits against a control that prints 20+ Mapped fields from the same file — so closed-by-stop-loss (evidence) and closed-by-OPERATOR (an administrative event) are ONE ROW SHAPE. gap_r is the learning signal, so a force-close manufactures a large spurious gap: F6's instance reads gap_r ~ -2.35 for a trade an operator terminated. Two of seven trades were operator closes, so 28% of the live corpus is not evidence in either direction. THIS BREAKS TIER 1 AS WRITTEN: cohort and symbol are discriminators that EXIST and are unread, fixable consumer-side; the close reason DOES NOT EXIST, so no filtering can recover it, and refusing on cohort alone would leave a population still 28% non-evidence while asserting it was characterised — worse than the silence it replaces. THE BACKFILL IS IMPOSSIBLE, which sets a deadline: every run before the field exists is permanently unclassifiable.)
+Last updated: 2026-09-11 (B400 — AN INSTRUMENT FOR THE ASSERTION-THAT-CANNOT-FAIL CLASS at agents/tools/inert_assertions.py, and the rule its one FALSE POSITIVE forced review to sharpen: not 'every operand is a literal' but 'every operand is a literal the author TRANSCRIBED from a value the code owns'. 0.3/0.1 != 3.0 asks a question of the INTERPRETER, which owns float semantics, and is a legitimate retirement condition; "endpoint" in "flag (...)" asks it of a COPY of a string alpaca.py owns, so the code can change underneath it and the line never notices. Controlled BEFORE use per B398 — four must-hits including verbatim reconstructions of both known instances — and THE CONTROL CORRECTED ITS AUTHOR: review filed `assert f() or True` as a must-MISS and the scanner was right. 4666 backend assertions, 1 flag, that flag a false positive, so the suite is genuinely clean. BLIND SPOT NAMED RATHER THAN CAVEATED: 290 frontend expect() calls unscanned, and the class is language-independent — which matters more there, because B380 and 8c907fc both bit on the frontend. B383 reproduced twice tonight, once by each seat; fix is to match on comm, not argv.)
 
 ---
 
@@ -25856,3 +25856,60 @@ reason to look somewhere else, not a reason to stop.*
 
 
 
+
+### B400 — AN INSTRUMENT FOR THE ASSERTION-THAT-CANNOT-FAIL CLASS, AND THE RULE IT FORCED REVIEW TO SHARPEN: not *every operand is a literal*, but *every operand is a literal the author TRANSCRIBED from a value the code owns*
+
+**Built by review at `agents/tools/inert_assertions.py`** — an AST walk finding assertions whose
+truth is decided before the code runs. **Answers a gap I had stated and had no countermeasure for.**
+
+```
+ALL-LITERAL   every operand a literal    assert "endpoint" in "flag (client endpoint unreadable)"
+OR-TRUTHY     an `or <truthy>` arm       assert x == y is None or True
+TUPLE         assert (cond, "msg")       a non-empty tuple is always truthy
+```
+
+**CONTROLLED BEFORE IT WAS RUN ANYWHERE** — four must-hits including verbatim reconstructions of
+both known instances, three must-misses correctly ignored. **`B398` is why that ordering matters: a
+scanner reporting a clean suite is the exact shape that lies.**
+
+**AND THE CONTROL CORRECTED ITS AUTHOR.** Review wrote `assert f() or True` as a must-MISS, reasoning
+that it refers to the code. **The scanner flagged it and the scanner was right** — `or True` is
+unconditionally true whatever `f()` returns. **The control expectation was wrong, not the
+instrument.** A control that can only confirm the author is not a control.
+
+**RESULT: 4666 assertions across 141 backend test files, ONE flag, and the flag is a FALSE
+POSITIVE** — `test_t0097_units_to_lots.py:119`:
+
+```python
+assert 0.3 / 0.1 != 3.0, "the float hazard this guards is real on this interpreter"
+```
+
+**THE RULE THE FALSE POSITIVE FORCED, and it is the entry.** Every operand is a literal, so a
+naive rule fires — but this asks a question of **the interpreter**, which owns float semantics, and
+if those ever changed the line would correctly report that the guard beneath it is unnecessary.
+**That is a retirement condition and it is legitimate.**
+
+> **The rule is not *every operand is a literal*. It is *every operand is a literal the author
+> TRANSCRIBED from a value the code owns*.**
+>
+> `0.3 / 0.1` is owned by the interpreter and the assertion still asks it a question. `"endpoint" in
+> "flag (...)"` is owned by `alpaca.py`, and the assertion asks the question **of a copy instead of
+> the original** — so the code can change underneath it and the line never notices. **The first
+> cannot go inert; the second already had.**
+
+**THE BLIND SPOT, NAMED RATHER THAN CAVEATED — and it is the lead.** It is a Python AST walker.
+**290 `expect()` calls across 14 frontend test files are unscanned**, and **the class is
+language-independent**: `expect(true).toBe(true)`, `expect([cond,'msg']).toBeTruthy()` and an `||`
+short-circuit all do the same thing.
+
+**This matters more in the frontend than in the backend, because that is where the class has
+actually bitten — twice.** `B380` was a fabricated all-clear on a frontend surface, and `8c907fc`
+shipped `if (false)` in a `.tsx` null guard. **The backend now has a one-second check and the
+surface with the track record has none**, covered by re-reading only — the method this session has
+watched fail three times.
+
+**`B383` REPRODUCED TWICE TONIGHT**, once by each of us: `pkill -f "pytest -q tests/unit"` and
+`pgrep -f` both matched the shell that typed the pattern, because the pattern appears in that
+shell's own argv. **The mechanical fix, since a resolution has now failed twice: capture the PID at
+launch and signal that, or match on `comm` rather than the full argv** — `ps -eo pid,comm,args` with
+`$2 ~ /^python/` cannot match a bash wrapper.
