@@ -26222,4 +26222,23 @@ not where a value comes from but whether it can be different when the world is d
 latent because the sources coincided. **This is a wrong value read at the right moment**, and no
 ordering fix touches it.
 
+**THE NEIGHBOURING FIELD IS CLEAN, CHECKED SO NOBODY RE-CHECKS IT.** `long_only` reads the SAME
+shared constant, so it is the obvious next suspect. **It is not the same defect.**
+
+```
+_long_only()   return policy is not None and DirectionType.SHORT not in policy.supported
+DirectionPolicy( constructions in the whole tree:  ONE   (ALPACA_CRYPTO_LONG_ONLY)
+```
+
+**So `long_only` is `True` on every broker including the in-process simulators — and that is
+TRUE.** `B391` is why: the policy lives on `BrokerAdapter` and **both simulators enforce it**, so a
+paper run genuinely does refuse shorts. The field describes the run correctly.
+
+> **An invariant field is not automatically a defect. `venue` is wrong because a simulator is not
+> Alpaca; `long_only` is right because a simulator running that policy IS long-only.** The test is
+> not *can this value vary* but *does it say something false about this run* — and `B391`, which made
+> the simulators enforce the venue's constraint, is exactly what makes the second one honest.
+
+
+
 
