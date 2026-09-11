@@ -26652,3 +26652,56 @@ isn't imported by `0010`/`0011`). **It's deliberately deferred until review has 
 because editing `logging.py` in the shared tree while review runs C's suites would put an unreviewed
 edit under a review measurement. That's B384's precondition. The durable fix is the one the Alpaca
 programme already names: delete the MT5 code and the `metaapi-cloud-sdk` pin.
+
+#### ADDENDUM (execute) — THE LEAK DEPENDS ON THE TOKEN'S SHAPE, AND MY FIRST ARMS COULD NOT SEE IT
+
+**The mechanism is right and the reach is narrower than "the redactor misses `auth-token=`".**
+MetaApi's SDK has TWO token shapes (`metaapi_client.py:29`: one dot-segment is an `'account'`
+token, three is a JWT `'api'` token). Measured against the landed redactor, independently
+reproduced by the manager:
+
+```
+JWT 'api' token       ?auth-token=   NOT leaked   the bare-token backstop redacts every segment
+hex 'account' token   ?auth-token=   LEAKED       <- B406 is real for this shape
+control               ?token=hex     not leaked
+```
+
+**THE BOUND, stated precisely (review and the manager):** JWT `'api'` tokens are already redacted by
+the bare-token backstop, because the signature segment is long random base64url and in practice
+always carries the digit and capital the backstop keys on — "in practice" rather than "always",
+since a segment that happens to lack one is vanishingly unlikely, not impossible. **`B406` bites
+single-segment `'account'` tokens only, and only those that evade the backstop.**
+
+The backstop catches a bare token ONLY if it has a lowercase letter AND an uppercase letter AND
+a digit AND 32+ characters of `[A-Za-z0-9/+_-]`. Verified at HEAD, not on disk:
+
+```
+mixed+digit, 40 chars   caught
+lower+digit, 40 chars   EVADES      upper+digit, 40 chars   EVADES
+mixed, no digit         EVADES      mixed+digit, 31 chars   EVADES
+```
+
+**Each condition can be checked against a real account token without printing it.** One that
+meets ANY of the four evasions is protected by the named `auth[_-]?token` rule alone.
+
+**NOT VERIFIED: what charset MetaApi's real account tokens use.** The lowercase-hex fixture is ONE
+shape that evades the backstop; it is not a measurement of MetaApi's format, and this entry must not
+be read as saying real account tokens leak. **The named `auth[_-]?token` rule is right regardless**,
+because whether a credential is redacted should not depend on a backstop happening to match its
+character mix.
+
+**THE PART WORTH KEEPING: my first five arms all passed against the UNFIXED redactor.** I built
+them with a realistic JWT, and the backstop already redacted it — so not one of them exercised the
+rule they existed for.
+
+> **A fixture that another defence already catches can't test the defence you're adding.**
+
+That is `B398`'s shape one level down: there, an instrument could not see the member it was built
+to catch; here, the instrument could see perfectly and was shown only inputs a *different* rule had
+already handled. Both present as green. The rebuilt arms isolate the named rule with a token the
+backstop provably cannot see — an arm asserts THAT, so the isolation is measured rather than
+assumed — and the JWT arm is labelled a regression guard for the combined redactor, since it
+passes with or without the fix.
+
+**Fifth vacuous arm of mine across `T-0137`/`T-0138`, and every one was caught the same way:
+running it against a known-bad state before trusting it.**
