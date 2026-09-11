@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-11 (B400 AMENDMENT — THE FRONTEND HALF at agents/tools/find_inert_constructs.js, a tsc-AST walk with 10 must-hit/10 must-miss controls including 8c907fc's if(false) verbatim; frontend/src 82 files -> 0. THE FINDING IS NOT THE ZERO, IT IS WHAT THE ZERO ALMOST WAS: review's first working version passed ALL TEN of its own must-hits and MISSED a real instance execute's cruder regex had already found — expect('literal'.includes('literal')), whose subject is a CallExpression the literal test walked past. A SYNTHETIC CONTROL ENCODES THE AUTHOR'S MODEL OF THE DEFECT; A REAL INSTANCE DOES NOT, and the shape neither had thought of was invisible to the control for exactly the reason it was invisible to the tool — B398 one turn further in, an instrument whose CONTROL was blind in the same way. Review correctly told execute NOT to delete the regex: two tools with different blind spots are not redundancy, the crude one found what the principled one missed. SHARED BLIND SPOT, verified independently by manager: neither resolves a literal bound to a const, so a clean run from both excludes the class only AS WRITTEN INLINE.)
+Last updated: 2026-09-11 (B400 AMENDMENT 2 — THE BLIND SPOT IS EMPTY AND THE FRONTEND TIER IS CLOSED; DO NOT BUILD CONSTANT PROPAGATION. Sized on the manager's instruction to measure before fixing: backend 4666 assertions with 1 inline literal (the known float check) and ZERO same-file consts, frontend 290 expect() with zero of both. Review then wired same-file primitive-const resolution into the TS walker, verified independently by manager in both directions. THE COUNT WAS WRONG TWICE FIRST, the same way each time: an accumulator (violations = 0 then +=) and a builder (mismatches = [] then .append) both read as constants, and an hour earlier the TS walker called a React ref test inert for the same reason — A CONSTANT BINDING IS NOT A CONSTANT VALUE, in both languages, and an instrument resolving constants must restrict to IMMUTABLE PRIMITIVES or it calls live assertions inert, which is the direction that gets a guard switched off. One confident zero caught: the sizer reported 0 assertions because the shell cwd had reset, and now REFUSES rather than reporting an unearned zero. AND 144 of 290 frontend subjects root at an IMPORTED name, which is not a blind spot but the correct shape — change the constant and the assertion moves; an unreachable tier is not automatically a gap.)
 
 ---
 
@@ -25956,5 +25956,59 @@ if (false)                                flagged
 the class** — it excludes the class *as written inline*. Every inert assertion one `const` away is
 invisible to the entire apparatus, and the fix (constant propagation) is materially more work than
 either tool represents.
+
+#### `B400` AMENDMENT 2 — THE BLIND SPOT IS EMPTY, THE FRONTEND TIER IS CLOSED, AND THE COUNT WAS WRONG TWICE FIRST — both times a MUTABLE BINDING read as a constant. **Do not build constant propagation.**
+
+**Manager asked for the gap to be SIZED before anyone decided to fix it.** Sized:
+
+```
+BACKEND   4666 assertions   inline-literal 1 (the known float check)   SAME-FILE CONST 0
+FRONTEND   290 expect()     inline-literal 0                           SAME-FILE CONST 0
+```
+
+**And the frontend tier is not merely empty, it is CLOSED** — review wired same-file primitive-const
+resolution into the walker. **Verified independently by manager, both directions:**
+`const X = 'a'; expect(X.includes('b'))` now fires, and the mutable case below correctly does not.
+
+**THE COUNT WAS WRONG TWICE BEFORE IT WAS RIGHT, THE SAME WAY EACH TIME:**
+
+```
+39  ->  `violations = 0` then `violations += 1`      an ACCUMULATOR
+15  ->  `mismatches = []` then `.append(...)`        a BUILDER — a method call is not a rebind
+ 0   after restricting to IMMUTABLE PRIMITIVES
+```
+
+**And an hour earlier the TS walker needed the identical narrowing** for
+`const ref = { current: null }`, where React mutates `ref.current` — it fired on a test whose entire
+subject is that mutation.
+
+> **A constant BINDING is not a constant VALUE**, and review made the same error in both languages
+> before the corpus corrected it. `const` binds the name, not the object; `x = []` then `x.append()`
+> never rebinds. **An instrument that resolves "constants" must restrict to IMMUTABLE PRIMITIVES or
+> it will call live assertions inert** — the false-positive direction, which is the one that gets a
+> guard switched off.
+
+**ONE CONFIDENT ZERO, CAUGHT.** The sizer printed `total assertions 0` because the shell cwd had
+reset and `backend/tests` did not resolve. **It now refuses rather than reporting a zero it could
+not earn** — the third cwd-reset false reading of the night across two seats, and the first to be
+turned into a refusal rather than a lesson.
+
+**THE REMAINING TIER IS NOT A HIDING PLACE, AND THIS IS THE SHARP PART.** 144 of 290 frontend
+subjects root at an **imported** name. **That is not a blind spot — it is the correct shape.** A
+constant owned by another module is exactly what a live assertion should read: **change the constant
+and the assertion moves.** Execute's own fix, `expect(SRC_NOT_CHECKED.includes(SRC_CHECKED))`, is one
+of the 144 and is right for precisely that reason.
+
+> **An unreachable tier is not automatically a gap.** The question is whether the instrument's
+> silence there could hide a defect — and for an imported constant it cannot, because that binding is
+> the thing that makes the assertion live.
+
+**BOUND ON THIS MEASUREMENT, stated unprompted:** it counts single-argument `expect(...)` and Python
+`assert` only. **A custom assertion helper wrapping either is invisible; so are `.each` tables of
+literals and fixture-provided values** — all land in "everything else" and are NOT sized. The Python
+exclusions are file-global and crude: a name disqualified anywhere in a file is disqualified
+everywhere in it.
+
+
 
 
