@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-11 (B393 — THE RESET PATH SNAPSHOTS THE CONFIG BEFORE REBUILDING THE BROKER. _config_snapshot() at crypto_loop.py:781 reads self.paper.direction_policy, but self.paper is not rebuilt until 826/831, so long_only and venue describe the broker the run just STOPPED using. Found by review running B390's sweep, verified at HEAD by manager. LATENT ONLY because all four construction sites pass the same fixed.VENUE_DIRECTION_POLICY constant, so the ordering error yields a correct value by accident and any arm asserting the key EXISTS passes regardless. T-0138 ARMS IT: C's subject is making self.paper a different object, and the moment the branches carry different policies a reset produces a run whose config describes the previous broker — rendered as a badge at RunHistoryPanel.tsx:67, so the label actively lies. THE CLASS IS A RELOCATION, which execute named on its own M-10: nothing is deleted, everything is computed, the snapshot just happens at the wrong point, and a text-substitution mutation harness CANNOT GENERATE IT. Remedy scoped into T-0138 — the task that arms a latent defect is the task that should disarm it. Sweep bound recorded: it read ONE dict in ONE file and its zero is about literal spellings, not consumers.)
+Last updated: 2026-09-11 (B394 — FOUR MECHANISMS BUILT THE SAME WEEK, EACH CORRECT, EACH WITH NO CONSUMER: LiveLoopBrokerProxy.unavailable_reason has no reader, records_rejected_signals has no verifier, 0 of EngineRun.config's 13 keys are verified or read by an automated consumer, and venue_would_refuse is read only by tests. Every one was built AS THE REMEDY TO A REAL FINDING, so each closed its finding on paper while leaving the harm intact — B292's could-not-ask inverted once more: the ability to ask was BUILT and nobody asks. The tell is checkable: when a remedy is a new field or reason string, ask WHICH EXISTING CONSUMER CHANGES BEHAVIOUR, and if the answer is 'a future one' the remedy is a note with a type annotation. IT RESHAPES PART E: the sweep measured /feedback reading NONE of the config (0 hits at HEAD), so part E does not fix a consumer that reads these badly — it BUILDS THE FIRST CONSUMER THAT READS THEM AT ALL, which is larger than the plan said. Also MODIFIED B221 — FIXED, core defect confirmed: main.py:242 registers LiveLoopBrokerProxy and _resolve reads loop.paper AT CALL TIME, so the rebind is followed and the orphan is gone. The residual [] -> 0 closed 0 failed is carved out precisely so it is not re-diagnosed as B221.)
 
 ---
 
@@ -13682,6 +13682,33 @@ to register an accessor rather than the object, so a stale reference cannot be h
 **Not fixed here — this is a diagnosis task and Malek is mid-decision on `B198`.**
 Related: **B215**, **B199**, **B178**.
 
+
+**FIXED 2026-09-11 — the core defect. Confirmed by manager; flagged by execute, who correctly
+declined to edit an entry it did not file.**
+
+```
+main.py:242   broker_manager.register_adapter("paper", LiveLoopBrokerProxy(live_loop))
+_resolve()    target = getattr(self._loop, "paper", None)     <- AT CALL TIME
+```
+
+**The remedy was the one this entry named — register an ACCESSOR rather than the object.** The
+manager no longer holds the pre-reset instance, so the rebind at `_reset_broker_state` is followed
+and there is no orphan. **The half of the switch that failed to FLATTEN now reaches the live
+broker.**
+
+**WHAT IS NOT CLOSED, carved out precisely so it is not re-diagnosed as this entry.** With no broker
+held, `close_all_positions()` returns `[]`, and `[]` still yields *0 closed, 0 failed* — a clean
+trigger. **That is narrower than the original harm** (the loop DID hold a working broker while the
+manager held an orphan; now they are the same object) **but it is not nothing**, and the mechanism
+built to resolve it has no reader:
+
+```
+LiveLoopBrokerProxy.unavailable_reason   written on every _resolve()
+grep -rn unavailable_reason backend/app/ --include=*.py   ->   news_context.py ONLY (unrelated field)
+```
+
+**Nothing consults it. See `B394`** — this is one of four instances found the same night.
+
 ### B223. The 70% partial pops the decision key, so every winner's record describes 70% of itself
 **Found in:** 2026-08-23, diagnosing `B219`/`B220` under T-0061 (Review)
 **What it is:** the link from a close event back to its `DecisionRecord` is
@@ -25424,3 +25451,45 @@ variable, a JSON path built at runtime — is invisible to it.** The one consume
 `long_only` at `RunHistoryPanel.tsx:67`, was found only because it is spelled literally; had the
 panel written `cfg[flagName]` the sweep would have reported zero consumers. **A zero from it is a
 zero about spellings, not about consumers.**
+
+
+### B394 — FOUR MECHANISMS BUILT THE SAME WEEK, EACH CORRECT, EACH WITH NO CONSUMER. The recurring defect is not a wrong value, it is a right value nobody reads
+
+**Found by accumulation rather than by a scan**, which is why it is filed: four independent
+findings on 2026-09-10/11 turned out to be one shape, and three of them were reported as separate
+successes before the fourth made the pattern visible.
+
+```
+LiveLoopBrokerProxy.unavailable_reason  written on every resolve   READERS: none      B221
+records_rejected_signals: True          asserted per run            VERIFIERS: none    B390
+EngineRun.config -- 13 keys             snapshotted per run         0 of 13 verified   B393 sweep
+                                                                    0 of 13 read by an automated consumer
+venue_would_refuse                      derived per OBSERVE row     READERS: tests only  T-0137
+```
+
+**Each was built correctly. Each is the right value. Not one is consulted by the code that would
+act on it.**
+
+**WHY THIS IS A DEFECT AND NOT TIDINESS.** Every one of these was built *as the remedy to a real
+finding* — and a remedy with no consumer closes the finding on paper while leaving the harm intact.
+`unavailable_reason` exists so a caller can tell *the loop held no broker* from *the broker held
+nothing*; **no caller asks, so the ambiguity the field was built to resolve is still there in full.**
+That is `B292`'s *could-not-ask* inverted one more turn: **the ability to ask was built, and nobody
+asks.**
+
+**THE TELL, and it is checkable.** When a remedy is *a new field, flag, or reason string*, the
+question *"which existing consumer changes behaviour because of it?"* has an answer or it does not.
+**If the answer is "a future one", the remedy is a note with a type annotation.** Every instance
+above would have been caught by asking it at the time.
+
+**AND IT RESHAPES PART E.** I had scoped part E as *teach the analysis layer to refuse a population
+it cannot characterise* — assuming the config reaches it and is trusted wrongly. **The sweep
+measured that `/feedback` reads NONE of the config: 0 hits at `HEAD`.** So part E does not fix a
+consumer that reads these badly. **It builds the first consumer that reads them at all**, which is a
+different and larger piece of work, and the plan said otherwise.
+
+**A fifth instance was reported the same hour and is already being fixed:** `LiveLoopBrokerProxy`'s
+docstring claims it *"forwards every member to `loop.paper` at call time"* and does not forward
+`order_path_status`, added to `BrokerAdapter` after the proxy was written. **A contract docstring
+that is false about itself** — execute found it in its own hour-old work and is forwarding it with
+`T-0138`'s wiring.
