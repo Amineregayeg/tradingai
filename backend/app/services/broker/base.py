@@ -288,6 +288,29 @@ class BrokerAdapter(ABC):
         ...
 
     # ------------------------------------------------------------------
+    def order_path_status(self) -> str | None:
+        """Why this adapter CANNOT place orders yet, or `None` if it can.
+
+        **A RUN THAT CANNOT PLACE AN ORDER MUST REFUSE TO START, NOT FAIL 146 TIMES** (`T-0138`).
+        `AlpacaAdapter.place_order` refuses every LONG while its body is unwritten (part D, which
+        measures the minimum order size the body has to round to). Pointing a run at it anyway
+        produces a wall of per-order failures that an operator reads as *the venue is broken* —
+        `B380`'s shape, a correct record turned into the wrong conclusion by the surface it
+        reaches. **One refusal at startup cannot be mistaken for a market condition.**
+
+        Deliberately NOT abstract, and `None` is the default for the same reason
+        `reference_price` returns `None`: adding an abstract member here would make every existing
+        adapter un-instantiable.
+
+        **The override must be DELETED when the body lands, and an arm enforces that rather than a
+        comment asking for it.** `test_t0138_order_path_gate` asserts the biconditional for Alpaca
+        — a reason here AND `place_order` raising `NotImplementedError` — so implementing the body
+        turns that arm RED and the override cannot survive it. *An arm pinning a phase boundary
+        expires when the phase ends, and the expiry is the point.*
+        """
+        return None
+
+    # ------------------------------------------------------------------
     async def reference_price(self, pair: str) -> float | None:
         """Price a MARKET order would fill at right now, or None if unknown.
 

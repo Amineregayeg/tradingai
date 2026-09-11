@@ -362,3 +362,49 @@ async def test_the_loop_ROUTES_a_non_filled_execution_into_the_rejection_recorde
         if isinstance(t, ast.Name)
     }
     assert "reason" in assigned, "the branch no longer derives a reason from the result"
+
+
+# =====================================================================================
+# T-0138 — THE RUN REFUSES TO START AGAINST A VENUE THAT CANNOT PLACE AN ORDER
+# =====================================================================================
+
+async def test_a_run_REFUSES_TO_START_when_the_venue_cannot_place_orders(bound):
+    """**ONE REFUSAL BEFORE THE RUN EXISTS, NOT 146 AFTERWARDS.**
+
+    `place_order`'s body is part D's, so a run pointed at Alpaca today would fail every entry
+    individually — and an operator reading a wall of venue errors concludes the VENUE is down and
+    goes to debug Alpaca. `B380`'s shape with the diagnosis relocated.
+
+    **And the refusal must happen BEFORE `reset_run`.** Refusing after it would have already ended
+    the previous run and opened a new one, so a rejected start would destroy the run it declined
+    to replace — the reset is not a no-op just because the start failed.
+    """
+    loop = LiveCryptoLoop()
+    first_run = await loop.ensure_run()
+
+    class CannotPlace(PaperBroker):
+        def order_path_status(self) -> str | None:
+            return "the order path is not written yet — part D of ALPACA_PROGRAMME.md"
+
+    loop.paper = CannotPlace(starting_balance=5_000.0, price_fn=lambda p: 70_000.0)
+
+    result = await loop.start()
+
+    assert result.get("started") is False
+    assert "part D" in result["refused"], "the refusal must name the task that owns the body"
+    assert loop._running is False, "the loop started anyway; the gate is decorative"
+    assert loop.run_id == first_run, (
+        "the refused start ENDED the previous run and opened a new one — a rejected start must "
+        "not be destructive"
+    )
+
+
+async def test_the_gate_is_ASKED_OF_THE_ADAPTER_and_does_not_block_the_simulators(bound):
+    """**The control, and it is the one that matters operationally**: a gate keyed on the venue's
+    name rather than on the adapter's own answer would still be refusing runs the day after part D
+    wrote the body. Worse, a gate that blocks everything stops the platform.
+    """
+    loop = LiveCryptoLoop()
+    assert loop.paper.order_path_status() is None, (
+        "the production simulator must remain startable — this is the engine's live path"
+    )

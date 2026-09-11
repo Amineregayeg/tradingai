@@ -6,9 +6,29 @@
 
 `ExecutionService` refuses any adapter reporting `is_simulation=False` and `ExecMode` has no LIVE
 member — both deliberately. An MT5 broker demo could not honestly answer that flag (`T-0076`,
-unruled since 2026-08-24). **An Alpaca paper account can**, because the flag is derived from a value
-we passed rather than a venue field we interpret. **The safety model is satisfied truthfully rather
-than bypassed.**
+unruled since 2026-08-24). **An Alpaca paper account can.**
+
+⚠ **AND THE SENTENCE THAT USED TO FOLLOW WAS FALSE, IN THE SAFETY LAYER, FOR A WHOLE TASK CYCLE.**
+It read: *"the flag is derived from a value we passed rather than a venue field we interpret — the
+safety model is satisfied truthfully rather than bypassed."* **A value we passed is not a fact
+about the world.** The SDK resolves the endpoint as
+
+    base_url = url_override if url_override else (TRADING_PAPER if paper else TRADING_LIVE)
+
+so `url_override` OUTRANKS `paper`, and `TradingClient(k, s, paper=True, url_override=<live>)`
+points at real money while `is_simulation` returns `True` (`B389`, settled by construction). The
+flag tracked an ARGUMENT that a second argument overrides.
+
+**Worse, the parameter was in my own introspection output the whole time.**
+`agents/tasks/T-0136/SDK_SHAPES.md:36` records the constructor signature INCLUDING
+`url_override: Optional[str] = None`. The document built so the mock could not encode my own
+reading captured the fact, and I wrote three lines about how trustworthy `paper` is without reading
+it. **The instrument had no blind spot; the reader did** — which is the inverse of the usual failure
+here, and it means *introspect before writing* only works if someone reads the output AGAINST the
+claims it is supposed to check.
+
+**`T-0138` removes the latency instead of documenting it:** the adapter reads where the client
+actually points and REFUSES TO CONSTRUCT on a known disagreement.
 
 **WRITTEN AFTER INTROSPECTING THE INSTALLED SDK, WHICH IS THE WHOLE DIFFERENCE FROM `T-0106`.**
 That adapter was written from documentation and its mock encoded its own reading, so no arm could
@@ -83,6 +103,88 @@ ALPACA_CRYPTO_LONG_ONLY = DirectionPolicy(
         "not a transient failure: the same order will be refused every time it is sent."
     ),
 )
+
+
+#: **THE ENDPOINTS, AS THE SDK'S OWN ENUM VALUES** — read from the installed package, not typed
+#: from memory: `BaseURL.TRADING_PAPER` / `BaseURL.TRADING_LIVE`.
+#:
+#: Hardcoded rather than imported because **`B328`**: this module must stay importable without
+#: `alpaca-py`, and `BaseURL` lives inside it. `test_t0138_endpoint_agreement` pins these against
+#: the installed enum, so a venue that changes its host turns an arm red instead of turning the
+#: safety flag into a lie.
+PAPER_ENDPOINT = "https://paper-api.alpaca.markets"
+LIVE_ENDPOINT = "https://api.alpaca.markets"
+
+
+def _endpoint_of(client: Any) -> str | None:
+    """WHERE THIS CLIENT ACTUALLY POINTS, or `None` if it cannot say (`B389`).
+
+    **TWO TYPES FOR ONE CONCEPT, AND `str()` IS THE TRAP** — measured, not assumed:
+
+    ```
+    TradingClient(k, s, paper=True)                      _base_url -> BaseURL.TRADING_PAPER
+    TradingClient(k, s, paper=True, url_override=<live>) _base_url -> 'https://api...'  (plain str)
+
+    "paper-api" in BaseURL.TRADING_PAPER        -> True    the MEMBER is a string
+    "paper-api" in str(BaseURL.TRADING_PAPER)   -> False   str() of it is not
+    str(BaseURL.TRADING_PAPER)                  -> 'BaseURL.TRADING_PAPER'
+    ```
+
+    ⚠ **THE EXPLANATION HERE WAS WRONG BEFORE IT WAS RIGHT, AND THE WRONG VERSION WAS THE
+    DANGEROUS ONE.** It said *"`BaseURL` is a plain `Enum`, not a `str, Enum`"*. **It IS a
+    `str, Enum`** — `issubclass(BaseURL, str)` is `True`, the member compares equal to the URL and
+    supports containment. **The actual mechanism is that `Enum.__str__` wins over `str.__str__` for
+    a mixin enum**, so the member *is* a string while `str()` of it is the member NAME. The
+    conclusion and the code were right for a reason that was not the real one — and a reader
+    trusting the old sentence would believe the member is not string-comparable at all, which would
+    send them to `.value` in places where plain comparison is fine. Corrected by the manager, who
+    drove it. *The claim held, the reason was wrong, and the reason is the load-bearing half for
+    whoever reads this next.*
+
+    So a check written `"paper-api" in str(client._base_url)` is `False` for a genuine paper client
+    and would refuse every legitimate construction while passing the override case it was written
+    to catch. `getattr(raw, "value", raw)` handles both shapes: the enum yields its URL, a plain
+    string yields itself. This is `Order.qty`'s `Union[str, float, None]` trap with a second
+    surface.
+
+    `None` means the question could not be asked — a test double, or an SDK that renamed a private
+    attribute. **It is not an answer**, and the caller must not read it as one.
+    """
+    raw = getattr(client, "_base_url", None)
+    if raw is None:
+        return None
+    return str(getattr(raw, "value", raw))
+
+
+class AlpacaEndpointMismatch(BrokerError):
+    """`is_simulation` would have disagreed with where the client is POINTED (`B389`).
+
+    **The flag we passed is a record of our intent; the base URL is where the money is.** The SDK
+    resolves them as
+
+        base_url = url_override if url_override else (TRADING_PAPER if paper else TRADING_LIVE)
+
+    so `url_override` outranks `paper` entirely, and `TradingClient(k, s, paper=True,
+    url_override=<live>)` points at real money while `is_simulation` returns `True` — the assertion
+    gating ALL execution passing on a real-money client. Settled by CONSTRUCTION, not by reading
+    the constructor.
+
+    **Raised at construction rather than reported by `is_simulation`.** A flag that quietly starts
+    returning something else moves the failure away from the mistake; refusing to build the adapter
+    puts it on the line that made it. Nothing downstream has to remember to check.
+    """
+
+    def __init__(self, *, paper: bool, endpoint: str) -> None:
+        super().__init__(
+            f"Alpaca adapter was constructed with paper={paper}, but its client points at "
+            f"{endpoint!r}. `is_simulation` reports the flag, and ExecutionService refuses any "
+            f"adapter reporting False — so this combination would have presented a client at "
+            f"{endpoint!r} as a simulation. `url_override` takes precedence over `paper` in the "
+            f"SDK (B389). Refusing to construct rather than reporting a flag that is not true.",
+            broker="alpaca",
+        )
+        self.paper = paper
+        self.endpoint = endpoint
 
 
 class AlpacaFieldUnreadable(BrokerError):
@@ -165,6 +267,27 @@ class AlpacaAdapter(BrokerAdapter):
         self._paper = bool(paper)
         self.connected: bool = False
 
+        #: WHERE THIS CLIENT POINTS, or `None` if it could not say (`B389`, `T-0138`).
+        #:
+        #: **A POSITIVE RECORD OF WHICH ANSWER `is_simulation` IS GIVING**, the same shape as
+        #: `Position.pnl_source`: *derived from the endpoint* and *taken from the flag because the
+        #: endpoint was unreadable* are different claims, and a reader must not have to guess
+        #: which one they have.
+        self.endpoint: str | None = _endpoint_of(client)
+        self.simulation_source: str = (
+            "endpoint" if self.endpoint is not None else "flag (client endpoint unreadable)"
+        )
+
+        # THE ASSERTION THAT REMOVES `B389` RATHER THAN DOCUMENTING IT.
+        #
+        # Only a KNOWN disagreement refuses. An unreadable endpoint is a question, not a licence:
+        # it is recorded above and left to `is_simulation`'s flag, because raising on it would
+        # take the platform down the day the SDK renames a private attribute — trading a latent
+        # risk for a certain outage. Test doubles land here too, which is why the mock in
+        # `test_t0136_alpaca_adapter.py` now carries a `_base_url`.
+        if self.endpoint is not None and (self.endpoint == PAPER_ENDPOINT) != self._paper:
+            raise AlpacaEndpointMismatch(paper=self._paper, endpoint=self.endpoint)
+
         #: `T-0137`. Declared on the INSTANCE so a reader of `manager.py` sees the constraint
         #: attached to the adapter it constructs, and so `ExecutionService` can read it through
         #: the `BrokerAdapter` contract without importing this module.
@@ -179,11 +302,19 @@ class AlpacaAdapter(BrokerAdapter):
     # ------------------------------------------------------------------
     @property
     def is_simulation(self) -> bool:
-        """**The `paper` flag we constructed the client with.**
+        """**The `paper` flag — which `__init__` has already checked against the real endpoint.**
 
         Not derived from an account field and not per-call. `T-0106`'s `is_simulation` returned a
-        hardcoded `False` with a docstring explaining that no value was correct for an MT5 demo;
-        here the value is correct and is simply reported.
+        hardcoded `False` with a docstring explaining that no value was correct for an MT5 demo.
+
+        **THIS USED TO SAY "the value is correct and is simply reported", AND THAT WAS THE WHOLE
+        DEFECT** (`B389`). The value is our INTENT; `url_override` can point the client somewhere
+        else entirely and this flag would not notice. It is trustworthy now only because
+        construction refuses on a known disagreement — so read `simulation_source` to see WHICH
+        answer you have: `endpoint` means the client was asked, `flag (...)` means it could not be.
+
+        Kept as a plain flag read rather than a live lookup on purpose: this gates every execution
+        and must not be able to raise or to change answer between two calls.
         """
         return self._paper
 
@@ -432,6 +563,22 @@ class AlpacaAdapter(BrokerAdapter):
     # ------------------------------------------------------------------
     # The one write — REFUSES, and refuses EVERY direction in this phase
     # ------------------------------------------------------------------
+    def order_path_status(self) -> str | None:
+        """This adapter cannot place orders yet, and a run must not START pointed at it.
+
+        **DELETE THIS OVERRIDE WHEN `place_order`'s BODY LANDS.** `test_t0138_order_path_gate`
+        asserts the biconditional — this reason present AND `place_order` raising
+        `NotImplementedError` — so writing the body turns that arm red and forces the removal.
+        A comment asking a future reader to remember would not.
+        """
+        return (
+            "Alpaca's order path is not written yet: `place_order` refuses every LONG with "
+            "NotImplementedError. Its body is scoped to part D of ALPACA_PROGRAMME.md, which "
+            "measures the minimum order size and increment the body must round to and refuse "
+            "below. Starting a run against this venue would fail every entry one at a time, and "
+            "the failures would read as the venue being down."
+        )
+
     async def place_order(self, request: OrderRequest) -> dict:
         """**REFUSES A SHORT WITH THE VENUE'S REASON. REFUSES A LONG AS UNIMPLEMENTED.**
 
@@ -446,7 +593,7 @@ class AlpacaAdapter(BrokerAdapter):
 
         ```
         SHORT  -> DirectionNotSupported, reason = ALPACA_CRYPTO_LONG_ONLY.reason
-        LONG   -> NotImplementedError,   which names the MEMBER and NOT the venue
+        LONG   -> NotImplementedError,   which names the MEMBER and NOT the venue (body: part D)
         ```
 
         **WHY THIS IS SAFE TO KEY ON DIRECTION AT ALL — measured, not assumed.** The two side
@@ -502,8 +649,10 @@ class AlpacaAdapter(BrokerAdapter):
             self.direction_policy.enforce(request.direction)
 
         raise NotImplementedError(
-            "Alpaca place_order is not implemented yet — it is part C of ALPACA_PROGRAMME.md, "
-            "which has no task id. This refusal is about the "
+            "Alpaca place_order is not implemented yet — its body is scoped to part D of "
+            "ALPACA_PROGRAMME.md, because D measures the minimum order size and increment that "
+            "the body must round to and refuse below; writing it before D means writing it on "
+            "assumptions. This refusal is about the "
             "MEMBER, not about the venue or the direction: a LONG is acceptable to Alpaca and "
             "will be placed here once this is written. A SHORT is refused above, permanently, "
             "with the venue's own reason."

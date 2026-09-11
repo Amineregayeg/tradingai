@@ -1625,6 +1625,31 @@ class LiveCryptoLoop:
         if self._running:
             return await self.status()
 
+        # ------------------------------------------------------------------
+        # REFUSE TO START AGAINST A VENUE THAT CANNOT PLACE AN ORDER (`T-0138`).
+        #
+        # **ONE REFUSAL, BEFORE THE RUN EXISTS — not 146 identical failures afterwards.** With an
+        # unwritten order path every entry fails individually, and an operator reading a wall of
+        # venue errors concludes the VENUE is broken rather than that the platform was pointed at
+        # a half-built adapter. That is `B380`'s shape: a correct record turned into the wrong
+        # conclusion by the surface it reaches, and here the wrong conclusion sends someone to
+        # Alpaca's status page.
+        #
+        # ASKED OF THE ADAPTER, NOT KEYED ON THE VENUE'S NAME. `if broker_mode == "alpaca"` would
+        # be a second copy of a fact the adapter already knows, and it would still be refusing
+        # runs the day after part D wrote the body — `B184` with a string, and stale by
+        # construction.
+        #
+        # BEFORE `reset_run`, deliberately. Refusing after it would have already ended the
+        # previous run and opened a new one, so a rejected start would destroy the run it
+        # refused to replace.
+        blocked = self.paper.order_path_status()
+        if blocked is not None:
+            logger.warning("Engine start REFUSED — venue cannot place orders",
+                           broker=getattr(self.paper, "broker_name", "?"), reason=blocked)
+            await self._act("engine", f"Engine NOT started — {blocked}")
+            return {**await self.status(), "started": False, "refused": blocked}
+
         # Close the books on anything a previous process left dangling BEFORE
         # opening a new run, so the abandoned records belong to the run that
         # created them rather than to this one.
