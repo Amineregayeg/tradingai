@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-11 (B399 — /feedback PROPOSES CORRECTIONS ACROSS REPLAY, BACKTEST, PAPER AND LIVE DECISIONS POOLED INTO ONE POPULATION, and across every instrument. cohort is NOT NULL, is in the dict the consumer receives (engine.py:53), and analyze() never reads it — controlled zero, with expected_r/realized_r/outcome nonzero proving the grep works. symbol is zero in the same breath. It is a DESIGN ACCOMMODATION, not an oversight: feedback.py:82 states the vocabulary is tolerant of both the DecisionRecord and backtest engine vocabularies. So part E is REMEDIAL, not preventive — the pooling predates long_only entirely, which inverts the framing I gave review. The config axis is severed one layer earlier: _serialize_decision emits 20 keys and run_id is not among them (B366). COULD-NOT-ASK stated rather than zeroed: no DB reachable, and review correctly DECLINED to reach production on a peer's ask, so run counts are unknown and must not be reported as zero. TIER 1 refuses on cohort with no schema change, no join and no caller change, covering the axis where harm is possible today; TIER 2 adds run_id to the serializer plus an O(runs) join.)
+Last updated: 2026-09-11 (B399 AMENDMENT — THERE IS A THIRD AXIS AND TIER 1 DOES NOT COVER IT. F6, audited 2026-08-13, measured it a MONTH before part E was scoped: DecisionRecord has NO field for HOW a trade closed — exit_reason/close_reason/exit_kind/forced are zero hits against a control that prints 20+ Mapped fields from the same file — so closed-by-stop-loss (evidence) and closed-by-OPERATOR (an administrative event) are ONE ROW SHAPE. gap_r is the learning signal, so a force-close manufactures a large spurious gap: F6's instance reads gap_r ~ -2.35 for a trade an operator terminated. Two of seven trades were operator closes, so 28% of the live corpus is not evidence in either direction. THIS BREAKS TIER 1 AS WRITTEN: cohort and symbol are discriminators that EXIST and are unread, fixable consumer-side; the close reason DOES NOT EXIST, so no filtering can recover it, and refusing on cohort alone would leave a population still 28% non-evidence while asserting it was characterised — worse than the silence it replaces. THE BACKFILL IS IMPOSSIBLE, which sets a deadline: every run before the field exists is permanently unclassifiable.)
 
 ---
 
@@ -25793,4 +25793,66 @@ run are a THIRD bucket that must be named in the composition, not folded into ei
 **Checked so nobody re-checks it:** `DecisionRecord` carries no user or account column, so the
 unfiltered `select()` is single-tenant rather than a cross-account leak; `user_id` on the endpoint is
 auth only.
+
+#### `B399` AMENDMENT — THERE IS A THIRD AXIS, IT IS THE WORST OF THE THREE, AND TIER 1 DOES NOT COVER IT. `F6` measured it a MONTH before part E was scoped
+
+**Found by review searching the register rather than the code, after reporting the row counts as a
+could-not-ask.** The counts were a proxy for *has the harm occurred*. **`F6` answers that question
+directly, audited and dated 2026-08-13, and it answers it against my framing.**
+
+```
+DecisionRecord fields   signal_sl · signal_tp · fill_price · expected_r · realized_r · gap_r · outcome
+exit_reason / close_reason / exit_kind / forced        ZERO hits
+                        (control: the Mapped[...] field list prints 20+ lines from the same file)
+```
+
+**So these are ONE row shape:**
+
+```
+closed by STOP-LOSS        a strategy outcome.        EVIDENCE.
+closed by an OPERATOR      an administrative event.   NOT EVIDENCE, in either direction.
+```
+
+**And `gap_r` is the learning signal**, so a force-close manufactures a large spurious gap. `F6`'s
+measured instance:
+
+```
+ETH/USD   expected_r 1.9166   realized_r -0.433   outcome LOSS   gap_r ~ -2.35
+```
+
+> **That is not the strategy underperforming by 2.35R. It is a trade terminated at an arbitrary
+> moment by an operator action — and nothing in the row says so.** Two of seven trades were operator
+> closes, so **28% of the live corpus is not evidence about the strategy**, and `wins 1 / losses 1`
+> is not a 50% win rate, it is where two marks happened to sit at `00:35:25Z`.
+
+**`F6`'s projection is the part that makes this urgent rather than tidy:** *after 15 stops, 30 rows,
+and corrections begin deriving from administrative events.* **Every stop/start cycle injects rows
+that look like strategy failures, invisibly** — and this engine has been stopped and restarted
+repeatedly, including the hold it is under now.
+
+**WHY THIS BREAKS THE TIER 1 RECOMMENDATION AS WRITTEN.** `cohort` and `symbol` are unread
+discriminators — **present in every record, delivered to the consumer, ignored.** Reading them is a
+consumer-side fix with no schema change. **The close-reason discriminator DOES NOT EXIST.** Nothing
+in the row distinguishes the two cases, so **no amount of filtering at the consumer can recover it**,
+and a tier 1 that refuses on `cohort` alone would leave a population that is still 28% non-evidence
+while now carrying an explicit assurance that it was characterised. **That is worse than the silence
+it replaces.**
+
+```
+TIER 1  cohort, symbol      consumer-side. Discriminator EXISTS and is unread.
+TIER 1b close reason        SCHEMA. Discriminator does not exist. Must be recorded at close time,
+                            and cannot be backfilled for rows already written.
+```
+
+**AND THE BACKFILL IS IMPOSSIBLE, WHICH SETS A DEADLINE.** Every run executed before the field
+exists is permanently unclassifiable — the information was never captured. **So the cost of delay is
+not linear: it is one more corpus of rows that can never be characterised.** `F6` was dated
+2026-08-13 and nothing has been recorded since that can tell the two apart.
+
+**Review's process note, recorded because it is the countermeasure working.** It reported the row
+counts as a could-not-ask and then **searched the register instead of stopping** — and the register
+held a measured, dated answer to the question the counts were a proxy for. *A could-not-ask is a
+reason to look somewhere else, not a reason to stop.*
+
+
 
