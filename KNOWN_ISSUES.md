@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-11 (B397 — THE TWO WAYS AN EQUIVALENCE ARM PASSES WHILE PROVING NOTHING, exact mirrors, both hit tonight hours apart: A!=B passes on incidental difference because two runs ALWAYS differ somewhere, and A==B passes on IDENTICAL BROKENNESS — _fingerprint compared a BOUND METHOD with `is`, which is never true, so settle_wired was False on both sides and the equality passed. Countermeasures are arms, not habits: name WHAT differs plus a negative control that must fail; and assert the fingerprint's CONTENT, since agreement between two unknowns is not a measurement. B396 — A GUARD WHOSE VOCABULARY GREW STOPS COVERING ITS CASE SILENTLY: warmup() skipped injection for broker_mode == 'sim', which meant 'every account where injection is harmful' only while sim and paper were the whole vocabulary; the consequence was MEASURED rather than asserted after the first statement of it was wrong — warmup places no orders, it mutates simulator internals, so Alpaca raises AttributeError rather than posting trades at a venue. B395 — simulation_source records whether the safety flag was EVER CHECKED and nothing keeps it, so a verified run and a merely-believed run are identical in every record; remedy is _config_snapshot, not the log.)
+Last updated: 2026-09-11 (B398 — A CONTRACT ARM THAT ENUMERATES THE CONTRACT CANNOT SEE A MEMBER THAT WAS NEVER ON IT. The arm the manager ordered after the proxy twice failed to forward a member was written, run against the tree with the simulation_source omission PRESENT, and PASSED — because simulation_source was never on BrokerAdapter, only on AlpacaAdapter as an instance attribute, so the defect was outside the arm's population by construction. An instrument that cannot see the defect it was built for is not a weaker instrument, it is a GREEN LIGHT; shipped unrun against known-bad, C would have carried a contract check that certifies nothing. Fix changes shape: declare simulation_source ON BrokerAdapter with the base RAISING, which makes absence loud AND the member enumerable — a benign default on the base would have reintroduced B395's amendment one level up. The allow-list is explicit names with reasons, never a predicate, because a predicate silently absorbs the next omission. FOURTH instance in two days of one shape: a population narrowed for a good reason then read as the whole; the only countermeasure that has worked is a must-hit control.)
 
 ---
 
@@ -25697,3 +25697,58 @@ A == B   assert the fingerprint's CONTENT, not only that two fingerprints agree.
 **`is` on a bound method is the specific trap and it is not obscure** — `obj.method is obj.method`
 is `False` in CPython for every object in this tree. **Any arm comparing callables with `is` is
 suspect on sight.**
+
+### B398 — A CONTRACT ARM THAT ENUMERATES THE CONTRACT CANNOT SEE A MEMBER THAT WAS NEVER ON IT. The arm was written for a known omission, run against the tree with that omission PRESENT, and PASSED
+
+**Found by execute, on an arm the manager had just ordered, by running it against a known-bad state
+BEFORE trusting it.** This is the strongest instance this register holds of *verify the instrument,
+not the result*, because the instrument was new, correct-looking, aimed at a defect that was
+present, and **green.**
+
+**THE ORDER.** `LiveLoopBrokerProxy` had twice failed to forward a member — `order_path_status`,
+then `simulation_source` — and both fixes were *forward that member*. So C was told to own an arm
+enumerating `BrokerAdapter`'s members and asserting the proxy forwards every one, **so the third
+omission is caught the day it is added rather than the day someone reads a wrong field.**
+
+**THE RESULT.**
+
+```
+arm written, run against the tree with the simulation_source omission PRESENT   ->   PASSED
+```
+
+**THE REASON, AND IT IS THE ENTRY.** The arm enumerates `BrokerAdapter`'s public members.
+**`simulation_source` was never ON `BrokerAdapter`** — it existed only on `AlpacaAdapter`, as an
+instance attribute. **So the defect was outside the arm's population by construction, and the arm
+reported the tree clean.**
+
+> **An instrument that cannot see the defect it was built for is not a weaker instrument. It is a
+> green light.** Written and shipped unrun against a known-bad state, C would have carried a contract
+> check that certifies nothing — the `records_rejected_signals` shape (`B390`) in the guard rather
+> than in the config.
+
+**THE FIX CHANGES SHAPE, AND GETS BOTH PROPERTIES AT ONCE.** `simulation_source` is declared on
+`BrokerAdapter` itself **and the base RAISES**. Absence is then loud where it is introduced, *and*
+the member is ENUMERABLE, so the arm covers it and every future one. **A concrete benign default on
+the base would have reintroduced `B395`'s amendment one level up** — the rule applied to the
+instrument rather than only to the field.
+
+**THE ALLOW-LIST IS EXPLICIT, NOT A PREDICATE**, and this is the part most likely to be undone later
+by someone tidying. `DELIBERATELY_NOT_FORWARDED` names five members with a reason each. **A
+predicate — *"skip properties"*, *"skip underscore-prefixed"* — would silently absorb the next
+omission, which is the exact failure the arm exists to catch.** Adding a name must be a decision
+someone writes down. A second arm asserts the exemptions still exist on the contract, so the list
+cannot outlive what it exempts.
+
+**THE FAMILY, and this is the fourth instance in two days of ONE shape:**
+
+```
+manager   find narrowed to the repo tree            the venv was in $HOME          B389
+review    place_order scan excluding broker/                                       reported at the time
+execute   mutation counts predicted over the file just authored                    M-5, M-6
+execute   contract arm enumerating the contract     the member was off-contract    THIS
+```
+
+**A population narrowed for a good reason, then read as if it were the whole.** In every case the
+narrowing is what made the instrument finish, or exist at all. **The only countermeasure that has
+worked is a must-hit control: run it against a state known to contain the defect, and treat a pass
+there as a broken instrument rather than a clean tree.**
