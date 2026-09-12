@@ -199,3 +199,125 @@ describe('B369 — MT5 is reachable from the broker form', () => {
     expect(screen.getByPlaceholderText(/account email/i)).toBeTruthy()
   })
 })
+
+describe('B408 — the form displayed Paper and submitted live', () => {
+  beforeEach(() => { connect.mockClear() })
+
+  /**
+   * WHY NO EXISTING ARM CAUGHT THIS, which is the interesting half.
+   *
+   * Two arms above look like coverage and together guarantee none:
+   *   - `offers Alpaca and SENDS api_key + api_secret` reads the PAYLOAD — and asserts
+   *     `broker`, `api_key`, `api_secret`, never `environment`.
+   *   - `offers Alpaca as PAPER ONLY` reads the rendered LABEL — which is already correct.
+   * A render arm cannot fail against this defect, because the display was never wrong. Only the
+   * submitted value was.
+   *
+   * The mechanism: initial state and the post-connect reset both hard-code `environment: 'live'`,
+   * the broker `<select>` writes only `broker`, and a one-environment broker renders a LABEL
+   * instead of a `<select>` — so for Alpaca nothing ever writes the field. **The select is the
+   * only writer, and this broker has no select.**
+   */
+  it('SUBMITS practice for Alpaca, not the default live', async () => {
+    const user = userEvent.setup()
+    await openBrokerForm(user)
+
+    const select = screen.getByDisplayValue(/Crypto Fund Trader/i) as HTMLSelectElement
+    await user.selectOptions(select, 'alpaca')
+    await user.type(screen.getByPlaceholderText(/Alpaca API key id/i), 'PKTEST')
+    await user.type(screen.getByPlaceholderText(/Alpaca secret key/i), 'sekrit')
+    await user.click(screen.getByRole('button', { name: /^Connect$/i }))
+
+    await waitFor(() => expect(connect).toHaveBeenCalledTimes(1))
+    const payload = connect.mock.calls[0]![0] as Record<string, unknown>
+
+    expect(payload.environment).toBe('practice')
+    expect(payload.environment).not.toBe('live')
+  })
+
+  it('submits the SAME environment it displays', async () => {
+    // The pairing that would have caught it. Either assertion alone passes on this defect: the
+    // label was right and the payload was unread.
+    const user = userEvent.setup()
+    await openBrokerForm(user)
+    const select = screen.getByDisplayValue(/Crypto Fund Trader/i) as HTMLSelectElement
+    await user.selectOptions(select, 'alpaca')
+
+    expect(screen.getByText(/^Paper$/)).toBeTruthy()          // displayed
+    await user.type(screen.getByPlaceholderText(/Alpaca API key id/i), 'PKTEST')
+    await user.type(screen.getByPlaceholderText(/Alpaca secret key/i), 'sekrit')
+    await user.click(screen.getByRole('button', { name: /^Connect$/i }))
+
+    await waitFor(() => expect(connect).toHaveBeenCalledTimes(1))
+    const payload = connect.mock.calls[0]![0] as Record<string, unknown>
+    expect(payload.environment).toBe('practice')              // submitted, and they agree
+  })
+
+  it('submits practice after a RESET, which is where the defect was worse', async () => {
+    // `SUPPORTED_BROKERS[0]` is `alpaca`, so the post-connect reset returned the form to Alpaca
+    // carrying `environment: 'live'`. A user who connected ANY broker and then connected Alpaca
+    // hit it without ever touching the broker select — and `B369` was recreated in this exact
+    // reset before, which is why it is worth its own arm rather than trusting the shared helper.
+    const user = userEvent.setup()
+    await openBrokerForm(user)
+
+    // First connect: CFT, which succeeds and triggers the reset.
+    await user.type(screen.getByPlaceholderText(/account email/i), 'a@b.c')
+    await user.type(screen.getByPlaceholderText(/account password/i), 'pw')
+    await user.click(screen.getByRole('button', { name: /^Connect$/i }))
+    await waitFor(() => expect(connect).toHaveBeenCalledTimes(1))
+
+    // Reopen. The form is now on Alpaca, untouched by the user.
+    const add = await screen.findByRole('button', { name: /Add Broker/i })
+    await user.click(add)
+    await user.type(screen.getByPlaceholderText(/Alpaca API key id/i), 'PKTEST')
+    await user.type(screen.getByPlaceholderText(/Alpaca secret key/i), 'sekrit')
+    await user.click(screen.getByRole('button', { name: /^Connect$/i }))
+
+    await waitFor(() => expect(connect).toHaveBeenCalledTimes(2))
+    const payload = connect.mock.calls[1]![0] as Record<string, unknown>
+    expect(payload.broker).toBe('alpaca')
+    expect(payload.environment).toBe('practice')
+  })
+
+  it('still submits live for CFT, whose single environment IS live', async () => {
+    // THE MUST-MISS. A fix that wrote 'practice' unconditionally, or dropped the field, would
+    // pass the arm above and break the broker that is actually connected in production.
+    const user = userEvent.setup()
+    await openBrokerForm(user)
+    // CFT's credential fields are email + password (there is no "API key" placeholder — my first
+    // fixture invented one and failed for its own reason rather than the defect's).
+    await user.type(screen.getByPlaceholderText(/account email/i), 'a@b.c')
+    await user.type(screen.getByPlaceholderText(/account password/i), 'pw')
+    await user.click(screen.getByRole('button', { name: /^Connect$/i }))
+
+    await waitFor(() => expect(connect).toHaveBeenCalledTimes(1))
+    const payload = connect.mock.calls[0]![0] as Record<string, unknown>
+    expect(payload.broker).toBe('cryptofundtrader')
+    expect(payload.environment).toBe('live')
+  })
+
+  it('lets the MT5 select keep writing the field', async () => {
+    // MT5 has two environments, so it HAS a select — the one writer that always worked. A fix
+    // that derived the environment from the broker alone would freeze it.
+    const user = userEvent.setup()
+    await openBrokerForm(user)
+    const select = screen.getByDisplayValue(/Crypto Fund Trader/i) as HTMLSelectElement
+    await user.selectOptions(select, 'mt5')
+
+    // BY POSITION AMONG THE COMBOBOXES, not by displayed value. My first fixture looked for
+    // "Demo", which assumed the POST-FIX default — on the deployed code the value carries over
+    // from CFT and shows "Live", so the arm failed for its own reason instead of the defect's.
+    // Two comboboxes exist here: [0] broker, [1] environment.
+    const combos = screen.getAllByRole('combobox') as HTMLSelectElement[]
+    expect(combos).toHaveLength(2)
+    await user.selectOptions(combos[1]!, 'live')
+    await user.type(screen.getByPlaceholderText(/MetaApi API token/i), 'tok')
+    await user.type(screen.getByPlaceholderText(/provisioned account id/i), 'acct')
+    await user.click(screen.getByRole('button', { name: /^Connect$/i }))
+
+    await waitFor(() => expect(connect).toHaveBeenCalledTimes(1))
+    const payload = connect.mock.calls[0]![0] as Record<string, unknown>
+    expect(payload.environment).toBe('live')
+  })
+})

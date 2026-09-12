@@ -95,6 +95,30 @@ const BROKER_CAPABILITIES = {
 
 type SupportedBroker = keyof typeof BROKER_CAPABILITIES
 
+/**
+ * B408 — THE ENVIRONMENT A BROKER IS ACTUALLY CONNECTED WITH, derived from its capabilities.
+ *
+ * The form displayed "Paper" for Alpaca and SUBMITTED `live`. Three places set `environment` and
+ * none of them consulted the broker: the initial state and the post-connect reset both hard-coded
+ * `'live'`, and the broker `<select>` wrote only `broker`. A one-environment broker renders a
+ * LABEL rather than a `<select>` — **so the select is the only writer of this field, and that
+ * broker has no select.** Nothing ever wrote it.
+ *
+ * Not cosmetic. The backend reads
+ * `paper = not environment.startswith("live") or observe_only`, so a stored `live` already
+ * falsifies the first term and the connection is paper by `observe_only` ALONE — which is only
+ * true while `ALLOW_LIVE_TRADING` is unset. Two deliberate acts later, that stored value selects
+ * the LIVE endpoint from a form that said Paper.
+ *
+ * Deriving it means submitted equals displayed by construction, for every broker: a
+ * single-environment broker gets the one value it has, and a multi-environment broker starts on
+ * its first option — which is also what its select shows, so the two cannot disagree on open.
+ */
+function defaultEnvironmentFor(broker: string): BrokerConnectRequest['environment'] {
+  const caps = BROKER_CAPABILITIES[broker as SupportedBroker]
+  return (caps?.environments[0]?.value ?? 'live') as BrokerConnectRequest['environment']
+}
+
 const SUPPORTED_BROKERS = Object.keys(BROKER_CAPABILITIES) as SupportedBroker[]
 
 // Section wrapper
@@ -176,7 +200,10 @@ export default function SettingsPage() {
     broker: 'cryptofundtrader',
     api_key: '',
     account_id: '',
-    environment: 'live',
+    // `B408`: derived, never a literal. A literal here was correct only because it happened to
+    // match CFT's single environment; the reset below used the same literal with a DIFFERENT
+    // broker and was wrong.
+    environment: defaultEnvironmentFor('cryptofundtrader'),
     observe_only: true,
   })
   const [connectLoading, setConnectLoading] = useState(false)
@@ -215,7 +242,13 @@ export default function SettingsPage() {
       // above line 120 says the backend cannot build, recreated after every SUCCESSFUL connect.
       // The initial state was fixed and the reset was missed, so the form was correct until it
       // was used once. It now returns to the same default the component starts from.
-      setBrokerForm({ broker: SUPPORTED_BROKERS[0], api_key: '', account_id: '', environment: 'live', observe_only: true })
+      // `B408`. **THIS WAS THE WORSE INSTANCE**: `SUPPORTED_BROKERS[0]` is `alpaca`, so after
+      // any successful connect the form reset to Alpaca carrying `environment: 'live'` — the
+      // defect, recreated by the reset, exactly as `B369` was recreated here before.
+      setBrokerForm({
+        broker: SUPPORTED_BROKERS[0], api_key: '', account_id: '',
+        environment: defaultEnvironmentFor(SUPPORTED_BROKERS[0]), observe_only: true,
+      })
     } catch (e: unknown) {
       const err = e as { detail?: string }
       setConnectError(err?.detail ?? 'Connection failed')
@@ -331,7 +364,14 @@ export default function SettingsPage() {
                     <label style={{ fontSize: 12, color: '#8888a0', display: 'block', marginBottom: 5 }}>Broker</label>
                     <select
                       value={brokerForm.broker}
-                      onChange={(e) => setBrokerForm((f) => ({ ...f, broker: e.target.value as BrokerConnectRequest['broker'] }))}
+                      onChange={(e) => {
+                        // `B408`: the environment follows the broker. Without this, selecting a
+                        // one-environment broker left whatever the previous one had.
+                        const next = e.target.value as BrokerConnectRequest['broker']
+                        setBrokerForm((f) => ({
+                          ...f, broker: next, environment: defaultEnvironmentFor(next),
+                        }))
+                      }}
                       style={{ width: '100%' }}
                     >
                       {SUPPORTED_BROKERS.map((b) => (
