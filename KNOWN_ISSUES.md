@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-12 (newest entry B425 — the feedback layer's outcome classifier enumerates SIX values while the database now holds EIGHT, so REJECTED and UNSIZED_FILL fall through into the fallback meant for rows carrying no token, which infers the outcome from the sign of realized_r; corrected after review showed my claim that the UNSIZED_FILL marker is destroyed on close was WRONG — the settle-path overwrite is unreachable for those rows behind three independent guards, and the real finding is that it is safe only BY DISTANCE, with the fix being to make crypto_loop.py:1930 look like :2475, which guards in its own query. B424 fixed at 12b3a90 and amended twice: it was TWO properties, not one — _declare_halt makes the pairing unrepresentable but says nothing about the no-await WINDOW that actually closed the cancellation and racing-status routes, and that adjacency was accidental. Three residuals then closed on the fix itself: a pairing arm scanning ONE module while the attribute was assignable from ANY (now a read-only @property plus a 333-file scan, two mechanisms with different blind spots); a LAST-WINS window walker that judged a two-pair body on the last pair only, reporting SAFE with the first pair open; and a blindness guard that stayed GREEN while the scan had stopped seeing the only site it exists for — a count is not a denominator, the identity of what was counted is.)
+Last updated: 2026-09-13 (newest entry B426 — a THIRD encoding of the outcome vocabulary, lowercase and four-valued, in backtest/engine.py, whose own local Trade dataclass never writes a DecisionRecord, so nothing is broken today; the row exists because B425's fix deletes feedback.py's alias sets, the ONLY place a lowercase token and the decision vocabulary appear together, after which no code path, test or comment will acknowledge that the other exists — and "scratch" has no counterpart among the eight, so a future join cannot be a rename. Also B425 amended: the defect is ABSENT VS UNRECOGNISED, not a missing token set. The reachable population is exactly NULL or one of the eight, so the sign-of-R fallback is CORRECT for NULL and wrong only for a token the reader does not know — one path for two states, which is _position_units's .get() collapse one layer up. The fix must therefore KEEP the fallback for NULL and stop it being reachable from a present token, and on an unrecognised token must exclude, COUNT and surface rather than raise. The six aliases have no producer — none is admitted by the CHECK — so deleting them is a pure deletion.)
 
 ---
 
@@ -28239,3 +28239,77 @@ unrecognised outcome becomes a normal trade result rather than an alarm. **The f
 from the model's own vocabulary and REFUSE on an unrecognised token** — the constants already exist
 (`OUTCOME_*` in `app/models/decision_record.py`), so this is a deletion of the parallel token sets
 rather than an addition to them. Not a deploy-D blocker.
+
+#### AMENDMENT (execute, verified by manager) — IT IS **ABSENT VS UNRECOGNISED**, NOT "A MISSING TOKEN SET", AND THAT CHANGES WHAT THE FIX MUST PRESERVE
+
+**The reachable population is exactly "NULL or one of the eight".** The column is
+`outcome IS NULL OR outcome IN (...)` (`decision_record.py:589`), `_serialize_decision` passes
+`r.outcome` through verbatim, and `analyze()` has **one** caller (`api/routers/engine.py:332`).
+Nothing else can arrive.
+
+**Which makes the sign-of-R fallback correct, and correctly reachable — for `NULL`.** A row that
+never carried a token has nothing else to go on. The defect is that a row carrying a token *the
+reader does not know* is routed into the branch written for rows carrying **none**:
+
+```
+outcome IS NULL          no token was ever recorded        -> infer from realized_r   CORRECT
+outcome = REJECTED       a token WAS recorded, unknown     -> infer from realized_r   WRONG
+outcome = UNSIZED_FILL   a token WAS recorded, unknown     -> infer from realized_r   WRONG
+```
+
+> **One path for two states.** It is `_position_units`'s defect one layer up: there `.get()`
+> collapsed *absent* and *present-and-None*; here "no set matched" collapses *absent* and
+> *present-but-unrecognised*.
+
+**So the fix is not "add the two missing tokens".** The fallback must **stay** for `NULL` and must
+**stop being reachable from a present token** — an unrecognised token is a different answer from an
+absent one and has to be routed somewhere that says so.
+
+**AND THE SIX ALIASES HAVE NO PRODUCER, so removing them is a pure deletion.** `"lose"`,
+`"breakeven"`, `"break_even"`, `"scratch"`, `"abstain"` and `""` are unreachable: **none is admitted
+by the CHECK** (verified by evaluating the alias list against the eight), no producer or test feeds
+them, and `analyze()` has no other caller. **Where `"scratch"` actually comes from is `B426`** — a
+third encoding of the outcome vocabulary in a module that never writes a `DecisionRecord`. The alias
+sets are the fossil of a join between the two that was never made.
+
+**On an unrecognised token: exclude, COUNT, and surface — do not raise.** An unknown outcome must not
+be able to take down the feedback endpoint, but it must not vanish silently either, which is the
+whole complaint.
+
+---
+
+### B426 — A **THIRD** ENCODING OF THE OUTCOME VOCABULARY, lowercase and four-valued, in `backtest/engine.py` — and after `B425`'s fix NO code path will acknowledge that the other one exists
+
+**Found by execute while establishing that `B425`'s six alias tokens have no producer — the answer to
+"where does `scratch` come from" is a different vocabulary in a different module. Manager confirmed
+it is unfiled: the register's thirteen apparent hits on `scratch` are all the ordinary word,
+including my own "scratch DB" in `B423`.**
+
+```
+decision_records CHECK      WIN LOSS BE OPEN ABSTAINED ABANDONED REJECTED UNSIZED_FILL   (8, upper)
+backtest/engine.py:521      d.outcome = "win" | "scratch" | "loss"                        (lower)
+    its Trade dataclass     outcome: str = "open"   # "win" | "loss" | "scratch"          (4, lower)
+```
+
+`backtest/engine.py` defines its **own local `Trade` dataclass** (`:59`) and never writes a
+`DecisionRecord` — grep for `DecisionRecord` in that module returns nothing. So the two vocabularies
+never meet at run time, and **nothing is broken today.**
+
+**THE REASON IT IS A ROW IS WHAT HAPPENS NEXT.** `B425`'s fix deletes `feedback.py`'s alias sets,
+which are the only place in the codebase where a lowercase token and the decision vocabulary appear
+together. They are a fossil of an intended join that was never made. **After the deletion the two
+encodings will have no code path, no test and no comment acknowledging that the other exists** — and
+`"scratch"` has no counterpart among the eight at all, so a future join cannot be a rename.
+
+This is `B405`/`B416`'s shape in a third place, and the register should stop being surprised by it:
+
+> **The vocabulary is defined once in the database and re-spelled wherever it is read or written.**
+> `0002`–`0013` re-spelled it in migrations (`B405`, `B416`), `feedback.py` re-spelled it for the
+> reader (`B425`), and `backtest/engine.py` re-spells it for a structure that never reaches the
+> table. Each was written by someone who could not see the others.
+
+**Not urgent and NOT a deploy-D blocker.** The cheap move when the backtest layer is next opened is
+to make the lowercase set derive from the `OUTCOME_*` constants, or to state in that module that its
+vocabulary is deliberately separate and why — either kills the ambiguity. **Do not "fix" it by
+folding `scratch` into `BE` without measuring what the backtest means by it**, which is `B423`'s
+lesson: rewriting a value onto a surviving one asserts something the record never said.
