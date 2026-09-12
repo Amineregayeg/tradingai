@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-12 (newest entry B423 — A DOWNGRADE THAT REWRITES ROWS ONTO A SURVIVING VALUE ASSERTS A DIFFERENT FACT, measured on a real restored copy of production during T-0143's harness run: 0006 rewrites ABANDONED to OPEN — the exact conflation that migration exists to abolish, per its own docstring — and 0008 rewrites REJECTED to ABSTAINED, which asserts no order was ever attempted; five live rows in production are targets of the first, the rewrite is one-way and a re-upgrade does not restore them, and row counts stay identical so nothing looks wrong. 0011/0012/0013 refuse instead, measured: planting one UNSIZED_FILL row makes 0013 -> 0012 fail with CheckViolationError, exit 1, revision and row intact. The three newer ones are right and the two early ones were never brought forward. Latent — nothing plans to roll back past 0006 — but the contrast's other side is not: once a real order writes UNSIZED_FILL, deploy D cannot be rolled back until someone decides what those rows become, which is a one-way door in the abort path. Neighbour of B416, not its duplicate: that entry is about the downgrade DERIVING its vocabulary, this is about what it does to the ROWS, which T-0143's freeze does not address.)
+Last updated: 2026-09-12 (newest entry B424 — halt_reason HAS NO SINGLE DECLARATION SITE, so the next halt site added inherits "healthy" for free. dd68008 closed two of the three routes STRUCTURALLY — the halt site's two assignments are back-to-back with no await between them, so no cancellation and no concurrent status() can see the reassuring middle, verified under mutation in a pinned worktree — but the third is a discipline claim: one assignment site today and nothing requires the next one to arm. A fix that requires everyone to remember has not removed the class, it has renamed it into a rule; the remedy is one _declare_halt that sets both fields plus a structural arm forbidding assignment outside it, cheap now with one site and an audit later. Latent, NOT a deploy-D blocker. Also B423 amended with review's reframe: it is not reversible-versus-one-way but SILENTLY one-way versus LOUDLY one-way, since a re-upgrade already does not restore the rewritten rows — refusing makes an existing one-way door visible at the moment someone reaches for it; the fix is a DELETION of the two UPDATE statements, not a pre-flight count, and changing a deployed migration's DOWNGRADE is safe where changing its upgrade is not, because these downgrades have never run.)
 
 ---
 
@@ -27988,3 +27988,69 @@ downgrade is not the same row, and today nothing distinguishes them.
 **This is `B416`'s neighbour and not its duplicate.** `B416` is about `0006`'s downgrade *deriving*
 its target vocabulary from the live one (fixed by `T-0143`'s freeze). This is about what that
 downgrade does to the *rows*, which `T-0143` did not touch and which the freeze does not address.
+
+#### AMENDMENT (review, verified in the code rather than from my message) — IT IS NOT REVERSIBLE VERSUS ONE-WAY. IT IS **SILENTLY** ONE-WAY VERSUS **LOUDLY** ONE-WAY
+
+My framing above was one step too generous to the refusing migrations. **The information is already
+destroyed today** — I measured that a re-upgrade does not restore the rewritten rows. So refusing
+does not *create* a one-way door:
+
+> **Refusing makes an existing one-way door visible at the moment someone is reaching for it.**
+
+That is the whole value of `0013`'s behaviour, and it is a stronger argument for the fix than
+"reversible is better", because it survives the objection that a refusing downgrade is less useful.
+
+**TWO NOTES ON HOW TO FIX IT, both about not introducing a second encoding:**
+
+1. **The fix is a DELETION, not an addition.** `0013` refuses by *not rewriting* — Postgres's own
+   CHECK rejects the rows. Removing the two `UPDATE` statements is the entire change. **Do not add a
+   hand-written pre-flight count of offending rows:** that is a second encoding of the vocabulary,
+   free to drift from the constraint, which is the exact shape `B405`/`B416` exist to remove.
+2. **Changing a DEPLOYED migration's DOWNGRADE is safe in a way changing its upgrade is not**, and
+   this entry would otherwise read as violating `B416`'s own principle. The freeze argument is
+   *reproduce what actually ran*. **These downgrades have never run in production**, so there is no
+   history to reproduce and nothing to contradict.
+
+**Operationally this is now moot for deploy D and the runbook says so:** `0012` and `0013` only widen
+CHECKs — four `op.*` calls apiece, verified by count against `0009`'s nine — so the `0013` schema is
+a strict superset of what pre-D code writes. **An abort redeploys the previous image and leaves the
+database at `0013`.** The downgrade is never run, so its refusal is never met.
+
+---
+
+### B424 — `halt_reason` HAS NO SINGLE DECLARATION SITE, so the next halt site added will inherit "healthy" for free. The remedy for the last inheritance bug is written down rather than made unrepresentable
+
+**Found by review while verifying `dd68008`, which is itself the fix for `halt_record_failed`
+defaulting to the reassuring state. Confirmed by manager as the one route of the original three that
+the fix did not close. Latent today and NOT a deploy-D blocker — there is exactly one halt site and
+it arms correctly.**
+
+`dd68008` closed two of three routes **structurally**, which is better than asserting them: the halt
+site's two assignments are back-to-back with no `await` between them (`crypto_loop.py:2183` and
+`:2197`), so neither a `CancelledError` nor a concurrent `status()` can observe the reassuring
+middle. Verified under mutation by review in a pinned worktree — removing the halt-site arm kills one
+arm, making the writer conditional kills two different ones, 9 passed restored.
+
+**The third route is untouched and it is a discipline claim, not a code property:**
+
+```
+self.halt_reason        one assignment site today
+                        nothing requires the next one to also set halt_record_failed
+no arm scans for halt sites — the property is "everyone remembers", which is not a property
+```
+
+**THIS IS THE ENTRY, and it is not really about halts.** `B413`'s class was *a failure that vanished
+because a field defaulted to health*. The remedy chosen was to set an alarming value at the halt
+site. **That remedy is a convention, so the class can return through any new site that does not
+follow it** — and a new halt site is exactly the kind of thing this engine will grow.
+
+> **A fix that requires everyone to remember has not removed the class, it has renamed it into a
+> rule.** The class ends when the wrong state cannot be written down.
+
+**THE DURABLE FIX, which is small today and gets harder with every site added:** one
+`_declare_halt(reason)` that sets **both** fields, plus the structural arm that already proved itself
+in this task (`M-2`'s shape) — **assert no assignment to `self.halt_reason` exists outside that
+method**. Then a future halt site cannot inherit "healthy", because it cannot declare a halt at all.
+
+**Do it while there is one site.** The cost is a method and one arm now, versus an audit of every
+site later — and the audit is the thing that reliably does not happen.
