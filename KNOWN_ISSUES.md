@@ -27334,6 +27334,18 @@ corroboration: earliest engine_run    2026-08-04 00:43:12
 **Eighteen days before the model gained a sixth value. So `0002` ran while the model held FIVE, and
 the frozen `5 / 4 / 2` is confirmed by the schema's own history.**
 
+**AND STEP 3's OWN PREMISE WAS CHECKED RATHER THAN ASSUMED** — review went back for it, and the
+manager verified both ends. **The bound only holds if the timestamp is server-generated**; a
+client-supplied one could be backdated and the inequality would prove nothing.
+
+```
+model            created_at ... server_default=func.now()
+deployed schema  column_default = now()
+```
+
+**So `min(created_at)` is a fact about when the server first wrote a row, not about what any writer
+claimed** — and step 3 closes.
+
 > **The value never moved. The justification moved twice** — from *the model at a landing commit*
 > (`B405`'s own method), to *the rewritten file ran* (one step short), to *the table predates the
 > sixth value*. **A file that will be trusted without re-derivation must not carry a reason that
