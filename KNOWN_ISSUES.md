@@ -26794,6 +26794,40 @@ deliberate acts, but both plausible when someone later wants real trading — an
 selects the **live** endpoint, with no further warning, on a connection the operator created from a
 form that said **Paper**.
 
+#### `B408` CORRECTION (review measured it; the manager's entry overstated the risk) — THE ROW IS THREE CONDITIONS FROM HARM, NOT ONE. And the better remedy makes it UNSTORABLE rather than repaired
+
+**I wrote that the connection is paper "by the second of two conditions". Review measured the second
+condition and it is sturdier than I said:**
+
+```
+paper        = not (environment or "").startswith("live")  or  observe_only
+observe_only = creds.get("observe_only", True)     <- DEFAULTS TO TRUE, stored or not
+               and is forced back to True unless ALLOW_LIVE_TRADING is set
+```
+
+**So the row is defused INDEPENDENTLY of `ALLOW_LIVE_TRADING`.** Reaching a live adapter needs three
+things together: stored `live`, stored `observe_only=False`, **and** the server-side switch. My
+"narrowest of margins" was wrong, and the correction belongs here rather than in a reply nobody reads.
+
+**THE REASON TO REPAIR IT IS NOT PROXIMITY TO HARM.** `BrokerConnectionRead.environment` is returned
+to the UI and `load_from_db` re-reads the row on every restart, so the connections list reports
+`live` for the account whose own label is `Alpaca (paper)`. **A record that misdescribes the thing it
+records** — `B402`'s shape — and nobody revisits a stored authorization when the server-side switch
+is later flipped for some other account.
+
+**AND THE FOLLOW-ON REVIEW WOULD RATHER HAVE THAN THE REPAIR: the frontend now derives the value,
+and the backend still accepts any string.**
+
+```python
+environment: str = Field(default="practice", description="'practice' or 'live'")
+```
+
+**A bare `str`.** The description names the vocabulary and nothing enforces it, so `live` for a
+paper-only broker stays persistable by a frontend regression, by `curl`, or by anything else.
+**Refuse to STORE an environment the broker does not offer and the bad row becomes impossible rather
+than repaired** — Execute's own `problem_response` argument (fix the builder, not the sites) applied
+to the write path instead of the read path.
+
 **REMEDY:** when a broker exposes exactly one environment, write it into form state on selection
 (and on reset), so the submitted value equals the displayed one. **An arm should assert the
 submitted payload's `environment` for a single-environment broker, not the rendered label** — a
