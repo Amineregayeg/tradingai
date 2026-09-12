@@ -27348,6 +27348,34 @@ and wrong for *present but unusable*.
 > **Full suite: 236 passed, 16/16 files, union verified, and ZERO guard firings across all 236** —
 > the number that matters most, since the guard runs `beforeEach` on every test.
 >
+> **⇢ NOW VERIFIED (this paragraph superseded).** Execute staged the chunk logs at
+> `_runs/full-suite-chunks/` — `files.txt`, `chunk1..8.log`, `chunk1..8.exit`, `SENTINEL` — and
+> review verified them **from the artefact**: `SENTINEL=8`, all eight exits `0`, **16 files each
+> appearing in exactly one chunk**, nothing in `files.txt` that never ran, **236 tests, 0 guard
+> firings.** The record moves from *partially corroborated* to **verified**.
+>
+> **AND REVIEW'S METHOD IS BETTER THAN EXECUTE'S IN A WAY THAT IS NOT COSMETIC.** Review derived the
+> file-to-chunk assignment **from the LOGS**; execute derived it from the script's slicing of
+> `files.txt`.
+>
+> > **`files.txt` records what was MEANT to run. The logs record what RAN.** A union check exists
+> > *precisely because those can differ* — so a union derived from the slicing is a restatement of
+> > the intent, not an observation of the outcome. **Summing per-chunk totals is licensed only once
+> > each file is known to have appeared exactly once**, and that knowledge has to come from the
+> > logs.
+>
+> **THE SAME METHOD DOES NOT TRANSFER TO THE BACKEND NUMBER, AND EXECUTE FOUND THAT ITSELF.** The
+> backend `2451` in `B419`'s commit message came from chunked `pytest -q`, and **`-q` prints dots,
+> not filenames — measured: zero filename matches in those chunk logs.** So that union **cannot** be
+> log-derived from the artefacts kept; it rests on intended slicing alone. **If a chunk had silently
+> collected fewer files than it was sliced, nothing would have noticed.**
+>
+> **Ruled: not re-run for its own sake — it is reviewed and the risk is small — but `T-0143` needs a
+> full backend run anyway, and that run uses a reporter that NAMES the files, with `2451` folded in
+> so it is re-established to the log-derived standard at no extra cost.**
+>
+> *(Superseded paragraph follows, kept because the correction is the record.)*
+>
 > **THE ZERO ACROSS 236 IS EXECUTE'S MEASUREMENT AND IS NOT INDEPENDENTLY CONFIRMED.** The manager
 > called it *the number that matters most*, and review declined to pass it on trust — then could not
 > reproduce it: **its own verification run was OOM-killed after one chunk**, which is the very
