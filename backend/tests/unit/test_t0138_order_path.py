@@ -15,8 +15,10 @@ keyword argument, and the flag would not have noticed.
 
 ---
 
-**THE OTHER HALF IS ABOUT WHERE A FAILURE IS ALLOWED TO APPEAR.** `place_order`'s body is scoped to
-part D, which measures the minimum order size it must round to. Until then a run pointed at Alpaca
+**THE OTHER HALF IS ABOUT WHERE A FAILURE IS ALLOWED TO APPEAR.** `place_order`'s body was scoped
+to part D, which measured the minimum order size it must round to (`T-0139`/`T-0140` — landed, so
+the gate is now removed and `test_t0138_order_path_gate` guards the crossing from the far side).
+Before that, a run pointed at Alpaca
 would fail *every entry, one at a time* — and an operator reading a wall of venue errors concludes
 the VENUE is down and goes to debug Alpaca. That is `B380`'s shape with the diagnosis relocated.
 **One refusal at startup cannot be mistaken for a market condition.**
@@ -25,6 +27,7 @@ from __future__ import annotations
 
 import pytest
 
+from app.core.exceptions import BrokerError
 from app.services.broker.alpaca import (
     LIVE_ENDPOINT,
     PAPER_ENDPOINT,
@@ -183,32 +186,54 @@ async def test_is_simulation_is_not_satisfied_by_returning_True_unconditionally(
 # =====================================================================================
 
 async def test_t0138_order_path_gate():
-    """**THE BICONDITIONAL, AND IT IS WHAT STOPS THIS GOING STALE.**
+    """**THE BICONDITIONAL EXPIRED EXACTLY AS DESIGNED, AND THIS IS THE OTHER HALF OF IT.**
 
-    `AlpacaAdapter.order_path_status()` declares that orders cannot be placed. That declaration and
-    `place_order`'s actual refusal are two representations of one fact (`B184`), so they are pinned
-    TOGETHER: implementing the body without deleting the override turns this red, and deleting the
-    override without implementing the body turns this red.
+    It pinned two representations of one fact together (`B184`): `order_path_status()` declaring
+    orders unplaceable, and `place_order` actually refusing. Either one changing alone turned it
+    red. **Part D (`T-0140`) wrote the body, this arm went red, and that red was the instruction
+    to remove the override** — which is the only reason the gate could not be left behind to
+    refuse startup against a working order path.
 
-    **This arm is meant to expire.** When part D writes the body, it fails — and that failure is
-    the instruction to remove the override. An arm pinning a phase boundary expires when the phase
-    ends, and the expiry is the point; `T-0136`'s direction-parametrized arm did exactly this and
-    the ordering it protected is the reason `T-0137` landed in the right order.
+    **The biconditional is kept, inverted.** The override is gone AND the body exists, and those
+    are still two representations of one fact, so they are still pinned together: re-adding the
+    override without removing the body turns this red, and gutting the body without restoring the
+    override turns this red. An arm pinning a phase boundary does not stop being useful when the
+    phase ends — it starts guarding the crossing from the other side.
     """
+    import inspect
+
     from app.db.enums import DirectionType, OrderType
-    from app.services.broker.base import OrderRequest
+    from app.services.broker.base import BrokerAdapter, OrderRequest
 
     adapter = AlpacaAdapter(object(), paper=True)
-    declared = adapter.order_path_status()
 
-    assert declared is not None, "the override was removed; was the body actually written?"
-    assert "part D" in declared, "the refusal must point at the task that owns the body"
+    assert adapter.order_path_status() is None, (
+        "the gate is declaring orders unplaceable while the body is written — a working adapter "
+        "that refuses to start"
+    )
+    assert "order_path_status" not in AlpacaAdapter.__dict__, (
+        "the override is back; it must be ABSENT, not overridden to return None, or the next "
+        "reader cannot tell a deliberate permission from a forgotten stub"
+    )
+    assert AlpacaAdapter.order_path_status is BrokerAdapter.order_path_status
 
-    with pytest.raises(NotImplementedError):
+    # THE OTHER HALF: the body must actually be there. A `place_order` that still refuses
+    # everything, with the gate removed, is the worst of both — startup permitted, every entry
+    # failing one at a time, and an operator reading a wall of venue errors going to debug Alpaca
+    # (`B380`'s shape with the diagnosis relocated, which is what the gate existed to prevent).
+    source = inspect.getsource(AlpacaAdapter.place_order)
+    assert "NotImplementedError" not in source, "the body is a stub with the gate removed"
+    assert "submit_order" in source, "the body does not submit anything"
+
+    # And driven, not just read: the refusal for a LONG is now about the CLIENT, never a blanket
+    # unimplemented.
+    with pytest.raises(BrokerError) as exc:
         await adapter.place_order(OrderRequest(
             pair="BTC/USD", direction=DirectionType.LONG, order_type=OrderType.MARKET,
             lot_size=0.001, sl=69_900.0,
         ))
+    assert not isinstance(exc.value, NotImplementedError)
+    assert "get_asset" in str(exc.value)
 
 
 async def test_an_adapter_that_CAN_place_orders_declares_nothing():

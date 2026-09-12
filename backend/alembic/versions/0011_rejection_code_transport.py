@@ -24,7 +24,25 @@ from __future__ import annotations
 
 from alembic import op
 
-from app.models.decision_record import REJECTION_CODES
+#: **FROZEN (`B405`).** `0011` added `VENUE_TRANSPORT` to `0010`'s sixteen, so it produced
+#: SEVENTEEN. Imported from the live list, this file's constraint grew silently with the
+#: vocabulary — and its downgrade, built from `REJECTION_CODES` minus one, rebuilt a "`0010`"
+#: that allowed whatever had been added since. **`T-0140` is what armed that**: adding
+#: `MIN_SIZE` would have made the downgrade permit a code `0010` never knew.
+#:
+#: Both tuples are what this migration actually produced, on 2026-09-11, in production.
+_CODES_AT_0011: tuple[str, ...] = (
+    "NO_REFERENCE_PRICE", "DEGENERATE_STOP", "ENTRY_DRIFT", "THROUGH_STOP",
+    "NON_POSITIVE_SIZE", "VENUE_DIRECTION_UNSUPPORTED",
+    "PROP_FIRM_TARGET_REACHED", "PROP_FIRM_HALTED_DAILY_LOSS",
+    "PROP_FIRM_HALTED_MAX_DRAWDOWN", "PROP_FIRM_HALTED",
+    "PROP_FIRM_WOULD_BREACH_DAILY_LOSS", "PROP_FIRM_WOULD_BREACH_MAX_DRAWDOWN",
+    "BROKER_UNAVAILABLE", "VENUE_TRANSPORT", "VENUE_RAISED",
+    "UNCODED_LEGACY", "UNCLASSIFIED",
+)
+
+#: What `0010` left behind — the target of this migration's downgrade.
+_CODES_AT_0010: tuple[str, ...] = tuple(c for c in _CODES_AT_0011 if c != "VENUE_TRANSPORT")
 
 revision: str = "0011"
 down_revision: str | None = "0010"
@@ -48,7 +66,7 @@ def upgrade() -> None:
     op.create_check_constraint(
         _CONSTRAINT,
         "decision_records",
-        f"rejection_code IS NULL OR {_sql_in('rejection_code', REJECTION_CODES)}",
+        f"rejection_code IS NULL OR {_sql_in('rejection_code', _CODES_AT_0011)}",
     )
 
 
@@ -57,10 +75,9 @@ def downgrade() -> None:
     # mapping them to any surviving code would assert a classification no decision site made, and
     # the downgrade would silently manufacture the measurement this column exists to keep honest.
     # A downgrade against such rows fails, loudly, which is the correct outcome.
-    narrower = tuple(c for c in REJECTION_CODES if c != "VENUE_TRANSPORT")
     op.drop_constraint(_CONSTRAINT, "decision_records", type_="check")
     op.create_check_constraint(
         _CONSTRAINT,
         "decision_records",
-        f"rejection_code IS NULL OR {_sql_in('rejection_code', narrower)}",
+        f"rejection_code IS NULL OR {_sql_in('rejection_code', _CODES_AT_0010)}",
     )

@@ -41,10 +41,28 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-from app.models.decision_record import (
-    OUTCOME_REJECTED,
-    REJECTION_CODES,
-    REJECTION_UNCODED_LEGACY,
+from app.models.decision_record import OUTCOME_REJECTED, REJECTION_UNCODED_LEGACY
+
+#: **FROZEN (`B405`). THE SIXTEEN CODES THIS MIGRATION ACTUALLY CREATED**, copied here rather than
+#: imported from `REJECTION_CODES`.
+#:
+#: The live list is a moving target: importing it meant this file's CHECK constraint changed
+#: meaning every time the vocabulary grew, so replaying `0010` on a fresh database produced a
+#: DIFFERENT constraint from the one production got — and `0011`'s downgrade rebuilt a "`0010`"
+#: permitting codes `0010` never knew. A migration must reproduce the state it originally
+#: produced, or the chain stops being a history.
+#:
+#: **This is the list as it stood when `0010` and `0011` ran together in production on
+#: 2026-09-11** (verified against `MIGRATION_TEST.md`: 2 seeded rows backfilled, a bogus code
+#: refused, `VENUE_TRANSPORT` accepted). `VENUE_TRANSPORT` is absent here BECAUSE `0011` is what
+#: added it — that asymmetry is the point, not an omission.
+_CODES_AT_0010: tuple[str, ...] = (
+    "NO_REFERENCE_PRICE", "DEGENERATE_STOP", "ENTRY_DRIFT", "THROUGH_STOP",
+    "NON_POSITIVE_SIZE", "VENUE_DIRECTION_UNSUPPORTED",
+    "PROP_FIRM_TARGET_REACHED", "PROP_FIRM_HALTED_DAILY_LOSS",
+    "PROP_FIRM_HALTED_MAX_DRAWDOWN", "PROP_FIRM_HALTED",
+    "PROP_FIRM_WOULD_BREACH_DAILY_LOSS", "PROP_FIRM_WOULD_BREACH_MAX_DRAWDOWN",
+    "BROKER_UNAVAILABLE", "VENUE_RAISED", "UNCODED_LEGACY", "UNCLASSIFIED",
 )
 
 revision: str = "0010"
@@ -85,7 +103,7 @@ def upgrade() -> None:
     op.create_check_constraint(
         _CONSTRAINT,
         "decision_records",
-        f"rejection_code IS NULL OR {_sql_in('rejection_code', REJECTION_CODES)}",
+        f"rejection_code IS NULL OR {_sql_in('rejection_code', _CODES_AT_0010)}",
     )
 
 

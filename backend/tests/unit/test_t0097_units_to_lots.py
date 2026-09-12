@@ -116,6 +116,9 @@ def test_the_step_is_computed_in_DECIMAL_not_binary_floats():
     """`0.3 / 0.1` is `2.9999999999999996` in binary floats, which floors to 2 and **halves
     the order**. `B227` is the same hazard one module over; here it is a live size error
     rather than a misread record."""
+    # inert-ok: this is the PREMISE, not the guard. It is all-literal on purpose — if an
+    # interpreter ever makes `0.3 / 0.1` exactly 3.0, the assertions below stop testing anything
+    # and this line is what says so. Constant-folded is not the same as cannot-fail.
     assert 0.3 / 0.1 != 3.0, "the float hazard this guards is real on this interpreter"
 
     r = units_to_lots(0.3, **COARSE)

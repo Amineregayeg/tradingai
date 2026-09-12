@@ -398,8 +398,13 @@ def test_place_order_REFUSES_A_SHORT_WITH_THE_VENUE_REASON_and_a_LONG_AS_UNIMPLE
 
     ```
     SHORT  -> DirectionNotSupported   the VENUE cannot take it, ever
-    LONG   -> NotImplementedError     the MEMBER is not written yet (part C)
+    LONG   -> BrokerError naming the member    OUR client cannot answer (part D wrote the body)
     ```
+
+    **AND IT EXPIRED A SECOND TIME, IN THE SAME PLACE.** Part D (`T-0140`) wrote the body, so the
+    `NotImplementedError` half is gone — the third row of the table changed while the property did
+    not. Twice rewritten, never deleted, because *the two refusals must not collapse* is what was
+    worth keeping both times.
 
     Collapsing them is `B376-B`'s shape and it fails in the expensive direction: a permanent
     venue reason filed against an order Alpaca would happily accept, telling every later reader
@@ -411,17 +416,24 @@ def test_place_order_REFUSES_A_SHORT_WITH_THE_VENUE_REASON_and_a_LONG_AS_UNIMPLE
         return OrderRequest(pair="BTC/USD", direction=direction, order_type=OrderType.MARKET,
                             lot_size=0.5, price=None, sl=None, tp=None, client_order_id="x")
 
+    # THE VENUE'S REFUSAL — permanent, and it must not need the client to answer anything.
+    # `TradingClientMock` has no `get_asset`, which is exactly the condition under which a
+    # direction refusal must still be a direction refusal.
     with pytest.raises(DirectionNotSupported) as short_exc:
         asyncio.run(adapter.place_order(_request(DirectionType.SHORT)))
     assert short_exc.value.reason == ALPACA_CRYPTO_LONG_ONLY.reason
     assert short_exc.value.venue == "alpaca"
 
-    with pytest.raises(NotImplementedError) as long_exc:
+    # OUR WIRING'S REFUSAL — a fact about the client, naming the member, and NOT a venue claim.
+    with pytest.raises(BrokerError) as long_exc:
         asyncio.run(adapter.place_order(_request(DirectionType.LONG)))
     assert not isinstance(long_exc.value, DirectionNotSupported), (
         "the two refusals collapsed: a LONG is now refused for a reason about the venue"
     )
     assert "not shortable" not in str(long_exc.value)
+    assert "get_asset" in str(long_exc.value), (
+        "a missing client member must be named, or it reads as a venue outage"
+    )
 
 
 def test_a_PARTIAL_close_is_HONOURED_and_carries_the_size():

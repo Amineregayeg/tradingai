@@ -17,6 +17,9 @@ from dataclasses import dataclass
 from enum import Enum
 
 from app.core.exceptions import BrokerError, DirectionNotSupported
+# Imported lazily inside the module rather than at package import: `alpaca.py` must stay
+# importable without the SDK (`B328`), and it is — the SDK lives inside its methods.
+from app.services.broker.alpaca import AlpacaBelowMinimumSize
 from app.core.logging import logger, redact_for_storage
 from app.db.enums import DirectionType, OrderType
 from app.models.decision_record import (
@@ -26,6 +29,7 @@ from app.models.decision_record import (
     REJECTION_NO_REFERENCE_PRICE,
     REJECTION_THROUGH_STOP,
     REJECTION_VENUE_DIRECTION_UNSUPPORTED,
+    REJECTION_MIN_SIZE,
     REJECTION_VENUE_TRANSPORT,
 )
 from app.services.broker.base import BrokerAdapter, OrderRequest
@@ -243,6 +247,32 @@ class ExecutionService:
                     "pair": sig.symbol, "direction": exc.direction,
                     "venue": exc.venue,
                     "sized_units": round(units, 8), "equity_at_entry": acct.equity}
+        except AlpacaBelowMinimumSize as exc:
+            # ------------------------------------------------------------------
+            # `MIN_SIZE` — THE VENUE'S FLOOR, AND IT MUST BE CAUGHT BEFORE `BrokerError`.
+            #
+            # `AlpacaBelowMinimumSize` subclasses `BrokerError`, so ORDER MATTERS exactly as it
+            # does for `DirectionNotSupported` above: reversed, every sub-minimum order would be
+            # filed as `VENUE_TRANSPORT` — a transient failure that clears on its own — when it
+            # is a deterministic size floor that will refuse the same order every time. `B375` in
+            # a third place.
+            #
+            # DISTINCT FROM `NON_POSITIVE_SIZE` too: that is `lot_size <= 0`, arithmetic on our
+            # side. This is a well-formed order the venue will not take, and the minimum moves
+            # with price (~$1 of notional, `T-0139`), so the same size can be refused today and
+            # accepted tomorrow. Two causes, two remedies.
+            # ------------------------------------------------------------------
+            logger.info(f"ExecutionService[{self.mode.value}] {sig.symbol} "
+                        f"{sig.direction.value} below the venue minimum: "
+                        f"{exc.requested} < {exc.minimum}")
+            return {"status": "REJECTED",
+                    "reason": redact_for_storage(str(exc)),
+                    "rejection_code": REJECTION_MIN_SIZE,
+                    "pair": sig.symbol, "direction": sig.direction.value,
+                    "venue": getattr(exc, "broker", None),
+                    "requested_units": float(exc.requested),
+                    "min_order_size": float(exc.minimum),
+                    "sized_units": lot_size, "equity_at_entry": acct.equity}
         except BrokerError as exc:
             # ------------------------------------------------------------------
             # `B403`'s TRANSPORT HALF. THE VENUE WAS REACHED AND FAILED.

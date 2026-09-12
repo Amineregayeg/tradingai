@@ -46,6 +46,7 @@ _CHAIN = [
     # cost of adding a line is what makes the omission visible at all.
     ("0010", "0010_decision_rejection_code.py", "0009"),
     ("0011", "0011_rejection_code_transport.py", "0010"),
+    ("0012", "0012_rejection_code_min_size.py", "0011"),
 ]
 
 
@@ -582,4 +583,99 @@ def test_the_rejection_code_backfill_writes_UNCODED_LEGACY_AND_NOTHING_ELSE():
     assert "rejection_reason" not in backfill, (
         "the backfill reads the PROSE. A count keyed on a sentence the venue chose, manufactured "
         "once, is thereafter indistinguishable from a measurement."
+    )
+
+
+# =====================================================================================
+# B405 — EACH MIGRATION'S VOCABULARY IS FROZEN AT THE REVISION THAT WROTE IT
+# =====================================================================================
+
+def test_no_migration_imports_the_LIVE_vocabulary():
+    """**`B405`. A migration that imports `REJECTION_CODES` rewrites its own history.**
+
+    `0010` built its CHECK from the live constant. Add an 18th code today and `0010` — the
+    revision that ran months ago against a 16-code vocabulary — starts *claiming* it always
+    admitted 18. The migration stops describing a schema version and starts describing HEAD, so
+    replaying the chain on a fresh database produces a different schema than the one production
+    actually has, and `MIGRATION_TEST.md`'s whole purpose collapses.
+
+    Worse in the downgrade direction: `0011`'s downgrade was `REJECTION_CODES` minus one, which
+    rebuilt a "`0010`" that never existed. **A downgrade is the thing you run under pressure**, at
+    which point it must reproduce the constraint that was actually there.
+
+    Each revision now carries its own frozen tuple. This arm reads the SOURCE, because the point
+    is that the import is absent — importing the module to check would not distinguish a frozen
+    literal from a constant that happens to agree today.
+    """
+    import pathlib
+
+    versions = pathlib.Path(__file__).resolve().parents[2] / "alembic" / "versions"
+    checked = 0
+    for path in sorted(versions.glob("00*.py")):
+        source = path.read_text()
+        if "rejection_code" not in source:
+            continue
+        checked += 1
+        assert "import REJECTION_CODES" not in source and "REJECTION_CODES," not in source, (
+            f"{path.name} imports the LIVE vocabulary — its CHECK will silently follow HEAD "
+            f"instead of describing the schema this revision created (B405)"
+        )
+    assert checked >= 3, (
+        f"only {checked} rejection_code migrations found; the glob or the naming changed and this "
+        f"arm would report a clean sweep over nothing"
+    )
+
+
+def test_each_migration_FREEZES_the_vocabulary_that_was_live_when_it_RAN():
+    """The counts, pinned per revision — and the chain of derivations checked, not just lengths.
+
+    ```
+    0010  16  the column and its first CHECK
+    0011  17  + VENUE_TRANSPORT (B403's transport half)
+    0012  18  + MIN_SIZE        (T-0140, the venue's sizing floor)
+    ```
+
+    **Each revision's DOWNGRADE target must equal the NEXT-LOWER revision's UPGRADE vocabulary**,
+    which is the property that actually matters and is not implied by the three lengths — three
+    tuples of the right size can still disagree about which codes they hold.
+    """
+    import importlib.util
+    import pathlib
+
+    versions = pathlib.Path(__file__).resolve().parents[2] / "alembic" / "versions"
+
+    def load(stem):
+        path = next(versions.glob(f"{stem}_*.py"))
+        spec = importlib.util.spec_from_file_location(f"_mig_{stem}", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    m10, m11, m12 = load("0010"), load("0011"), load("0012")
+
+    assert len(m10._CODES_AT_0010) == 16
+    assert len(m11._CODES_AT_0011) == 17
+    assert len(m12._CODES_AT_0012) == 18
+
+    # `VENUE_TRANSPORT` is deliberately ABSENT from 0010 — it is what 0011 added.
+    assert "VENUE_TRANSPORT" not in m10._CODES_AT_0010
+    assert "VENUE_TRANSPORT" in m11._CODES_AT_0011
+    assert "MIN_SIZE" not in m11._CODES_AT_0011
+    assert "MIN_SIZE" in m12._CODES_AT_0012
+
+    # THE CHAIN: each downgrade target is the previous revision's upgrade vocabulary, as SETS —
+    # a length match here would pass on two tuples holding different codes.
+    assert set(m11._CODES_AT_0010) == set(m10._CODES_AT_0010), (
+        "0011's downgrade would restore a 0010 that never existed"
+    )
+    assert set(m12._CODES_AT_0011) == set(m11._CODES_AT_0011), (
+        "0012's downgrade would restore an 0011 that never existed"
+    )
+
+    # And the LIVE vocabulary is 0012's, which is the only revision allowed to agree with HEAD.
+    from app.models.decision_record import REJECTION_CODES
+
+    assert set(m12._CODES_AT_0012) == set(REJECTION_CODES), (
+        "HEAD's vocabulary has moved past 0012 — a code the database's CHECK will refuse, so the "
+        "rejection is LOST rather than recorded (B410). A new code needs a new migration."
     )

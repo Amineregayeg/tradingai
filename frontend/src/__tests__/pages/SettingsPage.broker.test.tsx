@@ -19,8 +19,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
+// A DISTINCT id per call. Returning `c1` every time made the page hold two connections with the
+// same React key, and React's own warning says it "may cause children to be duplicated and/or
+// omitted" — so an arm counting rendered rows could pass against one row. No arm here does that
+// today; the fixture is fixed so none can start to.
+let connectCalls = 0
 const connect = vi.fn((_payload: Record<string, unknown>) =>
-  Promise.resolve({ id: 'c1', broker: 'mt5' }))
+  Promise.resolve({ id: `c${++connectCalls}`, broker: 'mt5' }))
 
 vi.mock('@/services/api', () => ({
   authHeaders: () => ({}),
@@ -45,7 +50,7 @@ async function openBrokerForm(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe('B369 — MT5 is reachable from the broker form', () => {
-  beforeEach(() => { connect.mockClear() })
+  beforeEach(() => { connect.mockClear(); connectCalls = 0 })
 
   it('offers MetaTrader 5 in the broker list at all', async () => {
     const user = userEvent.setup()
@@ -201,7 +206,7 @@ describe('B369 — MT5 is reachable from the broker form', () => {
 })
 
 describe('B408 — the form displayed Paper and submitted live', () => {
-  beforeEach(() => { connect.mockClear() })
+  beforeEach(() => { connect.mockClear(); connectCalls = 0 })
 
   /**
    * WHY NO EXISTING ARM CAUGHT THIS, which is the interesting half.

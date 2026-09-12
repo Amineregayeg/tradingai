@@ -107,6 +107,18 @@ REJECTION_ENTRY_DRIFT = "ENTRY_DRIFT"
 REJECTION_THROUGH_STOP = "THROUGH_STOP"
 REJECTION_NON_POSITIVE_SIZE = "NON_POSITIVE_SIZE"
 REJECTION_VENUE_DIRECTION_UNSUPPORTED = "VENUE_DIRECTION_UNSUPPORTED"
+
+#: The size was POSITIVE but below the venue's published minimum for that asset (`T-0140`).
+#:
+#: **DISTINCT FROM `NON_POSITIVE_SIZE`, and the two have different remedies.** `units <= 0` is
+#: arithmetic on our side — equity against stop width, or a degenerate stop. This is the VENUE's
+#: floor: the order is well-formed and simply too small to place. Collapsing them is part 3's
+#: `M-8` reappearing one task later.
+#:
+#: **The floor is not a constant.** Measured (`T-0139`/`B409`): BTC `0.000012941`, ETH
+#: `0.000397984` — both $1.00 of notional, so the minimum MOVES WITH PRICE while
+#: `min_trade_increment` (`1e-9` on both) does not. The two fields have different natures.
+REJECTION_MIN_SIZE = "MIN_SIZE"
 REJECTION_PROP_FIRM_TARGET_REACHED = "PROP_FIRM_TARGET_REACHED"
 REJECTION_PROP_FIRM_HALTED_DAILY_LOSS = "PROP_FIRM_HALTED_DAILY_LOSS"
 REJECTION_PROP_FIRM_HALTED_MAX_DRAWDOWN = "PROP_FIRM_HALTED_MAX_DRAWDOWN"
@@ -160,6 +172,7 @@ REJECTION_CODES: tuple[str, ...] = (
     REJECTION_THROUGH_STOP,
     REJECTION_NON_POSITIVE_SIZE,
     REJECTION_VENUE_DIRECTION_UNSUPPORTED,
+    REJECTION_MIN_SIZE,
     REJECTION_PROP_FIRM_TARGET_REACHED,
     REJECTION_PROP_FIRM_HALTED_DAILY_LOSS,
     REJECTION_PROP_FIRM_HALTED_MAX_DRAWDOWN,

@@ -43,9 +43,13 @@ from __future__ import annotations
 
 import pytest
 
-from app.core.exceptions import BrokerConnectionError, DirectionNotSupported
+from app.core.exceptions import BrokerConnectionError, BrokerError, DirectionNotSupported
 from app.db.enums import DirectionType, OrderType
-from app.services.broker.alpaca import ALPACA_CRYPTO_LONG_ONLY, AlpacaAdapter
+from app.services.broker.alpaca import (
+    ALPACA_CRYPTO_LONG_ONLY,
+    AlpacaAdapter,
+    AlpacaAssetUnusable,
+)
 from app.services.broker.base import DirectionPolicy, OrderRequest
 from app.services.broker.cft_sim import PropFirmRules, SimPropFirmBroker
 from app.services.broker.paper import PaperBroker
@@ -387,26 +391,63 @@ async def test_the_adapter_refuses_a_SHORT_with_the_venue_reason():
     assert exc.value.direction == "SHORT"
 
 
-async def test_the_adapter_refuses_a_LONG_as_UNIMPLEMENTED_and_says_so_differently():
-    """**The two refusals must stay distinguishable.** Order placement is not built yet (part C
-    of `ALPACA_PROGRAMME.md`); that is a fact about the MEMBER. Long-only is a fact about the
-    VENUE. Collapsing them files a permanent venue reason against an order Alpaca would accept.
+async def test_the_adapter_refuses_a_LONG_FOR_A_REASON_ABOUT_THE_CLIENT_not_the_venue():
+    """**THIS ARM EXPIRED WHEN `T-0140` WROTE THE BODY, AND IT WAS RIGHT BEFORE THAT.**
+
+    It used to pin `NotImplementedError` for a LONG, because order placement was scoped to part C
+    and *the member is not written* is a fact about OUR code, while long-only is a fact about the
+    VENUE. Part D wrote the body, so a LONG is now placed — the phase boundary this arm guarded
+    has been crossed, and **an arm pinning a phase boundary expires when the phase ends.** The
+    fourth in this codebase; the expiry is what kept the parts in order.
+
+    **Rewritten rather than deleted, because the property underneath is unchanged: the refusals
+    must not collapse.** There are now three, and each sends a reader somewhere different:
+
+    ```
+    SHORT                     -> DirectionNotSupported   the VENUE, permanently. No retry.
+    LONG, client can't answer -> BrokerError naming it    OUR wiring. Fix the client.
+    LONG, size below the floor -> AlpacaBelowMinimumSize  the VENUE's floor. Retry bigger.
+    ```
+
+    Collapsing any pair files a permanent venue reason against a transient condition or the
+    reverse — `B375`, which this file's `_req` already carries the scar of.
     """
     adapter = AlpacaAdapter(object(), paper=True)
-    with pytest.raises(NotImplementedError) as exc:
+
+    with pytest.raises(BrokerError) as exc:
         await adapter.place_order(_req(DirectionType.LONG))
-    assert "not shortable" not in str(exc.value), (
-        "a LONG refused with the venue's short reason is a false statement about the venue"
+
+    assert not isinstance(exc.value, DirectionNotSupported), (
+        "a LONG refused as a VENUE capability refusal is a false statement about the venue"
     )
-    assert not isinstance(exc.value, DirectionNotSupported)
+    assert "not shortable" not in str(exc.value)
+    assert "get_asset" in str(exc.value), (
+        "the refusal must name the member it could not call, or it is indistinguishable from a "
+        "venue outage and the reader debugs Alpaca instead of our wiring"
+    )
 
 
-async def test_the_adapter_checks_the_VENUE_before_the_UNIMPLEMENTED_refusal():
-    """Order matters. Reversed, every SHORT would report *not implemented* — a true statement
-    that hides the permanent one, and the record would tell a reader to try again later."""
+async def test_the_adapter_checks_THE_DIRECTION_BEFORE_IT_NEEDS_THE_VENUE():
+    """**Order matters, and the order changed under this arm.**
+
+    It used to mean *check the venue policy before the not-implemented refusal*: reversed, every
+    SHORT would report *not implemented*, a true statement hiding the permanent one, telling the
+    reader to try again later. The not-implemented refusal is gone; the same hazard now wears
+    transport's clothes.
+
+    `object()` has no `get_asset`, so a body that sized before judging the direction would refuse
+    this SHORT as a `BrokerError` — **`VENUE_TRANSPORT`, which reads as retryable** — and the loop
+    would retry, forever, an order Alpaca will never accept. `T-0140` had exactly this defect in
+    an intermediate state, introduced while deduplicating the venue read.
+    """
     adapter = AlpacaAdapter(object(), paper=True)
-    with pytest.raises(DirectionNotSupported):
+    with pytest.raises(DirectionNotSupported) as exc:
         await adapter.place_order(_req(DirectionType.SHORT))
+
+    assert not isinstance(exc.value, AlpacaAssetUnusable)
+    assert "get_asset" not in str(exc.value), (
+        "the direction refusal is reporting a missing client member, so it ran AFTER the sizing"
+    )
 
 
 # =====================================================================================

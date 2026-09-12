@@ -199,11 +199,32 @@ async def test_the_idle_broker_path_does_NOT_alarm():
 
 
 async def test_the_vocabulary_is_CLOSED_and_every_code_is_distinct():
-    # 16 at part 3, 17 once `VENUE_TRANSPORT` joined (`B403`'s transport half). The number is
-    # pinned so that widening the vocabulary is a DELIBERATE edit here and a schema change in
-    # `alembic/`, never a constant someone appends to — which is the whole reason the column
-    # carries a CHECK constraint.
-    assert len(REJECTION_CODES) == len(set(REJECTION_CODES)) == 17
+    # 16 at part 3, 17 once `VENUE_TRANSPORT` joined (`B403`'s transport half), 18 once `MIN_SIZE`
+    # got its owner (`T-0140`, the venue's sizing floor). The number is pinned so that widening
+    # the vocabulary is a DELIBERATE edit here AND a schema change in `alembic/`, never a constant
+    # someone appends to — which is the whole reason the column carries a CHECK constraint.
+    #
+    # **AND THE MIGRATION IS THE HALF THAT CANNOT BE SKIPPED.** A code added here without a
+    # migration widening the CHECK is a row the database refuses at write time, so the rejection
+    # is lost rather than recorded (`B410`). The names are listed, not just counted, because a
+    # count survives a rename and a rename is what breaks the CHECK.
+    assert len(REJECTION_CODES) == len(set(REJECTION_CODES)) == 18
+    assert "MIN_SIZE" in REJECTION_CODES
+    assert "VENUE_TRANSPORT" in REJECTION_CODES
+
+    # The CHECK constraint must admit exactly this vocabulary — same source, so this compares the
+    # two REPRESENTATIONS rather than re-asserting one of them.
+    from app.models.decision_record import DecisionRecord
+
+    checks = [c for c in DecisionRecord.__table__.constraints
+              if getattr(c, "name", "") == "ck_decision_records_rejection_code"]
+    assert len(checks) == 1, "the CHECK constraint is gone; the vocabulary is no longer closed"
+    rendered = str(checks[0].sqltext)
+    for code in REJECTION_CODES:
+        assert f"'{code}'" in rendered, (
+            f"{code} is in the constant and NOT in the CHECK — every row carrying it is refused "
+            f"by the database and the rejection is lost, not recorded (B410)"
+        )
     for code in REJECTION_CODES:
         assert code.isupper(), f"{code} breaks the vocabulary's shape"
 

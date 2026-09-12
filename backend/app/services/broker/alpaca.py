@@ -48,10 +48,11 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
+from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any, Callable
 
-from app.core.exceptions import BrokerError
+from app.core.exceptions import BrokerError, DirectionNotSupported
 from app.core.logging import logger
 from app.db.enums import DirectionType
 from app.schemas.broker import Position
@@ -187,6 +188,43 @@ class AlpacaEndpointMismatch(BrokerError):
         self.endpoint = endpoint
 
 
+class AlpacaBelowMinimumSize(BrokerError):
+    """The size was POSITIVE but below the venue's published minimum for this asset (`T-0140`).
+
+    **ITS OWN TYPE BECAUSE IT MAPS TO ITS OWN CODE.** `ExecutionService` catches `BrokerError` and
+    files it as `VENUE_TRANSPORT` — a transient failure. A size floor is neither transient nor our
+    arithmetic: `NON_POSITIVE_SIZE` is `units <= 0` on our side, and this is a well-formed order
+    the venue will not take. Sharing either code would be `B375`'s confusion in a third place.
+
+    **REFUSE, NEVER ROUND TO ZERO.** Rounding a sub-minimum size to zero would send a quantity the
+    venue rejects — or worse, one our own `lot_size > 0` guard rejects after the decision was
+    recorded as taken.
+    """
+
+    def __init__(self, *, symbol: str, requested: Decimal, minimum: Decimal) -> None:
+        super().__init__(
+            f"Alpaca will not take {requested} {symbol}: below its published minimum of "
+            f"{minimum}. The minimum is roughly one dollar of notional and MOVES WITH PRICE "
+            f"(measured T-0139: BTC 0.000012941, ETH 0.000397984), so this is a venue floor for "
+            f"this asset at this moment, not a constant and not a defect in the size.",
+            broker="alpaca",
+        )
+        self.symbol = symbol
+        self.requested = requested
+        self.minimum = minimum
+
+
+class AlpacaAssetUnusable(BrokerError):
+    """The venue's asset record cannot support an order decision (`T-0140`).
+
+    Raised when the symbol comes back as a DIFFERENT market, or when a limit field is absent.
+    `min_order_size`, `min_trade_increment` and `price_increment` are all `Optional[float]` on the
+    SDK model — so absence is a real state, and **the alarming reading is the only safe one**:
+    treating a missing minimum as zero would admit every size, and treating it as a constant is
+    the defect this task exists to remove.
+    """
+
+
 class AlpacaFieldUnreadable(BrokerError):
     """A numeric field was PRESENT and could not be parsed (`B338`).
 
@@ -245,8 +283,63 @@ def _required_dec(source: Any, field: str) -> Decimal:
     return value
 
 
+@dataclass(frozen=True)
+class AssetLimits:
+    """What the VENUE publishes about one asset's order sizing (`T-0139`/`B409`).
+
+    **THE TWO SIZE FIELDS HAVE DIFFERENT NATURES AND MUST NOT BE TREATED ALIKE.** Measured:
+
+    ```
+                         BTC              ETH            nature
+    min_order_size       0.000012941      0.000397984    ~$1 NOTIONAL -> MOVES WITH PRICE
+    min_trade_increment  0.000000001      0.000000001    a constant
+    price_increment      0.000000001      0.000000001    a constant, and NOT the quantity grid
+    ```
+
+    So the minimum is read per asset per order and the increment may be held — and the programme
+    document's `0.0001` for both was wrong in both directions: **7.7x too large** for the minimum
+    (refusing valid orders) and **100,000x too coarse** for the increment (quantising to a grid the
+    venue does not use).
+
+    `Decimal`, never `float`. The SDK hands these over as floats and the grid is nine decimal
+    places, which is where binary floats stop being safe — `T-0097`'s `0.3 / 0.1 == 2.9999...` one
+    module over. Conversion goes through `str()` so the decimal value is the one the venue sent.
+    """
+
+    symbol: str
+    min_order_size: Decimal
+    min_trade_increment: Decimal
+    price_increment: Decimal
+
+    def quantise_down(self, quantity: Decimal) -> Decimal:
+        """Round `quantity` DOWN to the quantity grid.
+
+        **DOWN, not nearest** (`T-0097`'s direction, already ruled for lots). Rounding up crosses
+        the risk the size was computed for: `size_position` derived it from equity, risk-% and
+        stop distance, and a larger quantity is a larger loss at the same stop.
+
+        Uses `min_trade_increment` — the QUANTITY grid. `price_increment` is a different field
+        that happens to hold the same value on this venue, which is exactly why swapping them is
+        invisible to a realistic fixture.
+        """
+        if self.min_trade_increment <= 0:
+            return quantity
+        return (quantity // self.min_trade_increment) * self.min_trade_increment
+
+
 class AlpacaAdapter(BrokerAdapter):
-    """Alpaca paper trading. Reads work; the one write refuses in this phase."""
+    """Alpaca paper trading. Reads work, and **the one write now places orders** (`T-0140`).
+
+    `order_path_status()` is deliberately NOT overridden any more: the override existed to stop a
+    run starting against an adapter that could not place an order, and `place_order`'s body
+    discharged it. `test_t0138_order_path_gate` pins the pair together from the far side, so
+    re-adding the override without gutting the body goes red, and vice versa.
+
+    ⚠ **Zero orders have been placed through this class.** The sizing numbers are what the venue
+    PUBLISHES about itself (`T-0139`), which beats documentation and is still not an executed-order
+    measurement. Which exception Alpaca raises for an undersized order, or for a shorting attempt,
+    is a could-not-ask (`D4b`) — the arms pin our mapping, not the venue's behaviour.
+    """
 
     broker_name = "alpaca"
 
@@ -574,100 +667,225 @@ class AlpacaAdapter(BrokerAdapter):
     # ------------------------------------------------------------------
     # The one write — REFUSES, and refuses EVERY direction in this phase
     # ------------------------------------------------------------------
-    def order_path_status(self) -> str | None:
-        """This adapter cannot place orders yet, and a run must not START pointed at it.
+    async def asset_limits(self, symbol: str) -> AssetLimits:
+        """Read this ASSET's sizing limits from the venue, now, for this order.
 
-        **DELETE THIS OVERRIDE WHEN `place_order`'s BODY LANDS.** `test_t0138_order_path_gate`
-        asserts the biconditional — this reason present AND `place_order` raising
-        `NotImplementedError` — so writing the body turns that arm red and forces the removal.
-        A comment asking a future reader to remember would not.
+        **PER ASSET AND PER ORDER, and both halves are load-bearing.**
+
+        *Per asset*, because BTC's minimum (`0.000012941`) and ETH's (`0.000397984`) differ by
+        **31x** — one asset's limits applied to every symbol would pass any BTC-only check and
+        silently refuse valid ETH orders, or admit sub-minimum ones.
+
+        *Per order*, because the minimum is roughly one dollar of notional and therefore moves
+        with price: at BTC 150,000 it is ~`0.0000067`, at 40,000 ~`0.000025`. **Any value we hold
+        goes stale without failing** — it simply refuses or admits the wrong orders as price
+        drifts, which is `B405`'s shape with a number guaranteed to rot rather than merely able to.
+        **A cache with no expiry is that pinned constant with extra steps**, so there is no cache:
+        one `get_asset` per order, and an arm asserts that count.
+
+        **THE SYMBOL IS COMPARED EXACTLY.** The venue also lists `BTC/USDC`, `BTC/USDT` and
+        `ETH/BTC`; review's own probe used `startswith("BTC")`, which would have caught `BTC/USDT`
+        and missed `ETH/BTC`. A loose match here does not fail — it prices the wrong market.
         """
-        return (
-            "Alpaca's order path is not written yet: `place_order` refuses every LONG with "
-            "NotImplementedError. Its body is scoped to part D of ALPACA_PROGRAMME.md, which "
-            "measures the minimum order size and increment the body must round to and refuse "
-            "below. Starting a run against this venue would fail every entry one at a time, and "
-            "the failures would read as the venue being down."
-        )
+        return self._limits_of(await self._fetch_asset(symbol), symbol)
+
+    async def _fetch_asset(self, symbol: str):
+        """The venue's record for `symbol`, read once, with the symbol checked EXACTLY.
+
+        Separate from `_limits_of` because `place_order` needs two different answers out of one
+        read — `shortable` and the sizing limits. Asking twice would double every order's venue
+        traffic and, worse, let the two answers come from *different* reads of a record that moves
+        with price.
+        """
+        asset = self._require_model(await self._call("get_asset", symbol), "get_asset")
+
+        got = getattr(asset, "symbol", None)
+        if got != symbol:
+            raise AlpacaAssetUnusable(
+                f"Asked Alpaca for {symbol!r} and it answered for {got!r}. The venue lists "
+                f"BTC/USD, BTC/USDC, BTC/USDT, ETH/USD, ETH/USDC, ETH/USDT and ETH/BTC, so a "
+                f"near-match is a DIFFERENT MARKET rather than a formatting difference.",
+                broker="alpaca",
+            )
+
+        return asset
+
+    @staticmethod
+    def _limits_of(asset, symbol: str) -> "AssetLimits":
+        """This asset's three sizing numbers, as `Decimal`, refusing any the venue did not give."""
+        limits = {}
+        for field in ("min_order_size", "min_trade_increment", "price_increment"):
+            raw = getattr(asset, field, None)
+            if raw is None:
+                # `Optional[float]` on the model, so absence is a real state. The alarming
+                # reading is the only safe one: a missing minimum treated as zero admits every
+                # size, and treated as a constant rebuilds the defect this task removes.
+                raise AlpacaAssetUnusable(
+                    f"Alpaca reported no {field} for {symbol}. Refusing to size an order against "
+                    f"an absent limit — a missing minimum is not a minimum of zero.",
+                    broker="alpaca",
+                )
+            # `str()` first: the SDK hands floats, the grid is 9 dp, and `Decimal(0.000012941)`
+            # carries the binary error that `Decimal("0.000012941")` does not.
+            limits[field] = Decimal(str(raw))
+
+        return AssetLimits(symbol=symbol, **limits)
 
     async def place_order(self, request: OrderRequest) -> dict:
-        """**REFUSES A SHORT WITH THE VENUE'S REASON. REFUSES A LONG AS UNIMPLEMENTED.**
+        """Place a MARKET order, sized to what the VENUE says it will take (`T-0140`, part D).
 
-        Two refusals, deliberately DIFFERENT (`T-0137`). Malek ruled the platform trades LONG
-        ONLY because Alpaca crypto is non-marginable and not shortable — a permanent venue
-        capability — while order placement itself is simply not built yet. **Collapsing the two
-        into one refusal is `B376-B`'s shape**: a raise-on-anything satisfies raise-on-shorts and
-        proves nothing about the direction, and the record it leaves says the venue refused an
-        order it would in fact accept once the member is written.
-
-        So the distinction is asserted, not just intended:
+        The refusals, **in the order they are checked**, and the order is load-bearing:
 
         ```
-        SHORT  -> DirectionNotSupported, reason = ALPACA_CRYPTO_LONG_ONLY.reason
-        LONG   -> NotImplementedError,   which names the MEMBER and NOT the venue (body: part D)
+        1. SHORT, by policy            -> DirectionNotSupported   VENUE_DIRECTION_UNSUPPORTED
+              no network. a permanent refusal must not need the venue to answer.
+        2. symbol answered for another -> AlpacaAssetUnusable     (a venue error, not a size one)
+        3. SHORT on a non-shortable asset -> DirectionNotSupported   same code, second gate:
+              this one fires only if `supported` is ever WIDENED, i.e. if our policy and the
+              venue's per-asset fact diverge.
+        4. quantised size below minimum -> AlpacaBelowMinimumSize  MIN_SIZE
         ```
 
-        **WHY THIS IS SAFE TO KEY ON DIRECTION AT ALL — measured, not assumed.** The two side
-        vocabularies set a trap here: on a spot venue **closing a long is also a `sell`**, so a
-        refusal written as *"refuse sells"* would refuse every EXIT and leave positions
-        unclosable, the kill switch included. Whether that matters depends on whether any exit
-        reaches this member:
+        **`1` BEFORE `2` IS THE WHOLE POINT.** Reversed — and it was, in an intermediate state of
+        this very change, because reading the asset first deduplicates the venue call — a SHORT on
+        an unreachable venue returns `BrokerError` and is filed `VENUE_TRANSPORT`, **which reads as
+        *try again***. The loop would then retry, forever, an order Alpaca will never accept.
+        `ExecutionService` does not gate this upstream: `service.py:209` consults
+        `direction_policy` only in the SHADOW branch, so for a live order this raise is the ONLY
+        gate. `B375`'s shape, arrived at by fixing something else.
 
-        ```
-        place_order callers          execution/service.py:167   -- ExecutionService.execute(sig)
-                                                                   takes a SIGNAL and builds the
-                                                                   OrderRequest from sig.direction
-                                                                   => THE ENTRY PATH
-                                     live_loop_proxy.py:142     -- a FORWARDER: it passes the same
-                                                                   request to whatever broker the
-                                                                   loop holds. Not an independent
-                                                                   caller and not an exit.
+        **THE LONG-ONLY RULE READS THE ASSET'S `shortable`, NOT `account.shorting_enabled`.**
+        Measured (`T-0139`/`D4a`): the account says `shorting_enabled: TRUE` while every crypto
+        asset says `shortable: false, marginable: false`. **A check written against the account
+        flag concludes shorts are fine, and they are not.** That is `B386`'s shape — two
+        instruments, one complete on the account axis and silent on the instrument axis — and the
+        account flag is the one a later reader reaches for, which is why the kill set pairs a
+        must-die on the asset field with a must-MISS on the account field.
 
-        every exit call site         positions.py:154           close_position   (manual close)
-                                     kill_switch.py:67          close_all_positions
-                                     crypto_loop.py:1006        close_position   (partial exit)
-                                     crypto_loop.py:1077        close_position   (full exit)
-                                     crypto_loop.py:1650        close_all_positions
-        ```
+        **ROUND DOWN, THEN REFUSE.** Down because rounding up crosses the risk the size was
+        computed for (`T-0097`'s ruled direction for lots). Refuse rather than round to zero,
+        because a zero quantity is an order the venue rejects — or one our own `lot_size > 0`
+        guard rejects after the decision has already been recorded as taken.
 
-        **NO EXIT PATH REACHES `place_order`.** Two callers, one entry and one forwarder — so
-        refusing `OrderRequest.direction == SHORT` cannot refuse a close, and closing a long (a
-        `sell` at the venue) is untouched. Had one exit routed through here, the refusal would
-        have had to discriminate on POSITION CONTEXT rather than on side, which is a different
-        task.
-
-        ⚠ **AND MY FIRST RUN OF THAT SCAN WAS NARROWER THAN THE QUESTION.** It excluded
-        `app/services/broker/` to drop the adapters' own `def place_order`, and that exclusion
-        also hid `live_loop_proxy.py:142`. The conclusion is unchanged — a forwarder is not an
-        exit — but **I reported "the only one" from a population that could not have contained
-        the second one.** Kept because it is the recurring shape: a scan whose population is
-        narrower than its question returns a confident answer to a question it did not ask.
-
-        ---
-
-        **THIS IS NOT WHERE THE LONG-ONLY PROPERTY IS ENFORCED FOR A PAPER RUN, AND THAT IS THE
-        FACT MOST WORTH KNOWING HERE.** The live loop does not execute against this adapter. It
-        builds `PaperBroker` or `SimPropFirmBroker` (`crypto_loop.py:168`, `:794`) and hands
-        THAT to `ExecutionService`. A refusal implemented only here would be unreachable in
-        every paper run — green arms, and 147 shorts still filling. The policy object is shared
-        with the simulators for exactly that reason; this member is the gate for the day the
-        real client is wired, not the gate the engine passes through today.
+        ⚠ **THE CODE THIS ORDER'S FAILURES MAP TO IS UNTESTED AGAINST THE VENUE** (`D4b`, and the
+        kill set's `M-10` prohibits pretending otherwise). This account has placed **zero** orders,
+        so no arm here has met a real Alpaca rejection: the arms pin OUR mapping — that a
+        `BrokerError` becomes `VENUE_TRANSPORT`, that this member's refusals become
+        `VENUE_DIRECTION_UNSUPPORTED` and `MIN_SIZE` — and say **nothing** about which exception
+        Alpaca actually raises for an undersized order or a shorting attempt. **A green suite here
+        is not evidence the boundary was tested.** The first real order settles it.
         """
-        # ORDER MATTERS: the venue's constraint is checked BEFORE the not-implemented refusal.
-        # Reversed, every SHORT would report "not implemented" — the true statement that hides
-        # the permanent one — and the record would say to try again later.
-        if self.direction_policy is not None:
-            self.direction_policy.enforce(request.direction)
+        # ------------------------------------------------------------------
+        # 1. POLICY FIRST, AND IT TOUCHES NO NETWORK.
+        #
+        # **THIS ORDER IS THE POINT, AND I HAD IT WRONG IN BETWEEN.** Reading the asset first
+        # deduplicates the venue call, which is why I moved it there — and it converts a
+        # PERMANENT refusal into one that needs a SUCCESSFUL venue call to happen at all. On a
+        # timeout the SHORT would come back as `BrokerError` -> `VENUE_TRANSPORT`, which reads as
+        # *try again*: the loop would retry, forever, an order this venue will never accept.
+        # `B375` again, produced by fixing something else.
+        #
+        # `ExecutionService` does NOT gate this upstream — `service.py:209` consults
+        # `direction_policy` only in the SHADOW branch (`status: observed`). For a live order
+        # THIS RAISE IS THE ONLY GATE, so it must not depend on the venue answering.
+        ALPACA_CRYPTO_LONG_ONLY.enforce(request.direction)
 
-        raise NotImplementedError(
-            "Alpaca place_order is not implemented yet — its body is scoped to part D of "
-            "ALPACA_PROGRAMME.md, because D measures the minimum order size and increment that "
-            "the body must round to and refuse below; writing it before D means writing it on "
-            "assumptions. This refusal is about the "
-            "MEMBER, not about the venue or the direction: a LONG is acceptable to Alpaca and "
-            "will be placed here once this is written. A SHORT is refused above, permanently, "
-            "with the venue's own reason."
+        # ------------------------------------------------------------------
+        # 2. ONE read, serving both the direction confirmation and the sizing. Two reads of a
+        #    record that MOVES WITH PRICE can disagree with each other.
+        asset = await self._fetch_asset(request.pair)
+
+        # ------------------------------------------------------------------
+        # 3. THE VENUE'S OWN ANSWER, as an INDEPENDENT gate rather than a duplicate of step 1.
+        #
+        # Step 1 is our policy; this is Alpaca's per-asset fact, and `T-0139`/`D4a` measured them
+        # agreeing today. The gate earns its place in the case where they DIVERGE: if `supported`
+        # is ever widened — a future venue, a config change, someone "fixing" the long-only rule —
+        # this still refuses a SHORT on an asset the venue marks `shortable: false`.
+        #
+        # **IT READS THE ASSET, NEVER THE ACCOUNT.** Measured: the account says
+        # `shorting_enabled: TRUE` while every crypto asset says `shortable: false`. A check
+        # against the account flag concludes shorts are fine and they are not — `B386`'s shape,
+        # one instrument complete on the account axis and silent on the instrument axis.
+        if request.direction != DirectionType.LONG and not getattr(asset, "shortable", False):
+            raise DirectionNotSupported(
+                venue="alpaca", direction=request.direction.value,
+                reason=ALPACA_CRYPTO_LONG_ONLY.reason,
+            )
+
+        limits = self._limits_of(asset, request.pair)
+        requested = Decimal(str(request.lot_size))
+        quantity = limits.quantise_down(requested)
+
+        if quantity < limits.min_order_size:
+            raise AlpacaBelowMinimumSize(
+                symbol=request.pair, requested=quantity, minimum=limits.min_order_size,
+            )
+
+        from alpaca.trading.enums import OrderSide, TimeInForce
+        from alpaca.trading.requests import MarketOrderRequest
+
+        # `str(quantity)` — the venue types quantities as strings and the SDK does not coerce, so
+        # handing it a float would send `0.30000000000000004` for a third of a position.
+        order = MarketOrderRequest(
+            symbol=request.pair,
+            qty=str(quantity),
+            side=OrderSide.BUY if request.direction == DirectionType.LONG else OrderSide.SELL,
+            time_in_force=TimeInForce.GTC,
+            client_order_id=request.client_order_id,
         )
+        placed = self._require_model(await self._call("submit_order", order), "submit_order")
+
+        # `B411` — TWO DEFECTS IN ONE PREDICATE, and this line held both.
+        #
+        # It read `str(getattr(placed, "status", "")).endswith("filled")`. `OrderStatus` is a
+        # `str`-mixin enum, so `str(OrderStatus.FILLED)` is `'OrderStatus.FILLED'` while the member
+        # itself equals `'filled'` — **exactly the trap already pinned for `BaseURL` in
+        # `test_t0138_order_path.py`, rebuilt one module later by the author of that arm.** So the
+        # predicate was BLIND: it never fired on a real fill. And `crypto_loop.py:1858` opens a
+        # position on `status == "FILLED"`, which means **a real filled order was invisible to the
+        # platform** — the venue holding a position the engine never recorded, the worst direction
+        # for this class of error to point.
+        #
+        # And the suffix match was LOOSE: `partially_filled` also ends with `filled`, so fixing
+        # only the blindness would have reported a partial as full and recorded a position at the
+        # size we ASKED for instead of the size we GOT. Hence an EXACT match on `.value`, and a
+        # partial that says so — it is deliberately not `"FILLED"`, so the loop does not record a
+        # full position from one. **A partial fill still leaves a real position we do not track**;
+        # that is logged as an open question rather than resolved here (`B411`).
+        raw_status = getattr(getattr(placed, "status", None), "value",
+                             getattr(placed, "status", "")) or "submitted"
+        if raw_status == "filled":
+            status = "FILLED"
+        elif raw_status == "partially_filled":
+            status = "PARTIALLY_FILLED"
+            logger.error(
+                "alpaca.partial_fill symbol=%s requested=%s filled=%s — the venue opened a "
+                "position smaller than the order and the engine does not track partials",
+                request.pair, quantity, getattr(placed, "filled_qty", None),
+            )
+        else:
+            status = str(raw_status).upper()
+
+        filled_raw = getattr(placed, "filled_qty", None)
+
+        return {
+            "status": status,
+            # What the VENUE says it filled, `None` when it did not say — never defaulted to the
+            # submitted quantity, which would report a fill we have no evidence of.
+            "filled_units": float(filled_raw) if filled_raw is not None else None,
+            "position_id": str(getattr(placed, "id", "")),
+            "pair": request.pair,
+            "direction": request.direction.value,
+            "units": float(quantity),
+            "requested_units": float(requested),
+            # Quantised DOWN, and the pair is recorded so a reader can see the venue's grid acting
+            # rather than infer it from a difference.
+            "quantise_increment": float(limits.min_trade_increment),
+            "min_order_size": float(limits.min_order_size),
+            "client_order_id": request.client_order_id,
+            "fill": float(getattr(placed, "filled_avg_price", None) or 0) or None,
+        }
 
     async def close_position(self, position_id: str, lot_size: float | None = None) -> dict:
         """Close by symbol, and **HONOUR `lot_size` rather than ignore it** (`T-0038`).
