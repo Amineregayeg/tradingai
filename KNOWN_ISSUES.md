@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-12 (B408 — THE CONNECT FORM SHOWS A SINGLE-ENVIRONMENT BROKER ITS ONE ENVIRONMENT AS A LABEL AND NEVER WRITES IT INTO FORM STATE. Alpaca displays 'Paper' and submits the initial-state default 'live', so broker_connections holds environment=live while the built client is paper:true. Changing the broker updates only `broker` (SettingsPage.tsx:334), and a one-environment broker renders a label instead of a select (:512), so nothing writes the field. B402's class on the INPUT side. Harmless today only because paper = not startswith('live') OR observe_only, and observe_only is forced on with ALLOW_LIVE_TRADING unset — so the connection is paper by the SECOND of two conditions while the first already points live. Set ALLOW_LIVE_TRADING=true and clear observe_only and the stored value selects the LIVE endpoint from a form that said Paper. Remedy: write the single environment into form state on selection and on reset, with an arm on the submitted PAYLOAD rather than the rendered label. Found verifying Malek's first real Alpaca connection, which itself succeeded against the paper endpoint.)
+Last updated: 2026-09-12 (B409 — THE VENUE'S MINIMUM IS ONE DOLLAR OF NOTIONAL AND MOVES WITH PRICE; THE INCREMENT IS A CONSTANT 1e-9. The programme documented 0.0001 for both and both were wrong: measured min_order_size is 0.000012941 BTC (~8x smaller) and 0.000397984 ETH, with min_trade_increment 1e-9 (100,000x finer). The minimum is $1.00 of notional — implied price within 0.19%/0.99% of spot on an INDEPENDENT source — so a pinned constant refuses valid orders in one price regime and admits sub-minimum ones in the other, WITHOUT FAILING. Read the minimum per asset at order time; the increment may be held. Two traps in the same output: account.shorting_enabled is TRUE while every crypto asset is shortable FALSE, so the long-only check must pin the ASSET flag; and a startswith symbol filter admits BTC/USDT and misses ETH/BTC, so comparisons must use the exact canonical string. D4b stays a could-not-ask with a consequence: the rejection_code mapping for venue errors is UNTESTED against a real venue rejection.)
 
 ---
 
@@ -26806,3 +26806,70 @@ Reconnecting after the fix is enough; nothing needs a hand-written UPDATE.
 `Alpaca adapter connected`, `Broker connected`, position reconciliation completed against Alpaca's
 paper endpoint with real credentials. `paper: true` in the log is the measured value, not an
 inference.
+
+### B409 — THE VENUE'S MINIMUM IS ONE DOLLAR OF NOTIONAL AND MOVES WITH PRICE; THE INCREMENT IS A CONSTANT. The programme documented `0.0001` for both, and both numbers were wrong
+
+**Measured on the live paper account under `T-0139` (review's probe, run by manager), which is the
+task the programme created precisely to distrust its own documented numbers. It was right to.**
+
+```
+                 PROGRAMME SAID          VENUE SAYS (GET /v2/assets, raw)
+BTC/USD          min 0.0001              min_order_size      0.000012941      ~8x smaller
+                 increment 0.0001        min_trade_increment 0.000000001      100,000x finer
+ETH/USD          (same)                  min_order_size      0.000397984
+                                         min_trade_increment 0.000000001
+both             fractionable true   marginable FALSE   shortable FALSE   tradable active
+```
+
+**THE MINIMUM IS ONE DOLLAR OF NOTIONAL.** Checked by arithmetic against an **independent** price
+source — the Binance endpoint the engine already uses, not the venue under test:
+
+```
+1 / 0.000012941 = 77,273.78 implied BTC   vs spot 77,418.00   0.19% apart
+1 / 0.000397984 =  2,512.66 implied ETH   vs spot  2,537.81   0.99% apart
+```
+
+> **So a pinned constant is wrong in both directions and wrong WITHOUT FAILING.** At BTC 150,000 the
+> true minimum is ~`0.0000067`; at 40,000, ~`0.000025`. A constant refuses valid orders in one regime
+> and admits sub-minimum ones in the other, and nothing in our code would notice either.
+
+**AND THE INCREMENT IS NOT PRICE-DERIVED** — `1e-9` on both assets. **The two fields have different
+natures and must not be treated alike:** one is read per order, the other can be held.
+
+**BOUND, stated rather than buried:** two points matching $1.00 within 1% is an **inference about
+the venue's rule**, not the rule itself. Re-reading the same endpoint later and diffing converts it
+from inference to measurement, and costs one GET.
+
+**FOR `place_order` (part D):** read both fields **from the venue per asset at order time**; round
+**DOWN** to the increment (`T-0097`'s direction); and **REFUSE below the minimum rather than round to
+zero** — which is what `MIN_SIZE`, reserved in part 3's kill set, now owns.
+
+## Two traps in the same output
+
+**1. THE ACCOUNT FLAG CONTRADICTS THE ASSET FLAG, and the account flag is the one a reader reaches
+for.**
+
+```
+account.shorting_enabled   TRUE          <- equities-shaped, and the tempting field
+asset.shortable            FALSE         <- the authority, on every crypto asset
+asset.marginable           FALSE
+```
+
+**Malek's long-only ruling is confirmed at the level that governs**, and a check written against
+`account.shorting_enabled` would conclude shorts are fine. **That needs a must-miss arm pinning that
+the account flag is NOT what is read** — `B386`'s shape: complete on the account axis, silent on the
+instrument axis.
+
+**2. A LOOSE SYMBOL FILTER PICKS THE WRONG MARKET.** The venue also lists `BTC/USDC`, `BTC/USDT` and
+`ETH/BTC`. Review's own probe filtered with `startswith("BTC")`, which admits `BTC/USDT` and misses
+`ETH/BTC` — **found by its author, and it did not affect the answer only because the full spelling
+list was printed alongside.** Any symbol check must compare the exact canonical string.
+**`D2` is otherwise settled: `BTC/USD` and `ETH/USD` are the venue's own spellings**, so
+`alpaca.py:253`'s comment is now verified rather than asserted.
+
+## `D4b` is a could-not-ask WITH A CONSEQUENCE
+
+The account has **zero orders**, so no rejection exists to observe, and it stays unobservable while
+we refuse to place one. **So `B392`/`B403`'s `rejection_code` mapping for venue errors is UNTESTED
+against a real venue rejection** — the arms pin OUR mapping, not the venue's behaviour. **Recorded as
+untested rather than covered**, and `place_order`'s first real run is what settles it.

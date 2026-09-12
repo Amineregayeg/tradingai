@@ -35,7 +35,13 @@ yes, because Alpaca holds them. That tension is smaller than MT5's and it is not
 
 ```
 size_position() returns   (equity * risk_pct) / risk_per_unit   -> a float of UNITS
-Alpaca crypto accepts     fractional qty, min 0.0001 BTC, increment 0.0001, up to 9 dp
+Alpaca crypto accepts     fractional qty. **MEASURED 2026-09-12 (`T-0139`, `B409`), and the
+                          numbers below are NOT what this document first claimed:**
+                            min_order_size      BTC 0.000012941   ETH 0.000397984   = $1 NOTIONAL,
+                                                so it MOVES WITH PRICE and must be read per order
+                            min_trade_increment 1e-9 on both      = a constant, and may be held
+                          This document previously said "min 0.0001 BTC, increment 0.0001" for both.
+                          The minimum was ~8x too large and the increment 100,000x too coarse.
 our canonical pair name   "BTC/USD"  ==  Alpaca's native symbol format
 ```
 
