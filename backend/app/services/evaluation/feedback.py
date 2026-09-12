@@ -33,6 +33,21 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
+# **THE LIVE LAYER READS THE LIVE VOCABULARY.** `B405` forbids the opposite direction — a
+# MIGRATION importing this list, because a migration must emit what was true when it ran.
+# `analyze()` stays pure and deterministic: this is a constants import, no I/O and no DB.
+from app.models.decision_record import (
+    DECISION_OUTCOMES,
+    OUTCOME_ABANDONED,
+    OUTCOME_ABSTAINED,
+    OUTCOME_BREAKEVEN,
+    OUTCOME_LOSS,
+    OUTCOME_OPEN,
+    OUTCOME_REJECTED,
+    OUTCOME_UNSIZED_FILL,
+    OUTCOME_WIN,
+)
+
 # ---------------------------------------------------------------------------
 # Knob vocabulary — the single source of truth for what may (and may NOT) be tuned.
 # ---------------------------------------------------------------------------
@@ -78,20 +93,71 @@ RISK_PCT_REFUSAL: str = (
 
 
 # ---------------------------------------------------------------------------
-# Outcome vocabulary — tolerant of both the DecisionRecord vocab (WIN/LOSS/BE/OPEN/
-# ABSTAINED) and the backtest engine vocab (win/loss/scratch/open), case-insensitive.
+# Outcome vocabulary — READ OFF THE MODEL, never re-listed here.
+#
+# `B425`. This was six hand-written token sets, and it had drifted by two: the
+# `decision_records` CHECK admitted eight values and this file knew six, so `REJECTED`
+# (live since `0008`) and `UNSIZED_FILL` (arriving with `0013`) matched nothing.
+#
+# **AND FALLING THROUGH IS NOT REFUSING.** They dropped into the branch written for rows
+# carrying NO token, which infers the outcome from the sign of `realized_r` — so a value
+# this layer has never heard of was answered with a confident one and the record's own
+# statement of what happened was discarded in favour of an inference.
+#
+# THE DEFECT IS AN EMPTINESS AXIS, not a missing token set. Three states, two paths:
+#
+#     outcome IS NULL          no token was ever written    -> infer from the sign of R
+#     outcome = "WIN"          a token this layer knows     -> use it
+#     outcome = "REJECTED"     a token this layer does NOT  -> was treated as the first
+#
+# The first and third are different questions and the fallback answers only the first.
+# It is `_position_units`' absent-vs-present-None one layer up: there `.get()` collapsed
+# them, here "no set matched" did.
+#
+# Keyed by the model's constants so the two cannot drift again — an outcome added to
+# `DECISION_OUTCOMES` without a bucket here is a FAILING TEST, not a silent
+# misclassification. That arm compares the two AS SETS; a length check passes on a
+# right-sized wrong membership (`B416`).
+#
+# **THE BACKTEST VOCABULARY IS DELIBERATELY GONE.** The old sets also carried
+# `lose`/`breakeven`/`break_even`/`scratch`/`abstain` for `app/services/backtest/engine.py`,
+# which emits `win|loss|scratch|open`. That join was never made: the backtest engine writes
+# no `DecisionRecord` and nothing feeds its trades to `analyze()`, so the tolerance was
+# unexercised in every path that exists. If it is ever wired up, those rows now surface as
+# `unrecognised` in the returned counts instead of `scratch` silently becoming a breakeven.
 # ---------------------------------------------------------------------------
 
-_WIN_TOKENS = {"win"}
-_LOSS_TOKENS = {"loss", "lose"}
-_BREAKEVEN_TOKENS = {"be", "breakeven", "break_even", "scratch"}
-_OPEN_TOKENS = {"open", ""}
-_ABSTAIN_TOKENS = {"abstained", "abstain"}
-#: The position existed; the process holding it died before it closed. Excluded
-#: from the learning population for a different reason than "open" — not "not yet"
-#: but "never observed". Folding it into breakeven would feed the loop a zero that
-#: nobody measured (KNOWN_ISSUES A11).
-_ABANDONED_TOKENS = {"abandoned"}
+#: The analysis bucket for every outcome the DATABASE can hold. **Keys are the model's own
+#: constants** — this file does not get to have an opinion about what the values are.
+_OUTCOME_BUCKETS: dict[str, str] = {
+    OUTCOME_WIN: "win",
+    OUTCOME_LOSS: "loss",
+    OUTCOME_BREAKEVEN: "be",
+    OUTCOME_OPEN: "open",
+    OUTCOME_ABSTAINED: "abstained",
+    #: The position existed; the process holding it died before it closed. Excluded
+    #: from the learning population for a different reason than "open" — not "not yet"
+    #: but "never observed". Folding it into breakeven would feed the loop a zero that
+    #: nobody measured (KNOWN_ISSUES A11).
+    OUTCOME_ABANDONED: "abandoned",
+    #: The order was refused before it reached the venue. No position, so no realized R.
+    OUTCOME_REJECTED: "rejected",
+    #: A fill we could not size. The row exists precisely BECAUSE its numbers are not
+    #: trustworthy, so it is the last row that should have its outcome inferred from them.
+    OUTCOME_UNSIZED_FILL: "unsized_fill",
+}
+
+#: **THE REFUSAL, and it is a VALUE rather than an exception on purpose.** `_classify_outcome`
+#: runs once per row over the whole corpus; raising here would take down an entire evaluation
+#: run because of one row — the `M-5` shape, where a bookkeeping failure killed the caller.
+#: Refusing means *do not guess*: the row is excluded, counted, and the count is returned.
+BUCKET_UNRECOGNISED = "unrecognised"
+
+#: Buckets carrying no realized information. Excluded from the evidence, each for its own
+#: reason, and each counted separately so "thin evidence" can say WHY it is thin.
+_NOT_CLOSED: tuple[str, ...] = (
+    "open", "abstained", "abandoned", "rejected", "unsized_fill", BUCKET_UNRECOGNISED,
+)
 
 
 class RiskPctTuningRefused(ValueError):
@@ -175,26 +241,26 @@ def _first(rec: dict, *keys: str) -> Any:
 # ---------------------------------------------------------------------------
 
 def _classify_outcome(rec: dict, realized_r: float | None) -> str:
-    """Return one of 'win' | 'loss' | 'be' | 'open' | 'abstained' | 'abandoned'.
+    """Map a record to one of :data:`_OUTCOME_BUCKETS`' values, or
+    :data:`BUCKET_UNRECOGNISED`.
 
-    Prefers an explicit ``outcome`` token (case-insensitive, both vocabularies);
-    falls back to the sign of ``realized_r`` when no token is present.
+    **`B425`. An explicit token is an ANSWER, not a hint.** A token this layer does not
+    know is refused — never inferred from ``realized_r``, because the sign of R is what
+    you consult when the row never said, and this row did say. Refusing returns a value;
+    it does not raise. This runs once per row over the corpus and one bad row must not end
+    the run (`M-5`).
+
+    The ``realized_r`` fallback below is reachable ONLY when the record carries no token
+    at all, which is what ``outcome IS NULL`` means in the CHECK.
     """
     raw = _first(rec, "outcome")
     if raw is not None:
-        tok = str(raw).strip().lower()
-        if tok in _WIN_TOKENS:
-            return "win"
-        if tok in _LOSS_TOKENS:
-            return "loss"
-        if tok in _BREAKEVEN_TOKENS:
-            return "be"
-        if tok in _ABSTAIN_TOKENS:
-            return "abstained"
-        if tok in _OPEN_TOKENS:
-            return "open"
-        if tok in _ABANDONED_TOKENS:
-            return "abandoned"
+        tok = str(raw).strip()
+        # An empty string is the ABSENCE of a token, not an unknown one — it is the only
+        # spelling of "nothing was written" that survives a round trip through JSON, and
+        # the CHECK cannot store it. Deliberately NOT a refusal.
+        if tok:
+            return _OUTCOME_BUCKETS.get(tok.upper(), BUCKET_UNRECOGNISED)
     # An explicit abstained flag also means "no trade".
     if bool(rec.get("abstained")):
         return "abstained"
@@ -258,14 +324,20 @@ class _RecordView:
     outcome: str  # win|loss|be
 
 
-def _closed_views(records: list[dict]) -> list[_RecordView]:
+def _closed_views(records: list[dict]) -> tuple[list[_RecordView], dict[str, int]]:
     """Project the closed (resolved) records into the fields the analysis uses.
 
-    A record is *closed* when its outcome resolves to win/loss/be (or a realized_r
-    is present without an OPEN/ABSTAINED marker). OPEN and ABSTAINED rows carry no
-    realized information and are excluded from the evidence count.
+    A record is *closed* when its outcome resolves to win/loss/be. Everything else carries
+    no realized information and is excluded from the evidence count.
+
+    **Returns the EXCLUSION COUNTS as well as the views (`B425`).** Dropping a row and
+    saying nothing is how `REJECTED` was invisible for two migrations: the corpus shrank
+    and the only symptom was an evidence count that read as normal. A refusal nobody can
+    count is indistinguishable from no refusal, and the caller reports "insufficient
+    evidence" without being able to say what the evidence was spent on.
     """
     views: list[_RecordView] = []
+    excluded: dict[str, int] = {}
     for rec in records:
         if not isinstance(rec, dict):
             continue
@@ -277,10 +349,14 @@ def _closed_views(records: list[dict]) -> list[_RecordView]:
         realized_r = _to_float(_first(rec, "realized_r", "r_multiple", "r"))
 
         outcome = _classify_outcome(rec, realized_r)
-        if outcome in ("open", "abstained", "abandoned"):
+        if outcome in _NOT_CLOSED:
+            excluded[outcome] = excluded.get(outcome, 0) + 1
             continue
         if realized_r is None:
-            # Resolved but no numeric R to learn from — nothing to measure.
+            # Resolved but no numeric R to learn from — nothing to measure. Counted under
+            # its own key rather than folded in with the refusals: this row said what
+            # happened and simply has no number, which is a different gap in the corpus.
+            excluded["resolved_without_r"] = excluded.get("resolved_without_r", 0) + 1
             continue
 
         expected_r = _to_float(_first(rec, "expected_r"))
@@ -299,7 +375,7 @@ def _closed_views(records: list[dict]) -> list[_RecordView]:
                 outcome=outcome,
             )
         )
-    return views
+    return views, excluded
 
 
 # ---------------------------------------------------------------------------
@@ -430,7 +506,7 @@ def analyze(records: list[dict], params: dict, min_evidence: int = 30) -> dict:
     :class:`Correction`), ``abstained`` (bool), ``abstain_reason`` (str|None).
     """
     params = params or {}
-    views = _closed_views(records or [])
+    views, excluded = _closed_views(records or [])
     n = len(views)
 
     # --- expected vs actual (computed over whatever closed evidence exists) ------
@@ -519,10 +595,19 @@ def analyze(records: list[dict], params: dict, min_evidence: int = 30) -> dict:
             "expected_vs_actual": expected_vs_actual,
             "gaps": gaps,
             "corrections": [],
+            "excluded": excluded,
             "abstained": True,
+            # **THE COUNTS BELONG IN THE REASON, not only in the payload.** This is the
+            # branch where an unread vocabulary actually bites: the evidence is thin
+            # BECAUSE rows were refused, and saying "insufficient evidence: 4" without
+            # saying "and 60 rows were excluded, 60 of them unrecognised" hides the cause
+            # behind a number that reads like a quiet start.
             "abstain_reason": (
                 f"insufficient evidence: {n} closed record(s) < min_evidence={min_evidence}; "
                 "no confident correction on thin data."
+                + (f" Excluded {sum(excluded.values())} record(s): "
+                   + ", ".join(f"{k}={v}" for k, v in sorted(excluded.items())) + "."
+                   if excluded else "")
             ),
         }
 
@@ -653,6 +738,7 @@ def analyze(records: list[dict], params: dict, min_evidence: int = 30) -> dict:
         "expected_vs_actual": expected_vs_actual,
         "gaps": gaps,
         "corrections": corrections,
+        "excluded": excluded,
         "abstained": False,
         "abstain_reason": None,
     }

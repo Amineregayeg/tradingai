@@ -94,6 +94,10 @@ export default function EnginePage() {
   const gaps = (feedback?.gaps ?? {}) as Dict
   const eva = (feedback?.expected_vs_actual ?? {}) as Dict
   const corrections = (feedback?.corrections ?? []) as Dict[]
+  // B425: the analysis refuses rows it cannot read rather than guessing at them, and a
+  // refusal nobody can see is the same defect wearing a different hat.
+  const excluded = (feedback?.excluded ?? {}) as Record<string, number>
+  const excludedTotal = Object.values(excluded).reduce((a, b) => a + (Number(b) || 0), 0)
   const activity = (status?.activity ?? []) as Dict[]
   const cfg = (status?.config ?? {}) as Dict
   const cfgSymbols = (Array.isArray(cfg.symbols) ? cfg.symbols : []) as string[]
@@ -216,6 +220,28 @@ export default function EnginePage() {
             <Stat label="Slippage" value={r(gaps.mean_slippage_r)} color={AMBER} />
             <Stat label="Win-rate gap" value={eva.actual_win_rate != null ? `${(((n(gaps.win_rate_gap) ?? 0)) * 100).toFixed(1)}pp` : '—'} />
           </div>
+          {/* **B425. ABOVE THE TERNARY ON PURPOSE.**
+              `abstain_reason` carries the exclusion counts, but it renders on ONE of the three
+              branches — so the rows the analysis refused were visible exactly when the engine had
+              already stopped itself, and hidden on both branches where it acts. One of those
+              prints "the engine is tracking its expectations", unchanged whether zero rows were
+              dropped or sixty. That is the defect this entry is about, one layer out: a surface
+              that reads as health regardless of what went missing.
+
+              ABSENT AND EMPTY ARE DIFFERENT ANSWERS and are rendered differently. `{}` means the
+              backend counted and found none, so nothing is shown. A MISSING key means this build
+              cannot tell you — which must not look like "none". */}
+          {feedback && feedback.excluded === undefined ? (
+            <div style={{ fontSize: 11, color: AMBER, marginBottom: 10 }}>
+              This build cannot report which records the analysis refused.
+            </div>
+          ) : excludedTotal > 0 ? (
+            <div style={{ fontSize: 11, color: AMBER, marginBottom: 10 }}>
+              {excludedTotal} record(s) excluded from the evidence:{' '}
+              {Object.entries(excluded).sort(([a], [b]) => a.localeCompare(b))
+                .map(([k, v]) => `${k}=${String(v)}`).join(', ')}
+            </div>
+          ) : null}
           {feedback?.abstained ? (
             <div style={{ fontSize: 12, color: MUTE, lineHeight: 1.5 }}>{String(feedback?.abstain_reason ?? '')}</div>
           ) : corrections.length === 0 ? (
