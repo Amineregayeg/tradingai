@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-12 (B414 — THE ERROR LOG B413 CREDITED AS 'THE SIGNAL' DROPPED EVERY VALUE IT NAMED. logger.error used percent-format while loguru formats with str.format, so the placeholders stayed literal and all three arguments were discarded: 'logs at ERROR' was true and worthless. Found by execute before starting T-0141, fixed at 6434e83 and verified against the app's own serialize=True sink. Its first two line-based greps reported NONE FOUND over a file known to contain one; the AST sweep with a planted control found it, the only percent-format logger call in 184 files. AND NO ARM CAUGHT IT: the arm that exercises that exact line never looks at the log — a side effect nothing asserts on is not covered by the test that triggers it. Also B413 CORRECTED: a partial fill does not leave NO row, it leaves a FALSE one (outcome REJECTED, reason PARTIALLY_FILLED, code UNCLASSIFIED), so the fix must REMOVE the false row rather than add a true one, the indistinguishability arm can pass against the unfixed code, and the halt must REPLACE that row rather than follow it.)
+Last updated: 2026-09-12 (B416 — B405's DEFECT EXISTS IN FOUR MORE VOCABULARIES AND THE GUARD WRITTEN FOR IT TODAY IS BLIND TO EVERY ONE, because it filters `if "rejection_code" not in source: continue` and sets its floor at the count it could already see. 0002, 0006, 0007 and 0008 import live vocabularies from app.models.decision_record, and 0006's downgrade derives its 0005 from DECISION_OUTCOMES minus a member — B405 character for character. Latent until an outcome value is added, which is exactly what T-0141's deferred halt record would do. Fix is its own task: freeze four vocabularies across four ALREADY-DEPLOYED migrations and widen the arm to refuse ANY app.* import, which needs the real-server harness. Also B415 — halt-vs-skip was decided by block.startswith('KILL SWITCH'), so a new halt reason reaches the operator labelled a routine skip; and B413 RULED: the truthful halt outcome value is consolidated with B416's freeze into one migration and one harness run, since adding a value before the freeze would arm B416 immediately.)
 
 ---
 
@@ -27099,6 +27099,31 @@ split into the gate and the false-rejection path that must **stop** being writte
 the partial's record **is a position record at the filled size** with a mandatory run against the
 unfixed code first, and `M-6` carries the ordering clause that the halt must **replace** the false row.
 
+**THE HALT LEAVES NO `decision_record` AT ALL, and that is the lesser of two evils rather than an
+answer.** Execute deferred it to me rather than inventing a value, which was right:
+
+```
+a REJECTED row would be FALSE — the venue filled part of the order (the defect this task removes)
+NO row means the decision is absent from the denominator — B403's shape
+a TRUTHFUL row needs its own OUTCOME value, and `outcome` is a closed vocabulary
+  (ck_decision_records_outcome), so that is a MIGRATION — B410's coupling, and the manager's release
+```
+
+**RULED: the truthful outcome value is NOT added in `T-0141`. It is consolidated with `B416`'s
+vocabulary freeze into one task, one migration and ONE real-server harness run**, because both touch
+the same `outcome` vocabulary and the harness is the expensive part. **Adding a value before the
+freeze would also arm `B416` immediately** — `0002`, `0006` and `0008` would each start claiming they
+always admitted it.
+
+**The halt is not silent in the meantime:** an ERROR log carrying pair, direction, status,
+`filled_units` and `submitted_units` — **and post-`B414` those values actually arrive** — an activity
+line labelled `halt` with the reason, `status().halt_reason`, and both operator surfaces.
+
+**`M-6` BIT HARDEST IN THE UI, NOT THE BACKEND.** `EnginePanel` computed `live = running && !paused`,
+and a halt leaves `running` true and `paused` false — **so the operator saw a green pulsing "LIVE
+ENGINE" over an engine that would never take another entry**, with an unsized position at the venue.
+`B179`'s shape. Both surfaces now read the reason, with driven arms in both directions.
+
 **RULING:**
 
 1. **A fill quantity greater than zero is a REAL POSITION and must be tracked at the FILLED size**,
@@ -27142,3 +27167,77 @@ uncontrolled scan.
 have: review's *"sends a quantity the venue rejects"* → *"would reject"*, and a second execute found
 sweeping for siblings — *"a size the venue accepts"*, **which asserts an acceptance never observed.**
 We have placed zero orders.
+
+### B415 — HALT-VS-SKIP WAS DECIDED BY A PROSE PREFIX, so any new halt reason reaches the operator labelled as a routine skip
+
+**Found by execute preparing `T-0141`'s named halt. Verified by manager at `HEAD`:**
+
+```python
+crypto_loop.py:1780   kind = "halt" if block.startswith("KILL SWITCH") else "skip"
+```
+
+**The classification lived in the message TEXT.** So `T-0141`'s halt — *a partial fill we cannot
+size* — would have been surfaced to the operator as an ordinary skipped bar, alongside "spread too
+wide" and "outside session". **The one event that means *stop and look* would have arrived wearing
+the costume of the most ignorable event on the panel.**
+
+**This is `scanners-keyed-on-vocabulary-go-blind` in the operator path**, and the direction is the
+dangerous one: not a false alarm, but a real alarm rendered routine. **Fixed in `T-0141` by carrying
+the kind as a constant rather than deriving it from prose.**
+
+### B416 — `B405`'s DEFECT EXISTS IN FOUR MORE VOCABULARIES, AND THE GUARD WRITTEN FOR IT TODAY IS BLIND TO EVERY ONE — because it filters on the name of the vocabulary it was written for
+
+**Found by execute while trying to add an outcome value for `T-0141`, so it sits directly in the next
+task's path. Measured by AST with a planted-import control, after two text greps had already lied to
+it. Verified by manager: five imports across twelve migration files.**
+
+```
+0002_decision_records              DECISION_COHORTS, DECISION_OUTCOMES, SIGNAL_DIRECTIONS, _sql_in
+0006_decision_outcome_abandoned    DECISION_OUTCOMES      downgrade derives "0005" as
+                                                          tuple(v for v in DECISION_OUTCOMES if v != "ABANDONED")
+0007_decision_attribution          DECIDED_BY_* (4 names)
+0008_decision_outcome_rejected     DECISION_OUTCOMES
+0010_decision_rejection_code       OUTCOME_REJECTED, REJECTION_UNCODED_LEGACY   <- SCALARS, weaker case
+```
+
+**`0006`'s downgrade is `B405` character for character** — a historical vocabulary derived from the
+live one minus a member.
+
+**WHY THE GUARD MISSES IT, and this is the entry:**
+
+```python
+test_no_migration_imports_the_LIVE_vocabulary:
+    if "rejection_code" not in source:
+        continue                      # <- all four outcome migrations skipped here
+    ...
+    assert checked >= 3               # <- passes on exactly the three it already knew about
+```
+
+> **A guard written for one vocabulary, keyed on that vocabulary's name.** Its floor was set to the
+> count it could already see, so it certifies a clean sweep over the only files it looks at. **The
+> blindness our tooling note warns about, inside the guard against that blindness** — `B412`'s shape
+> in product tests rather than in tools.
+
+**LATENT, AND WHAT STOPS IT BEING SO:** nobody has added an outcome since `REJECTED`/`0008`.
+**`T-0141`'s deferred halt record is exactly what would add one** — and the moment it lands, `0002`,
+`0006` and `0008` all begin claiming they always admitted it, and replaying the chain on a fresh
+database stops reproducing production.
+
+**`0010` IS FLAGGED AS THE WEAKER CASE RATHER THAN OVER-FIXED:** it imports two **scalars** for a data
+backfill, not a vocabulary tuple. If `OUTCOME_REJECTED`'s value changed, the backfill would target
+different rows — but it does not rewrite a constraint's history.
+
+**THE FIX IS ITS OWN TASK AND NOT `T-0141`'s COMMIT:** freezing four vocabularies across four
+**already-deployed** migrations, and widening the arm to refuse **any** `app.*` import under
+`alembic/versions/` (with `_sql_in` whitelisted or copied). **Changing deployed migrations requires
+the real-server harness** — the same routine `0010`/`0011`/`0012` got, where the downgrade step was
+what actually proved the freeze.
+
+**AND EXECUTE'S OWN NEAR-MISS, recorded because it nearly became a claim to the manager.**
+Mid-investigation it had found only `0002` and `0006` and was about to report that `REJECTED` had
+**no migration at all** — which would have meant production's CHECK silently refusing every rejection
+row, with `_record_rejected_signal` swallowing the error by design. **`0008` exists and does exactly
+that job**; the grep missed it because it names the constraint through a `_CONSTRAINT` variable.
+
+> **The alarming version of a finding is the one to verify hardest.** A frightening conclusion is the
+> one you most want to report immediately, and the one most likely to be an artefact of the search.
