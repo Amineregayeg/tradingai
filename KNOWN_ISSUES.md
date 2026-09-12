@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-12 (B409 — THE VENUE'S MINIMUM IS ONE DOLLAR OF NOTIONAL AND MOVES WITH PRICE; THE INCREMENT IS A CONSTANT 1e-9. The programme documented 0.0001 for both and both were wrong: measured min_order_size is 0.000012941 BTC (~8x smaller) and 0.000397984 ETH, with min_trade_increment 1e-9 (100,000x finer). The minimum is $1.00 of notional — implied price within 0.19%/0.99% of spot on an INDEPENDENT source — so a pinned constant refuses valid orders in one price regime and admits sub-minimum ones in the other, WITHOUT FAILING. Read the minimum per asset at order time; the increment may be held. Two traps in the same output: account.shorting_enabled is TRUE while every crypto asset is shortable FALSE, so the long-only check must pin the ASSET flag; and a startswith symbol filter admits BTC/USDT and misses ETH/BTC, so comparisons must use the exact canonical string. D4b stays a could-not-ask with a consequence: the rejection_code mapping for venue errors is UNTESTED against a real venue rejection.)
+Last updated: 2026-09-12 (B410 — A REJECTION ROW LOST TO A CONSTRAINT VIOLATION IS SWALLOWED BY DESIGN. _record_rejected_signal catches every exception (crypto_loop.py:1449) so the loop cannot die of bookkeeping, which is correct — but rejection_code now carries a CHECK closing the vocabulary, so a code the DEPLOYED database has never heard of fails into that except: the signal is correctly refused, no order is placed, and NOTHING RECORDS IT. B403's shape produced by DEPLOYMENT ORDER rather than by code, and the half that works hides the half that does not. Found by execute preparing T-0140. That task defuses its own case — 0012, the vocabulary constant and the order body land in ONE commit, and within a single deploy the api entrypoint runs deploy_migrate.py with check_call BEFORE uvicorn, so a failed migration exits rather than serving — but it does not close the class. Closing it needs a COUNTED failed-write metric surfaced beside the split, not a log line, and the swallow needs to distinguish a transient DB error from a CHECK violation, which is B375 one layer down.)
 
 ---
 
@@ -26873,3 +26873,48 @@ The account has **zero orders**, so no rejection exists to observe, and it stays
 we refuse to place one. **So `B392`/`B403`'s `rejection_code` mapping for venue errors is UNTESTED
 against a real venue rejection** — the arms pin OUR mapping, not the venue's behaviour. **Recorded as
 untested rather than covered**, and `place_order`'s first real run is what settles it.
+
+### B410 — A REJECTION ROW LOST TO A CONSTRAINT VIOLATION IS SWALLOWED BY DESIGN, so a code-vocabulary mismatch shrinks the denominator with nothing saying so. The refusal still happens; only the RECORD of it disappears
+
+**Found by execute preparing `T-0140`, as a deployment-ordering hazard. Filed separately because the
+mechanism outlives that task and is not specific to `MIN_SIZE`.**
+
+`_record_rejected_signal` catches every exception (`crypto_loop.py:1449`) with a stated and correct
+reason — *"never let bookkeeping kill the loop"*. **A failed write must not stop the engine. But the
+`rejection_code` column now carries a `CHECK` closing the vocabulary**, so a code the running
+database has never heard of does not fail loudly at the write; it fails into that `except`.
+
+```
+code emits a rejection_code the deployed CHECK does not allow
+  -> INSERT violates ck_decision_records_rejection_code
+  -> _record_rejected_signal swallows it
+  -> the signal was correctly REFUSED, no order was placed,
+     and NOTHING RECORDS THAT IT HAPPENED
+```
+
+> **This is `B403` produced by deployment order rather than by code.** The venue refuses, the engine
+> behaves correctly, and the denominator is wrong with nothing saying so. **The half that works
+> hides the half that does not** — exactly the pairing `B215`, `B380` and `B399` are all instances of.
+
+**`T-0140` DEFUSES ITS OWN CASE AND DOES NOT CLOSE THE CLASS.** Ruled: `0012`, the vocabulary
+constant and the order body land in **one commit**, never split, so the code cannot reach production
+ahead of the constraint. **And within a single deploy the ordering is already safe** — the api
+entrypoint runs `deploy_migrate.py` before `exec uvicorn`, with `check_call`, so a failed migration
+exits the container instead of serving. **The hazard is entirely in splitting them.** Worth knowing
+rather than relying on: it is a property of the entrypoint, not of the recording path.
+
+**WHAT WOULD ACTUALLY CLOSE IT** — not scoped here, and stated so nobody reads this as fixed:
+
+```
+a swallowed write is INVISIBLE. It should be COUNTED.
+   a per-run counter of failed rejection writes, surfaced beside the split, turns a silent
+   loss into a number someone can see. A log line is not enough: B404's log path was clean
+   for a month and nobody read it.
+distinguish the CLASSES of failure inside the swallow
+   a transient DB error is worth retrying; a CHECK violation is a programming error and will
+   fail identically forever. Today they are the same `except`, which is B375 one layer down.
+```
+
+**And the general rule this is the fourth instance of:** *a value written into a column whose
+constraint is deployed separately is a two-part deployment*, and the recording path is exactly where
+a mismatch goes quiet, because recording is the part that is written to never interrupt anything.
