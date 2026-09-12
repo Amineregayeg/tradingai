@@ -805,3 +805,145 @@ async def test_the_ENTRY_line_names_WHAT_was_entered_with_AND_without_an_exit_pl
         assert "BTC/USD" in entry[0], f"the entry line does not name the pair: {entry[0]!r}"
         assert "LONG" in entry[0], f"the entry line does not name the direction: {entry[0]!r}"
         assert "0.004" in entry[0], f"the entry line does not name the size: {entry[0]!r}"
+
+
+# =====================================================================================
+# B419 — "KEY ABSENT" AND "KEY PRESENT AND None" ARE THE TWO CASES THIS FUNCTION SEPARATES
+# =====================================================================================
+
+async def test_a_FULL_fill_whose_VENUE_REPORTED_NOTHING_does_not_record_the_submitted_size():
+    """**`B419`, found by review in the function this task added, and it is `B411` by another
+    route.**
+
+    `.get()` collapses *key absent* and *key present and `None`* to the same answer, and those are
+    exactly the two cases the `FILLED` fallback exists to distinguish. My ten fixtures could not
+    reach it: they all went through `.get()`, which had already erased the difference.
+
+    ```
+    paper/cft_sim   omit `filled_units` entirely   -> fall back to `units`. correct.
+    alpaca          ALWAYS emits it, None = the venue did not say  -> MUST NOT fall back.
+    ```
+
+    **And `alpaca.py` refuses this three lines above the key it sets** — *"never defaulted to the
+    submitted quantity, which would report a fill we have no evidence of"* — while the loop did it
+    on the adapter's behalf. I wrote both sides and the second undid the first.
+    """
+    absent = {"status": "FILLED", "units": 0.01}
+    present_none = {"status": "FILLED", "filled_units": None, "units": 0.01}
+
+    # The premise, stated so the arm cannot pass for the wrong reason: these two are the SAME
+    # through `.get()` and different through membership.
+    assert absent.get("filled_units") == present_none.get("filled_units") is None
+    assert ("filled_units" in absent) != ("filled_units" in present_none)
+
+    assert _units(absent) == 0.01, "the paper/sim fallback broke — M-3's must-miss"
+    assert _units(present_none) is None, (
+        "a venue that reported NO filled quantity had the SUBMITTED size recorded as the position"
+    )
+
+
+async def test_WHICH_BROKERS_EMIT_THE_KEY_is_pinned_because_the_fix_depends_on_it():
+    """**The fallback is only correct while `paper`/`cft_sim` OMIT the key and `alpaca` sets it.**
+
+    That is a fact about three files this one does not own, so it is measured rather than assumed —
+    and if any of them changes, the membership test silently starts meaning something else.
+    """
+    import ast
+    import pathlib
+
+    broker = pathlib.Path("app/services/broker")
+    if not broker.exists():                       # running from the repo root
+        broker = pathlib.Path("backend/app/services/broker")
+
+    def emits(name: str) -> bool:
+        tree = ast.parse((broker / name).read_text(encoding="utf-8"))
+        fn = next(n for n in ast.walk(tree)
+                  if isinstance(n, (ast.AsyncFunctionDef, ast.FunctionDef))
+                  and n.name == "place_order")
+        return any(isinstance(k, ast.Constant) and k.value == "filled_units"
+                   for d in ast.walk(fn) if isinstance(d, ast.Dict) for k in d.keys)
+
+    assert not emits("paper.py"), (
+        "paper.py now reports a filled quantity — the `FILLED` fallback is no longer for it, and "
+        "the membership test's meaning has changed under it"
+    )
+    assert not emits("cft_sim.py"), "cft_sim.py now reports a filled quantity"
+    assert emits("alpaca.py"), (
+        "alpaca.py no longer emits `filled_units`, so an unreported venue fill is now "
+        "indistinguishable from a paper fill and takes the submitted size"
+    )
+
+
+async def test_the_HALT_names_the_POSITION_it_warns_about(monkeypatch):
+    """**The halt named the situation and not the OBJECT.**
+
+    `res` carries the venue's own id for the position it just opened. Without it the operator is
+    told a position of unknown size may exist and given no way to go and look at it — and this
+    halt exists precisely because we cannot describe that position ourselves.
+    """
+    loop, seen = _driven_loop(monkeypatch, {
+        "status": "PARTIALLY_FILLED", "filled_units": None, "units": 0.01,
+        "sized_units": 0.01, "position_id": "venue-pos-7", "client_order_id": "sig-x",
+    })
+
+    await loop._tick_symbol("BTC/USD", "BTCUSDT")
+
+    assert loop.halt_reason == HALT_PARTIAL_UNSIZED
+    halts = [msg for kind, msg in seen.acts if kind == BLOCK_HALT]
+    assert halts, f"no halt line: {seen.acts}"
+    assert "venue-pos-7" in halts[0], (
+        f"the halt does not name the position it warns about: {halts[0]!r}"
+    )
+
+
+async def test_the_halt_says_UNREPORTED_rather_than_inventing_an_id(monkeypatch):
+    """The must-miss: a missing id must read as missing. An empty string in that slot would render
+    as `venue position ` and look like a truncated value rather than an absent one."""
+    loop, seen = _driven_loop(monkeypatch, {
+        "status": "PARTIALLY_FILLED", "filled_units": None, "units": 0.01, "sized_units": 0.01,
+    })
+
+    await loop._tick_symbol("BTC/USD", "BTCUSDT")
+
+    halts = [msg for kind, msg in seen.acts if kind == BLOCK_HALT]
+    assert "UNREPORTED" in halts[0], f"{halts[0]!r}"
+
+
+async def test_the_HALT_LOG_carries_the_fields_an_operator_would_grep(monkeypatch):
+    """**`B414`'s LESSON, REPRODUCED IN THE SAME TASK AND CAUGHT BY THE HARNESS.**
+
+    Removing `position_id` from this `logger.error` call killed **nothing**: every arm drove the
+    line and none read the log. That is exactly what `B414` was — *"a side effect nothing asserts
+    on is not covered by the test that triggers it"* — and `B414` was mine, three hours earlier, on
+    this same log statement.
+
+    The log is not decoration here. The activity deque is in memory and the websocket push is
+    transient, so **after a restart the log is the only trace of this halt that survives** — which
+    makes its structured fields the durable record of a position we could not size. `setup_logging`
+    serialises `extra` to JSON, so these are grep-able keys rather than prose.
+    """
+    from loguru import logger
+
+    captured: list[dict] = []
+    sink = logger.add(lambda m: captured.append(dict(m.record["extra"])), level="ERROR")
+    try:
+        loop, seen = _driven_loop(monkeypatch, {
+            "status": "PARTIALLY_FILLED", "filled_units": None, "units": 0.01,
+            "sized_units": 0.01, "position_id": "venue-pos-7", "client_order_id": "sig-x",
+        })
+        await loop._tick_symbol("BTC/USD", "BTCUSDT")
+    finally:
+        logger.remove(sink)
+
+    assert captured, "the halt emitted no ERROR record at all"
+    extra = captured[-1]
+
+    # THE OBJECT, not just the situation — an operator has to be able to find the position.
+    assert extra.get("position_id") == "venue-pos-7", (
+        f"the halt log does not identify the position it warns about: {extra}"
+    )
+    # And the numbers that say WHY it could not be sized.
+    assert extra.get("status") == "PARTIALLY_FILLED"
+    assert extra.get("filled_units") is None, "the venue's own (absent) answer must be recorded"
+    assert extra.get("submitted_units") == 0.01
+    assert extra.get("pair") == "BTC/USD"

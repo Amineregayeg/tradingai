@@ -683,8 +683,21 @@ class LiveCryptoLoop:
             return number if number > 0 else None
 
         status = res.get("status")
-        raw_filled = res.get("filled_units")
-        filled = positive(raw_filled)
+        # **`B419`. `.get()` CANNOT TELL "KEY ABSENT" FROM "KEY PRESENT AND `None`", and those are
+        # the two cases this function exists to separate.** Membership can, so membership is what
+        # is tested.
+        #
+        # Measured on the real return dicts: `paper.py` and `cft_sim.py` never emit `filled_units`
+        # at all (0 occurrences), while `alpaca.py:889` ALWAYS emits it, with `None` meaning *the
+        # venue did not say*. Read through `.get()` both arrive as `None`, so an Alpaca full fill
+        # with no reported quantity took the paper fallback and recorded THE SUBMITTED SIZE.
+        #
+        # **And the adapter three lines above that key refuses exactly this** — *"never defaulted
+        # to the submitted quantity, which would report a fill we have no evidence of"*. The loop
+        # was doing it on the adapter's behalf: `B411` by another route, on the `FILLED` path.
+        # I wrote both sides, and the second undid the first.
+        reported = "filled_units" in res
+        filled = positive(res.get("filled_units"))
 
         if status == "PARTIALLY_FILLED":
             return filled
@@ -699,7 +712,7 @@ class LiveCryptoLoop:
             #
             # Caught by driving the resolver: with the two folded together, a `NaN` filled
             # quantity on a full fill returned the submitted size.
-            if raw_filled is not None:
+            if reported:
                 return filled
             return positive(res.get("units"))
 
@@ -2039,11 +2052,18 @@ class LiveCryptoLoop:
                 "no usable filled quantity, so a position of unknown size may exist",
                 pair=pair, direction=sig.direction.value, status=status,
                 filled_units=res.get("filled_units"), submitted_units=res.get("units"),
+                # **THE HALT NAMED THE SITUATION AND NOT THE OBJECT.** `res` carries the venue's
+                # own id for the position it just opened, so without it the thing this halt warns
+                # about is not directly findable at the venue — the operator is told a position of
+                # unknown size may exist and given no way to go and look at it.
+                position_id=res.get("position_id"),
+                client_order_id=res.get("client_order_id"),
             )
             await self._act(
                 BLOCK_HALT,
                 f"{pair} {sig.direction.value} — HALTED: {HALT_PARTIAL_UNSIZED} "
-                f"(status {status}, filled {res.get('filled_units')!r})",
+                f"(status {status}, filled {res.get('filled_units')!r}, "
+                f"venue position {res.get('position_id') or 'UNREPORTED'})",
             )
             return
 
