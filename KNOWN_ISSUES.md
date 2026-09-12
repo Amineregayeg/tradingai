@@ -27399,6 +27399,28 @@ THE CONFIG PIN = DECLARATION.  Greppable intent, and it does catch a future EDIT
 first half were the fix.** And an arm asserting the config *contains* those keys is the
 assert-a-field-exists shape **this entry itself warns against** — `B394`.
 
+**WHAT THE CANARY COVERS, SPLIT THREE WAYS — and the third line is a bound on the CANARY, not on
+our evidence for it.** My first wording said it *"fires under `singleFork`, a pool swap, an upgrade
+and a future default change"*, and review's correction is that those are not the same kind of
+unexercised:
+
+```
+DEMONSTRATED              the singleFork route (once M-4/the control lands)
+GENERALISES BY CONSTRUCTION   any route that shares a module registry — a pool swap, an upgrade.
+                          The canary asserts a CONDITION (the mock in force is not this file's),
+                          and every mock-leaking mechanism reaches that same observable. Not
+                          measured, but following from what the canary LOOKS AT rather than from
+                          optimism.
+NOT COVERED               isolation failures that do not manifest as a foreign MOCK — a shared
+                          jsdom global, a leaked timer, a module-level side effect that is not a
+                          mock. The canary sees NONE of these.
+```
+
+**"A future default change" was a category, not a route**, which is why it belonged in the third line
+rather than the first. **Without that line, *"the canary is the enforcement"* reads as covering more
+than it does** — and it gives the next seat the right question when something isolation-shaped breaks
+and the canary is green: *does this manifest as a foreign mock at all?*
+
 **THE CONTROL IS THE ROW THE TASK RESTS ON, not a nicety:** the canary **shown to fail under
 `singleFork` and pass under isolation, same tree, two invocations.** Without it, the canary is an arm
 agreeing with the config it ships beside.
