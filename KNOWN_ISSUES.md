@@ -27269,6 +27269,34 @@ database stops reproducing production.
 backfill, not a vocabulary tuple. If `OUTCOME_REJECTED`'s value changed, the backfill would target
 different rows — but it does not rewrite a constraint's history.
 
+**THE GUARD'S DESIGN, resolved by review out of a conflict in the manager's own brief.** I asked for
+two things that pull against each other: *refuse **any** `app.*` import under `versions/`*, and
+*flag `0010` rather than over-fixing it*. **A structural rule catches `0010`.**
+
+**Resolved as an EXEMPTION carrying its reason in the code, not as a semantic qualifier:**
+
+```
+"no app.* import under alembic/versions/, EXCEPT 0010's two scalars, because they write a
+ DATA BACKFILL rather than feed a CHECK constraint"
+```
+
+> **A structural rule with one documented exception is checkable by a glob.** Restating it as *"no
+> import that feeds a constraint"* would make the guard **make the judgement it exists to remove** —
+> and a guard that must decide what an import is *for* is a guard that can be talked out of firing.
+
+**The exemption is its own row: an arm fails if `0010`'s import list ever grows.** So the exception
+is bounded by a test rather than by the comment beside it.
+
+**AND THE EXISTING GUARD IS ALREADY THE FAILURE MODE IT IS MEANT TO PREVENT.** It asserts
+`len(_CODES_AT_0010) == 16`, `== 17`, `== 18`, plus two membership spot-checks. **A tuple of the
+right length disagreeing about membership passes it** — so the hole is not hypothetical in the new
+tuples, it is **the shape of the arm we already have.** Set comparison is what closes it.
+
+**AND THE ORDERING ERROR HAS AN OBSERVABLE, which is how it becomes testable at all.** An arm cannot
+check the order of edits inside a commit — **but it can check that no frozen tuple contains a value
+that postdates every frozen revision.** That is the ordering mistake's fingerprint, and it survives
+whatever order the author actually worked in.
+
 **THE FIX IS ITS OWN TASK AND NOT `T-0141`'s COMMIT:** freezing four vocabularies across four
 **already-deployed** migrations, and widening the arm to refuse **any** `app.*` import under
 `alembic/versions/` (with `_sql_in` whitelisted or copied). **Changing deployed migrations requires
