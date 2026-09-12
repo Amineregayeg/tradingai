@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-13 (newest entry B426 — a THIRD encoding of the outcome vocabulary, lowercase and four-valued, in backtest/engine.py, whose own local Trade dataclass never writes a DecisionRecord, so nothing is broken today; the row exists because B425's fix deletes feedback.py's alias sets, the ONLY place a lowercase token and the decision vocabulary appear together, after which no code path, test or comment will acknowledge that the other exists — and "scratch" has no counterpart among the eight, so a future join cannot be a rename. Also B425 amended: the defect is ABSENT VS UNRECOGNISED, not a missing token set. The reachable population is exactly NULL or one of the eight, so the sign-of-R fallback is CORRECT for NULL and wrong only for a token the reader does not know — one path for two states, which is _position_units's .get() collapse one layer up. The fix must therefore KEEP the fallback for NULL and stop it being reachable from a present token, and on an unrecognised token must exclude, COUNT and surface rather than raise. The six aliases have no producer — none is admitted by the CHECK — so deleting them is a pure deletion.)
+Last updated: 2026-09-13 (newest entry B427 — place_order NEVER OBSERVES A TERMINAL ORDER STATE: it reads status and filled_qty off the SUBMISSION response and get_order( appears zero times in alpaca.py, so an ordinary "accepted"/"new" acknowledgement enters neither the fill branch nor the halt check and falls to the else that records a REJECTION with the status as its reason. The engine therefore records a refusal of an order the venue ACCEPTED and may still fill, after which nothing manages the resulting position — word for word the defect the code already documents forty lines above for PARTIALLY_FILLED, still live in the adjacent branch for every status nobody enumerated. Nobody has measured what Alpaca returns, so it may be latent; probe 3 settles it, which is why probe 3 now polls to a terminal state before running any parser. One layer BELOW T-0130 and must not be merged with it: T-0130 fixes a default resolving to FILLED and a classification resolving to REJECTED, while this is that both classify a moment that has not happened yet — T-0130 can be correct and this still be wrong. Found by review on the probe ladder and written only into the runbook until now, which is B147's grade-1 shape.)
 
 ---
 
@@ -28362,3 +28362,64 @@ to make the lowercase set derive from the `OUTCOME_*` constants, or to state in 
 vocabulary is deliberately separate and why — either kills the ambiguity. **Do not "fix" it by
 folding `scratch` into `BE` without measuring what the backtest means by it**, which is `B423`'s
 lesson: rewriting a value onto a surviving one asserts something the record never said.
+
+---
+
+### B427 — `place_order` NEVER OBSERVES A TERMINAL ORDER STATE, so an order the venue ACCEPTED is recorded as a REJECTION — and the venue may still fill it
+
+**Found by review while reviewing the first-order probe ladder, and verified by manager in the code.
+It was written into `ENGINE_START_RUNBOOK.md` as a probe-design correction and NOT filed, which is
+`B147`'s grade-1 shape: a real finding that went into an artefact nobody would grep for. Filed now
+because it is a production defect on the ORDER PATH, not a runbook problem.**
+
+`AlpacaAdapter.place_order` reads `status` and `filled_qty` off the **submission response**
+(`alpaca.py:856`, `:883`) and never re-reads the order. **`get_order(` appears ZERO times in
+`alpaca.py`** — there is no single-order re-read anywhere in the adapter, and `get_orders()` (`:618`)
+is never used for this.
+
+```
+FILL_BEARING_STATUSES = ("FILLED", "PARTIALLY_FILLED")        crypto_loop.py:173
+an ordinary acknowledgement is "accepted" / "new" / "pending_new"
+  -> not in FILL_BEARING_STATUSES, so the fill branch is not entered
+  -> and the halt check at :2170 is not entered either
+  -> control reaches the else at :2318:  reason = res.get("reason") or res.get("status") or "rejected"
+```
+
+**So the engine records a REFUSAL of an order the venue ACCEPTED and may be about to fill.** That is
+the worst available combination, and it is worse than either defect `T-0130` addresses:
+
+> The venue fills the order. The record says it was rejected. **Nothing will manage the resulting
+> position**, because as far as the engine is concerned it never opened one.
+
+**This is word-for-word the defect the code already documents forty lines above, still live in the
+adjacent branch.** The comment on the `PARTIALLY_FILLED` path says it *"recorded a refusal of an
+order the venue had partly filled. A false row is worse than none here, because `B399`"* — and the
+same thing is true of **every status nobody enumerated**.
+
+**NOBODY HAS MEASURED WHAT ALPACA ACTUALLY RETURNS.** Crypto may fill fast enough that a market order
+answers `filled` outright, in which case this is latent. **The ladder's probe 3 is what settles it**,
+which is why probe 3 was rewritten to poll to a terminal state before running any parser — an
+acknowledgement is not an outcome, and a measurement taken against one answers confidently about the
+wrong moment in the order's life.
+
+**RELATIONSHIP TO `T-0130`, because they are one layer apart and must not be merged.**
+
+```
+T-0130   absent status  -> FILLED        a DEFAULT resolving to a reassuring answer
+T-0130   unknown status -> REJECTED      a CLASSIFICATION resolving to an affirmative answer
+B427     the status read is NOT TERMINAL at all — so both of the above are classifying a moment
+         that has not happened yet
+```
+
+**`T-0130` can be correct and this still be wrong.** Perfect three-way classification of a
+non-terminal acknowledgement is still classification of the wrong thing.
+
+**THE FIX IS NOT A LONGER STATUS LIST.** It is that a non-terminal response is not an outcome:
+resolve the order to a terminal state (bounded, with the timeout itself recorded as a result), then
+classify. **The handle already exists in the returned dict** — `"position_id"` is in fact the ORDER
+id (`alpaca.py:890`, `str(getattr(placed, "id", ""))`), a naming hazard worth its own line since the
+same key holds the **symbol** at `:955`. One key, three meanings, one file.
+
+**What the loop should do with a still-unresolved order after the bound is a trading-behaviour
+ruling, not a code question**, and it belongs with `B424`'s family: *we cannot establish whether we
+hold a position* is its own state and must alarm, not resolve to either affirmative.
