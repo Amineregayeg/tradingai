@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-12 (B410 — A REJECTION ROW LOST TO A CONSTRAINT VIOLATION IS SWALLOWED BY DESIGN. _record_rejected_signal catches every exception (crypto_loop.py:1449) so the loop cannot die of bookkeeping, which is correct — but rejection_code now carries a CHECK closing the vocabulary, so a code the DEPLOYED database has never heard of fails into that except: the signal is correctly refused, no order is placed, and NOTHING RECORDS IT. B403's shape produced by DEPLOYMENT ORDER rather than by code, and the half that works hides the half that does not. Found by execute preparing T-0140. That task defuses its own case — 0012, the vocabulary constant and the order body land in ONE commit, and within a single deploy the api entrypoint runs deploy_migrate.py with check_call BEFORE uvicorn, so a failed migration exits rather than serving — but it does not close the class. Closing it needs a COUNTED failed-write metric surfaced beside the split, not a log line, and the swallow needs to distinguish a transient DB error from a CHECK violation, which is B375 one layer down.)
+Last updated: 2026-09-12 (B413 — A PARTIALLY FILLED ORDER LEAVES A REAL POSITION THE ENGINE DOES NOT TRACK, raised by execute as a question rather than defaulted in code. crypto_loop opens a position only on FILLED; the adapter reports PARTIALLY_FILLED with filled_units from the venue, and nothing reconciles it, so the venue holds a position with no row against it and the ruled kill-switch property fails. RULED: a fill above zero is a real position tracked at the FILLED size, never the asked size; a partial with filled_units None must HALT the run with a named reason; reconciliation is its own task. Also B411 — str() on a mixin enum made a REAL FILL INVISIBLE (str(OrderStatus.FILLED) is 'OrderStatus.FILLED', so endswith('filled') never fired) while matching PARTIALLY_FILLED loosely, the same trap the same author had already pinned for BaseURL one module earlier; and B412 — three of four path-taking tools printed a clean zero over an EMPTY FILE SET, the guard already existing in the fourth, which invalidates past clean reports from file-path invocations.)
 
 ---
 
@@ -26952,3 +26952,115 @@ distinguish the CLASSES of failure inside the swallow
 **And the general rule this is the fourth instance of:** *a value written into a column whose
 constraint is deployed separately is a two-part deployment*, and the recording path is exactly where
 a mismatch goes quiet, because recording is the part that is written to never interrupt anything.
+
+### B411 — `str()` ON A MIXIN ENUM MADE A REAL FILL INVISIBLE TO THE PLATFORM, and the same predicate matched a PARTIAL fill. Wrong twice, in opposite directions, on one line
+
+**Found by execute's own arms on `T-0140`; verified by review against the installed SDK.** The
+predicate was `str(placed.status).endswith("filled")`.
+
+```
+str(OrderStatus.FILLED)            = 'OrderStatus.FILLED'   .endswith("filled") -> FALSE   never fired
+OrderStatus.FILLED.value           = 'filled'                                   -> True    the fix
+OrderStatus.PARTIALLY_FILLED.value = 'partially_filled'     .endswith("filled") -> TRUE    loose
+```
+
+**`crypto_loop.py:1858` opens a position on `status == "FILLED"`.** So a real filled order **never
+reported FILLED**, and the venue would hold a position the engine never recorded. **That is the worst
+direction this class can point**: not a phantom position in our books, but a real one outside them,
+invisible to the kill switch, whose ruled property is that every open position must be CLOSED,
+FAILED WITH A REASON, or NOT ATTEMPTED.
+
+**And fixing only the blindness would have recorded a PARTIAL as a full position**, at the size we
+asked for rather than the size we got.
+
+**IT IS THE SAME TRAP THE SAME AUTHOR HAD ALREADY PINNED.** `B389`/`B400`: `BaseURL` is a `str`
+mixin enum whose `str()` is the member name, pinned in `test_t0138_order_path.py`. **Rebuilt one
+module later, from a docstring, by the author of that arm.** A rule learned on one surface did not
+transfer to the next — `a-rule-learned-on-one-surface-stays-there`, in product code this time.
+
+**Remedy, and it handles both shapes (`B356`):**
+`getattr(getattr(placed, "status", None), "value", getattr(placed, "status", ""))` — the enum's
+value, or a plain string when the SDK hands one back.
+
+**A third defect in the same commit, worth recording for its mechanism:** `place_order` raised
+`DirectionNotSupported` while `alpaca.py` imported only `BrokerError`. **The long-only refusal —
+Malek's one hand-made ruling — raised `NameError`, which is not a `BrokerError`, so
+`ExecutionService`'s handler would not have caught it and the refusal would have escaped as an
+unhandled crash.** The name appeared in that module **only inside a docstring**, and the raise was
+written from the docstring that described it. **A docstring naming an exception is not evidence the
+name resolves.**
+
+### B412 — THREE OF FOUR PATH-TAKING TOOLS PRINTED A CLEAN ZERO OVER AN EMPTY FILE SET, and the guard that prevents it already existed in the fourth
+
+**Found by execute while controlling its own report, and it invalidates past clean results — mine
+and review's included, since we both used these to certify suites.**
+
+```
+find_inert_assertions.py    rglob on a FILE path yields nothing -> scanned 0 files, printed "0 inert"
+find_all_negative_arms.js   empty dir -> "0 all-negative arm(s)"
+find_inert_constructs.js    empty dir -> "0 inert construct(s)"
+size_const_blindspot.py     ALREADY GUARDED: "REFUSING: <path> is not a directory — a zero from
+                            here would mean nothing"
+size_const_blindspot.js     ALREADY GUARDED
+```
+
+**The guard existed, with that exact reasoning, in one tool and not its siblings.** And
+`find_inert_constructs.js` is the one that found the TypeScript inert assertion nobody could find by
+reading — **so a false zero from it is precisely the case that matters.**
+
+> **`B398` again, one level up: the instrument for assertions that cannot fail could not fail
+> either.** And caught the same way it always is — by controlling the zero. The same file reported
+> **2** findings as a directory and **0** as itself.
+
+**Fixed in the tools rather than in another note**, which is the difference between a principle and a
+mechanism: all three now refuse an empty set naming the path, or print the **denominator** beside the
+count. Controlled three ways.
+
+**Real numbers, now that the instruments are proven:**
+
+```
+backend    0 inert assertions   in 330 files
+frontend   0 inert constructs   in  82 files
+frontend  19 ALL-NEGATIVE ARMS  in  82 files    <- pre-existing, untouched, NOT filed as a task
+```
+
+**The 19 were previously reported without a denominator and so were not readable as a backlog.**
+Arms that only assert absence (e.g. *"does nothing when settings is null"*). Recorded here as a
+number, not as a verdict on them.
+
+**One standing hit is legitimate and now carries a waiver:** `assert 0.3 / 0.1 != 3.0` pins the
+premise the arm below it depends on and **can** fail on another interpreter. **Constant-folded is not
+the same as cannot-fail.** It carries `# inert-ok: <reason>` with a **mandatory** reason — a bare
+pragma does not waive, controlled — rather than being left as a permanent hit that trains everyone
+to ignore the output.
+
+### B413 — A PARTIALLY FILLED ORDER LEAVES A REAL POSITION THE ENGINE DOES NOT TRACK. Open, and ruled here rather than defaulted in code
+
+**Raised by execute on `T-0140` as a question rather than answered by a default, which was the right
+call: it needs a ruling, and the ruling is Malek's property to protect.**
+
+```
+crypto_loop.py:1858   opens a position on status == "FILLED"
+the adapter now       reports PARTIALLY_FILLED (deliberately NOT "FILLED", so the loop does not
+                      open a FULL position from a partial one), logs at ERROR, and carries
+                      filled_units from the venue — None when the venue did not say
+nothing               reconciles it
+```
+
+**So the venue holds a real position and the engine has no row for it.** That is exactly what
+**`B411`** would have produced by accident, arrived at deliberately — and it breaks the ruled
+kill-switch property, because a position nobody recorded can be neither closed nor failed with a
+reason.
+
+**RULING:**
+
+1. **A fill quantity greater than zero is a REAL POSITION and must be tracked at the FILLED size**,
+   never at the size we asked for.
+2. **When the venue reports a partial and `filled_units` is `None`, the run must HALT with a named
+   reason** rather than continue. A position may exist that we cannot size, and continuing to trade
+   around an unknown position is worse than stopping.
+3. **Reconciliation is the durable answer and is NOT squeezed into `T-0140`.** `reconcile_positions`
+   already exists and already runs at connect; wiring the partial-fill path into it is its own task.
+
+**Until 1 and 2 land, this is an open hole in the order path**, and the engine's standing HOLD is
+what keeps it theoretical. **Do not lift that hold on the strength of D alone.**
