@@ -509,15 +509,19 @@ async def test_a_FILLED_order_reports_the_word_the_LOOP_reads():
     )
     assert OrderStatus.FILLED.value == "filled"
 
-    # The actual consumer, read from disk rather than from my memory of it — the literal the
-    # loop compares is what makes this arm's expected value the RIGHT one, and if the loop stops
-    # comparing it this goes red rather than pinning a word nothing reads.
-    import inspect
+    # The actual consumer, read from disk rather than from my memory of it — what the loop
+    # accepts is what makes this arm's expected value the RIGHT one, and if the loop stops
+    # accepting it this goes red rather than pinning a word nothing reads.
+    #
+    # **AND IT DID GO RED, ONE TASK LATER, EXACTLY AS INTENDED.** It pinned the literal
+    # `res.get("status") == "FILLED"`. `T-0141` widened that gate to `FILL_BEARING_STATUSES`,
+    # because a PARTIALLY_FILLED order is also a real position — so the literal disappeared and
+    # this arm failed rather than going quietly stale. Re-derived against the constant, which is
+    # the concept rather than one of its spellings.
+    from app.services.live.crypto_loop import FILL_BEARING_STATUSES
 
-    from app.services.live import crypto_loop
-
-    assert 'res.get("status") == "FILLED"' in inspect.getsource(crypto_loop), (
-        "the loop no longer opens a position on this literal — re-derive what status it reads"
+    assert "FILLED" in FILL_BEARING_STATUSES, (
+        "the loop no longer opens a position on this status — re-derive what it reads"
     )
 
 

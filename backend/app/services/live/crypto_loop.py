@@ -113,6 +113,66 @@ def _with_exit_plan(reasons: list[str] | None) -> list[str]:
     ]
 
 
+#: **`B417`. `:.3f` PRINTS EVERY CRYPTO SIZE AS `0.000`.**
+#:
+#: Measured against the venue's own numbers (`T-0139`): BTC's minimum order is `0.000012941` and a
+#: 1% risk entry on a five-figure account is `1e-4` to `1e-3`. So `f"{units:.3f}"` rendered
+#: **every BTC entry the engine has ever logged** as `Entered BTC/USD LONG 0.000`, and every runner
+#: remainder as `0.000 units run on`. The trade was real, the number in front of the operator was
+#: zero, and a size that reads as zero is indistinguishable from the `NON_POSITIVE_SIZE` refusal
+#: this codebase has a rejection code for.
+#:
+#: Nine decimal places because that is the venue's `min_trade_increment` (`1e-9`) — the grid sizes
+#: are actually quantised to — with trailing zeros trimmed so a whole lot still reads as `0.5`
+#: rather than `0.500000000`.
+def _fmt_units(units: float | None) -> str:
+    if units is None:
+        return "unknown"
+    return f"{units:.9f}".rstrip("0").rstrip(".") or "0"
+
+
+#: **THE ACTIVITY KINDS A BLOCK CAN PRODUCE.** `halt` means nothing will trade until someone acts;
+#: `skip` means this bar was not taken and the next one might be.
+BLOCK_HALT = "halt"
+BLOCK_SKIP = "skip"
+
+
+class BlockReason(str):
+    """A block reason that carries HOW SERIOUS it is, structurally rather than in its prose.
+
+    **`B415`.** `_tick_symbol` decided halt-vs-skip with `block.startswith("KILL SWITCH")`. That is
+    a **prose prefix**, so the classification depended on the first eleven characters of a sentence
+    written for a human: reword the kill-switch reason and an armed kill switch is surfaced to the
+    operator as a routine `skip`, and **any halt added later is a `skip` by default** — which is
+    how `T-0141`'s named halt would have arrived, defeating the ruling through the back door.
+
+    A `str` subclass rather than a pair or a dataclass, deliberately: `_entry_block_reason`'s answer
+    is ALSO persisted as `engine_policy` prose on the shadow's `setup_evaluation` record, so the
+    value has to stay a string for that contract to be unchanged. This keeps one object with one
+    identity and puts the classification beside the text instead of deriving it from the text.
+    """
+
+    kind: str
+
+    def __new__(cls, text: str, *, kind: str) -> "BlockReason":
+        if kind not in (BLOCK_HALT, BLOCK_SKIP):
+            raise ValueError(f"unknown block kind {kind!r}")
+        obj = super().__new__(cls, text)
+        obj.kind = kind
+        return obj
+
+
+#: The named halt for `B413`: the venue reported a partial fill and we could not establish the size
+#: of the position it left. **A distinct value, per `M-7`** — sharing one with the operator pause or
+#: the kill switch would make *halted because a partial could not be sized* and *someone pressed
+#: stop* the same event to every count and every panel.
+HALT_PARTIAL_UNSIZED = "a partial fill left a position we could not size"
+
+#: Statuses that mean the venue acted on the order. `B316` already records that `service.py`
+#: defaults a status-less reply to `FILLED`, so absence never arrives here as absence.
+FILL_BEARING_STATUSES = ("FILLED", "PARTIALLY_FILLED")
+
+
 class LiveCryptoLoop:
     def __init__(
         self,
@@ -188,6 +248,13 @@ class LiveCryptoLoop:
         self._open_decision: dict[str, str] = {}
         self._running = False
         self.paused = False
+        #: **NOT CLEARED BY `reset` OR `stop`, and that is the ruling's direction rather than an
+        #: oversight.** `paused` is cleared by both, because an operator pause is resolved by the
+        #: operator. This is not: it says a position of unknown size may exist AT THE VENUE, and
+        #: restarting the engine does not make that position known. Clearing it silently on the
+        #: next start would re-enter the hole it exists to stop us trading into. Reconciliation is
+        #: what legitimately clears it, and reconciliation is the task after this one (`B413`).
+        self.halt_reason: str | None = None
         #: The scanning task, owned by start()/stop(). None when stopped.
         self._task: "asyncio.Task | None" = None
         #: Sequence number for shadow (M9 Stage A) telemetry within this scan.
@@ -294,6 +361,11 @@ class LiveCryptoLoop:
         return {
             "running": self._running,
             "paused": self.paused,
+            # **`M-6`'s READER.** A reason stored where `status()` cannot show it is `B394` — a
+            # mechanism with no consumer. `paused` is a bare bool and carried no reason, so an
+            # unnamed halt was indistinguishable from an operator pause, from the order-path gate
+            # and from a prop-firm halt: three causes, one flag.
+            "halt_reason": self.halt_reason,
             # B179's LESSON APPLIED BEFORE IT BITES. `0 flattens at 19:00` means "the flag is
             # off" and READS AS "the flatten works and there was nothing to close". Whoever
             # asks "did the daily flatten run?" must be able to tell SUPPRESSED from IDLE from
@@ -465,14 +537,24 @@ class LiveCryptoLoop:
         trading rather than merely closing positions once.
         """
         from app.services.compliance.kill_switch import kill_switch
+
+        # **THE HALT COMES FIRST, and it is checked before anything that can fail.** It means a
+        # position of unknown size may exist at the venue, which outranks every other reason to
+        # not enter — and, like the direction refusal in `alpaca.place_order`, it must not depend
+        # on a position read or a venue call succeeding.
+        if self.halt_reason:
+            return BlockReason(f"HALTED ({self.halt_reason})", kind=BLOCK_HALT)
         if kill_switch.is_armed:
-            return f"KILL SWITCH ARMED ({kill_switch.reason or 'no reason given'})"
+            return BlockReason(
+                f"KILL SWITCH ARMED ({kill_switch.reason or 'no reason given'})", kind=BLOCK_HALT)
+        # `skip`, not `halt`, and unchanged: an operator pause is resolved by the operator, and
+        # this preserves exactly the classification the prose prefix produced.
         if self.paused:
-            return "engine paused"
+            return BlockReason("engine paused", kind=BLOCK_SKIP)
         if await self._has_position(pair):
-            return "already in a position"
+            return BlockReason("already in a position", kind=BLOCK_SKIP)
         if await self._open_count() >= self.max_concurrent:
-            return f"max concurrent {self.max_concurrent} reached"
+            return BlockReason(f"max concurrent {self.max_concurrent} reached", kind=BLOCK_SKIP)
         return None
 
     async def _news_context(self) -> NewsContext:
@@ -552,6 +634,76 @@ class LiveCryptoLoop:
         except Exception:  # noqa: BLE001
             raw = str(len(entry_df))
         return hashlib.sha1(raw.encode()).hexdigest()[:16]
+
+    @staticmethod
+    def _position_units(res: dict) -> float | None:
+        """The size of the position the venue ACTUALLY opened, or `None` when it cannot be read.
+
+        **`B413`/`T-0141`. The ruling: a fill above zero is a real position, tracked at the FILLED
+        size, never at the size we asked for.**
+
+        ```
+        FILLED            filled_units when the broker reports one, else `units`
+        PARTIALLY_FILLED  filled_units ONLY. no fallback.
+        anything else     None — not a fill
+        ```
+
+        **THE FALLBACK IS THE MUST-MISS AND IT IS WHY IT EXISTS ONLY ON `FILLED`.** `paper.py` and
+        `cft_sim.py` return `units` and **no `filled_units` at all** — measured, not assumed — and
+        those two are what the engine actually runs on today. Requiring `filled_units` for every
+        fill would halt **every paper and sim entry** and destroy the order path, which is exactly
+        the unconditional-halt failure the kill set names as `M-3`. A paper fill fills what was
+        asked, so `units` is the filled size there.
+
+        **AND THE FALLBACK MUST NOT REACH `PARTIALLY_FILLED`.** For Alpaca, `units` is what we
+        SUBMITTED — so falling back to it on a partial would record the asked size and rebuild
+        `B411`'s defect deliberately, which is `M-1`.
+
+        A non-positive size is not a position (`M-5`). Recording one creates a phantom the engine
+        would then try to exit, and `sized_units` is what the partial-close accounting reads
+        (`:1579`, `:1624`).
+        """
+        def positive(value) -> float | None:
+            """`value` as a positive float, or `None` when it is not one.
+
+            **UNPARSEABLE IS UNSIZEABLE, and that is a deliberate fail-closed.** A broker handing
+            back a non-numeric quantity is violating its contract, and letting `float()` raise
+            would abort the bar into `_loop`'s blanket handler — leaving NO row, which is `B403`'s
+            shape. *We cannot establish the size* is exactly what an unparseable quantity means,
+            so it takes the same path as an absent one: the halt.
+            """
+            if value is None:
+                return None
+            try:
+                number = float(value)
+            except (TypeError, ValueError):
+                return None
+            if number != number or number in (float("inf"), float("-inf")):
+                return None          # NaN and infinity are not sizes either
+            return number if number > 0 else None
+
+        status = res.get("status")
+        raw_filled = res.get("filled_units")
+        filled = positive(raw_filled)
+
+        if status == "PARTIALLY_FILLED":
+            return filled
+
+        if status == "FILLED":
+            # **ABSENT AND UNUSABLE ARE NOT THE SAME ANSWER, and collapsing them substitutes a
+            # size for one we were given and could not read.** `paper.py` and `cft_sim.py` never
+            # report a filled quantity, so absence is their normal and `units` is the fill. But a
+            # broker that reported `NaN`, `inf` or a non-numeric SPOKE — and falling back to the
+            # submitted quantity there would record a size the venue never confirmed, which is
+            # `B411`'s defect reached through the fallback instead of the field.
+            #
+            # Caught by driving the resolver: with the two folded together, a `NaN` filled
+            # quantity on a full fill returned the submitted size.
+            if raw_filled is not None:
+                return filled
+            return positive(res.get("units"))
+
+        return None
 
     async def _record_signal_decision(
         self, pair: str, entry_df, sig, sized_units: float, fill_price: float | None = None,
@@ -1311,7 +1463,7 @@ class LiveCryptoLoop:
                 "exit",
                 f"EXIT-001 partial: banked {plan['fraction']:.0%} of {pair} at "
                 f"{plan['price']:.0f} ({event.get('pnl', 0):+.0f} USDT) — "
-                f"{event.get('remaining_units', 0):.3f} units run on, stop UNCHANGED",
+                f"{_fmt_units(event.get('remaining_units', 0))} units run on, stop UNCHANGED",
             )
 
     async def _close_at_session_end(self, now_ny: datetime) -> None:
@@ -1777,7 +1929,12 @@ class LiveCryptoLoop:
         # ordering is asserted by test_t0011_census.py::test_the_gate_re_evaluates_...
         block = await self._entry_block_reason(pair)
         if block is not None:
-            kind = "halt" if block.startswith("KILL SWITCH") else "skip"
+            # `B415`. This read `block.startswith("KILL SWITCH")` — the classification lived in
+            # the first eleven characters of a human sentence. **An unclassified reason defaults to
+            # `halt`, not `skip`**: a block whose seriousness we cannot establish is the alarming
+            # case, and this label is display-only, so erring loud costs an operator a second look
+            # and erring quiet hides a stopped engine.
+            kind = getattr(block, "kind", BLOCK_HALT)
             await self._act(kind, f"{pair} {self.entry_tf} bar closed — {block}, skipped")
             return
         bias = await self._fetch_bars(bsym, self.bias_tf, 220)
@@ -1855,8 +2012,44 @@ class LiveCryptoLoop:
                 f"{type(exc).__name__}",
             )
             raise
-        if res.get("status") == "FILLED":
-            logger.info("Live paper entry", pair=pair, dir=sig.direction.value, fill=res.get("fill"))
+        # ------------------------------------------------------------------
+        # `B413`/`T-0141`. THREE OUTCOMES, NOT TWO, and the size is resolved BEFORE the branch so
+        # there stays exactly ONE call to `_record_signal_decision` — a second call site is a
+        # second place the sizing inputs can be forgotten, which
+        # `test_decision_record_schema.py` asserts against by AST.
+        status = res.get("status")
+        opened_units = self._position_units(res)
+
+        if status in FILL_BEARING_STATUSES and opened_units is None:
+            # **THE VENUE ACTED AND WE CANNOT SAY WHAT WE NOW HOLD. FAIL CLOSED.**
+            #
+            # Ruled: a partial whose size we cannot read HALTS the run with a named reason, because
+            # trading around a position of unknown size is worse than stopping.
+            #
+            # **AND NO REJECTION ROW IS WRITTEN HERE.** Before this, a `PARTIALLY_FILLED` result
+            # fell through to the `else` below, which recorded `outcome=REJECTED`,
+            # `rejection_reason="PARTIALLY_FILLED"`, `rejection_code=UNCLASSIFIED` — measured by
+            # evaluating that branch against the dict the adapter really returns. So the engine did
+            # not lose the event; **it recorded a refusal of an order the venue had partly
+            # filled.** A false row is worse than none here, because `B399`: a population nobody
+            # can characterise, and this one reads as coverage.
+            self.halt_reason = HALT_PARTIAL_UNSIZED
+            logger.error(
+                "live.partial_fill_unsized — HALTING. the venue acted on the order and reported "
+                "no usable filled quantity, so a position of unknown size may exist",
+                pair=pair, direction=sig.direction.value, status=status,
+                filled_units=res.get("filled_units"), submitted_units=res.get("units"),
+            )
+            await self._act(
+                BLOCK_HALT,
+                f"{pair} {sig.direction.value} — HALTED: {HALT_PARTIAL_UNSIZED} "
+                f"(status {status}, filled {res.get('filled_units')!r})",
+            )
+            return
+
+        if status in FILL_BEARING_STATUSES:
+            logger.info("Live paper entry", pair=pair, dir=sig.direction.value, fill=res.get("fill"),
+                        status=status, opened_units=opened_units)
             # STAGE B. The plan EXIT-001 produces is now EXECUTED, not merely recorded.
             pid = res.get("position_id")
             if pid and sig.partial_price is not None and sig.partial_fraction is not None:
@@ -1867,7 +2060,20 @@ class LiveCryptoLoop:
                     "pair": pair,
                 }
             await self._record_signal_decision(
-                pair, entry, sig, res.get("sized_units", 0), fill_price=res.get("fill"),
+                # **THE SIZE OF THE POSITION THAT EXISTS, not the size we asked for** (`M-1`).
+                # This read `res.get("sized_units", 0)` — the quantity `size_position` computed —
+                # which for a partial fill is larger than what we hold, and `sized_units` is what
+                # the partial-close accounting reads (`:1579`, `:1624`). So the asked size here
+                # would make the ladder try to close more than exists.
+                #
+                # NAMING, and it is `B402`'s shape (`M-1`'s footnote): the parameter and the column
+                # are both called `sized_units`, a name for the ASKED quantity, while every
+                # consumer already treats the value as the POSITION's size. The name is wrong and
+                # renaming a column is a migration plus a consumer sweep — reported as its own
+                # item rather than smuggled in here. The asked size is not lost: it is
+                # reconstructible from `sizing_equity`, `sizing_risk_pct` and `sizing_price`, which
+                # is what `B279`/`B280` added them for.
+                pair, entry, sig, opened_units, fill_price=res.get("fill"),
                 trace=trace,
                 # `B279`. The two inputs `size_position` was actually called with. Passed
                 # from the execution result rather than re-read here: a second read of
@@ -1880,14 +2086,29 @@ class LiveCryptoLoop:
                 sizing_price=res.get("sizing_price"),
             )
             await ws_manager.push_position_open(res)
+            # **`B417`, SECOND HALF: THE CONDITIONAL BOUND OVER THE WHOLE CONCATENATION.**
+            #
+            # This was one expression — four implicitly-joined f-strings, then
+            # `if sig.partial_price is not None else` a fifth. Python binds the conditional across
+            # the entire joined string, so the `else` branch produced **only**
+            # `"@ 70000 (SL 99, no exit plan)"`: the pair, the direction and the size all dropped,
+            # leaving an entry line that does not say what was entered.
+            #
+            # **Latent rather than live, and stated as such:** `strategy_step.py:224,248` set
+            # `partial_price` on both the LONG and SHORT paths, so every signal the live strategy
+            # produces takes the first branch. It is reachable from a hand-built signal — which is
+            # how it surfaced, in an arm written for the size format.
+            #
+            # Split so the subject is unconditional and only the exit clause varies.
+            exit_clause = (
+                f"{sig.partial_fraction:.0%} at {sig.partial_price:.0f}, "
+                f"remainder passive to STOP_HIT or SESSION_CLOSE"
+                if sig.partial_price is not None else "no exit plan"
+            )
             await self._act(
                 "entry",
-                f"Entered {pair} {sig.direction.value} {res.get('sized_units', 0):.3f} "
-                f"@ {res.get('fill', sig.entry):.0f} (SL {sig.sl:.0f}, "
-                f"{sig.partial_fraction:.0%} at {sig.partial_price:.0f}, "
-                f"remainder passive to STOP_HIT or SESSION_CLOSE)"
-                if sig.partial_price is not None else
-                f"@ {res.get('fill', sig.entry):.0f} (SL {sig.sl:.0f}, no exit plan)",
+                f"Entered {pair} {sig.direction.value} {_fmt_units(opened_units)} "
+                f"@ {res.get('fill', sig.entry):.0f} (SL {sig.sl:.0f}, {exit_clause})",
             )
         else:
             # NEVER drop a generated signal silently. A rejection (non-positive

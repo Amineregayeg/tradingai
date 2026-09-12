@@ -5,6 +5,15 @@ import { authHeaders } from '@/services/api'
 interface EngineStatus {
   running: boolean
   paused: boolean
+  /**
+   * WHY the engine stopped trading, when something other than an operator stopped it.
+   *
+   * `B413`/`T-0141`: a partial fill we could not size halts the run, and `running` stays `true`
+   * while `paused` stays `false` — so before this field the dot below went on pulsing GREEN over
+   * an engine that would never take another entry. That is `B179`'s shape: *the flag is off* read
+   * as *it works and there was nothing to do*.
+   */
+  halt_reason?: string | null
   mode: string
   symbols: string[]
   equity: number
@@ -58,7 +67,10 @@ export function EnginePanel() {
   if (!s) return <div style={{ padding: 14, color: '#55556a', fontSize: 11 }}>Loading engine…</div>
 
   const pnlPos = (s.total_pnl ?? 0) >= 0
-  const live = s.running && !s.paused
+  // A HALT IS NOT LIVE. Three states, not two: live, paused by an operator, and halted for a
+  // reason the engine found itself. Reading only `paused` collapses the third into the first.
+  const halted = !!s.halt_reason
+  const live = s.running && !s.paused && !halted
 
   return (
     <div style={{ padding: '12px 14px', borderBottom: '1px solid #1e2035', flexShrink: 0 }}>
@@ -67,8 +79,8 @@ export function EnginePanel() {
           className={live ? 'pulse-dot' : ''}
           style={{
             width: 8, height: 8, borderRadius: '50%',
-            background: s.paused ? '#f59e0b' : live ? '#00d68f' : '#55556a',
-            boxShadow: `0 0 8px ${s.paused ? '#f59e0b' : live ? '#00d68f' : 'transparent'}`,
+            background: halted ? '#ff3b5c' : s.paused ? '#f59e0b' : live ? '#00d68f' : '#55556a',
+            boxShadow: `0 0 8px ${halted ? '#ff3b5c' : s.paused ? '#f59e0b' : live ? '#00d68f' : 'transparent'}`,
           }}
         />
         <span style={{ fontSize: 12, fontWeight: 700, color: '#e8e8ef', letterSpacing: '0.02em' }}>LIVE ENGINE</span>
@@ -77,6 +89,21 @@ export function EnginePanel() {
         </span>
         <span style={{ marginLeft: 'auto', fontSize: 10, color: '#55556a' }}>{s.symbols.join(' · ')}</span>
       </div>
+
+      {/* The REASON, not just the state. An unnamed halt is indistinguishable from an operator
+          pause, from the order-path gate and from a prop-firm halt — three causes, one flag. */}
+      {halted && (
+        <div
+          role="alert"
+          style={{
+            marginBottom: 11, padding: '7px 9px', borderRadius: 6,
+            border: '1px solid #5c1526', background: 'rgba(255,59,92,0.10)',
+            color: '#ff3b5c', fontSize: 11, fontWeight: 600, lineHeight: 1.4,
+          }}
+        >
+          HALTED — {s.halt_reason}
+        </div>
+      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '11px 8px', marginBottom: 11 }}>
         <Stat k="Equity" v={money(s.equity)} />

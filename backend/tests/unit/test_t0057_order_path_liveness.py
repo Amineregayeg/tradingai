@@ -719,22 +719,63 @@ def test_the_block_reason_string_is_pinned_to_the_GATES_OWN_WORDS():
 
     Read from `crypto_loop`'s source by AST rather than by text, so a mention in a docstring
     cannot satisfy it — the constant must appear as a RETURNED value.
+
+    **THE EXTRACTOR CHANGED WITH `T-0141` AND THE PROPERTY DID NOT.** The gate now returns
+    `BlockReason(<text>, kind=…)` rather than a bare string, so the reason can carry its
+    halt-vs-skip classification structurally instead of being guessed from its prose (`B415`).
+    This arm read only `ast.Constant` returns, so it went from finding the string to finding
+    `set()` — **and it failed loudly, which is the whole reason it was written this way.** A
+    text search would have kept passing on the docstring mentions three lines above.
+
+    `BlockReason` is a `str` subclass and is transparent to every consumer — `==`, `in`, dict
+    lookup, `str()` and `json.dumps` all behave as the plain string, checked rather than assumed
+    — so the monitor keyed on this value is unaffected. Only the extractor had to learn the new
+    shape, and it now ALSO pins that every reason is wrapped, which is what makes the
+    classification reachable.
     """
     from app.services.live import crypto_loop
 
     tree = ast.parse(
         inspect.getsource(crypto_loop.LiveCryptoLoop._entry_block_reason).lstrip()
     )
-    returned = {
-        node.value.value
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Return)
-        and isinstance(node.value, ast.Constant)
-        and isinstance(node.value.value, str)
-    }
+
+    def _text_of(value):
+        """The reason's text, whether returned bare or wrapped in `BlockReason(...)`."""
+        if isinstance(value, ast.Constant) and isinstance(value.value, str):
+            return value.value, False
+        if (isinstance(value, ast.Call)
+                and getattr(value.func, "id", None) == "BlockReason"
+                and value.args):
+            first = value.args[0]
+            if isinstance(first, ast.Constant) and isinstance(first.value, str):
+                return first.value, True
+            if isinstance(first, ast.JoinedStr):     # an f-string reason, e.g. max concurrent
+                return "".join(
+                    v.value for v in first.values
+                    if isinstance(v, ast.Constant) and isinstance(v.value, str)
+                ), True
+        return None, None
+
+    returned, unwrapped = set(), []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Return) or node.value is None:
+            continue
+        if isinstance(node.value, ast.Constant) and node.value.value is None:
+            continue                                  # `return None` — the gate is open
+        text, wrapped = _text_of(node.value)
+        if text is None:
+            continue
+        returned.add(text)
+        if not wrapped:
+            unwrapped.append(text)
+
     assert BLOCKED_BY_POSITION in returned, (
         f"the gate no longer returns {BLOCKED_BY_POSITION!r} — it returns {returned}. "
         "The monitor is keyed on that string and has silently stopped being able to fire."
+    )
+    assert not unwrapped, (
+        f"{unwrapped} is returned as a bare string, so its seriousness has to be guessed from "
+        f"its prose — which is B415, and a halt returned this way is surfaced as a routine skip"
     )
 
 

@@ -341,15 +341,23 @@ async def test_the_loop_ROUTES_a_non_filled_execution_into_the_rejection_recorde
         n for n in ast.walk(tree)
         if isinstance(n, ast.AsyncFunctionDef) and n.name == "_tick_symbol"
     )
-    fork = next(
+    # **THE LOCATOR CHANGED WITH `T-0141`, AND THE CHANGE IS WHY IT WENT RED RATHER THAN STALE.**
+    #
+    # This used to find the fork by the literal `"FILLED"` inside its test. That literal is now the
+    # module constant `FILL_BEARING_STATUSES`, because the branch handles two fill-bearing statuses
+    # rather than one — so the old locator raised `StopIteration` and the arm failed loudly instead
+    # of silently pinning a branch that no longer existed. **A locator keyed on a literal the
+    # subject chose is the same blindness as a scan keyed on one**; keyed on the constant's NAME it
+    # tracks the concept.
+    forks = [
         n for n in ast.walk(fn)
         if isinstance(n, ast.If)
-        and any(
-            isinstance(c, ast.Constant) and c.value == "FILLED"
-            for c in ast.walk(n.test)
-        )
-    )
-    assert fork.orelse, "the non-FILLED branch is gone; a refused signal now falls through"
+        and any(isinstance(c, ast.Name) and c.id == "FILL_BEARING_STATUSES"
+                for c in ast.walk(n.test))
+    ]
+    assert forks, "the fill-bearing branch is gone; a refused signal now falls through"
+    fork = forks[-1]
+    assert fork.orelse, "the non-fill branch is gone; a refused signal now falls through"
 
     calls = [
         n for n in ast.walk(ast.Module(body=fork.orelse, type_ignores=[]))
@@ -358,9 +366,34 @@ async def test_the_loop_ROUTES_a_non_filled_execution_into_the_rejection_recorde
         and n.func.attr == "_record_rejected_signal"
     ]
     assert len(calls) == 1, (
-        "the non-FILLED branch does not record the refusal — every 'no order was placed' "
+        "the non-fill branch does not record the refusal — every 'no order was placed' "
         "assertion in the suite stays green while the evidence is dropped"
     )
+
+    # **AND THE THIRD BRANCH MUST NOT RECORD ONE.** `T-0141` added a halt for a fill the venue made
+    # and we could not size. Before it, that case fell into the `else` above and was recorded as
+    # `outcome=REJECTED` / `rejection_code=UNCLASSIFIED` — **a refusal of an order the venue had
+    # partly filled.** So "every non-fill records a rejection" is no longer the whole property:
+    # the halt branch must record NEITHER, or one event leaves two contradictory rows.
+    halt_forks = [
+        n for n in forks
+        if any(isinstance(c, ast.Name) and c.id == "opened_units" for c in ast.walk(n.test))
+    ]
+    assert len(halt_forks) == 1, (
+        "the unsized-fill branch is gone; a partial we cannot size falls back into the rejection "
+        "recorder and is filed as a refusal of an order the venue filled"
+    )
+    halt_body = ast.Module(body=halt_forks[0].body, type_ignores=[])
+    assert not [
+        n for n in ast.walk(halt_body)
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+        and n.func.attr in ("_record_rejected_signal", "_record_signal_decision")
+    ], "the halt branch records a row for a position it has just said it cannot describe"
+    assert [
+        n for n in ast.walk(halt_body)
+        if isinstance(n, ast.Assign)
+        and any(isinstance(t, ast.Attribute) and t.attr == "halt_reason" for t in n.targets)
+    ], "the branch does not set a halt reason, so the run keeps trading around an unknown position"
 
     # The reason must be a NAME bound in that branch, not a literal: `reason = res.get(...)`.
     assert any(isinstance(a, ast.Name) for a in calls[0].args), (

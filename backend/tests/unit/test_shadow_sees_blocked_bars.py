@@ -43,8 +43,22 @@ def loop_with_a_blocked_entry(monkeypatch):
     async def _fetch(*a, **k):
         return _bars()
 
-    async def _blocked(pair):
-        return "already in a position"
+    async def _holding(pair):
+        """Stubbed ONE LEVEL BELOW the gate, so the REAL `_entry_block_reason` runs.
+
+        This fixture used to stub `_entry_block_reason` itself and return the bare string
+        `"already in a position"` — **a shape production can no longer produce.** Block reasons are
+        now `BlockReason`, carrying their halt-vs-skip classification structurally rather than in a
+        prose prefix (`B415`), so a double returning a plain `str` had this arm asserting against a
+        value the code under test never builds — `B356`'s class, a mock encoding the author's
+        reading, and it went red the moment the classification stopped being guessable from text.
+
+        Stubbing the position read instead lets the gate itself decide, so the `skip` asserted
+        below is the classification the engine would really emit. (The ORDERING arm further down
+        still stubs the gate directly, and correctly: its subject is the call sequence, so it has
+        to intercept the call.)
+        """
+        return True
 
     async def _shadow(pair, entry, engine_policy=None):
         seen.append(pair)
@@ -53,7 +67,7 @@ def loop_with_a_blocked_entry(monkeypatch):
         acted.append((kind, msg))
 
     monkeypatch.setattr(loop, "_fetch_bars", _fetch)
-    monkeypatch.setattr(loop, "_entry_block_reason", _blocked)
+    monkeypatch.setattr(loop, "_has_position", _holding)
     monkeypatch.setattr(loop, "_shadow_evaluate", _shadow)
     monkeypatch.setattr(loop, "_act", _act)
     return loop, seen, acted

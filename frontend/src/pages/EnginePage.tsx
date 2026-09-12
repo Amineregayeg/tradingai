@@ -79,6 +79,10 @@ export default function EnginePage() {
 
   const running = !!status?.running
   const paused = !!status?.paused
+  // `B413`/`T-0141`. A halt is a THIRD state: `running` stays true and `paused` stays false, so
+  // reading only those two shows a healthy engine that will never take another entry. The reason
+  // is what separates *a partial fill we could not size* from *someone pressed Pause*.
+  const haltReason = (status?.halt_reason ?? null) as string | null
   const mode = String(status?.mode ?? '—')
   const simOn = !!sim?.enabled
 
@@ -92,6 +96,22 @@ export default function EnginePage() {
   return (
     <div style={{ flex: 1, overflow: 'auto', background: '#0a0a0f' }}>
       <div style={{ padding: '14px 28px 0' }}><LoadFailure what={failed} /></div>
+      {haltReason && (
+        <div
+          role="alert"
+          style={{
+            margin: '14px 28px 0', padding: '10px 12px', borderRadius: 8,
+            border: `1px solid ${RED}`, background: 'rgba(255,59,92,0.10)',
+            color: RED, fontSize: 12, fontWeight: 600, lineHeight: 1.5,
+          }}
+        >
+          ENGINE HALTED — {haltReason}
+          <div style={{ color: MUTE, fontWeight: 400, marginTop: 4 }}>
+            No new entries will be taken. This is not a pause: it does not clear on Stop or on a
+            new run, because the condition it reports is at the venue rather than in the engine.
+          </div>
+        </div>
+      )}
       <div style={{ padding: '20px 28px 16px', borderBottom: '1px solid #1e2035', background: '#0d0d14', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <h1 style={{ fontSize: 20, fontWeight: 700, color: '#e8e8ef', margin: 0 }}>Engine</h1>
