@@ -160,7 +160,16 @@ broker_mode                       selects between TWO SIMULATORS -- not a venue 
 `ExecMode.PAPER` remains correct because an Alpaca paper account **is** a simulation, and
 `execute()`'s assertion passes on a true flag.
 
-## D — First connection, AND the order body written against what it measures
+## D — First connection, AND the order body  ✅ **DONE** — `T-0139` measured it, `T-0140` built it, `T-0141` closed the partial-fill hole
+
+> **Landed:** the account is connected (paper, verified `paper: true` in the log), the venue's real
+> limits were **measured** rather than taken from documentation (`B409` — the programme's own numbers
+> were wrong by 8x and 100,000x), `place_order` sizes against those limits per asset at order time,
+> and a partial fill is now either a real position at the FILLED size or a named halt.
+>
+> **NOT DONE, and deliberately outside D:** the halt leaves no durable record (`B413`), which is
+> consolidated with `B416`'s vocabulary freeze and Review's Alert row. **And nothing is deployed:**
+> the engine's dated HOLD stands, and D does not lift it.
 
 **Goal: replace assumptions with observations — and THEN implement `place_order`, whose inputs are
 exactly those observations.**

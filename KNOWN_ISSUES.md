@@ -27016,6 +27016,22 @@ reading — **so a false zero from it is precisely the case that matters.**
 mechanism: all three now refuse an empty set naming the path, or print the **denominator** beside the
 count. Controlled three ways.
 
+**A SIXTH INSTANCE, in review's own mutation harness, two days after this entry:** its harness
+**reported a clean baseline as a SURVIVOR, twice.** The mutation literals had the wrong quotes and
+indentation, so the substitution never applied and the run printed the **unmutated** result as though
+the mutant had survived. **It was caught only because a traceback happened to print above the
+output.**
+
+> **An apply-check that merely PRINTS its failure is not a check.** Review's now **aborts the run**,
+> and every count it has reported since is from a run where the mutation was confirmed present in the
+> file.
+
+**A survivor you never created is worse than a missing one**: it reads as *the arm does not cover
+this*, and the honest response to that is to write another arm — so the false survivor spends real
+effort and still leaves the original arm uncredited. **Same family as the false zero, one step
+further: not a clean sweep over nothing, but a specific negative result manufactured from a failed
+setup.**
+
 **Real numbers, now that the instruments are proven:**
 
 ```
