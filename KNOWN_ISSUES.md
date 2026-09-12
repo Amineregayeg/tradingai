@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-12 (newest entry B422 — ANY MODULE-SCOPE REGISTRATION IS INSTALLED ONCE PER PROCESS, NOT ONCE PER FILE, and it is now MEASURED as TWO PACKAGES AND THREE REGISTRATIONS rather than one instance plus a worry: @testing-library/react's afterEach(cleanup) at import time, which broke us, plus @testing-library/user-event's afterEach(resetClipboardStubOnView) and afterAll(detachClipboardStubFromView) at module scope with the same typeof guard. The precise claim is that the second and third EXIST and are SUBJECT to the defect but are LATENT because the feature they guard is unused — zero clipboard hits across src/ — which is stronger than a guard against the un-enumerated and weaker than a second active incident. It also bounds the canary: a per-test DOM check would NOT catch a leaked clipboard stub, so T-0142 ships the DOM check WITH ITS SCOPE STATED rather than claiming to guard the class. Also B421 — a verification reusing the original instrument's design tests the instrument, not the claim; and B418 corrected twice over.)
+Last updated: 2026-09-12 (newest entry B423 — A DOWNGRADE THAT REWRITES ROWS ONTO A SURVIVING VALUE ASSERTS A DIFFERENT FACT, measured on a real restored copy of production during T-0143's harness run: 0006 rewrites ABANDONED to OPEN — the exact conflation that migration exists to abolish, per its own docstring — and 0008 rewrites REJECTED to ABSTAINED, which asserts no order was ever attempted; five live rows in production are targets of the first, the rewrite is one-way and a re-upgrade does not restore them, and row counts stay identical so nothing looks wrong. 0011/0012/0013 refuse instead, measured: planting one UNSIZED_FILL row makes 0013 -> 0012 fail with CheckViolationError, exit 1, revision and row intact. The three newer ones are right and the two early ones were never brought forward. Latent — nothing plans to roll back past 0006 — but the contrast's other side is not: once a real order writes UNSIZED_FILL, deploy D cannot be rolled back until someone decides what those rows become, which is a one-way door in the abort path. Neighbour of B416, not its duplicate: that entry is about the downgrade DERIVING its vocabulary, this is about what it does to the ROWS, which T-0143's freeze does not address.)
 
 ---
 
@@ -27920,3 +27920,71 @@ split, and it is execute's own framing.
 module scope is per-process, and the first registrant wins.** The countermeasure is the same one
 `B418` arrived at the hard way — **assert the OUTCOME per unit of work (per test), never the
 configuration, and never per file**, because the first unit is always immune.
+
+---
+
+### B423 — A DOWNGRADE THAT REWRITES ROWS ONTO A SURVIVING VALUE ASSERTS A DIFFERENT FACT, and the chain does this in TWO places while THREE newer migrations refuse to. Measured on a real restored copy of production
+
+**Found by manager during `T-0143`'s real-server harness run (`818387c`), on a `pg_dump`/`pg_restore`
+copy of production into a scratch DB. Production untouched throughout, verified at both ends.**
+
+When a downgrade narrows the `outcome` CHECK, rows already holding a doomed value have to go
+somewhere. **The chain answers that question two different ways, and never revisited the first.**
+
+```
+0006  downgrade  UPDATE ... SET outcome='OPEN'      WHERE outcome='ABANDONED'   <- silent rewrite
+0008  downgrade  UPDATE ... SET outcome='ABSTAINED' WHERE outcome='REJECTED'    <- silent rewrite
+0011  downgrade  refuses                                                        <- loud
+0012  downgrade  refuses                                                        <- loud
+0013  downgrade  refuses                                                        <- loud
+```
+
+**Both rewrites land on a value that means something the record did not conclude, and in `0006`'s
+case on the exact value the migration exists to abolish.** `0006`'s own docstring says it:
+
+> *"the only way to say that was to leave `outcome = 'OPEN'`, which claims the opposite — that the
+> trade is still running — and there was no way to tell the two apart afterwards."*
+
+So the upgrade ends the `OPEN`/`ABANDONED` conflation and **the downgrade silently restores it.**
+`0008`'s is the same shape one word over: `ABSTAINED` says *the engine declined to place an order*,
+`REJECTED` says *an order was placed and refused*. Rewriting the second as the first asserts that no
+order was ever attempted.
+
+**MEASURED, not read.** Restored copy carried production's 5 `ABANDONED` rows. After downgrading to
+`0005` and re-upgrading to head:
+
+```
+production        ABANDONED 5   ABSTAINED 1635   LOSS 18   WIN 20    (untouched, rev 0011)
+scratch, after    OPEN      5   ABSTAINED 1635   LOSS 18   WIN 20    (rev 0013, 1678 rows both)
+```
+
+**Row count identical, five facts changed, nothing logged, and the re-upgrade does not restore them.**
+The rewrite is one-way: `ABANDONED` is not recoverable from `OPEN` once the distinction is gone.
+
+**THE CONTRAST, measured on the same copy** — plant one `UNSIZED_FILL` row, then roll `0013 -> 0012`:
+
+```
+asyncpg.exceptions.CheckViolationError: check constraint "ck_decision_records_outcome" ... violated
+ALEMBIC_EXIT=1     revision stays 0013     the row survives     constraint unchanged
+```
+
+Clean atomic failure, no partial state. **`0011`/`0012`/`0013` are right and `0006`/`0008` are the
+outliers** — the policy changed midway through the chain and the two early ones were never brought
+forward.
+
+**WHAT THIS COSTS TODAY.** `0006`'s rewrite has five live targets in production right now, so it is
+real rather than hypothetical; but nothing plans to roll back past `0006`, so it is **latent**. The
+part that is *not* latent is the other side of the contrast, and it belongs in the runbook rather
+than here: **once a real order writes an `UNSIZED_FILL` row, deploy D cannot be rolled back until
+someone decides what those rows become.** The refusal is correct — it is a one-way door in the abort
+path, and the abort path is exactly when it would be met.
+
+**THE FIX IS NOT "MAKE THEM ALL REWRITE".** It is the opposite: `0006` and `0008` should refuse the
+way `0013` does. A downgrade that cannot preserve a fact should stop and say so, because the
+alternative is a database that answers confidently and wrongly. If a rewrite is ever genuinely
+required, the synthesized value has to be recorded as synthesized — a row that was rewritten by a
+downgrade is not the same row, and today nothing distinguishes them.
+
+**This is `B416`'s neighbour and not its duplicate.** `B416` is about `0006`'s downgrade *deriving*
+its target vocabulary from the live one (fixed by `T-0143`'s freeze). This is about what that
+downgrade does to the *rows*, which `T-0143` did not touch and which the freeze does not address.
