@@ -27084,6 +27084,21 @@ cares about: a row of the wrong shape reads as coverage.**
    the false REJECTED row **before** anything halts. **The named halt must REPLACE that row, not
    follow it** — otherwise we halt and still leave a record saying the signal was refused.
 
+**WHY THE ROW WAS WRONG, in review's own diagnosis, because it is the reusable half.** Review wrote
+`M-8` by taking **`B403`'s conclusion** — *a third outcome that produces no row* — and applying it to
+a new site **without re-measuring whether this third outcome also falls through.** It does not: it
+lands in the rejection path and writes a false row.
+
+> **A conclusion was transferred where the METHOD should have been.** `B403`'s method is *drive the
+> branch and look at what the recorder actually receives*; its conclusion was about one site.
+> **`M-8` is what transferring the conclusion costs** — an arm that would have passed against the
+> unfixed code, because the defect itself satisfies it.
+
+**Amended before review began** (the file is review's; execute correctly did not edit it): `M-2` is
+split into the gate and the false-rejection path that must **stop** being written, `M-8` now asserts
+the partial's record **is a position record at the filled size** with a mandatory run against the
+unfixed code first, and `M-6` carries the ordering clause that the halt must **replace** the false row.
+
 **RULING:**
 
 1. **A fill quantity greater than zero is a REAL POSITION and must be tracked at the FILLED size**,
