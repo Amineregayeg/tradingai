@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-13 (newest entry B427 — place_order NEVER OBSERVES A TERMINAL ORDER STATE: it reads status and filled_qty off the SUBMISSION response and get_order( appears zero times in alpaca.py, so an ordinary "accepted"/"new" acknowledgement enters neither the fill branch nor the halt check and falls to the else that records a REJECTION with the status as its reason. The engine therefore records a refusal of an order the venue ACCEPTED and may still fill, after which nothing manages the resulting position — word for word the defect the code already documents forty lines above for PARTIALLY_FILLED, still live in the adjacent branch for every status nobody enumerated. Nobody has measured what Alpaca returns, so it may be latent; probe 3 settles it, which is why probe 3 now polls to a terminal state before running any parser. One layer BELOW T-0130 and must not be merged with it: T-0130 fixes a default resolving to FILLED and a classification resolving to REJECTED, while this is that both classify a moment that has not happened yet — T-0130 can be correct and this still be wrong. Found by review on the probe ladder and written only into the runbook until now, which is B147's grade-1 shape.)
+Last updated: 2026-09-13 (newest entries B428 and B429, which must be read together — B428: THE ALPACA TICK PATH CANNOT RUN AT ALL. crypto_loop.py:2051 calls self.paper.on_tick unguarded; on_tick is not in the adapter base (zero hits, control place_order three) and is defined only by paper.py and cft_sim.py, while _build_broker puts a real AlpacaAdapter in that slot — so every tick raises AttributeError BEFORE any signal is evaluated, _loop catches it per symbol and logs logger.warning, and the engine reports running=true paused=false halt_reason=None forever. B179's signature on the venue we are about to trade, and worse: the engine cannot place an order at all. It is also why part D's order path has never actually run. B429: a live Alpaca position would have NO STOP — place_order never reads request.sl/tp and sends no bracket (0 hits), while cryptofundtrader.py and oanda.py both send it (4 hits each, the control that makes the zero mean something), and the only SL/TP enforcement in the tree is inside the simulators' on_tick — the very method AlpacaAdapter lacks. B428 is why B429 has never bitten, so fixing B428 alone ARMS B429 the same hour and B429 must land first or with it. No Alpaca order has been driven: what is measured is that the code does not send a stop, not a stopless position observed at the venue.)
 
 ---
 
@@ -28423,3 +28423,87 @@ same key holds the **symbol** at `:955`. One key, three meanings, one file.
 **What the loop should do with a still-unresolved order after the bound is a trading-behaviour
 ruling, not a code question**, and it belongs with `B424`'s family: *we cannot establish whether we
 hold a position* is its own state and must alarm, not resolve to either affirmative.
+
+---
+
+### B428 — THE ALPACA TICK PATH CANNOT RUN AT ALL. Every tick raises before any signal is evaluated, the loop swallows it as a WARNING, and the engine reports HEALTHY forever
+
+**Found by execute on the order path while pausing `T-0130`. Every link verified independently by
+manager. This is not latent: it is what would happen the first time the engine is started on Alpaca.**
+
+```
+_build_broker      venue == "alpaca"  ->  adapter = AlpacaAdapter(client, paper=True)
+:1037              self.paper = built                       so self.paper IS the real venue adapter
+:2051              for ev in self.paper.on_tick(pair, price):        UNGUARDED
+                   # the comment above it reads: "mark-to-market + auto-close SL/TP"
+base.py            on_tick appears ZERO times                (control: place_order appears 3)
+defines on_tick    paper.py and cft_sim.py ONLY              alpaca.py: zero `def on_tick`
+```
+
+**`on_tick` is not part of the adapter contract.** It is a simulator method the loop calls on
+whatever `self.paper` holds. With a real venue in that slot, `_tick_symbol` raises `AttributeError`
+at `:2051` — **before** the strategy is evaluated, which happens further down the same function.
+
+**AND THE LOOP SWALLOWS IT**, once per symbol per poll, forever:
+
+```python
+except Exception as exc:  # noqa: BLE001 - never let one symbol kill the loop
+    logger.warning("Live loop symbol error", pair=pair, error=str(exc))
+```
+
+> `running=true`, `paused=false`, `halt_reason=None`. **Healthy.** An operator sees a running engine
+> taking no trades and reads a quiet market.
+
+**That is `B179`'s exact signature, on the venue we are about to trade, and worse than `B179`:**
+there the engine was choosing not to trade; here it *cannot place an order at all*, and nothing
+says so. A `warning` is the right severity for one symbol failing once and the wrong severity for
+the only venue failing every tick since start-up.
+
+**This is why part D's order path has never actually run.** `T-0140`/`T-0141`/`T-0143` were all
+written and tested against a path that dies two lines before the code they changed.
+
+---
+
+### B429 — A LIVE ALPACA POSITION WOULD HAVE NO STOP, at the venue OR in process. It is the ONLY adapter that drops `sl`/`tp`, and `B428` is why nobody has noticed
+
+**Found by execute, controlled sweep, verified independently by manager. `B428` and this one must be
+read together and fixed in the opposite order to the one they were found in.**
+
+`AlpacaAdapter.place_order` builds a plain `MarketOrderRequest` — symbol, qty, side, TIF,
+`client_order_id`. **It never reads `request.sl` or `request.tp`**, and sends no bracket:
+
+```
+alpaca.py            request.sl / request.tp        0 hits
+alpaca.py            bracket|order_class|stop_loss|take_profit   0 hits
+cryptofundtrader.py  request.sl / request.tp        4 hits       <- CONTROL: the pattern is used
+oanda.py             request.sl / request.tp        4 hits       <- CONTROL
+```
+
+**The control is what makes the zero mean something** — the two other real adapters both send the
+stop, so this is a gap in `alpaca.py` and not a vocabulary miss in the sweep.
+
+**The only SL/TP enforcement anywhere in the tree is in the SIMULATORS** — `paper.py` (16 `sl`/`tp`
+references) and `cft_sim.py` (17), both inside `on_tick`. So:
+
+```
+stop at the venue      NO — never sent
+stop in process        NO — the only mechanism is on_tick, which AlpacaAdapter does not have
+```
+
+The session-close flatten reads `self.paper.get_positions()` and **is** venue-authoritative, so
+exposure is bounded at one session. **A time bound is not a stop.**
+
+**`B428` IS WHY THIS HAS NEVER BITTEN, AND THAT IS THE DANGEROUS PART.** The tick path dies at
+`:2051` before it could ever mark a position, so the absent stop has had no opportunity to matter.
+
+> **Fix `B428` alone and `B429` goes live the same hour.** The repair for "the engine cannot trade"
+> is precisely what arms "a position with no stop". **`B429` must land first, or with it.**
+
+**SCOPE OF THE EVIDENCE, stated because it bounds the claim:** this was established by reading
+`place_order` and sweeping for `sl` handling with a control. **No Alpaca order has been driven.**
+What is measured is that *the code does not send a stop* — not an observation of a stopless position
+at the venue.
+
+**FOR THE FIRST-ORDER LADDER:** probe 3 is a minimum-size buy and probe 4 closes it immediately, so
+the exposure is seconds at roughly $1 of notional. That is a bound by **size and duration**, not by a
+stop, and the runbook now says so rather than implying the position is protected.
