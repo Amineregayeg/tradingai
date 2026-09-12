@@ -27321,6 +27321,45 @@ and wrong for *present but unusable*.
 
 ### B418 — THE FRONTEND SUITE'S CORRECTNESS DEPENDS ON NOT BEING RUN IN ONE PROCESS, and `isolate` does not guard that. **THE MECHANISM IS A SHARED jsdom DOM THAT ACCUMULATES ACROSS FILES — NOT a shared module registry (corrected below)**
 
+> ## ⇢ SETTLED AND FIXED at `bb7d62f` — and the control is a 2x2 that fires in ONE cell
+>
+> **THE MECHANISM, fourth and measured:** `@testing-library/react` registers `afterEach(cleanup)` at
+> **import time**. Under one process the module is cached after the first test file, so the hook is
+> installed in the **first file's** suite context only. **Every later file gets no cleanup and
+> accumulates its own renders.** The `"multiple elements"` failures are a later file colliding with
+> **itself**.
+>
+> **THE FIX:** register `afterEach(cleanup)` in `setup.ts`. Three lines. It works because
+> **`setupFiles` re-execute per test file even under `singleFork`** — measured separately — and only
+> externalised `node_modules` dependencies are cached for the process (`B422`).
+>
+> ```
+>                 isolation          --singleFork
+> fix PRESENT     QUIET 35/35        QUIET 35/35
+> fix REMOVED     QUIET 35/35        GUARD FIRED — 12 failed, 16 firings, the first reporting
+>                                    2103 bytes of the previous test's markup in document.body
+> ```
+>
+> **The guard fires in exactly one cell — the one where the defect occurs.** The top row rules out an
+> arm agreeing with its own shipping configuration, which killed three earlier candidates; the
+> bottom-left rules out *fires always*, **and is why nobody saw this for months**. `singleFork` as
+> shipped was `6 failed / 32 passed`; with the fix, `38 passed`.
+>
+> **Full suite: 236 passed, 16/16 files, union verified, and ZERO guard firings across all 236** —
+> the number that matters most, since the guard runs `beforeEach` on every test.
+>
+> **WHAT THE COMMIT CLAIMS AND WHAT IT REFUSES TO:** it records that the guard **detects**
+> accumulation, and states plainly that it does **not** demonstrate accumulation still **occurs**
+> once the fix is in — that would need a second uncovered registration actually producing leftovers,
+> and the two that exist are latent (`B422`). **The guard is named for DOM accumulation in both its
+> name and its failure text**, because it cannot see a leaked clipboard stub and must not read as
+> though it can.
+>
+> **FOUR MECHANISMS, THREE OF THEM FALSE, and the commit records which and by whom.** *The sequence
+> of being wrong is the reusable part* — a future reader who sees only the fix will rebuild one of
+> the wrong stories. Evidence: `agents/tasks/T-0142/_runs/EVIDENCE.md`, thirteen logs, every claim
+> spot-checked against its own log rather than against the memory of writing it.
+
 > ## ⇢ CORRECTED A SECOND TIME — THE DOM DOES NOT CROSS FILES EITHER. It accumulates WITHIN a later file
 >
 > **Review re-measured with a DIFFERENT instrument — real RTL renders plus a counter for the OTHER
