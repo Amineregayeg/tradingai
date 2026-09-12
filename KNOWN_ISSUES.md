@@ -27303,7 +27303,7 @@ instead of through the field. **Found by driving ten shapes through it rather th
 and it is `a-default-must-be-the-alarming-state` one layer in: the fallback was right for *absent*
 and wrong for *present but unusable*.
 
-### B418 — THE FRONTEND SUITE'S CORRECTNESS RESTS ON A VITEST RUNNER DEFAULT, and on 13 of the mocked keys a leak RESOLVES TO THE WRONG DATA AND PASSES
+### B418 — THE FRONTEND SUITE'S CORRECTNESS DEPENDS ON NOT BEING RUN IN ONE PROCESS, and `isolate` does not guard that. On 9 of the mocked keys a leak RESOLVES TO THE NEIGHBOUR'S DATA AND PASSES
 
 **Measured by review after execute reported a runner-configuration hazard; this is the half execute's
 own warning did not cover, and it is the dangerous half.**
@@ -27350,10 +27350,50 @@ neighbour's factory, and this file's own fixture keys then describe data it neve
 **The asymmetry — the part that actually matters — survives both corrections**, and the remedy is
 unaffected, because a module-scope sentinel watches the registry, which is the real mechanism.
 
-**REMEDY, ruled ahead of `B416`'s consolidated freeze:** pin `pool` and `isolate` in
-`vite.config.ts`, and add a canary arm that fails when isolation is lost. **Every frontend number
-quoted this week depends on this**, and changing that config re-opens all of them — so it is
-verified on its own rather than folded into another task.
+**REMEDY — CORRECTED BEFORE THE TASK WAS RELEASED, because the first half I ruled CANNOT ENFORCE
+ANYTHING.** Execute measured it three ways, one variable at a time, same 3-file reproduction:
+
+```
+1  vitest 1.6.1's own defaults (dist/config.js)   isolate: true, pool: "threads"
+     -> the version we run ALREADY defaults to isolated. The hazard is NOT a default flipping.
+2  config pinned pool:'threads', isolate:true, then --singleFork on the CLI      7 failed
+3  --poolOptions.forks.isolate=true set EXPLICITLY on the CLI, with --singleFork 7 failed
+```
+
+**It is not "CLI beats config". They are ORTHOGONAL**, from vitest's own type declarations:
+`isolate` means *recycle the worker after each test*; `singleFork` means *run tests inside a single
+fork*. **With one fork there is nothing to recycle between files, so `isolate` never covered this
+mechanism at all.**
+
+> **So the entry's own premise needed correcting too.** This is not *a suite certified by a runner
+> default* — the default is already safe. **It is a suite whose correctness depends on not being run
+> in one process, guarded by a setting that does not address that.**
+
+**RANKED, and the ranking is the point:**
+
+```
+THE CANARY = ENFORCEMENT.  It guards the OUTCOME — "this file's mock is not the one installed" —
+                           rather than a mechanism, so it fires under singleFork, under a pool
+                           swap, under an upgrade, and under a future default change.
+THE CONFIG PIN = DECLARATION.  Greppable intent, and it does catch a future EDIT setting
+                           isolate:false. It is not a defence.
+```
+
+**Stating the remedy as "pin `pool` and `isolate` and add a canary" would have read as though the
+first half were the fix.** And an arm asserting the config *contains* those keys is the
+assert-a-field-exists shape **this entry itself warns against** — `B394`.
+
+**THE CONTROL IS THE ROW THE TASK RESTS ON, not a nicety:** the canary **shown to fail under
+`singleFork` and pass under isolation, same tree, two invocations.** Without it, the canary is an arm
+agreeing with the config it ships beside.
+
+**Still ruled ahead of `B416`'s consolidated freeze**, because every frontend number quoted this week
+depends on this and changing that config re-opens all of them.
+
+**A process note from the measurement, because it cost three runs:** execute kept launching a
+wait-loop beside the experiment and the harness killed both for memory. **A polling loop competes
+with the thing it waits on** — its own standing note, and the same shape as the backend chunking fix.
+**One process, and let the notification come.**
 
 ### B419 — `.get()` CANNOT TELL "KEY ABSENT" FROM "KEY PRESENT = None", so an Alpaca FILLED order with no reported quantity is recorded at the SUBMITTED size
 
