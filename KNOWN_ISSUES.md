@@ -27260,6 +27260,53 @@ test_no_migration_imports_the_LIVE_vocabulary:
 > blindness our tooling note warns about, inside the guard against that blindness** — `B412`'s shape
 > in product tests rather than in tools.
 
+**SEVERITY CORRECTED — IT IS NOT LATENT FOR TWO OF THE FOUR, AND `0006`'s DOWNGRADE IS WRONG
+TODAY.** Execute reconstructed each vocabulary **at the commit that added each migration**, parsed
+rather than read:
+
+```
+rev    what its CHECK created IN PRODUCTION      a replay TODAY creates   verdict
+0002   5  WIN LOSS BE OPEN ABSTAINED             7                        WIDER by ABANDONED, REJECTED
+0006   6  + ABANDONED                            7                        WIDER by REJECTED
+0008   7  + REJECTED                             7                        identical
+0007   3  UNSET ICT RULE_ENGINE                  3                        identical
+0002   DECISION_COHORTS 4 / SIGNAL_DIRECTIONS 2  unchanged since          identical
+```
+
+> **The END STATES agree — production 7, fresh replay 7 — and that is the only reason nothing has
+> broken.** The **intermediate** states do not. **A scratch database stopped at `0002` or `0006` has
+> a vocabulary production never had at that revision**, so a partial replay is not reproducing
+> history — which bears directly on the manager's harness, where the `0010` downgrade step is this
+> same check one revision later.
+
+**AND `0006`'s DOWNGRADE IS ALREADY WRONG BY ONE MEMBER, TODAY.** It derives *"the `0005`
+vocabulary"* as live-minus-`ABANDONED`, which evaluates to **6 values including `REJECTED`** — and
+the real pre-`0006` constraint admitted **5** and never admitted `REJECTED`. **A downgrade to `0005`
+right now creates a constraint that never existed.** The halt's outcome value makes it worse; it
+does not make it wrong.
+
+**THE FREEZE, DERIVED — this was the thing that would have made the task unbuildable if history were
+not recoverable:**
+
+```
+0002  DECISION_OUTCOMES 5 / DECISION_COHORTS 4 / SIGNAL_DIRECTIONS 2      landed 2580ffe 2026-07-19
+0006  DECISION_OUTCOMES 6, downgrade target = 0002's 5                    landed 7f51836 2026-08-09
+0007  DECIDED_BY_VALUES 3                                                 landed a0ed499 2026-08-14
+0008  DECISION_OUTCOMES 7, downgrade target = 0006's 6                    landed e8dd8da 2026-08-24
+```
+
+**THE IDENTICAL ONES STILL NEED FREEZING.** `0007`, `0008` and the two small vocabularies match only
+because **nothing has been added since** — and that is exactly the condition `T-0143` ends.
+
+**AND THE CONTROL IS WHY ANY OF THIS EXISTS.** Execute's first extractor handled only `ast.Assign`,
+and these constants are **annotated** assignments — so it reported **NOT PRESENT for every vocabulary
+at every commit**, including at `HEAD`, where execute had read the seven outcomes by eye an hour
+earlier.
+
+> **A uniform, plausible, entirely wrong answer.** It was caught **only because `HEAD` was in the
+> table as a control with a known value.** Without that row, the freeze would have been reported
+> **unrecoverable** and the task **blocked** — a false negative that would have looked like a finding.
+
 **LATENT, AND WHAT STOPS IT BEING SO:** nobody has added an outcome since `REJECTED`/`0008`.
 **`T-0141`'s deferred halt record is exactly what would add one** — and the moment it lands, `0002`,
 `0006` and `0008` all begin claiming they always admitted it, and replaying the chain on a fresh
