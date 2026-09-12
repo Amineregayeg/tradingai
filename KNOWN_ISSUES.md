@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-11 (B407 — _build_broker ASSIGNS self.mode BEFORE CONSTRUCTING THE ADAPTER, so a refused rebuild leaves the broker and hook intact but mode flipped to ALPACA_PAPER over a simulator. Found by review checking 1d28275, whose new comment says _bind_broker 'mutates nothing until the build succeeds': true of self.paper and the hook, false of self.mode. Occurrence checked before severity: _config_snapshot does not read it on that path, so no run record is wrong; only status() and start()'s log line. And as called it CANNOT FIRE: paper=True, no url_override, and alpaca-py has no env override for the base URL. LATENT, armed by any of three ordinary edits. Fix: construct first, then assign mode, in all three branches, with an arm that forces the constructor to raise.)
+Last updated: 2026-09-12 (B408 — THE CONNECT FORM SHOWS A SINGLE-ENVIRONMENT BROKER ITS ONE ENVIRONMENT AS A LABEL AND NEVER WRITES IT INTO FORM STATE. Alpaca displays 'Paper' and submits the initial-state default 'live', so broker_connections holds environment=live while the built client is paper:true. Changing the broker updates only `broker` (SettingsPage.tsx:334), and a one-environment broker renders a label instead of a select (:512), so nothing writes the field. B402's class on the INPUT side. Harmless today only because paper = not startswith('live') OR observe_only, and observe_only is forced on with ALLOW_LIVE_TRADING unset — so the connection is paper by the SECOND of two conditions while the first already points live. Set ALLOW_LIVE_TRADING=true and clear observe_only and the stored value selects the LIVE endpoint from a form that said Paper. Remedy: write the single environment into form state on selection and on reset, with an arm on the submitted PAYLOAD rather than the rendered label. Found verifying Malek's first real Alpaca connection, which itself succeeded against the paper endpoint.)
 
 ---
 
@@ -26762,3 +26762,47 @@ has succeeded. **Arm:** force the constructor to raise; assert `self.mode` is un
 
 **Not a blocker for `1d28275`**, whose purpose — B406, and removing a sentence that argued for the
 defect — it meets.
+
+### B408 — THE CONNECT FORM SHOWS A SINGLE-ENVIRONMENT BROKER ITS ONE ENVIRONMENT AS A LABEL AND NEVER WRITES IT INTO FORM STATE. Alpaca displays "Paper" and submits `live`, and the stored row says `live` while the client is `paper`
+
+**Found by manager verifying Malek's first real Alpaca connection in production.** The connection
+itself is correct and safe. **The record of it is wrong, and the wrong value is the one that selects
+the endpoint.**
+
+```
+broker_connections   alpaca   environment = live      <- what the form submitted
+api log              paper: true   observe_only: true   allow_live: false
+                     ALLOW_LIVE_TRADING unset          <- what actually got built
+```
+
+**WHY IT SUBMITS `live`:** the form's initial state is `environment: 'live'`
+(`SettingsPage.tsx:179`, and the reset at `:218`). Changing the broker updates **only** `broker`
+(`:334`). And a broker with one environment is rendered as a **label rather than a `<select>`**
+(`:512`), so the displayed "Paper" never reaches state. **The dropdown is the only thing that writes
+the field, and this broker has no dropdown.**
+
+> **The label and the payload disagree, and nothing in the form can tell you which one it sent.**
+> This is `B402`'s class on the input side: there, a run recorded a venue it never touched; here, a
+> connection records an environment it was never built with.
+
+**WHY IT IS HARMLESS TODAY, AND EXACTLY WHY IT IS NOT COSMETIC.** `paper` is derived as
+`not environment.startswith("live") or observe_only`. The stored `live` makes the first term
+`False`, and **only `observe_only` rescues it** — which is itself forced on because
+`ALLOW_LIVE_TRADING` is unset. **So the connection is paper by the second of two conditions, with
+the first already pointing at live.** Set `ALLOW_LIVE_TRADING=true` and clear `observe_only` — both
+deliberate acts, but both plausible when someone later wants real trading — and this stored value
+selects the **live** endpoint, with no further warning, on a connection the operator created from a
+form that said **Paper**.
+
+**REMEDY:** when a broker exposes exactly one environment, write it into form state on selection
+(and on reset), so the submitted value equals the displayed one. **An arm should assert the
+submitted payload's `environment` for a single-environment broker, not the rendered label** — a
+render test passes today, since the label is already correct.
+
+**THE EXISTING ROW SHOULD BE CORRECTED TOO.** It is stored `live` and describes a `paper` client.
+Reconnecting after the fix is enough; nothing needs a hand-written UPDATE.
+
+**Verified working, so this entry is not read as "the connection is broken":** adapter constructed,
+`Alpaca adapter connected`, `Broker connected`, position reconciliation completed against Alpaca's
+paper endpoint with real credentials. `paper: true` in the log is the measured value, not an
+inference.
