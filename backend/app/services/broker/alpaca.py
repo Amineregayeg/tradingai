@@ -859,10 +859,23 @@ class AlpacaAdapter(BrokerAdapter):
             status = "FILLED"
         elif raw_status == "partially_filled":
             status = "PARTIALLY_FILLED"
+            # `B414`. THIS WAS `%s` WITH POSITIONAL ARGS, AND LOGURU FORMATS WITH `str.format` —
+            # so the placeholders stayed literal and the symbol, the requested size and the filled
+            # size were ALL DROPPED. The register recorded that a partial fill "logs at ERROR",
+            # which was true and worthless: the line said a partial happened and not for what or
+            # how much. Mine is the only percent-format logger call in `app/` (184 files, AST
+            # sweep with a planted control), so the convention was never in doubt — I just used
+            # the other language's.
+            #
+            # **AND NO ARM CAUGHT IT.** `test_a_PARTIAL_fill_is_NOT_reported_as_FILLED` executes
+            # this exact line and never looks at the log, which is why the arm is green and the
+            # log was empty. A side effect nothing asserts on is not covered by the test that
+            # triggers it.
             logger.error(
-                "alpaca.partial_fill symbol=%s requested=%s filled=%s — the venue opened a "
-                "position smaller than the order and the engine does not track partials",
-                request.pair, quantity, getattr(placed, "filled_qty", None),
+                "alpaca.partial_fill — the venue opened a position SMALLER than the order and "
+                "the engine does not track partials",
+                symbol=request.pair, requested=str(quantity),
+                filled=str(getattr(placed, "filled_qty", None)),
             )
         else:
             status = str(raw_status).upper()

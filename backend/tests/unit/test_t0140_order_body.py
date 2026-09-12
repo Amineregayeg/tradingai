@@ -193,7 +193,10 @@ async def test_a_size_valid_at_the_MEASURED_minimum_is_not_refused_by_the_DOCUME
     result = await adapter.place_order(_req(lot=between))
 
     assert result["status"] == "FILLED"
-    assert client.submitted, "a size the venue accepts was not submitted"
+    assert client.submitted, (
+        "a size ABOVE the venue's published minimum was not submitted — `M-10`: published is not "
+        "the same as accepted, and no order has been placed to find out"
+    )
 
 
 # =====================================================================================
@@ -235,8 +238,14 @@ async def test_the_quantisation_is_EXACT_where_float_arithmetic_is_not():
 # =====================================================================================
 
 async def test_a_sub_minimum_size_is_REFUSED_not_rounded_to_zero():
-    """**`M-3`.** Rounding to zero sends a quantity the venue rejects — or one our own
-    `lot_size > 0` guard rejects after the decision was already recorded as taken."""
+    """**`M-3`.** Rounding to zero sends a quantity the venue **would** reject — or one our own
+    `lot_size > 0` guard rejects after the decision was already recorded as taken.
+
+    **"would", not "does", and the correction is `M-10` enforcing itself.** Review caught this
+    sentence asserting Alpaca's behaviour in a file whose header says none of it is known. Only the
+    second half — our own guard — is tested; the venue's response to a zero quantity is a
+    could-not-ask like every other venue response here, because this account has placed no orders.
+    The hedge was already in the sentence and the indicative verb undid it."""
     adapter, client = _adapter()
 
     with pytest.raises(AlpacaBelowMinimumSize) as exc:
