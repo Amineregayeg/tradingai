@@ -28131,8 +28131,51 @@ a `realized_r`.
 > `realized_r`, or removing that overwrite, makes `REJECTED` and `UNSIZED_FILL` rows count as real
 > wins and losses by the sign of a number nobody claimed was measurable.
 
-Worth stating plainly because the overwrite is itself the thing that destroys the `UNSIZED_FILL`
-marker the moment a position closes — the label survives only while the position is open.
+#### CORRECTION (review, verified independently by manager) — I SAID THE MARKER IS DESTROYED WHEN A POSITION CLOSES. IT IS NOT. THE OVERWRITE IS UNREACHABLE FOR THESE ROWS
+
+I wrote that the settle path's overwrite "destroys the `UNSIZED_FILL` marker the moment a position
+closes — the label survives only while the position is open." **That is wrong, and I had told Malek
+the same thing.** The settle path cannot reach such a row. **Three independent guards, each of which
+I confirmed in the code rather than accepting on report:**
+
+```
+912         _open_decision creates rows with outcome=OUTCOME_OPEN; the halt path never registers there
+1809        the settle path's lookup filters  DecisionRecord.outcome == OUTCOME_OPEN
+1810        ...and also filters              DecisionRecord.sized_units.is_not(None)   <- NULL on halt rows
+```
+
+Any one suffices and all three hold. **So the halt's durable record is safe, which is the question
+`T-0143` actually cares about.** A full sweep of `.outcome =` across the service layer finds exactly
+two writers of `decision_records.outcome` — `1930` and `2475` — the remaining hits being `Trade` rows
+or backtest structures in a different lowercase vocabulary.
+
+**THE REAL FINDING IS WEAKER AND BETTER: it is safe only BY DISTANCE.** `1930` is unconditional and
+sits *outside* the `if realized_r is not None:` guard above it. Nothing at that line records that it
+must not clobber a terminal outcome; its safety lives in one registration site and two `where`
+clauses in a method you have to go and find. **A fourth halt outcome that registers in
+`_open_decision`, or a relaxed `sized_units` filter, destroys the record silently — and the settle
+path looks innocent in the diff.**
+
+**AND THE FIX IS ALREADY THIS CODEBASE'S IDIOM, TWO METHODS AWAY.** The other writer is guarded at
+the point of mutation:
+
+```
+1930  settle    rec.outcome = WIN/LOSS/BE       safe via callers + filters in TWO OTHER methods
+2475  abandon   rec.outcome = OUTCOME_ABANDONED guarded IN ITS OWN QUERY:
+                                                select(...).where(outcome == OUTCOME_OPEN)
+```
+
+So the remedy is not an invention — it is **making `1930` look like `2475`**, which its author
+already chose independently for the identical hazard.
+
+> **`B424` and this are the same shape twice: a safety property that holds, held by something other
+> than the code that would violate it.**
+
+**What this does NOT change:** the classifier gap above is real and unaffected — `REJECTED` and
+`UNSIZED_FILL` still match none of the six token sets. Adding them explicitly, with `UNSIZED_FILL`
+excluded **by name**, is worth doing so that an unknown-size halt cannot enter the learning corpus as
+a win or loss by the sign of a number computed against a size we said we could not read. That is the
+reason to fix it — not the erasure I claimed.
 
 **THE FALLBACK IS THE REASSURING STATE**, which is why this is a row and not a comment: an
 unrecognised outcome becomes a normal trade result rather than an alarm. **The fix is to classify
