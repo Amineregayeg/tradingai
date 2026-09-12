@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-12 (B418 — THE FRONTEND SUITE'S CORRECTNESS RESTS ON A VITEST RUNNER DEFAULT. vite.config.ts pins only environment: 'jsdom' — no pool, no isolate — and of the keys mocked across the seven files stubbing @/services/api, 60 are defined by exactly one file so a leak RAISES, while 13 are defined by several so a leak RESOLVES TO THE WRONG DATA AND PASSES. Surfaced when full vitest was OOM-killed three times and --singleFork FABRICATED seven failures in untouched files; the control settled it at 13/13 under normal isolation, and that run is counted in neither direction. Remedy ruled AHEAD of B416's freeze because every frontend number quoted this week depends on it. Also B417 — every crypto position size printed to the operator as 0.000 because of f'{units:.3f}' against a minimum of 0.000012941, making a live position indistinguishable from the NON_POSITIVE_SIZE refusal; and B417b, the entry line's conditional bound over the whole implicit concatenation so its else branch dropped pair, direction and size.)
+Last updated: 2026-09-12 (B419 — .get() CANNOT TELL KEY ABSENT FROM KEY PRESENT = None, so an Alpaca FILLED order with no venue-reported quantity is recorded at the SUBMITTED size. paper.py and cft_sim.py OMIT filled_units so the fallback is correct for them, while alpaca.py:889 ALWAYS emits the key with None meaning the venue did not say — and the adapter's own comment refuses exactly this defaulting, which the loop then does on its behalf. B411 by another route, on the FILLED path, and the same absent-versus-empty distinction execute had already found on a different axis in this task without it generalising. Fix is one line: if 'filled_units' in res. It FAILS 7cae285. Also B418's FIGURES CORRECTED — review's extractor used a 1200-character window instead of parsing the factory, so 60/13 was wrong; the re-derivation reproduces 22 distinct keys, 13 single-file and 9 multi-file, and the mechanism is the module registry rather than module-local consts.)
 
 ---
 
@@ -27286,8 +27286,10 @@ own warning did not cover, and it is the dangerous half.**
 vite.config.ts pins:   environment: 'jsdom'        <- and nothing else
                        no `pool`, no `isolate`
 7 files stub @/services/api
-  60 keys defined by exactly ONE file    -> a leak RAISES            (loud: execute's 7 fabricated reds)
-  13 keys defined by SEVERAL files       -> a leak RESOLVES to the WRONG DATA and PASSES   (silent)
+  22 distinct factory keys
+  13 defined by exactly ONE file   -> a leak RAISES              (loud: execute's 7 fabricated reds)
+   9 defined by SEVERAL files      -> a leak RESOLVES to the neighbour's data and PASSES   (silent)
+     api(6) authHeaders(6) settings(4) get(3) engine(2) list(2) runs(2) status(2) update(2)
 ```
 
 **So the suite is correct because a default happens to isolate it.** Change the runner's default,
@@ -27305,7 +27307,60 @@ same tree, 13/13 passed. **That run is counted in neither direction.**
 summed** — each of the 16 files in exactly one log, none missing, none unexpected, every exit 0, and
 the total independently matching a whole-suite run from before the mutation kills.
 
+**FIGURES CORRECTED — the first version of this entry carried review's numbers and they were wrong,
+by review's own re-derivation.** Its extractor took a fixed **1200-character window** after
+`vi.mock('@/services/api'` rather than the factory, and the window ran past the factory into
+module-level fixture literals. **A text window instead of a structural extraction — the exact
+failure it had filed against others all week.** Re-derived by parsing the balanced argument list, it
+reproduces execute's `22/13/9` exactly, key list included.
+
+**AND THE MECHANISM WAS WRONG TOO, which matters more than the count.** Module-local consts
+(`'wins'`, `'closed_trades'`, `'running'`, `'paused'` — none of them factory keys) **cannot cross
+files even in one process**, so naming them as the silent surface was wrong. **The mechanism is the
+module registry:** the installed mock is not this file's, so the call resolves against the
+neighbour's factory, and this file's own fixture keys then describe data it never supplied.
+**Co-defined keys are the CONSEQUENCE, not a second pathway.**
+
+**The asymmetry — the part that actually matters — survives both corrections**, and the remedy is
+unaffected, because a module-scope sentinel watches the registry, which is the real mechanism.
+
 **REMEDY, ruled ahead of `B416`'s consolidated freeze:** pin `pool` and `isolate` in
 `vite.config.ts`, and add a canary arm that fails when isolation is lost. **Every frontend number
 quoted this week depends on this**, and changing that config re-opens all of them — so it is
 verified on its own rather than folded into another task.
+
+### B419 — `.get()` CANNOT TELL "KEY ABSENT" FROM "KEY PRESENT = None", so an Alpaca FILLED order with no reported quantity is recorded at the SUBMITTED size
+
+**Found by review reviewing `7cae285`; it fails that commit.** `T-0141` exists to stop a fill being
+recorded at a size the venue did not confirm, and **its own resolver does exactly that on one path.**
+
+```python
+raw_filled = res.get("filled_units")
+if status == "FILLED":
+    if raw_filled is not None: return filled
+    return positive(res.get("units"))       # <- the fallback, and the defect
+```
+
+**The two brokers differ in a way `.get()` erases**, measured on the real return dicts rather than
+assumed:
+
+```
+paper.py / cft_sim.py   OMIT `filled_units` entirely (0 occurrences)   -> fallback CORRECT
+alpaca.py:889           ALWAYS emits the key, None meaning "the venue did not say"
+
+driven:  paper  FILLED, key ABSENT         -> 0.01    correct
+         alpaca FILLED, key PRESENT=None   -> 0.01    *** the SUBMITTED size ***
+         alpaca FILLED, venue said 0.004   -> 0.004
+```
+
+> **The adapter's own comment at `:888` refuses precisely this** — *"never defaulted to the submitted
+> quantity, which would report a fill we have no evidence of"* — **and the loop does it on the
+> adapter's behalf.** `B411` by another route, on the `FILLED` path this time.
+
+**AND IT IS THE SAME DISTINCTION EXECUTE HAD ALREADY FOUND ONCE IN THIS TASK, on a different axis.**
+It caught *absent vs unusable* (a `NaN` falling back to the submitted size) and fixed it; **this is
+absent vs present-but-None**, and the fix did not generalise. **Two axes of the same question — what
+does this field's emptiness MEAN — and finding one did not prompt the other.**
+
+**Fix is one line: `if "filled_units" in res:`.** It keeps `M-3`'s must-miss intact, because
+paper and sim still fall back, and closes the Alpaca path.
