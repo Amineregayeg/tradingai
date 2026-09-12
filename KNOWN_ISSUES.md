@@ -27405,16 +27405,25 @@ and a future default change"*, and review's correction is that those are not the
 unexercised:
 
 ```
-DEMONSTRATED              the singleFork route (once M-4/the control lands)
-GENERALISES BY CONSTRUCTION   any route that shares a module registry — a pool swap, an upgrade.
-                          The canary asserts a CONDITION (the mock in force is not this file's),
-                          and every mock-leaking mechanism reaches that same observable. Not
-                          measured, but following from what the canary LOOKS AT rather than from
-                          optimism.
+DEMONSTRATED              TWO INDEPENDENT ROUTES, measured before anything was built around them:
+                            1. singleFork's shared process
+                            2. a runtime registry replacement under a CORRECTLY-CONFIGURED runner
+                               (vi.doMock + vi.resetModules then import; pool threads,
+                               isolate true, no singleFork anywhere)
+                                 vi.mock at module scope   -> mock in force = "m4probe"
+                                 vi.doMock + resetModules  -> mock in force = "SOMEONE_ELSE"
+GENERALISES BY THE SAME PROPERTY   a pool swap, an upgrade, a default change — NOT separately
+                          demonstrated. They reach the same observable because the canary asserts
+                          the CONDITION rather than any mechanism.
 NOT COVERED               isolation failures that do not manifest as a foreign MOCK — a shared
                           jsdom global, a leaked timer, a module-level side effect that is not a
                           mock. The canary sees NONE of these.
 ```
+
+**ROUTE 2 IS THE CONFIG PIN'S LIMIT DEMONSTRATED RATHER THAN ARGUED.** The two routes share
+nothing — one is a runner **topology** (one process instead of N), the other a runtime **registry
+replacement** inside a properly configured process. **A check reading `pool` and `isolate` would
+report HEALTH in the second case, because the runner genuinely IS configured correctly.**
 
 **"A future default change" was a category, not a route**, which is why it belonged in the third line
 rather than the first. **Without that line, *"the canary is the enforcement"* reads as covering more
