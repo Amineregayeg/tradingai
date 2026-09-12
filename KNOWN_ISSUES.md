@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-12 (newest entry B424 — halt_reason HAS NO SINGLE DECLARATION SITE, so the next halt site added inherits "healthy" for free. dd68008 closed two of the three routes STRUCTURALLY — the halt site's two assignments are back-to-back with no await between them, so no cancellation and no concurrent status() can see the reassuring middle, verified under mutation in a pinned worktree — but the third is a discipline claim: one assignment site today and nothing requires the next one to arm. A fix that requires everyone to remember has not removed the class, it has renamed it into a rule; the remedy is one _declare_halt that sets both fields plus a structural arm forbidding assignment outside it, cheap now with one site and an audit later. Latent, NOT a deploy-D blocker. Also B423 amended with review's reframe: it is not reversible-versus-one-way but SILENTLY one-way versus LOUDLY one-way, since a re-upgrade already does not restore the rewritten rows — refusing makes an existing one-way door visible at the moment someone reaches for it; the fix is a DELETION of the two UPDATE statements, not a pre-flight count, and changing a deployed migration's DOWNGRADE is safe where changing its upgrade is not, because these downgrades have never run.)
+Last updated: 2026-09-12 (newest entry B425 — THE FEEDBACK LAYER'S OUTCOME CLASSIFIER ENUMERATES SIX VALUES AND THE DATABASE NOW HOLDS EIGHT. REJECTED (live since 0008) and UNSIZED_FILL (arriving with 0013) match none of _classify_outcome's six token sets and fall through into the fallback meant for rows carrying NO token, which infers the outcome from the SIGN OF realized_r — so a value the analysis layer has never heard of is answered with a confident one and the record's own statement is discarded. Today such a row is classified "open" and silently dropped from the evidence set, labelled with the value that means "still running", which is B423's conflation one layer up; production holds zero REJECTED rows so the live effect is currently nil. The sign-of-R branch is NOT reachable today and that was checked rather than assumed — realized_r has one writer app-wide and the same block overwrites outcome to WIN/LOSS/BE — but that is a property of today's single writer, not a designed invariant, and the overwrite is itself what destroys the UNSIZED_FILL marker when a position closes. Fix is to classify from the model's own OUTCOME_* constants and REFUSE on an unrecognised token, a deletion rather than an addition. Not a deploy-D blocker. Also B424 amended: it is TWO properties — _declare_halt fixes route 3 but NOT the adjacency that actually closes routes 1 and 2, which Execute confirmed was accidental, and an await added inside _declare_halt reopens both with the discipline fix fully in place.)
 
 ---
 
@@ -28054,3 +28054,88 @@ method**. Then a future halt site cannot inherit "healthy", because it cannot de
 
 **Do it while there is one site.** The cost is a method and one arm now, versus an audit of every
 site later — and the audit is the thing that reliably does not happen.
+
+#### AMENDMENT (review) — `B424` IS **TWO** PROPERTIES, AND `_declare_halt` ONLY FIXES ONE OF THEM
+
+The entry above treats "every halt site arms" as the whole problem. It is not. What actually closes
+routes 1 and 2 is the **adjacency** — that nothing suspends between the two assignments — and
+**Execute has confirmed that placement was accidental rather than designed.**
+
+```
+route 3        every halt site arms             -> _declare_halt + "no assignment outside it"
+the window     nothing suspends between them    -> NEEDS ITS OWN ARM, and inside _declare_halt too
+```
+
+**An `await` added *inside* `_declare_halt`, between its two lines, reopens both original routes with
+the discipline fix fully in place.** No existing arm catches it: the arms test *states*, and this is
+about the *window* between two states. Every one still passes.
+
+Review's arm walks the enclosing block and refuses if any `Await`/`Yield` sits between the two
+assignments. Controlled both ways against the current tree — HEAD safe; a planted `await` reported at
+the right line; the check refusing rather than passing when its target is absent.
+
+**One declared wart to fix when it is taken:** with the alarm assignment removed entirely it reports
+*"NO HALT SITE FOUND — the check is scanning nothing"*. It refuses correctly but names the wrong
+cause. Split it into *"halt site found, alarm assignment absent"* versus *"no halt site found"*.
+
+> **A structural property that nobody chose is the most fragile kind there is** — no comment, no arm,
+> and no author who remembers deciding it. The first person to refactor that block will not know it
+> existed, because in a month it reads as ordinary sequential code.
+
+---
+
+### B425 — THE FEEDBACK LAYER'S OUTCOME CLASSIFIER ENUMERATES SIX VALUES AND THE DATABASE NOW HOLDS EIGHT. The two it does not know FALL THROUGH INTO A FALLBACK THAT INFERS THE OUTCOME FROM THE SIGN OF R
+
+**Found by manager while verifying that a pre-deploy-D build can read the rows deploy D writes —
+which it can. This is the next question along: whether the code that CONSUMES those rows knows what
+they mean. Measured by evaluating the classifier's own token sets against the database's own CHECK.**
+
+`_classify_outcome` (`app/services/evaluation/feedback.py:177`) matches an explicit outcome token
+against six sets. The `decision_records` CHECK admits eight values:
+
+```
+WIN  LOSS  BE  OPEN  ABSTAINED  ABANDONED     -> matched
+REJECTED                                      -> NO SET MATCHES, falls through   (live since 0008)
+UNSIZED_FILL                                  -> NO SET MATCHES, falls through   (arrives with 0013)
+```
+
+**Falling through is not a refusal.** Control drops past all six sets into the fallback that exists
+for rows carrying *no* token at all:
+
+```python
+if realized_r is None:       return "open"
+if realized_r > 1e-9:        return "win"
+if realized_r < -1e-9:       return "loss"
+return "be"
+```
+
+**So a value the analysis layer has never heard of is answered with a confident one**, and the
+explicit token — the record's own statement of what happened — is discarded in favour of an
+inference. This is `B405`/`B416`'s shape outside the migrations: **a second encoding of the outcome
+vocabulary, free to drift from the constraint that owns it**, and it has drifted by two.
+
+**WHAT IT COSTS TODAY, stated at the severity I can actually measure.** Such a row reaches
+`realized_r is None`, is classified **`"open"`**, and is then dropped by
+`if outcome in ("open", "abstained", "abandoned"): continue`. **Silently excluded from the evidence
+set, and labelled with the value that means "still running"** — `B423`'s conflation again, one layer
+up. Excluding an unmeasurable fill is arguably the right arithmetic; doing it under the wrong label,
+by accident, and without a record is not. Production holds **zero** `REJECTED` rows today
+(`ABANDONED 5 / ABSTAINED 1635 / LOSS 18 / WIN 20`), so the live effect is currently nil.
+
+**THE SIGN-OF-R BRANCH IS NOT REACHABLE TODAY, AND I CHECKED RATHER THAN ASSUMED IT.** `realized_r`
+has exactly one writer app-wide (`crypto_loop.py:1927`), and that same block **overwrites**
+`rec.outcome` with `WIN`/`LOSS`/`BE` unconditionally — so no row can carry a fall-through token *and*
+a `realized_r`.
+
+> **That is a property of today's single writer, not a designed invariant.** A second writer of
+> `realized_r`, or removing that overwrite, makes `REJECTED` and `UNSIZED_FILL` rows count as real
+> wins and losses by the sign of a number nobody claimed was measurable.
+
+Worth stating plainly because the overwrite is itself the thing that destroys the `UNSIZED_FILL`
+marker the moment a position closes — the label survives only while the position is open.
+
+**THE FALLBACK IS THE REASSURING STATE**, which is why this is a row and not a comment: an
+unrecognised outcome becomes a normal trade result rather than an alarm. **The fix is to classify
+from the model's own vocabulary and REFUSE on an unrecognised token** — the constants already exist
+(`OUTCOME_*` in `app/models/decision_record.py`), so this is a deletion of the parallel token sets
+rather than an addition to them. Not a deploy-D blocker.
