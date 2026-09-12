@@ -389,11 +389,29 @@ async def test_the_loop_ROUTES_a_non_filled_execution_into_the_rejection_recorde
         if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
         and n.func.attr in ("_record_rejected_signal", "_record_signal_decision")
     ], "the halt branch records a row for a position it has just said it cannot describe"
-    assert [
+    # **THE PROPERTY SURVIVED `B424`; THE SHAPE MOVED.** This asserted a direct assignment to
+    # `self.halt_reason`. That assignment is now forbidden outside `_declare_halt`, which sets the
+    # halt AND arms the missing-record alarm as one act — because a halt site that sets only the
+    # first reports a healthy durable record. So the branch must CALL the declarer, and a bare
+    # assignment here would now fail `test_halt_reason_is_assigned_ONLY_inside_declare_halt`.
+    declares = [
+        n for n in ast.walk(halt_body)
+        if isinstance(n, ast.Call)
+        and (getattr(n.func, "attr", None) or getattr(n.func, "id", None)) == "_declare_halt"
+    ]
+    assigns = [
         n for n in ast.walk(halt_body)
         if isinstance(n, ast.Assign)
         and any(isinstance(t, ast.Attribute) and t.attr == "halt_reason" for t in n.targets)
-    ], "the branch does not set a halt reason, so the run keeps trading around an unknown position"
+    ]
+    assert declares or assigns, (
+        "the branch neither declares a halt nor sets a halt reason, so the run keeps trading "
+        "around a position of unknown size"
+    )
+    assert not assigns, (
+        "the branch assigns self.halt_reason directly instead of calling _declare_halt, so the "
+        "missing-record alarm is not armed and status() reports a healthy durable record (B424)"
+    )
 
     # The reason must be a NAME bound in that branch, not a literal: `reason = res.get(...)`.
     assert any(isinstance(a, ast.Name) for a in calls[0].args), (

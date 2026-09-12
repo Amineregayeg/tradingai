@@ -769,6 +769,31 @@ class LiveCryptoLoop:
             if failures else None
         )
 
+    def _declare_halt(self, reason: str) -> None:
+        """Stop the engine and arm the missing-record alarm. **THE ONLY PLACE EITHER IS SET.**
+
+        **`B424`, and it is TWO properties that look like one.**
+
+        *The pairing.* `halt_reason` and `halt_record_failed` must move together: a halt declared
+        without arming the alarm reports a healthy record, because `None` on that field asserts
+        *both durable rows are on disk*. Nothing required the pairing — it held because there was
+        exactly one halt site and its author happened to write both lines. **The second halt site
+        inherits "healthy" for free**, so the pairing is made unrepresentable here rather than
+        remembered, and an arm asserts no assignment to either field outside this method.
+
+        *The window.* **Collapsing the two assignments says nothing about what sits BETWEEN them.**
+        The adjacency below is load-bearing and was undesigned: with no suspension point between
+        the two statements, no cancellation can land in the gap and no concurrent `status()` can
+        observe the reassuring middle — a halt in force with its alarm unset. An `await` inserted
+        between these two lines reopens both routes **with this method fully in place**, which is
+        why it has an arm of its own rather than a comment.
+
+        **DO NOT PUT ANYTHING BETWEEN THE NEXT TWO STATEMENTS.** Not a log line, not an `await`,
+        not a call that might one day become async.
+        """
+        self.halt_reason = reason
+        self.halt_record_failed = f"{reason} — durable record NOT YET WRITTEN"
+
     @staticmethod
     def _position_units(res: dict) -> float | None:
         """The size of the position the venue ACTUALLY opened, or `None` when it cannot be read.
@@ -2180,23 +2205,8 @@ class LiveCryptoLoop:
             # not lose the event; **it recorded a refusal of an order the venue had partly
             # filled.** A false row is worse than none here, because `B399`: a population nobody
             # can characterise, and this one reads as coverage.
-            self.halt_reason = HALT_PARTIAL_UNSIZED
-            # **SET THE ALARMING STATE HERE, WITH THE HALT ITSELF.** `None` used to mean both
-            # *both rows are on disk* and *no write was ever attempted*, so a halt whose record
-            # was never written reported healthy — which is the exact thing this field exists to
-            # prevent, reachable through the field added to prevent it.
-            #
-            # It is not hypothetical: `_record_unsized_fill` guards `Exception`, and
-            # `CancelledError` is a `BaseException`, so a shutdown between the halt and the write
-            # leaves the halt in force and the record absent. A `status()` call racing the write
-            # sees the same. And any future halt site that forgets to call the writer inherits
-            # "healthy" for free.
-            #
-            # Now the three states are distinct: NOT YET WRITTEN / the failure reason / `None`,
-            # and `None` asserts that both rows exist.
-            self.halt_record_failed = (
-                f"{HALT_PARTIAL_UNSIZED} — durable record NOT YET WRITTEN"
-            )
+            # Halting and arming the alarm are ONE act (`B424`) — see `_declare_halt`.
+            self._declare_halt(HALT_PARTIAL_UNSIZED)
             logger.error(
                 "live.partial_fill_unsized — HALTING. the venue acted on the order and reported "
                 "no usable filled quantity, so a position of unknown size may exist",
