@@ -28276,6 +28276,55 @@ sets are the fossil of a join between the two that was never made.
 be able to take down the feedback endpoint, but it must not vanish silently either, which is the
 whole complaint.
 
+#### AMENDMENT (review, on the fix at `fb00a84`; manager verified) — THE COUNTS REACHED THE PAYLOAD AND NOT THE OPERATOR, so the remedy REBUILT THIS ENTRY'S DEFECT ONE LAYER OUT
+
+Execute reported that the exclusion counts reach the screen with no frontend change, citing
+`EnginePage.tsx:220` rendering `abstain_reason`. **The line was right and the BRANCH was not.** That
+line sits on one arm of a three-way ternary:
+
+```
+abstained              -> abstain_reason renders, counts VISIBLE
+no corrections         -> "the engine is tracking its expectations"   <- 60 rows dropped, UNCHANGED
+corrections proposed   -> the corrections list                        <- 60 rows dropped, UNCHANGED
+```
+
+**So the refusal was visible exactly when the engine had already stopped itself, and hidden on both
+branches where it acts** — one of which prints an affirmatively reassuring sentence regardless of how
+much was silently dropped.
+
+> **A surface that reads as health no matter what went missing is the defect this entry is about.**
+> The remedy had rebuilt it one layer out: counting and surfacing are different properties, and
+> **the payload half is not evidence about the screen half.**
+
+Fixed by hoisting the display above the ternary, **with ABSENT and EMPTY rendered differently on
+purpose** — `{}` means *counted, found none*; a missing key means *this build cannot tell you*; and
+collapsing those two is the thing being reported. Verified by manager at
+`EnginePage.tsx:234` (`feedback.excluded === undefined`) and `:238` (`excludedTotal > 0`), both
+outside the corrections ternary.
+
+**TWO MEASUREMENTS RATHER THAN CLAIMS, which is why this amendment is short:**
+
+```
+set-vs-length, driven      the M-2 mutant carries EIGHT keys, so a length check PASSES
+                           and the set comparison FAILS — B416's lesson demonstrated in this
+                           file rather than cited
+frontend hoist, controlled by rebuilding the defect: 4 of 6 arms fail; the 2 that pass are the
+                           control and the abstained branch, which SHOULD pass
+```
+
+**And one more of the harness family**, recorded because it is the third relative today: one of
+execute's new arms had the `"failed" in "xfailed"` bug — the absent-branch message contained the
+phrase the other assertion searched for, so a substring probe matched the state it was asserting was
+absent. **Fixed in the component rather than in the regex**, on the grounds that *two states an
+operator must distinguish should not share a phrase*. That is the right direction: the test was
+reporting a real ambiguity in the UI copy.
+
+**Suites at `fb00a84`, both counted against a collector rather than a glob** (`B418`'s lesson plus
+the enumeration gap found in deploy D's gate): backend 142 files / 2533 collected, **2532 passed +
+1 xfail**, 18 chunks all exit 0, union identical. Frontend 17 files / 244 collected **from vitest's
+own collector** (`-t` matching nothing, `--reporter=json`), **244 passed**, 5 chunks all exit 0,
+union identical.
+
 ---
 
 ### B426 — A **THIRD** ENCODING OF THE OUTCOME VOCABULARY, lowercase and four-valued, in `backtest/engine.py` — and after `B425`'s fix NO code path will acknowledge that the other one exists
