@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-12 (newest entry B422 — ANY MODULE-SCOPE REGISTRATION IS INSTALLED ONCE PER PROCESS, NOT ONCE PER FILE. vi.mock is immune only because vitest hoists it; cleanup hooks, interceptors and global resets are not, so under one process the FIRST file to register owns the hook and every later file silently has none — and none of them appear in a config where anyone would look, which is why B418's config pin could report health while the suite was broken. Also B421 — a VERIFICATION THAT REUSES THE ORIGINAL INSTRUMENT'S DESIGN TESTS THE INSTRUMENT, NOT THE CLAIM: review confirmed a wrong mechanism by rebuilding execute's probe and inherited its flaw, so two seats agreeing was worth nothing. And B418 CORRECTED A SECOND TIME: the DOM does not cross files either — measured other=0 — it accumulates WITHIN a later file, so a canary must be PER-TEST, since the first file is immune and a later file's first test is clean.)
+Last updated: 2026-09-12 (newest entry B422 — ANY MODULE-SCOPE REGISTRATION IS INSTALLED ONCE PER PROCESS, NOT ONCE PER FILE, and it is now MEASURED as TWO PACKAGES AND THREE REGISTRATIONS rather than one instance plus a worry: @testing-library/react's afterEach(cleanup) at import time, which broke us, plus @testing-library/user-event's afterEach(resetClipboardStubOnView) and afterAll(detachClipboardStubFromView) at module scope with the same typeof guard. The precise claim is that the second and third EXIST and are SUBJECT to the defect but are LATENT because the feature they guard is unused — zero clipboard hits across src/ — which is stronger than a guard against the un-enumerated and weaker than a second active incident. It also bounds the canary: a per-test DOM check would NOT catch a leaked clipboard stub, so T-0142 ships the DOM check WITH ITS SCOPE STATED rather than claiming to guard the class. Also B421 — a verification reusing the original instrument's design tests the instrument, not the claim; and B418 corrected twice over.)
 
 ---
 
@@ -27607,7 +27607,42 @@ interceptors, global resets  module-scope registration            -> ONCE PER PR
 none.** That is precisely why `B418`'s failures looked like cross-file contamination and were not:
 a later file had no cleanup **of its own**.
 
-> **The dangerous property: none of these appear in a config where anyone would look.** `pool` and
+> **MEASURED: THE CLASS IS TWO PACKAGES AND THREE REGISTRATIONS, not one instance plus a worry.**
+Execute searched the whole surface rather than stopping at the first, and the search was controlled
+— the same grep finds RTL's known registration. Test files import exactly three third-party modules
+(`@testing-library/react`, `@testing-library/user-event`, `vitest`), which made the surface
+tractable.
+
+```
+@testing-library/react       afterEach(cleanup)                     import time   -> BROKE US
+@testing-library/user-event  afterEach(resetClipboardStubOnView)    module scope  -> latent
+  Clipboard.js:156-162       afterAll(detachClipboardStubFromView)  module scope  -> latent
+
+  const g = globalThis;
+  if (typeof g.afterEach === 'function') { g.afterEach(...) }   <- same typeof guard, same trap
+```
+
+**THE PRECISE CLAIM, and the precision is the point:** *a second and third registration EXIST and are
+subject to the same defect; they are LATENT because the feature they guard is unused.*
+`resetClipboardStubOnView` only matters once a clipboard stub is attached, and **no test in this
+suite touches the clipboard — measured, zero hits for clipboard/copy/paste across `src/`.** Two files
+use `userEvent` at all and neither uses it for the clipboard.
+
+> **That is materially stronger than *"a guard against cases we have not enumerated"* and materially
+> weaker than *"a second case is actively breaking us"*.** It is the difference between the canary
+> being justified by a **mechanism** and justified by an **incident** — and the entry should not be
+> read as claiming the latter.
+
+**AND IT SHARPENS WHAT A CANARY CAN HONESTLY GUARD.** A per-test **DOM** check would **not** catch a
+leaked clipboard stub: **DOM accumulation and clipboard state are different artefacts of the same
+cause.** Guarding the class would need a per-test assertion that the environment is pristine along
+several axes, **and those axes cannot be enumerated any better than the packages enumerate them.**
+
+**So `T-0142` ships the DOM check WITH ITS SCOPE STATED** — it catches the instance that broke us,
+and the class is recorded here — **rather than claiming to guard the class.** That is the honest
+split, and it is execute's own framing.
+
+**The dangerous property: none of these appear in a config where anyone would look.** `pool` and
 > `isolate` are in `vite.config.ts`; a cleanup hook registered at module scope in a setup file is
 > invisible to any audit of the runner's configuration — which is the whole reason `B418`'s config
 > pin could report health while the suite was broken.
