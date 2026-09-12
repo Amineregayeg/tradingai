@@ -760,11 +760,14 @@ class LiveCryptoLoop:
             failures.append(f"alert: {type(exc).__name__}")
             logger.error("live.unsized_fill.alert_failed", error=str(exc), pair=pair)
 
-        if failures:
-            self.halt_record_failed = (
-                f"the halt is IN FORCE but its durable record could not be written "
-                f"({', '.join(failures)}) — reconcile the position at the venue by hand"
-            )
+        # **UNCONDITIONAL, so that SUCCESS is what clears the alarm.** An `if failures:` here would
+        # leave the "not yet written" string in place after a successful write — but worse, it was
+        # what allowed `None` to survive from initialisation and mean two different things.
+        self.halt_record_failed = (
+            f"the halt is IN FORCE but its durable record could not be written "
+            f"({', '.join(failures)}) — reconcile the position at the venue by hand"
+            if failures else None
+        )
 
     @staticmethod
     def _position_units(res: dict) -> float | None:
@@ -2178,6 +2181,22 @@ class LiveCryptoLoop:
             # filled.** A false row is worse than none here, because `B399`: a population nobody
             # can characterise, and this one reads as coverage.
             self.halt_reason = HALT_PARTIAL_UNSIZED
+            # **SET THE ALARMING STATE HERE, WITH THE HALT ITSELF.** `None` used to mean both
+            # *both rows are on disk* and *no write was ever attempted*, so a halt whose record
+            # was never written reported healthy — which is the exact thing this field exists to
+            # prevent, reachable through the field added to prevent it.
+            #
+            # It is not hypothetical: `_record_unsized_fill` guards `Exception`, and
+            # `CancelledError` is a `BaseException`, so a shutdown between the halt and the write
+            # leaves the halt in force and the record absent. A `status()` call racing the write
+            # sees the same. And any future halt site that forgets to call the writer inherits
+            # "healthy" for free.
+            #
+            # Now the three states are distinct: NOT YET WRITTEN / the failure reason / `None`,
+            # and `None` asserts that both rows exist.
+            self.halt_record_failed = (
+                f"{HALT_PARTIAL_UNSIZED} — durable record NOT YET WRITTEN"
+            )
             logger.error(
                 "live.partial_fill_unsized — HALTING. the venue acted on the order and reported "
                 "no usable filled quantity, so a position of unknown size may exist",

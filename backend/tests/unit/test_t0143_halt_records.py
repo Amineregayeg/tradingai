@@ -45,9 +45,21 @@ class _Boom:
         raise self.exc
 
 
+#: What the engine says between declaring a halt and getting its record on disk.
+NOT_YET_WRITTEN = "durable record NOT YET WRITTEN"
+
+
 def _loop_at_halt():
+    """A loop at the moment of halting — halt declared, record NOT yet written.
+
+    **Both fields are set together on purpose.** `halt_record_failed` defaulted to `None`, which
+    meant *both rows are on disk* AND *no write was attempted*, so a halt whose record never
+    happened reported healthy. The arms below used to assert `None` here, which is to say they
+    asserted that a halted engine with nothing recorded was fine — **the arms encoded the defect.**
+    """
     loop = LiveCryptoLoop()
     loop.halt_reason = HALT_PARTIAL_UNSIZED       # the halt is ALREADY in force (M-7)
+    loop.halt_record_failed = f"{HALT_PARTIAL_UNSIZED} — {NOT_YET_WRITTEN}"
     return loop
 
 
@@ -127,7 +139,13 @@ async def test_status_reports_NOTHING_when_the_writes_SUCCEED(monkeypatch):
     """The negative control, and without it the arm above is satisfied by a field that is always
     populated. A key that always says "failed" cannot report health."""
     loop = _loop_at_halt()
-    assert (await loop.status())["halt_record_failed"] is None
+    # BEFORE the write: the alarming state, not silence. This is the assertion that used to say
+    # `is None` — and changing it is the proof, because the old form passed against a halt that
+    # had written nothing at all.
+    assert NOT_YET_WRITTEN in (await loop.status())["halt_record_failed"], (
+        "a declared halt with no record yet reports healthy — `None` cannot mean both 'written' "
+        "and 'never attempted'"
+    )
 
     # A session maker that works, so both writes complete.
     import contextlib
@@ -219,3 +237,184 @@ async def test_ONE_write_failing_does_not_suppress_the_OTHER(monkeypatch):
 
     assert "Alert" in seen, f"the alert was skipped because the corpus write failed: {seen}"
     assert (await loop.status())["halt_record_failed"], "the corpus failure is not reported"
+
+
+# =====================================================================================
+# THE DEFAULT IS THE ALARMING STATE — three distinct states, and `None` asserts a fact
+# =====================================================================================
+
+async def test_a_halt_whose_writer_NEVER_RAN_does_not_report_healthy(monkeypatch):
+    """**The third time in this task that the defect class turned up inside its own fix.**
+
+    ```
+    M-6   the remedy for "a failure vanished into a log"   nearly became   log-and-continue
+    M-9   the remedy for "justified one step short"        was justified   one step short
+    here  the remedy for "the failure must not vanish"     defaulted to    "nothing failed"
+    ```
+
+    `_record_unsized_fill` guards `Exception`; `CancelledError` is a `BaseException`, so a shutdown
+    between declaring the halt and writing its record skips the writer entirely. A `status()` call
+    racing the write sees the same window, and any future halt site that forgets to call the writer
+    inherits "healthy" for free.
+    """
+    loop = _loop_at_halt()          # halted, writer has NOT run
+
+    status = await loop.status()
+    assert status["halt_reason"] == HALT_PARTIAL_UNSIZED
+    assert status["halt_record_failed"], (
+        "the engine is halted and nothing has been written, and status() says all is well"
+    )
+    assert NOT_YET_WRITTEN in status["halt_record_failed"]
+
+
+async def test_CancelledError_leaves_the_alarm_STANDING(monkeypatch):
+    """The reachable route, driven rather than argued. `except Exception` does not catch it, so the
+    writer aborts — and the alarm must survive that, which it does only because it was set with the
+    halt rather than by the writer."""
+    import contextlib
+
+    from app.db import session as dbsession
+
+    @contextlib.asynccontextmanager
+    async def _cancelled():
+        raise __import__("asyncio").CancelledError()
+        yield  # pragma: no cover
+
+    loop = _loop_at_halt()
+
+    # Scoped to the WRITER only: `status()` reads the database too, so leaving this patched would
+    # cancel the very call the assertion depends on — the arm would then fail for its own reason.
+    original = dbsession.async_session_maker
+    dbsession.async_session_maker = _cancelled
+    try:
+        with pytest.raises(BaseException):   # noqa: B017 — CancelledError is the point
+            await loop._record_unsized_fill("BTC/USD", _bars(), _Sig(), _res())
+    finally:
+        dbsession.async_session_maker = original
+
+    status = await loop.status()
+    assert status["halt_reason"] == HALT_PARTIAL_UNSIZED, "the halt was lost"
+    assert status["halt_record_failed"], (
+        "a CancelledError skipped the writer and status() reports the record as fine"
+    )
+
+
+async def test_the_three_states_are_DISTINCT(monkeypatch):
+    """`None` must assert a positive fact — both rows on disk — or it cannot report health."""
+    import contextlib
+
+    from app.db import session as dbsession
+
+    # 1. not yet written
+    loop = _loop_at_halt()
+    not_yet = (await loop.status())["halt_record_failed"]
+
+    # 2. attempted and failed
+    monkeypatch.setattr(dbsession, "async_session_maker", _Boom())
+    await loop._record_unsized_fill("BTC/USD", _bars(), _Sig(), _res())
+    failed = (await loop.status())["halt_record_failed"]
+
+    # 3. attempted and written
+    class _Ok:
+        def add(self, obj):
+            return None
+
+        async def commit(self):
+            return None
+
+    @contextlib.asynccontextmanager
+    async def _ok():
+        yield _Ok()
+
+    monkeypatch.setattr(dbsession, "async_session_maker", _ok)
+    await loop._record_unsized_fill("BTC/USD", _bars(), _Sig(), _res())
+    written = (await loop.status())["halt_record_failed"]
+
+    assert not_yet and failed and written is None, (
+        f"not-yet={not_yet!r} failed={failed!r} written={written!r}"
+    )
+    assert not_yet != failed, "'never attempted' and 'attempted and failed' read the same"
+    assert "reconcile" in failed.lower() and NOT_YET_WRITTEN in not_yet
+
+
+async def test_the_HALT_SITE_sets_the_alarm_even_if_the_WRITER_never_runs(monkeypatch):
+    """**THE ARM THAT MAKES THE OTHERS MEAN ANYTHING, and the harness is what demanded it.**
+
+    Removing the alarm-set from the halt site killed NOTHING in the first control run. Every arm
+    above uses `_loop_at_halt()`, which hand-sets `halt_record_failed` — **so the fixture was doing
+    the work the production code is supposed to do**, and the arms asserted only that `status()`
+    reports a field somebody had already set.
+
+    This one drives the REAL halt path through `_tick_symbol` and then prevents the writer from
+    running at all — which is the `CancelledError` case, the concurrent-`status()` case, and the
+    forgot-to-call-it case, all of which leave exactly this state.
+    """
+    from app.db.enums import DirectionType
+    from app.services.live import crypto_loop as mod
+
+    import pandas as pd
+
+    loop = LiveCryptoLoop()
+    acts: list[tuple[str, str]] = []
+
+    class _S:
+        symbol, direction = "BTC/USD", DirectionType.LONG
+        entry, sl, tp = 100.0, 99.0, None
+        risk_pct, approved, client_order_id = 0.01, True, "sig-x"
+        partial_price = partial_fraction = None
+
+    class _T:
+        reasons = ["t0143"]
+
+        def __getattr__(self, _):
+            return None
+
+    base = [100.0 + i for i in range(60)]
+    bars = pd.DataFrame({"open": base, "high": [b + 1 for b in base],
+                         "low": [b - 1 for b in base], "close": base, "volume": [10.0] * 60})
+
+    async def _noop(*a, **k):
+        return None
+
+    async def _fetch(*a, **k):
+        return bars
+
+    async def _exec(sig):
+        # a partial the engine cannot size — the halt condition
+        return {"status": "PARTIALLY_FILLED", "filled_units": None, "units": 0.01,
+                "sized_units": 0.01, "position_id": "venue-pos-9"}
+
+    async def _act(kind, msg):
+        acts.append((kind, msg))
+
+    async def _writer_never_runs(*a, **k):
+        """Stands in for CancelledError, a racing status() call, or a halt site that forgets."""
+        return None
+
+    monkeypatch.setattr(mod, "evaluate_latest_bar_traced", lambda *a, **k: (_S(), _T()))
+    monkeypatch.setattr(loop, "_fetch_bars", _fetch)
+    monkeypatch.setattr(loop, "_act", _act)
+    monkeypatch.setattr(loop, "_shadow_evaluate", _noop)
+    monkeypatch.setattr(loop, "_maybe_emit_census", _noop)
+    monkeypatch.setattr(loop, "_news_context", _noop)
+    monkeypatch.setattr(loop, "_has_position", lambda *a, **k: _false())
+    monkeypatch.setattr(loop, "_open_count", lambda *a, **k: _zero())
+    monkeypatch.setattr(loop, "_record_unsized_fill", _writer_never_runs)
+    monkeypatch.setattr(loop.execution, "execute", _exec)
+
+    await loop._tick_symbol("BTC/USD", "BTCUSDT")
+
+    assert loop.halt_reason == HALT_PARTIAL_UNSIZED, f"the halt did not happen: {acts}"
+    assert loop.halt_record_failed, (
+        "the halt site did not raise the alarm, so a halt whose writer never runs — cancelled, "
+        "raced, or simply not called — reports a healthy record"
+    )
+    assert NOT_YET_WRITTEN in loop.halt_record_failed
+
+
+async def _false():
+    return False
+
+
+async def _zero():
+    return 0
