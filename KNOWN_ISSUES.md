@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-12 (B413 — A PARTIALLY FILLED ORDER LEAVES A REAL POSITION THE ENGINE DOES NOT TRACK, raised by execute as a question rather than defaulted in code. crypto_loop opens a position only on FILLED; the adapter reports PARTIALLY_FILLED with filled_units from the venue, and nothing reconciles it, so the venue holds a position with no row against it and the ruled kill-switch property fails. RULED: a fill above zero is a real position tracked at the FILLED size, never the asked size; a partial with filled_units None must HALT the run with a named reason; reconciliation is its own task. Also B411 — str() on a mixin enum made a REAL FILL INVISIBLE (str(OrderStatus.FILLED) is 'OrderStatus.FILLED', so endswith('filled') never fired) while matching PARTIALLY_FILLED loosely, the same trap the same author had already pinned for BaseURL one module earlier; and B412 — three of four path-taking tools printed a clean zero over an EMPTY FILE SET, the guard already existing in the fourth, which invalidates past clean reports from file-path invocations.)
+Last updated: 2026-09-12 (B414 — THE ERROR LOG B413 CREDITED AS 'THE SIGNAL' DROPPED EVERY VALUE IT NAMED. logger.error used percent-format while loguru formats with str.format, so the placeholders stayed literal and all three arguments were discarded: 'logs at ERROR' was true and worthless. Found by execute before starting T-0141, fixed at 6434e83 and verified against the app's own serialize=True sink. Its first two line-based greps reported NONE FOUND over a file known to contain one; the AST sweep with a planted control found it, the only percent-format logger call in 184 files. AND NO ARM CAUGHT IT: the arm that exercises that exact line never looks at the log — a side effect nothing asserts on is not covered by the test that triggers it. Also B413 CORRECTED: a partial fill does not leave NO row, it leaves a FALSE one (outcome REJECTED, reason PARTIALLY_FILLED, code UNCLASSIFIED), so the fix must REMOVE the false row rather than add a true one, the indistinguishability arm can pass against the unfixed code, and the halt must REPLACE that row rather than follow it.)
 
 ---
 
@@ -27052,6 +27052,38 @@ nothing               reconciles it
 kill-switch property, because a position nobody recorded can be neither closed nor failed with a
 reason.
 
+**CORRECTION (execute, measured; the manager's entry above was wrong about the mechanism).** It is
+**not a missing record. It is a FALSE one.** Evaluated by lifting the else-branch's own expressions
+out of `crypto_loop.py` by AST and running them against the dict the real adapter returns for a real
+`PARTIALLY_FILLED` order built from the SDK model:
+
+```
+res.get('status') == 'FILLED'                              -> False, so the ELSE at :1895 runs
+reason = res.get('reason') or res.get('status') or 'rejected'  -> 'PARTIALLY_FILLED'
+code   = res.get('rejection_code')                             -> None
+_record_rejected_signal writes:  outcome = OUTCOME_REJECTED    <- the venue FILLED part of it
+                                 rejection_reason = 'PARTIALLY_FILLED'
+                                 rejection_code   = UNCLASSIFIED   <- alarms, by design
+```
+
+**Better than silence in exactly one way:** `UNCLASSIFIED` alarms and the prose is greppable, so the
+hole is visible in the rejection surface rather than silent. **Worse in the way this register
+cares about: a row of the wrong shape reads as coverage.**
+
+**THREE CONSEQUENCES FOR THE FIX, and none is cosmetic:**
+
+1. **Widening the status gate is NOT sufficient.** Unless the rejected row stops being written,
+   a partial produces **TWO records** — one saying the signal was rejected, one saying a position
+   opened. **The fix must REMOVE the false row, not merely add a true one.**
+2. **The "indistinguishable in the record" row can pass against the UNFIXED code.** A partial and a
+   full fill are *already* distinguishable today — `FILLED` against `REJECTED`/`UNCLASSIFIED` — so an
+   arm asserting only that the two records differ **is satisfied by the defect itself.** That is
+   `B397`'s `A != B` trap with the incidental difference being the bug. **The arm must assert the
+   partial's record is a POSITION at the FILLED size.**
+3. **The halt path runs through the same else branch**, so a `filled_units is None` partial writes
+   the false REJECTED row **before** anything halts. **The named halt must REPLACE that row, not
+   follow it** — otherwise we halt and still leave a record saying the signal was refused.
+
 **RULING:**
 
 1. **A fill quantity greater than zero is a REAL POSITION and must be tracked at the FILLED size**,
@@ -27064,3 +27096,34 @@ reason.
 
 **Until 1 and 2 land, this is an open hole in the order path**, and the engine's standing HOLD is
 what keeps it theoretical. **Do not lift that hold on the strength of D alone.**
+
+### B414 — THE ERROR LOG THAT `B413` CREDITED AS "THE SIGNAL" DROPPED EVERY VALUE IT NAMED, and no arm caught it because the arm that runs that line never looks at the log
+
+**Found and fixed by execute before starting `T-0141`, landed at `6434e83`.** `B413`'s entry credits
+the partial-fill path with logging at `ERROR`. **It did log. It logged nothing useful.**
+
+```python
+logger.error("... symbol=%s requested=%s filled=%s", sym, req, filled)   # percent-format
+```
+
+**Loguru formats with `str.format`, not `%`.** So the placeholders stayed literal and **all three
+arguments were discarded.** *"Logs at ERROR"* was true and worthless — the operator would have seen
+`symbol=%s requested=%s filled=%s` at the exact moment the size mattered most.
+
+**Fixed to the house kwargs convention and verified against the app's own sink** — `setup_logging`
+sets `serialize=True`, so `extra` reaches the JSON.
+
+**THE SWEEP, AND ITS FIRST TWO ATTEMPTS WERE BLIND.** Two line-based greps reported *none found* over
+a file execute knew contained one. **The AST sweep with a planted control found it: 184 files, and
+that call was the only percent-format logger call in `app/`.** Another instance of a zero from an
+uncontrolled scan.
+
+> **AND THE PART WORTH KEEPING: no arm caught this.**
+> `test_a_PARTIAL_fill_is_NOT_reported_as_FILLED` **executes that exact line** and never looks at the
+> log. **A side effect nothing asserts on is not covered by the test that triggers it.** Coverage
+> that counts executed lines would have called this covered.
+
+**The same commit carries two `M-10` wording slips**, both asserting knowledge of the venue we do not
+have: review's *"sends a quantity the venue rejects"* → *"would reject"*, and a second execute found
+sweeping for siblings — *"a size the venue accepts"*, **which asserts an acceptance never observed.**
+We have placed zero orders.
