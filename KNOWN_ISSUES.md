@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-12 (B419 — .get() CANNOT TELL KEY ABSENT FROM KEY PRESENT = None, so an Alpaca FILLED order with no venue-reported quantity is recorded at the SUBMITTED size. paper.py and cft_sim.py OMIT filled_units so the fallback is correct for them, while alpaca.py:889 ALWAYS emits the key with None meaning the venue did not say — and the adapter's own comment refuses exactly this defaulting, which the loop then does on its behalf. B411 by another route, on the FILLED path, and the same absent-versus-empty distinction execute had already found on a different axis in this task without it generalising. Fix is one line: if 'filled_units' in res. It FAILS 7cae285. Also B418's FIGURES CORRECTED — review's extractor used a 1200-character window instead of parsing the factory, so 60/13 was wrong; the re-derivation reproduces 22 distinct keys, 13 single-file and 9 multi-file, and the mechanism is the module registry rather than module-local consts.)
+Last updated: 2026-09-12 (newest entry B419 — .get() cannot tell KEY ABSENT from KEY PRESENT = None, so an Alpaca FILLED order with no venue-reported quantity was recorded at the SUBMITTED size; fixed at 252e7d5 with `if "filled_units" in res`, and paper/cft_sim still fall back because they omit the key. AND B418's MECHANISM IS CORRECTED: it is a SHARED jsdom DOM accumulating across files, NOT a shared module registry. Execute's own two-invocation control caught its own detector passing under BOTH normal isolation and --singleFork — a detector that passes in both detects nothing — and the row review and the manager insisted the task rest on is what caught it. vi.mock is hoisted per test file even in one process so each file's own mock IS in force; what leaks is the DOCUMENT, with PROBE2's body holding PROBE1's node before any render. Review's 22/13/9 census is arithmetically right but its pathway does not occur. The silent half is real on a different axis: a PRESENCE assertion can pass on another file's node while ABSENCE and duplicate-role lookups fail loudly. Nothing committed.)
 
 ---
 
@@ -27319,7 +27319,68 @@ instead of through the field. **Found by driving ten shapes through it rather th
 and it is `a-default-must-be-the-alarming-state` one layer in: the fallback was right for *absent*
 and wrong for *present but unusable*.
 
-### B418 — THE FRONTEND SUITE'S CORRECTNESS DEPENDS ON NOT BEING RUN IN ONE PROCESS, and `isolate` does not guard that. On 9 of the mocked keys a leak RESOLVES TO THE NEIGHBOUR'S DATA AND PASSES
+### B418 — THE FRONTEND SUITE'S CORRECTNESS DEPENDS ON NOT BEING RUN IN ONE PROCESS, and `isolate` does not guard that. **THE MECHANISM IS A SHARED jsdom DOM THAT ACCUMULATES ACROSS FILES — NOT a shared module registry (corrected below)**
+
+> ## ⇢ MECHANISM CORRECTED — EVERYTHING BELOW ABOUT A SHARED MODULE REGISTRY IS WRONG
+>
+> **Found by execute's own two-invocation control, on the detector it had just built. The detector
+> was INERT and it is the author who says so:**
+>
+> ```
+> A  normal isolation   3 files, 38 tests, exit 0        all three canaries PASS
+> B  --singleFork       6 failed / 32 passed             all three canaries PASS TOO
+> ```
+>
+> **A detector that passes in both configurations detects nothing.** That is the
+> arm-agreeing-with-the-config-it-ships-beside shape — **and the two-invocation row is exactly the
+> control review and the manager insisted the task rest on. It did the job it was kept for.**
+>
+> **WHAT ACTUALLY CROSSES FILES**, measured with two probe files under `singleFork`:
+>
+> ```
+> PROBE1 mock-in-force = probe1        PROBE2 mock-in-force = probe2      <- each file's own mock
+> PROBE2 document.body BEFORE any render = 31 bytes
+> PROBE2 body preview = <div data-probe="probe1"></div>                   <- the PREVIOUS file's node
+> ```
+>
+> **`vi.mock` is hoisted and applied PER TEST FILE even in one process, so the module registry does
+> NOT leak.** The canary's question — *is this mock mine?* — answered **yes, correctly**, which is
+> precisely why it was useless. **What leaks is the jsdom DOCUMENT.**
+>
+> The six real failures say the same in production terms:
+> `TestingLibraryElementError: Found multiple elements with the role "heading" and name "Engine"` —
+> **leftover NODES from another file's renders, not a swapped fixture.**
+>
+> ### Three corrections
+>
+> **1. MECHANISM:** a shared jsdom DOM accumulating across files, not a shared module registry.
+>
+> **2. THE KEY CENSUS SURVIVES; ITS PATHWAY DOES NOT.** Review's `22 / 13 / 9` is arithmetically
+> right — execute reproduced it — **but the claim attached to it, that a leak on the 9 multi-file
+> keys resolves to the neighbour's data and passes silently, is NOT demonstrated and execute
+> currently believes it FALSE.** Everything below that rests on it is superseded by this block.
+>
+> **3. THE SILENT HALF IS REAL, ON A DIFFERENT AXIS — and review's instinct that one existed was
+> right:**
+>
+> ```
+> presence assertion   getByText('HALTED')            can pass on ANOTHER file's node   SILENT
+> absence assertion    queryByRole('alert') is null   fails on a stale node             LOUD
+> getByRole duplicate                                 throws "multiple elements"        LOUD
+> ```
+>
+> **The silent harm is an arm that renders nothing of its own and still finds what it is looking
+> for.** That is worth more than the key count, and unlike the key count it is testable.
+>
+> **THE CORRECTED DETECTOR, being measured rather than proposed:** assert the file **started with a
+> clean DOM**. Under isolation it passes — 0 stale bytes in both files, measured. The `singleFork`
+> half is running; **if it fails there, the detector discriminates, and the same two-invocation row
+> proves it.**
+>
+> **NOTHING IS COMMITTED.** Execute declined to land a canary it had shown to be inert, and said so
+> before being asked. **A corrected mechanism late beats a green commit telling future readers this
+> was closed.**
+
 
 **Measured by review after execute reported a runner-configuration hazard; this is the half execute's
 own warning did not cover, and it is the dangerous half.**
