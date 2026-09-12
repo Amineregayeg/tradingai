@@ -255,6 +255,20 @@ class LiveCryptoLoop:
         #: next start would re-enter the hole it exists to stop us trading into. Reconciliation is
         #: what legitimately clears it, and reconciliation is the task after this one (`B413`).
         self.halt_reason: str | None = None
+        #: **`M-6`. WHY THE DURABLE RECORD OF A HALT IS MISSING, when it is.**
+        #:
+        #: The halt writes two records — a `DecisionRecord` for the corpus and an `Alert` for the
+        #: operator — and neither may kill the loop (`M-5`). But *must not kill the loop* and
+        #: *must not vanish silently* pull against each other, and the obvious reconciliation
+        #: (`except Exception: logger.error(...)`) is **`B403` rebuilt inside the fix for
+        #: `B413`** — we are adding the Alert precisely because a log line is not a record, so
+        #: satisfying *must not vanish* with a log line satisfies it with the thing already known
+        #: to be insufficient.
+        #:
+        #: So the failure goes where someone is already looking: `status()`, which is the surface
+        #: the operator is on BECAUSE of the halt. The halt then reports both *a position of
+        #: unknown size exists* and *its durable record could not be written*.
+        self.halt_record_failed: str | None = None
         #: The scanning task, owned by start()/stop(). None when stopped.
         self._task: "asyncio.Task | None" = None
         #: Sequence number for shadow (M9 Stage A) telemetry within this scan.
@@ -366,6 +380,9 @@ class LiveCryptoLoop:
             # unnamed halt was indistinguishable from an operator pause, from the order-path gate
             # and from a prop-firm halt: three causes, one flag.
             "halt_reason": self.halt_reason,
+            # `M-6`'s consumer. `None` when nothing failed; the reason when the halt's durable
+            # record could not be written. A key that is always populated cannot report health.
+            "halt_record_failed": self.halt_record_failed,
             # B179's LESSON APPLIED BEFORE IT BITES. `0 flattens at 19:00` means "the flag is
             # off" and READS AS "the flatten works and there was nothing to close". Whoever
             # asks "did the daily flatten run?" must be able to tell SUPPRESSED from IDLE from
@@ -634,6 +651,120 @@ class LiveCryptoLoop:
         except Exception:  # noqa: BLE001
             raw = str(len(entry_df))
         return hashlib.sha1(raw.encode()).hexdigest()[:16]
+
+    async def _record_unsized_fill(self, pair: str, entry_df, sig, res: dict) -> None:
+        """The two DURABLE records of a halt: one for the corpus, one for the operator.
+
+        **`B413`/`T-0143`. THE HALT ITSELF IS ALREADY DONE BY THE TIME THIS RUNS** — `halt_reason`
+        is set, the ERROR line is out, the activity line is out, and entry is blocked. This method
+        only records it, and `M-7` is the reason that ordering is not incidental: **the alert is a
+        durable record OF the halt, never the halt itself.** If everything here fails, the engine
+        must still be stopped.
+
+        **`M-5`: NEITHER WRITE MAY KILL THE LOOP.** This is a safety path, and the moment a
+        database write is most likely to fail is exactly the moment it is most needed — a halt
+        usually follows something already going wrong.
+
+        **`M-6`: AND NEITHER MAY VANISH.** Those two requirements pull against each other, and the
+        obvious reconciliation — catch, log, continue — is `B403` rebuilt inside the fix for
+        `B413`: we are writing an `Alert` precisely because a log line is not a record. So a
+        failure sets `halt_record_failed`, which `status()` exposes, which is the surface the
+        operator is on BECAUSE of the halt.
+
+        **The `DecisionRecord` carries `UNSIZED_FILL`** — its own outcome, because `REJECTED` says
+        execution refused the signal (it did not — the venue acted), `OPEN` says a position of
+        KNOWN size exists (that is the whole condition), and `ABANDONED` says one died (this may
+        still be open). Before that value existed the loop wrote `REJECTED`/`UNCLASSIFIED` here,
+        which was an affirmatively false row rather than a missing one.
+        """
+        from decimal import Decimal
+
+        failures: list[str] = []
+
+        try:
+            from app.db.session import async_session_maker
+            from app.models.decision_record import (
+                COHORT_PAPER,
+                Attribution,
+                DecisionRecord,
+                OUTCOME_UNSIZED_FILL,
+            )
+
+            entry = float(entry_df["close"].iloc[-1])
+            async with async_session_maker() as db:
+                db.add(DecisionRecord(
+                    symbol=pair, timeframe=self.entry_tf,
+                    inputs_hash=self._inputs_hash(entry_df), code_path_hash=self._code_path_hash(),
+                    score=None, abstained=False,
+                    signal_dir=sig.direction.value,
+                    signal_entry=Decimal(str(round(entry, 6))),
+                    signal_sl=Decimal(str(round(float(sig.sl), 6))),
+                    signal_tp=None,
+                    outcome=OUTCOME_UNSIZED_FILL,
+                    # NOT `sized_units`: that column is read by the partial-close accounting as the
+                    # size of the position, and not knowing it is the entire condition. Leaving it
+                    # NULL says so; a number here would be invented.
+                    rejection_reason=(
+                        f"{HALT_PARTIAL_UNSIZED} — status {res.get('status')!r}, venue reported "
+                        f"filled {res.get('filled_units')!r}, submitted {res.get('units')!r}, "
+                        f"venue position {res.get('position_id') or 'UNREPORTED'}"
+                    ),
+                    cohort=COHORT_PAPER, run_id=self.run_id,
+                    **Attribution.ict().as_columns(),
+                ))
+                await db.commit()
+        except Exception as exc:  # noqa: BLE001 — recorded on status(), never raised
+            failures.append(f"decision_record: {type(exc).__name__}")
+            logger.error("live.unsized_fill.decision_record_failed", error=str(exc), pair=pair)
+
+        try:
+            from datetime import timedelta
+
+            from app.db.enums import AlertPriority, AlertStatus, AlertType
+            from app.db.session import async_session_maker
+            from app.models.alert import Alert
+
+            async with async_session_maker() as db:
+                db.add(Alert(
+                    # An EXISTING AlertType and priority on purpose. `type` is a Postgres ENUM
+                    # (`alert_type_t`), so a new member would mean `ALTER TYPE` — which is what
+                    # took production down in `0009`. RISK_WARNING/CRITICAL already say this.
+                    type=AlertType.RISK_WARNING,
+                    priority=AlertPriority.CRITICAL,
+                    pair=pair,
+                    message=(
+                        f"ENGINE HALTED — {HALT_PARTIAL_UNSIZED}. A position may exist at the "
+                        f"venue whose size we cannot establish. No new entries will be taken."
+                    ),
+                    suggested_action={
+                        "action": "reconcile_position_at_venue",
+                        "venue_position_id": res.get("position_id"),
+                        "pair": pair,
+                    },
+                    context_json={
+                        "halt_reason": HALT_PARTIAL_UNSIZED,
+                        "status": res.get("status"),
+                        "filled_units": res.get("filled_units"),
+                        "submitted_units": res.get("units"),
+                        "position_id": res.get("position_id"),
+                        "client_order_id": res.get("client_order_id"),
+                        "run_id": str(self.run_id) if self.run_id else None,
+                    },
+                    status=AlertStatus.PENDING,
+                    # A halt does not resolve on its own, so this outlives an ordinary alert. It
+                    # is NOT NULL on the model and has no default, so it must be supplied.
+                    expires_at=datetime.now(tz=timezone.utc) + timedelta(days=365),
+                ))
+                await db.commit()
+        except Exception as exc:  # noqa: BLE001 — recorded on status(), never raised
+            failures.append(f"alert: {type(exc).__name__}")
+            logger.error("live.unsized_fill.alert_failed", error=str(exc), pair=pair)
+
+        if failures:
+            self.halt_record_failed = (
+                f"the halt is IN FORCE but its durable record could not be written "
+                f"({', '.join(failures)}) — reconcile the position at the venue by hand"
+            )
 
     @staticmethod
     def _position_units(res: dict) -> float | None:
@@ -2065,6 +2196,9 @@ class LiveCryptoLoop:
                 f"(status {status}, filled {res.get('filled_units')!r}, "
                 f"venue position {res.get('position_id') or 'UNREPORTED'})",
             )
+            # LAST, and after the halt is already in force (`M-7`): this records the halt, it does
+            # not perform it. Every line above has already run, so a failure here cannot un-halt.
+            await self._record_unsized_fill(pair, entry, sig, res)
             return
 
         if status in FILL_BEARING_STATUSES:

@@ -936,7 +936,12 @@ async def test_the_HALT_LOG_carries_the_fields_an_operator_would_grep(monkeypatc
         logger.remove(sink)
 
     assert captured, "the halt emitted no ERROR record at all"
-    extra = captured[-1]
+    # SELECT the halt's own record rather than taking the last one. The halt now also writes two
+    # durable records, and a FAILING write emits its own ERROR — so `[-1]` was the alert failure,
+    # not the halt. An index is not a selector.
+    halts = [e for e in captured if e.get("status") is not None]
+    assert halts, f"no halt record among {len(captured)} ERROR records: {captured}"
+    extra = halts[0]
 
     # THE OBJECT, not just the situation — an operator has to be able to find the position.
     assert extra.get("position_id") == "venue-pos-7", (

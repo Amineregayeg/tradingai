@@ -17,12 +17,61 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-from app.models.decision_record import (
-    DECISION_COHORTS,
-    DECISION_OUTCOMES,
-    SIGNAL_DIRECTIONS,
-    _sql_in,
-)
+#: **FROZEN (`B405`/`B416`). THE THREE VOCABULARIES THIS REVISION ACTUALLY CREATED**, written out
+#: rather than imported from the live model.
+#:
+#: **THIS IS NOT A PRECAUTION — IT WAS ALREADY WRONG.** The outcome list holds eight values now
+#: (`ABANDONED` joined at `0006`, `REJECTED` at `0008`, `UNSIZED_FILL` at `0013`), so replaying this
+#: revision on a fresh database created a CHECK admitting all of them where production's `0002`
+#: admitted five. The end states coincide only because later revisions widen it anyway; a database
+#: stopped at `0002` had a vocabulary production never had at `0002`.
+#:
+#: **WHERE THE FIVE COMES FROM, and the justification moved twice while the value never did.**
+#: All three steps are written out because each was believed, and the first two were each one step
+#: short in a file whose whole purpose is to be trusted without re-derivation.
+#:
+#: **`0002` HAD TWO LIVES**, which is why this file is the only one of the four where reading the
+#: model and reading the migration disagree:
+#:
+#: ```
+#: 2580ffe  2026-07-19 22:40  LITERAL: outcome IN ('WIN','LOSS','BE','OPEN')   FOUR, no ABSTAINED,
+#:                            no IS NULL OR, and NO cohort CHECK — only an index
+#: 8fdaf6a  2026-07-19 22:54  rewritten to IMPORT the model, and to create ck_decision_records_cohort
+#: ```
+#:
+#: ```
+#: STEP 1  the model at 0002's landing commit said five
+#:         -> RIGHT BY LUCK, and it is `B405`'s own method: reading a migration's historical
+#:            constraint off the MODEL instead of off the MIGRATION. At that commit this file
+#:            held a literal and read no model at all.
+#: STEP 2  ck_decision_records_cohort is present in production, so the REWRITTEN 0002 ran
+#:         -> ONE STEP SHORT, and worse than step 1 because it reads as a measurement rather than
+#:            as a derivation. The rewritten 0002 is precisely the file that builds its CHECK at
+#:            RUN TIME from whatever the model holds that day — which is the entire reason it
+#:            needed freezing. "It ran" is compatible with it having written six.
+#: STEP 3  0002 CREATES the table, so the first row bounds when it ran:
+#:              min(created_at) in decision_records   2026-07-22 04:00:09   (1678 rows)
+#:              ABANDONED joins the model at 0006     2026-08-09 19:43
+#:              corroboration: earliest engine_run    2026-08-04 00:43:12
+#:         -> EIGHTEEN DAYS EARLIER. 0002 ran while the model held FIVE. CLOSED.
+#: ```
+#:
+#: **STEP 3's OWN PREMISE WAS CHECKED RATHER THAN ASSUMED:** the bound holds only if that timestamp
+#: is server-generated. `created_at` is `server_default=func.now()` in the model, `now()` in the
+#: deployed schema, and no writer in `backend/app` passes `created_at=`. A client-supplied value
+#: could have been backdated and the inequality would have proved nothing — failing in the
+#: reassuring direction.
+#:
+_OUTCOMES_AT_0002: tuple[str, ...] = ("WIN", "LOSS", "BE", "OPEN", "ABSTAINED")
+_COHORTS_AT_0002: tuple[str, ...] = ("replay", "backtest", "paper", "live")
+_DIRECTIONS_AT_0002: tuple[str, ...] = ("LONG", "SHORT")
+
+
+def _sql_in(column: str, values: tuple[str, ...]) -> str:
+    """Copied from the model as it stood at `2580ffe`, for the reason above."""
+    quoted = ", ".join(f"'{v}'" for v in values)
+    return f"{column} IN ({quoted})"
+
 
 # revision identifiers, used by Alembic.
 revision: str = "0002"
@@ -71,15 +120,15 @@ def upgrade() -> None:
         sa.Column("correction_json", sa.Text(), nullable=True),
         sa.Column("cohort", sa.String(), nullable=False, server_default="replay"),
         sa.CheckConstraint(
-            f"signal_dir IS NULL OR {_sql_in('signal_dir', SIGNAL_DIRECTIONS)}",
+            f"signal_dir IS NULL OR {_sql_in('signal_dir', _DIRECTIONS_AT_0002)}",
             name="ck_decision_records_signal_dir",
         ),
         sa.CheckConstraint(
-            f"outcome IS NULL OR {_sql_in('outcome', DECISION_OUTCOMES)}",
+            f"outcome IS NULL OR {_sql_in('outcome', _OUTCOMES_AT_0002)}",
             name="ck_decision_records_outcome",
         ),
         sa.CheckConstraint(
-            _sql_in("cohort", DECISION_COHORTS),
+            _sql_in("cohort", _COHORTS_AT_0002),
             name="ck_decision_records_cohort",
         ),
     )

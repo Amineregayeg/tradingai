@@ -17,6 +17,8 @@ column added by an *earlier* revision drift unnoticed.
 """
 from __future__ import annotations
 
+import re
+
 import ast
 import importlib.util
 from pathlib import Path
@@ -47,6 +49,7 @@ _CHAIN = [
     ("0010", "0010_decision_rejection_code.py", "0009"),
     ("0011", "0011_rejection_code_transport.py", "0010"),
     ("0012", "0012_rejection_code_min_size.py", "0011"),
+    ("0013", "0013_outcome_unsized_fill.py", "0012"),
 ]
 
 
@@ -590,92 +593,359 @@ def test_the_rejection_code_backfill_writes_UNCODED_LEGACY_AND_NOTHING_ELSE():
 # B405 — EACH MIGRATION'S VOCABULARY IS FROZEN AT THE REVISION THAT WROTE IT
 # =====================================================================================
 
-def test_no_migration_imports_the_LIVE_vocabulary():
-    """**`B405`. A migration that imports `REJECTION_CODES` rewrites its own history.**
-
-    `0010` built its CHECK from the live constant. Add an 18th code today and `0010` — the
-    revision that ran months ago against a 16-code vocabulary — starts *claiming* it always
-    admitted 18. The migration stops describing a schema version and starts describing HEAD, so
-    replaying the chain on a fresh database produces a different schema than the one production
-    actually has, and `MIGRATION_TEST.md`'s whole purpose collapses.
-
-    Worse in the downgrade direction: `0011`'s downgrade was `REJECTION_CODES` minus one, which
-    rebuilt a "`0010`" that never existed. **A downgrade is the thing you run under pressure**, at
-    which point it must reproduce the constraint that was actually there.
-
-    Each revision now carries its own frozen tuple. This arm reads the SOURCE, because the point
-    is that the import is absent — importing the module to check would not distinguish a frozen
-    literal from a constant that happens to agree today.
-    """
+def _versions_dir():
     import pathlib
 
-    versions = pathlib.Path(__file__).resolve().parents[2] / "alembic" / "versions"
-    checked = 0
-    for path in sorted(versions.glob("00*.py")):
-        source = path.read_text()
-        if "rejection_code" not in source:
+    return pathlib.Path(__file__).resolve().parents[2] / "alembic" / "versions"
+
+
+def _migration_files():
+    """Every migration, found by GLOB.
+
+    **`M-2`'s must-miss: never a list of stems, and never a floor at a count we can already see.**
+    The guard this replaces keyed on three hardcoded stems (`0010`/`0011`/`0012`) and on files
+    containing the string `rejection_code` — so the four OUTCOME migrations were invisible to it,
+    and its own `checked >= 3` floor passed on exactly the three it could see. A guard that has to
+    list its subjects stops covering the next one added.
+    """
+    files = sorted(_versions_dir().glob("[0-9][0-9][0-9][0-9]_*.py"))
+    assert len(files) >= 12, (
+        f"the glob found {len(files)} migrations — it is scanning nothing or the naming changed, "
+        f"and a glob that matches nothing reports a clean pass"
+    )
+    return files
+
+
+#: **THE ONE DOCUMENTED EXEMPTION, and it is bounded by an arm rather than by this comment.**
+#:
+#: `0010` imports two SCALARS to write a DATA BACKFILL — `OUTCOME_REJECTED` selects the rows to
+#: update and `REJECTION_UNCODED_LEGACY` is the value written — rather than a vocabulary that
+#: becomes a CHECK constraint. That is a real distinction and freezing it would read as though the
+#: distinction were not understood.
+#:
+#: **The rule stays STRUCTURAL — no `app.*` import under `versions/` — with one named exception.**
+#: Restating it semantically (*"no import that feeds a constraint"*) would make this guard decide
+#: what an import is FOR, which is exactly the judgement it exists to remove, and a guard that must
+#: decide can be talked out of firing.
+_IMPORT_EXEMPT = {
+    "0010_decision_rejection_code.py": {"OUTCOME_REJECTED", "REJECTION_UNCODED_LEGACY"},
+}
+
+
+def test_NO_migration_imports_from_app_except_the_one_documented_exemption():
+    """**`M-2`. `B405`/`B416`: a migration that imports live code rewrites its own history.**
+
+    `0002` built its CHECK from the live outcome list. That list has since grown from five values
+    to seven, so replaying `0002` on a fresh database created a constraint admitting **seven**
+    where production's `0002` admitted five — **measured, not hypothetical.** The migration stopped
+    describing a schema version and started describing HEAD.
+
+    The rule is structural and the population comes from a glob, because the guard this replaces
+    knew about three files out of twelve and reported a clean sweep over them.
+    """
+    import ast
+
+    offenders = []
+    for path in _migration_files():
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        imported = {
+            alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("app.")
+            for alias in node.names
+        }
+        if not imported:
             continue
-        checked += 1
-        assert "import REJECTION_CODES" not in source and "REJECTION_CODES," not in source, (
-            f"{path.name} imports the LIVE vocabulary — its CHECK will silently follow HEAD "
-            f"instead of describing the schema this revision created (B405)"
-        )
-    assert checked >= 3, (
-        f"only {checked} rejection_code migrations found; the glob or the naming changed and this "
-        f"arm would report a clean sweep over nothing"
+        allowed = _IMPORT_EXEMPT.get(path.name)
+        if allowed is not None and imported <= allowed:
+            continue
+        offenders.append(f"{path.name}: {sorted(imported)}")
+
+    assert not offenders, (
+        "these migrations import live code, so their constraints follow HEAD instead of describing "
+        "the schema they created:\n  " + "\n  ".join(offenders)
     )
 
 
+def test_the_EXEMPTION_is_bounded_and_does_not_silently_GROW():
+    """**`M-8`'s own row.** The exemption is for two scalars feeding a data backfill and nothing
+    else. Without this, `0010` becomes a hole any future import can be added through — and the
+    exemption's justification would quietly stop being true while the comment still claimed it."""
+    import ast
+
+    for name, allowed in _IMPORT_EXEMPT.items():
+        path = _versions_dir() / name
+        assert path.exists(), f"the exemption names {name}, which does not exist"
+        imported = {
+            alias.name
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+            if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("app.")
+            for alias in node.names
+        }
+        assert imported == allowed, (
+            f"{name}'s app imports are {sorted(imported)}, and the exemption covers exactly "
+            f"{sorted(allowed)}. It was granted for two SCALARS writing a data backfill; anything "
+            f"else needs its own justification, not this one's"
+        )
+        # The scalars must still be scalars. A tuple arriving under one of these names is a
+        # vocabulary wearing the exemption's clothes.
+        from app.models import decision_record
+
+        for scalar in allowed:
+            assert isinstance(getattr(decision_record, scalar), str), (
+                f"{scalar} is no longer a string, so the exemption's reason — SCALARS for a "
+                f"backfill, not a vocabulary — no longer holds"
+            )
+
+
 def test_each_migration_FREEZES_the_vocabulary_that_was_live_when_it_RAN():
-    """The counts, pinned per revision — and the chain of derivations checked, not just lengths.
+    """**`M-1`. Every frozen vocabulary, compared AS SETS against what that revision produced.**
+
+    The guard this replaces asserted `len(...) == 16/17/18` plus two membership spot-checks — so a
+    tuple of the RIGHT LENGTH with one member wrong passed it. A length is not a set, and the
+    failure this exists for is a right-sized tuple disagreeing about membership.
 
     ```
-    0010  16  the column and its first CHECK
-    0011  17  + VENUE_TRANSPORT (B403's transport half)
-    0012  18  + MIN_SIZE        (T-0140, the venue's sizing floor)
+    0002   5  the column and its first CHECK           0010  16  rejection_code's first CHECK
+    0006   6  + ABANDONED                              0011  17  + VENUE_TRANSPORT
+    0007   3  decided_by's vocabulary                  0012  18  + MIN_SIZE
+    0008   7  + REJECTED
     ```
 
-    **Each revision's DOWNGRADE target must equal the NEXT-LOWER revision's UPGRADE vocabulary**,
-    which is the property that actually matters and is not implied by the three lengths — three
-    tuples of the right size can still disagree about which codes they hold.
+    Each revision's contents were recovered from the model as it stood at that migration's landing
+    commit (`git show <sha>:app/models/decision_record.py`), not from today's model.
     """
     import importlib.util
-    import pathlib
-
-    versions = pathlib.Path(__file__).resolve().parents[2] / "alembic" / "versions"
 
     def load(stem):
-        path = next(versions.glob(f"{stem}_*.py"))
+        path = next(_versions_dir().glob(f"{stem}_*.py"))
         spec = importlib.util.spec_from_file_location(f"_mig_{stem}", path)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         return mod
 
-    m10, m11, m12 = load("0010"), load("0011"), load("0012")
+    m2, m6, m7, m8 = load("0002"), load("0006"), load("0007"), load("0008")
+    m10, m11, m12, m13 = load("0010"), load("0011"), load("0012"), load("0013")
+
+    EXPECTED = {
+        ("0002", "_OUTCOMES_AT_0002"): {"WIN", "LOSS", "BE", "OPEN", "ABSTAINED"},
+        ("0002", "_COHORTS_AT_0002"): {"replay", "backtest", "paper", "live"},
+        ("0002", "_DIRECTIONS_AT_0002"): {"LONG", "SHORT"},
+        ("0006", "_OUTCOMES_AT_0006"): {"WIN", "LOSS", "BE", "OPEN", "ABSTAINED", "ABANDONED"},
+        ("0007", "_DECIDED_BY_VALUES_AT_0007"): {"UNSET", "ICT", "RULE_ENGINE"},
+        ("0008", "_OUTCOMES_AT_0008"): {
+            "WIN", "LOSS", "BE", "OPEN", "ABSTAINED", "ABANDONED", "REJECTED"},
+        ("0013", "_OUTCOMES_AT_0013"): {
+            "WIN", "LOSS", "BE", "OPEN", "ABSTAINED", "ABANDONED", "REJECTED", "UNSIZED_FILL"},
+    }
+    mods = {"0002": m2, "0006": m6, "0007": m7, "0008": m8, "0013": m13}
+    for (stem, name), expected in EXPECTED.items():
+        actual = set(getattr(mods[stem], name))
+        assert actual == expected, (
+            f"{stem}.{name} differs from what that revision created: "
+            f"unexpected {sorted(actual - expected)}, missing {sorted(expected - actual)}"
+        )
 
     assert len(m10._CODES_AT_0010) == 16
     assert len(m11._CODES_AT_0011) == 17
     assert len(m12._CODES_AT_0012) == 18
-
-    # `VENUE_TRANSPORT` is deliberately ABSENT from 0010 — it is what 0011 added.
     assert "VENUE_TRANSPORT" not in m10._CODES_AT_0010
     assert "VENUE_TRANSPORT" in m11._CODES_AT_0011
     assert "MIN_SIZE" not in m11._CODES_AT_0011
     assert "MIN_SIZE" in m12._CODES_AT_0012
 
-    # THE CHAIN: each downgrade target is the previous revision's upgrade vocabulary, as SETS —
-    # a length match here would pass on two tuples holding different codes.
-    assert set(m11._CODES_AT_0010) == set(m10._CODES_AT_0010), (
-        "0011's downgrade would restore a 0010 that never existed"
+    # THE CHAIN: each downgrade target is the previous revision's upgrade vocabulary, AS SETS.
+    # `0006`'s was WRONG before this task — it derived the target as the live list minus
+    # ABANDONED, which today is six values INCLUDING REJECTED, while the real pre-0006 constraint
+    # admitted five and had never heard of REJECTED.
+    assert set(m6._OUTCOMES_AT_0002) == set(m2._OUTCOMES_AT_0002), (
+        "0006's downgrade would restore a 0002 that never existed"
     )
-    assert set(m12._CODES_AT_0011) == set(m11._CODES_AT_0011), (
-        "0012's downgrade would restore an 0011 that never existed"
+    assert set(m8._OUTCOMES_AT_0006) == set(m6._OUTCOMES_AT_0006), (
+        "0008's downgrade would restore a 0006 that never existed"
     )
+    assert set(m11._CODES_AT_0010) == set(m10._CODES_AT_0010)
+    assert set(m12._CODES_AT_0011) == set(m11._CODES_AT_0011)
 
-    # And the LIVE vocabulary is 0012's, which is the only revision allowed to agree with HEAD.
-    from app.models.decision_record import REJECTION_CODES
+    # The LIVE vocabularies belong to the NEWEST revision for each, and to no other.
+    from app.models.decision_record import DECISION_OUTCOMES, REJECTION_CODES
 
     assert set(m12._CODES_AT_0012) == set(REJECTION_CODES), (
-        "HEAD's vocabulary has moved past 0012 — a code the database's CHECK will refuse, so the "
-        "rejection is LOST rather than recorded (B410). A new code needs a new migration."
+        "HEAD's rejection vocabulary has moved past 0012 — a code the database's CHECK refuses, so "
+        "the rejection is LOST rather than recorded (B410). A new code needs a new migration."
     )
+    assert set(m13._OUTCOMES_AT_0008) == set(m8._OUTCOMES_AT_0008), (
+        "0013's downgrade would restore an 0008 that never existed"
+    )
+    assert set(m13._OUTCOMES_AT_0013) == set(DECISION_OUTCOMES), (
+        "HEAD's outcome vocabulary has moved past 0013 — a value the database's CHECK refuses, so "
+        "the row is LOST rather than recorded (B410). A new outcome needs a new migration, and the "
+        "frozen tuples must NOT be updated to match it."
+    )
+
+
+# =====================================================================================
+# M-10 — THE ARM THAT CAN ACTUALLY FAIL: mutate the LIVE model, require the migration to ignore it
+# =====================================================================================
+
+def _constraints_emitted_by(stem: str, overrides: dict, direction: str = "upgrade") -> dict[str, str]:
+    """Run a migration's `upgrade()` against a stubbed `op` and collect its CHECK expressions.
+
+    **WHY A BEHAVIOURAL PROBE AND NOT A TUPLE COMPARISON.** `DECIDED_BY_VALUES` is three values
+    today and was three when `0007` ran; `SIGNAL_DIRECTIONS` (2) and `DECISION_COHORTS` (4) are
+    likewise unchanged since `0002`. So an arm asserting *"`0007` emits UNSET/ICT/RULE_ENGINE"*
+    **passes identically before and after the freeze** — it tests my transcription, not the
+    freeze, and three of the four freezes would ship with no arm capable of failing.
+
+    The property that distinguishes frozen from unfrozen is: **the live model MOVES and the
+    migration does not follow.** So the live constant is replaced with an extra member and the
+    migration is re-executed. Frozen, it still emits the original set. Unfrozen, it emits the
+    mutated one — which is precisely the defect (`B405`/`B416`).
+    """
+    import importlib
+    import importlib.util
+    import sys
+    import types
+    from unittest import mock
+
+    from app.models import decision_record
+
+    captured: dict[str, str] = {}
+
+    def _create_check_constraint(name, table, condition, **kw):
+        captured[name] = str(condition)
+
+    def _create_table(*args, **kw):
+        # `0002` builds its CHECKs INLINE as `sa.CheckConstraint(...)` arguments to `create_table`
+        # rather than calling `create_check_constraint`. Capturing only the latter made this probe
+        # report `0002 emitted []` — an empty result that an assertion-free version would have
+        # read as "nothing followed the live model", which is the wrong kind of green.
+        for arg in args:
+            name = getattr(arg, "name", None)
+            sqltext = getattr(arg, "sqltext", None)
+            if name and sqltext is not None:
+                captured[str(name)] = str(sqltext)
+
+    fake_op = types.SimpleNamespace(
+        create_check_constraint=_create_check_constraint,
+        drop_constraint=lambda *a, **k: None,
+        create_table=_create_table,
+        create_index=lambda *a, **k: None,
+        drop_index=lambda *a, **k: None,
+        drop_table=lambda *a, **k: None,
+        add_column=lambda *a, **k: None,
+        drop_column=lambda *a, **k: None,
+        execute=lambda *a, **k: None,
+        alter_column=lambda *a, **k: None,
+        f=lambda x: x,
+        get_bind=lambda: None,
+        batch_alter_table=lambda *a, **k: None,
+    )
+
+    path = next(_versions_dir().glob(f"{stem}_*.py"))
+    with mock.patch.dict(sys.modules, {"alembic": types.SimpleNamespace(op=fake_op)}):
+        with mock.patch("alembic.op", fake_op, create=True):
+            saved = {k: getattr(decision_record, k) for k in overrides}
+            for k, v in overrides.items():
+                setattr(decision_record, k, v)
+            try:
+                importlib.reload(decision_record)  # noqa: F841 — see below
+            except Exception:
+                pass
+            # `reload` would undo the override, so set again on the reloaded module object.
+            for k, v in overrides.items():
+                setattr(sys.modules["app.models.decision_record"], k, v)
+            try:
+                spec = importlib.util.spec_from_file_location(f"_probe_{stem}", path)
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                mod.op = fake_op
+                getattr(mod, direction)()
+            finally:
+                for k, v in saved.items():
+                    setattr(sys.modules["app.models.decision_record"], k, v)
+    return captured
+
+
+def test_0007_IGNORES_a_new_DECIDED_BY_value_added_to_the_live_model():
+    """**`M-10`.** `DECIDED_BY_VALUES` has held the same three since `0007` ran, so every
+    transcription check on it passes whether or not the file is frozen. This one moves the live
+    model and requires the migration not to follow."""
+    emitted = _constraints_emitted_by(
+        "0007", {"DECIDED_BY_VALUES": ("UNSET", "ICT", "RULE_ENGINE", "A_FOURTH_DECIDER")})
+    check = emitted.get("ck_decision_records_decided_by")
+    assert check, f"0007 emitted no decided_by CHECK; got {sorted(emitted)}"
+    assert "A_FOURTH_DECIDER" not in check, (
+        "0007's CHECK followed the live model — it is not frozen, and replaying it would create a "
+        "constraint admitting a value revision 0007 never knew"
+    )
+    for expected in ("UNSET", "ICT", "RULE_ENGINE"):
+        assert f"'{expected}'" in check, f"{expected} vanished from 0007's CHECK: {check}"
+
+
+def test_0002_IGNORES_new_cohorts_and_directions_added_to_the_live_model():
+    """The same property for the two vocabularies that have never moved — which is exactly why
+    they need this arm rather than a membership check."""
+    emitted = _constraints_emitted_by("0002", {
+        "DECISION_COHORTS": ("replay", "backtest", "paper", "live", "A_FIFTH_COHORT"),
+        "SIGNAL_DIRECTIONS": ("LONG", "SHORT", "SIDEWAYS"),
+    })
+    cohort = emitted.get("ck_decision_records_cohort")
+    direction = emitted.get("ck_decision_records_signal_dir")
+    assert cohort and direction, f"0002 emitted {sorted(emitted)}"
+    assert "A_FIFTH_COHORT" not in cohort, "0002's cohort CHECK followed the live model"
+    assert "SIDEWAYS" not in direction, "0002's signal_dir CHECK followed the live model"
+    assert "'replay'" in cohort and "'LONG'" in direction
+
+
+def test_0006_and_0008_IGNORE_a_new_OUTCOME_added_to_the_live_model():
+    """The two that CAN move — and the arm is the same shape, so the four freezes are covered by
+    one property rather than by two kinds of check."""
+    mutated = tuple(["WIN", "LOSS", "BE", "OPEN", "ABSTAINED", "ABANDONED", "REJECTED",
+                     "UNSIZED_FILL", "A_NINTH_OUTCOME"])
+    for stem in ("0006", "0008", "0013"):
+        emitted = _constraints_emitted_by(stem, {"DECISION_OUTCOMES": mutated})
+        check = emitted.get("ck_decision_records_outcome")
+        assert check, f"{stem} emitted no outcome CHECK; got {sorted(emitted)}"
+        assert "A_NINTH_OUTCOME" not in check, (
+            f"{stem}'s CHECK followed the live model — replaying it would admit a value that "
+            f"revision never knew"
+        )
+
+
+def test_every_DOWNGRADE_emits_the_PREVIOUS_revision_and_ignores_the_live_model():
+    """**`M-3`, and the harness found this gap rather than review or me.**
+
+    The arms above compare the frozen TUPLES. `M-3`'s property is about what `downgrade()`
+    **EMITS** — so restoring `0006`'s live-derived target passed everything: the tuple
+    `_OUTCOMES_AT_0002` was still present and still correct, and nothing ran the function that had
+    stopped using it. **A constant being right is not the same as the code reading it.**
+
+    That is `M-10`'s lesson one function over, which is why this runs `downgrade()` with the live
+    model mutated and reads the SQL that comes out.
+
+    **A downgrade is the thing you run under pressure** — and `0006`'s was already emitting a
+    `0005` that never existed: the live list minus `ABANDONED` is seven values today, including
+    `REJECTED` and `UNSIZED_FILL`, where the real pre-`0006` constraint admitted five.
+    """
+    mutated = ("WIN", "LOSS", "BE", "OPEN", "ABSTAINED", "ABANDONED", "REJECTED",
+               "UNSIZED_FILL", "A_NINTH_OUTCOME")
+
+    EXPECTED_TARGET = {
+        "0006": {"WIN", "LOSS", "BE", "OPEN", "ABSTAINED"},                       # 0002's five
+        "0008": {"WIN", "LOSS", "BE", "OPEN", "ABSTAINED", "ABANDONED"},          # 0006's six
+        "0013": {"WIN", "LOSS", "BE", "OPEN", "ABSTAINED", "ABANDONED", "REJECTED"},  # 0008's seven
+    }
+    for stem, expected in EXPECTED_TARGET.items():
+        emitted = _constraints_emitted_by(stem, {"DECISION_OUTCOMES": mutated}, "downgrade")
+        check = emitted.get("ck_decision_records_outcome")
+        assert check, f"{stem}'s downgrade emitted no outcome CHECK; got {sorted(emitted)}"
+
+        quoted = set(re.findall(r"'([A-Z_]+)'", check))
+        assert quoted == expected, (
+            f"{stem}'s downgrade emits {sorted(quoted)} and revision it targets held "
+            f"{sorted(expected)}. Unexpected {sorted(quoted - expected)}, missing "
+            f"{sorted(expected - quoted)} — a downgrade that restores a constraint which never "
+            f"existed is worse than one that fails, because it succeeds"
+        )
+        assert "A_NINTH_OUTCOME" not in check, f"{stem}'s downgrade followed the live model"

@@ -18,7 +18,20 @@ from __future__ import annotations
 
 from alembic import op
 
-from app.models.decision_record import DECISION_OUTCOMES
+#: **FROZEN (`B405`/`B416`), and this one's DOWNGRADE WAS ALREADY EMITTING A CONSTRAINT THAT
+#: NEVER EXISTED.**
+#:
+#: The downgrade derived its target as the LIVE outcome list minus `ABANDONED`. Live is now seven,
+#: so that evaluated to six values **including `REJECTED`** — while the real pre-`0006` constraint
+#: (created by `0002`) admitted **five** and had never heard of `REJECTED`, which arrived two
+#: revisions later at `0008`. Downgrading to `0005` was creating a vocabulary production never had
+#: at any point in its history.
+#:
+#: Measured at this migration's landing commit (`7f51836`, 2026-08-09): six values. The downgrade
+#: target is `0002`'s five, WRITTEN OUT rather than derived by subtraction — subtracting from a
+#: live list is the defect itself, not merely a spelling of it.
+_OUTCOMES_AT_0006: tuple[str, ...] = ("WIN", "LOSS", "BE", "OPEN", "ABSTAINED", "ABANDONED")
+_OUTCOMES_AT_0002: tuple[str, ...] = ("WIN", "LOSS", "BE", "OPEN", "ABSTAINED")
 
 revision: str = "0006"
 down_revision: str | None = "0005"
@@ -38,7 +51,7 @@ def upgrade() -> None:
     op.create_check_constraint(
         _CONSTRAINT,
         "decision_records",
-        f"outcome IS NULL OR {_sql_in('outcome', DECISION_OUTCOMES)}",
+        f"outcome IS NULL OR {_sql_in('outcome', _OUTCOMES_AT_0006)}",
     )
 
 
@@ -54,5 +67,5 @@ def downgrade() -> None:
         _CONSTRAINT,
         "decision_records",
         "outcome IS NULL OR "
-        + _sql_in("outcome", tuple(v for v in DECISION_OUTCOMES if v != "ABANDONED")),
+        + _sql_in("outcome", _OUTCOMES_AT_0002),
     )

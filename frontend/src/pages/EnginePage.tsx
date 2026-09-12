@@ -83,6 +83,11 @@ export default function EnginePage() {
   // reading only those two shows a healthy engine that will never take another entry. The reason
   // is what separates *a partial fill we could not size* from *someone pressed Pause*.
   const haltReason = (status?.halt_reason ?? null) as string | null
+  // `T-0143`/`M-6`. A failed durable write must not vanish into a log that rotates — and the
+  // operator is already on this page BECAUSE of the halt, so the second fact arrives where the
+  // first one sent them. `except: logger.error(...)` would have been B403 rebuilt inside the fix
+  // for B413; this is the consumer that makes it a record instead.
+  const haltRecordFailed = (status?.halt_record_failed ?? null) as string | null
   const mode = String(status?.mode ?? '—')
   const simOn = !!sim?.enabled
 
@@ -110,6 +115,11 @@ export default function EnginePage() {
             No new entries will be taken. This is not a pause: it does not clear on Stop or on a
             new run, because the condition it reports is at the venue rather than in the engine.
           </div>
+          {haltRecordFailed && (
+            <div style={{ color: RED, fontWeight: 600, marginTop: 6 }}>
+              AND ITS RECORD IS MISSING — {haltRecordFailed}
+            </div>
+          )}
         </div>
       )}
       <div style={{ padding: '20px 28px 16px', borderBottom: '1px solid #1e2035', background: '#0d0d14', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

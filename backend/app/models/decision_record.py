@@ -65,6 +65,28 @@ OUTCOME_ABANDONED = "ABANDONED"
 #: Same argument `ABANDONED` makes above: its own value rather than the nearest existing
 #: one, because the nearest existing one is a different fact.
 OUTCOME_REJECTED = "REJECTED"
+#: The venue FILLED SOMETHING and we cannot say how much (`B413`/`T-0143`).
+#:
+#: A market order came back `PARTIALLY_FILLED` with no usable filled quantity, so a position exists
+#: at the venue whose size we cannot establish. The run HALTS on this — trading around a position
+#: of unknown size is worse than stopping — and this is the durable record of the decision that
+#: produced it.
+#:
+#: **ITS OWN VALUE, on `ABANDONED`'s and `REJECTED`'s own argument, because all three nearest
+#: neighbours are a DIFFERENT FACT:**
+#:
+#: * `REJECTED` says execution REFUSED the signal. Nothing was refused — the venue accepted the
+#:   order and acted on it. Filing it here is a false statement about what happened, and it is
+#:   what the loop did before this value existed: `outcome=REJECTED`, `code=UNCLASSIFIED`, for an
+#:   order the venue had partly filled.
+#: * `OPEN` says a position exists at a known size, and `sized_units` is what the partial-close
+#:   accounting reads (`crypto_loop.py:1579`, `:1624`). We do not have that number — that is the
+#:   whole condition.
+#: * `ABANDONED` says a position died before it closed. This one may still be open; nobody knows.
+#:
+#: **Excluded from the realized-R population for `ABANDONED`'s reason** — there is no number anyone
+#: observed, and a fabricated zero in the feedback loop is worse than an absent row.
+OUTCOME_UNSIZED_FILL = "UNSIZED_FILL"
 DECISION_OUTCOMES: tuple[str, ...] = (
     OUTCOME_WIN,
     OUTCOME_LOSS,
@@ -73,6 +95,7 @@ DECISION_OUTCOMES: tuple[str, ...] = (
     OUTCOME_ABSTAINED,
     OUTCOME_ABANDONED,
     OUTCOME_REJECTED,
+    OUTCOME_UNSIZED_FILL,
 )
 
 # rejection_code ----------------------------------------------------------

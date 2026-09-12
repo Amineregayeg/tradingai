@@ -30,7 +30,18 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-from app.models.decision_record import DECISION_OUTCOMES
+#: **FROZEN (`B405`/`B416`).** Measured at this migration's landing commit (`e8dd8da`,
+#: 2026-08-24): seven values — `0006`'s six plus `REJECTED`.
+#:
+#: **THIS ONE'S DOWNGRADE WAS CORRECT ONLY BY COINCIDENCE.** It derived its target as the live
+#: list minus `REJECTED`, which equals `0006`'s six **only while the live list is exactly seven**.
+#: The moment an eighth value joins — which is what `T-0143` does — that subtraction returns seven
+#: and the "`0006` vocabulary" gains a value `0006` never had. `0006`'s equivalent was already
+#: wrong; this one was one addition away, and right-by-coincidence is not a property worth keeping.
+_OUTCOMES_AT_0008: tuple[str, ...] = (
+    "WIN", "LOSS", "BE", "OPEN", "ABSTAINED", "ABANDONED", "REJECTED",
+)
+_OUTCOMES_AT_0006: tuple[str, ...] = ("WIN", "LOSS", "BE", "OPEN", "ABSTAINED", "ABANDONED")
 
 revision: str = "0008"
 down_revision: str | None = "0007"
@@ -79,7 +90,7 @@ def upgrade() -> None:
     op.create_check_constraint(
         _CONSTRAINT,
         "decision_records",
-        f"outcome IS NULL OR {_sql_in('outcome', DECISION_OUTCOMES)}",
+        f"outcome IS NULL OR {_sql_in('outcome', _OUTCOMES_AT_0008)}",
     )
 
 
@@ -100,7 +111,7 @@ def downgrade() -> None:
         _CONSTRAINT,
         "decision_records",
         "outcome IS NULL OR "
-        + _sql_in("outcome", tuple(v for v in DECISION_OUTCOMES if v != "REJECTED")),
+        + _sql_in("outcome", _OUTCOMES_AT_0006),
     )
     op.drop_column("decision_records", "rejection_reason")
     op.drop_column("decision_records", "sizing_price")

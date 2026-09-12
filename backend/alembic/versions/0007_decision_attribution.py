@@ -50,11 +50,25 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-from app.models.decision_record import (
-    DECIDED_BY_ICT,
-    DECIDED_BY_RULE_ENGINE,
-    DECIDED_BY_UNSET,
-    DECIDED_BY_VALUES,
+#: **FROZEN (`B405`/`B416`).** Measured at this migration's landing commit (`a0ed499`,
+#: 2026-08-14): three values, and the live list still holds exactly these three.
+#:
+#: **IDENTICAL TODAY IS NOT THE SAME AS SAFE.** This vocabulary has simply had nothing added since,
+#: which is the only reason its imported form and its frozen form agree — the same condition that
+#: made `0002`'s look fine until `ABANDONED` and `REJECTED` arrived. Freezing it now costs nothing
+#: and removes the dependency before the next addition rather than after it.
+#:
+#: The three SCALARS are frozen for the same reason at one remove: `DECIDED_BY_UNSET` is a
+#: `server_default` baked into the column and `DECIDED_BY_ICT` is written into a data backfill by
+#: this revision. If either string changed in the model, this already-run migration would start
+#: describing a default it never applied and a backfill it never performed.
+_DECIDED_BY_UNSET_AT_0007 = "UNSET"
+_DECIDED_BY_ICT_AT_0007 = "ICT"
+_DECIDED_BY_RULE_ENGINE_AT_0007 = "RULE_ENGINE"
+_DECIDED_BY_VALUES_AT_0007: tuple[str, ...] = (
+    _DECIDED_BY_UNSET_AT_0007,
+    _DECIDED_BY_ICT_AT_0007,
+    _DECIDED_BY_RULE_ENGINE_AT_0007,
 )
 
 revision: str = "0007"
@@ -84,7 +98,7 @@ def upgrade() -> None:
             "decided_by",
             sa.String(),
             nullable=False,
-            server_default=DECIDED_BY_UNSET,
+            server_default=_DECIDED_BY_UNSET_AT_0007,
         ),
     )
     op.add_column(
@@ -104,19 +118,19 @@ def upgrade() -> None:
     # of them, which reads as case 1 and not as a lost decider, because
     # `decided_by` says ICT.
     op.execute(
-        f"UPDATE decision_records SET decided_by = '{DECIDED_BY_ICT}' "
-        f"WHERE decided_by = '{DECIDED_BY_UNSET}'"
+        f"UPDATE decision_records SET decided_by = '{_DECIDED_BY_ICT_AT_0007}' "
+        f"WHERE decided_by = '{_DECIDED_BY_UNSET_AT_0007}'"
     )
 
     op.create_check_constraint(
         _CK_DECIDED_BY,
         "decision_records",
-        _sql_in("decided_by", DECIDED_BY_VALUES),
+        _sql_in("decided_by", _DECIDED_BY_VALUES_AT_0007),
     )
     op.create_check_constraint(
         _CK_ONLY_RULE_ENGINE_NAMES,
         "decision_records",
-        f"decided_by = '{DECIDED_BY_RULE_ENGINE}' OR deciding_rule_id IS NULL",
+        f"decided_by = '{_DECIDED_BY_RULE_ENGINE_AT_0007}' OR deciding_rule_id IS NULL",
     )
 
     op.create_index(_IX_RULE, "decision_records", ["deciding_rule_id"])

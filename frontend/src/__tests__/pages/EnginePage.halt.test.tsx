@@ -93,4 +93,34 @@ describe('T-0141 — the Engine page surfaces a halt and its reason', () => {
     expect(screen.getByRole('button', { name: 'Resume' })).toBeTruthy()
     expect(screen.queryByRole('alert')).toBeNull()
   })
+
+  it('T-0143: says when the halt\'s DURABLE RECORD could not be written', async () => {
+    // M-6's consumer. A log line rotates; this page is where the operator already is, BECAUSE of
+    // the halt. So the second fact — the record is missing — arrives where the first one sent them.
+    status.mockResolvedValue({
+      ...RUNNING,
+      halt_reason: HALT,
+      halt_record_failed:
+        'the halt is IN FORCE but its durable record could not be written (alert: OperationalError)'
+        + ' — reconcile the position at the venue by hand',
+    })
+    render(<EnginePage />)
+
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toContain('RECORD IS MISSING')
+    expect(alert.textContent).toMatch(/reconcile/i)
+    // and the halt itself is still reported — the record failing does not replace the halt
+    expect(alert.textContent).toContain(HALT)
+  })
+
+  it('says NOTHING about a missing record when the writes succeeded', async () => {
+    // The control: a line that is always present reports nothing. Without this the arm above is
+    // satisfied by hard-coded text.
+    status.mockResolvedValue({ ...RUNNING, halt_reason: HALT, halt_record_failed: null })
+    render(<EnginePage />)
+
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toContain(HALT)
+    expect(alert.textContent).not.toContain('RECORD IS MISSING')
+  })
 })
