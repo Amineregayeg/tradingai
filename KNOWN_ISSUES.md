@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-12 (newest entry B425 — THE FEEDBACK LAYER'S OUTCOME CLASSIFIER ENUMERATES SIX VALUES AND THE DATABASE NOW HOLDS EIGHT. REJECTED (live since 0008) and UNSIZED_FILL (arriving with 0013) match none of _classify_outcome's six token sets and fall through into the fallback meant for rows carrying NO token, which infers the outcome from the SIGN OF realized_r — so a value the analysis layer has never heard of is answered with a confident one and the record's own statement is discarded. Today such a row is classified "open" and silently dropped from the evidence set, labelled with the value that means "still running", which is B423's conflation one layer up; production holds zero REJECTED rows so the live effect is currently nil. The sign-of-R branch is NOT reachable today and that was checked rather than assumed — realized_r has one writer app-wide and the same block overwrites outcome to WIN/LOSS/BE — but that is a property of today's single writer, not a designed invariant, and the overwrite is itself what destroys the UNSIZED_FILL marker when a position closes. Fix is to classify from the model's own OUTCOME_* constants and REFUSE on an unrecognised token, a deletion rather than an addition. Not a deploy-D blocker. Also B424 amended: it is TWO properties — _declare_halt fixes route 3 but NOT the adjacency that actually closes routes 1 and 2, which Execute confirmed was accidental, and an await added inside _declare_halt reopens both with the discipline fix fully in place.)
+Last updated: 2026-09-12 (newest entry B425 — the feedback layer's outcome classifier enumerates SIX values while the database now holds EIGHT, so REJECTED and UNSIZED_FILL fall through into the fallback meant for rows carrying no token, which infers the outcome from the sign of realized_r; corrected after review showed my claim that the UNSIZED_FILL marker is destroyed on close was WRONG — the settle-path overwrite is unreachable for those rows behind three independent guards, and the real finding is that it is safe only BY DISTANCE, with the fix being to make crypto_loop.py:1930 look like :2475, which guards in its own query. B424 fixed at 12b3a90 and amended twice: it was TWO properties, not one — _declare_halt makes the pairing unrepresentable but says nothing about the no-await WINDOW that actually closed the cancellation and racing-status routes, and that adjacency was accidental. Three residuals then closed on the fix itself: a pairing arm scanning ONE module while the attribute was assignable from ANY (now a read-only @property plus a 333-file scan, two mechanisms with different blind spots); a LAST-WINS window walker that judged a two-pair body on the last pair only, reporting SAFE with the first pair open; and a blindness guard that stayed GREEN while the scan had stopped seeing the only site it exists for — a count is not a denominator, the identity of what was counted is.)
 
 ---
 
@@ -28081,6 +28081,63 @@ cause. Split it into *"halt site found, alarm assignment absent"* versus *"no ha
 > **A structural property that nobody chose is the most fragile kind there is** — no comment, no arm,
 > and no author who remembers deciding it. The first person to refactor that block will not know it
 > existed, because in a month it reads as ordinary sequential code.
+
+#### SECOND AMENDMENT (execute, fixed at `12b3a90`; manager verified) — BOTH RESIDUALS CLOSED, AND THE SCOPE ONE WAS THIS REGISTER'S OWN SHAPE: A SCAN THAT ANSWERS ONLY FOR THE FILES IT WAS POINTED AT
+
+**Residual 1, found by review on the fix itself.** The pairing arm used
+`inspect.getsource(mod)` — **one module** — while `halt_reason` was a public attribute assignable
+from **any** module. Route 3 was closed against a new halt site in `crypto_loop.py` and left open
+against the same site written one file over. Latent, since nothing outside that module assigned it.
+
+**Closed twice over, deliberately, because the two mechanisms have different blind spots:**
+
+```
+read-only @property over _halt_reason      an external assignment RAISES   but only if it RUNS
+the scan walks app/ + tests/ (333 files)   a line that never runs is seen  but only where it LOOKS
+```
+
+**Manager verified the conversion is complete rather than taking it on report** — the failure mode of
+turning a writable attribute into a read-only property is that a *missed* write site becomes a
+runtime `AttributeError`, and the worst place for that is the halt path itself:
+
+```
+.halt_reason  =   (assignment, not comparison)  2 hits: one docstring, one arm asserting it RAISES
+                                                ZERO production assignment sites remain
+_halt_reason  =   :257 initialiser (annotated)  :815 inside _declare_halt — the only writer
+property      ->  returns self._halt_reason, so a read before any halt is safe
+status()      ->  still emits "halt_reason" and "halt_record_failed", same keys, same values
+```
+
+The last line is why **not** re-running the frontend suite is sound: the operator surface is
+unchanged. *(My first sweep used `halt_reason\s*=`, which matches `==` and misses an annotated
+assignment — it found eight hits, six of them comparisons, and would have missed the initialiser
+entirely. The corrected pattern is the one quoted above.)*
+
+**The property also removed a fixture doing the production code's work** — `_loop_at_halt` and six
+sites in `T-0141` hand-set the halted state and now go through `_declare_halt`. Two of them were
+clearing a halt with `halt_reason = None`, and **there is no production API that lifts a halt** by
+this register's own ruling that it survives reset and stop; they now build a second loop.
+
+**Residual 2, LAST-WINS.** The window walker kept one halt/alarm index per body and overwrote it each
+iteration, so two pairs in one body were judged on the last only. **Measured before the fix: a
+two-pair body with an open window on the FIRST pair reported SAFE.** Each halt now pairs with the
+next alarm after it. Offered as "worth a comment rather than a change" and taken as a change, because
+it is the previous amendment's traversal defect one level down and **the third instance of that same
+shortcut** — review's traversal returned after the first block, execute's verification script had the
+identical bug, and now the walker.
+
+**Residual 3, FOUND BY THE KILL SET ON THE FIX ITSELF, and it is the best of the three.** The package
+scan guarded against going blind with `assert sites` — publish the denominator. **A mutation renaming
+the field at the declaration point left that guard GREEN**, because `__init__` still assigns
+`_halt_reason`: the scan had stopped seeing the only site it exists for and still reported a full
+denominator.
+
+> **A count is not a denominator. The identity of what was counted is.**
+
+The guard now names the site. **Two of four kill-set rows were void on the first pass** and were
+re-run: an `await` placed in a sync method is a `SyntaxError`, so the run collected 3 of 62 and
+"died" from broken collection rather than from the arm — a faithful mutation needs `async def`, a
+real `await`, and an awaiting caller.
 
 ---
 
