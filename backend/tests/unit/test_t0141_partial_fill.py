@@ -163,7 +163,7 @@ async def test_the_halt_reason_REACHES_A_CONSUMER_rather_than_merely_existing():
         "a fresh loop already blocks, so this arm could not tell the halt from the baseline"
     )
 
-    loop.halt_reason = HALT_PARTIAL_UNSIZED
+    loop._declare_halt(HALT_PARTIAL_UNSIZED)
     block = await loop._entry_block_reason("BTC/USD")
 
     assert block is not None, "the halt does not block entry, so it is not a halt"
@@ -175,7 +175,7 @@ async def test_the_halt_blocks_WITHOUT_reading_a_position_or_the_venue():
     to enter — and, like the direction refusal in `alpaca.place_order`, it must not depend on a
     position read succeeding. Otherwise a venue timeout turns the halt into a pass."""
     loop = LiveCryptoLoop()
-    loop.halt_reason = HALT_PARTIAL_UNSIZED
+    loop._declare_halt(HALT_PARTIAL_UNSIZED)
 
     async def _explode(pair):
         raise AssertionError("the halt read a position before refusing")
@@ -191,13 +191,17 @@ async def test_the_halt_is_classified_as_a_HALT_and_a_routine_block_as_a_SKIP():
     prefix — so **any halt added later was a `skip` by default**, which is how this task's named
     halt would have arrived, defeating `M-6` through the back door."""
     loop = LiveCryptoLoop()
-    loop.halt_reason = HALT_PARTIAL_UNSIZED
+    loop._declare_halt(HALT_PARTIAL_UNSIZED)
     halt = await loop._entry_block_reason("BTC/USD")
     assert halt.kind == BLOCK_HALT
 
-    loop.halt_reason = None
-    loop.paused = True
-    pause = await loop._entry_block_reason("BTC/USD")
+    # **A FRESH LOOP, not `halt_reason = None`.** Nothing in production lifts a halt — it survives
+    # `reset` and `stop` by ruling, and it is a read-only property now — so clearing it here was
+    # asserting the discrimination against a state the engine cannot reach.
+    unhalted = LiveCryptoLoop()
+    assert unhalted.halt_reason is None
+    unhalted.paused = True
+    pause = await unhalted._entry_block_reason("BTC/USD")
     assert pause.kind == BLOCK_SKIP, (
         "an operator pause is now reported as a halt — the classification changed for a reason "
         "this task did not rule on"
@@ -223,7 +227,7 @@ async def test_the_halt_reason_DOES_NOT_COLLIDE_with_any_existing_block_reason()
     finally:
         kill_switch.disarm()
 
-    loop.halt_reason = HALT_PARTIAL_UNSIZED
+    loop._declare_halt(HALT_PARTIAL_UNSIZED)
     ours = str(await loop._entry_block_reason("BTC/USD"))
 
     assert ours not in others, f"the halt reuses an existing reason: {ours!r}"
@@ -247,7 +251,7 @@ async def test_status_SHOWS_the_halt_reason_and_shows_NOTHING_when_there_is_none
     )
     assert (await loop.status())["halt_reason"] is None
 
-    loop.halt_reason = HALT_PARTIAL_UNSIZED
+    loop._declare_halt(HALT_PARTIAL_UNSIZED)
     assert (await loop.status())["halt_reason"] == HALT_PARTIAL_UNSIZED
 
 
@@ -598,7 +602,7 @@ async def test_the_ACTIVITY_LINE_for_a_halt_is_labelled_halt_not_skip(monkeypatc
     feed is the consumer, and this drives it.
     """
     loop, seen = _driven_loop(monkeypatch, {"status": "FILLED", "units": 0.01})
-    loop.halt_reason = HALT_PARTIAL_UNSIZED
+    loop._declare_halt(HALT_PARTIAL_UNSIZED)
 
     await loop._tick_symbol("BTC/USD", "BTCUSDT")
 
@@ -654,9 +658,14 @@ async def test_EVERY_block_reason_the_gate_produces_carries_its_own_kind():
 
     seen = []
 
-    loop.halt_reason = HALT_PARTIAL_UNSIZED
-    seen.append(await loop._entry_block_reason("BTC/USD"))
-    loop.halt_reason = None
+    # **A SECOND LOOP FOR THE HALT, because a halt cannot be lifted.** It is checked first and
+    # masks every other reason, which is why the original cleared it to move on. That clear is not
+    # available any more and should not have been: nothing in production un-halts.
+    halted = LiveCryptoLoop()
+    halted._has_position = _no_position
+    halted._open_count = _none_open
+    halted._declare_halt(HALT_PARTIAL_UNSIZED)
+    seen.append(await halted._entry_block_reason("BTC/USD"))
 
     kill_switch.arm(reason="daily loss")
     try:

@@ -254,7 +254,7 @@ class LiveCryptoLoop:
         #: restarting the engine does not make that position known. Clearing it silently on the
         #: next start would re-enter the hole it exists to stop us trading into. Reconciliation is
         #: what legitimately clears it, and reconciliation is the task after this one (`B413`).
-        self.halt_reason: str | None = None
+        self._halt_reason: str | None = None
         #: **`M-6`. WHY THE DURABLE RECORD OF A HALT IS MISSING, when it is.**
         #:
         #: The halt writes two records — a `DecisionRecord` for the corpus and an `Alert` for the
@@ -769,6 +769,24 @@ class LiveCryptoLoop:
             if failures else None
         )
 
+    @property
+    def halt_reason(self) -> str | None:
+        """Why the engine is halted, or `None`. **READ-ONLY: the only writer is `_declare_halt`.**
+
+        **`B424` residual, found by review.** The pairing arm scanned ONE MODULE while this was a
+        public attribute assignable from ANY module — so route 3 was closed against a new halt site
+        in this file and left open against the same site written one file over. A source scan can
+        only ever answer for the files it was pointed at; the population question does not arise if
+        the wrong state cannot be assigned in the first place.
+
+        `loop.halt_reason = "..."` now raises `AttributeError` wherever it is written, including
+        from a test — which is the point. A fixture that set both fields by hand was already caught
+        once doing the production code\'s work, and this makes that fixture impossible rather than
+        discouraged: `_declare_halt` is the only way to reach the halted state, so anything
+        exercising a halt exercises the real pairing.
+        """
+        return self._halt_reason
+
     def _declare_halt(self, reason: str) -> None:
         """Stop the engine and arm the missing-record alarm. **THE ONLY PLACE EITHER IS SET.**
 
@@ -779,7 +797,10 @@ class LiveCryptoLoop:
         *both durable rows are on disk*. Nothing required the pairing — it held because there was
         exactly one halt site and its author happened to write both lines. **The second halt site
         inherits "healthy" for free**, so the pairing is made unrepresentable here rather than
-        remembered, and an arm asserts no assignment to either field outside this method.
+        remembered, and an arm asserts no assignment to either field outside this method. `halt_reason`
+        is additionally a read-only property, so the scan's SCOPE stops mattering — see its
+        docstring above; the scan still runs, PACKAGE-WIDE, because a line that never executes
+        never raises.
 
         *The window.* **Collapsing the two assignments says nothing about what sits BETWEEN them.**
         The adjacency below is load-bearing and was undesigned: with no suspension point between
@@ -791,7 +812,7 @@ class LiveCryptoLoop:
         **DO NOT PUT ANYTHING BETWEEN THE NEXT TWO STATEMENTS.** Not a log line, not an `await`,
         not a call that might one day become async.
         """
-        self.halt_reason = reason
+        self._halt_reason = reason
         self.halt_record_failed = f"{reason} — durable record NOT YET WRITTEN"
 
     @staticmethod

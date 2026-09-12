@@ -56,10 +56,18 @@ def _loop_at_halt():
     meant *both rows are on disk* AND *no write was attempted*, so a halt whose record never
     happened reported healthy. The arms below used to assert `None` here, which is to say they
     asserted that a halted engine with nothing recorded was fine — **the arms encoded the defect.**
+
+    **AND IT NO LONGER SETS THEM BY HAND.** It used to, and the harness showed what that cost:
+    removing the alarm-set from the production halt site killed nothing, because this fixture was
+    doing the production code's work. `halt_reason` is now a read-only property, so the hand-set is
+    not merely discouraged — it raises. Every arm below reaches the halted state the only way the
+    engine can reach it, which means `_declare_halt` regressing takes them all with it.
     """
     loop = LiveCryptoLoop()
-    loop.halt_reason = HALT_PARTIAL_UNSIZED       # the halt is ALREADY in force (M-7)
-    loop.halt_record_failed = f"{HALT_PARTIAL_UNSIZED} — {NOT_YET_WRITTEN}"
+    loop._declare_halt(HALT_PARTIAL_UNSIZED)      # the halt is ALREADY in force (M-7)
+    assert loop.halt_reason and NOT_YET_WRITTEN in (loop.halt_record_failed or ""), (
+        "the fixture no longer reaches the state it is named for"
+    )
     return loop
 
 
@@ -341,9 +349,11 @@ async def test_the_HALT_SITE_sets_the_alarm_even_if_the_WRITER_never_runs(monkey
     """**THE ARM THAT MAKES THE OTHERS MEAN ANYTHING, and the harness is what demanded it.**
 
     Removing the alarm-set from the halt site killed NOTHING in the first control run. Every arm
-    above uses `_loop_at_halt()`, which hand-sets `halt_record_failed` — **so the fixture was doing
+    above used `_loop_at_halt()`, which hand-set `halt_record_failed` — **so the fixture was doing
     the work the production code is supposed to do**, and the arms asserted only that `status()`
-    reports a field somebody had already set.
+    reports a field somebody had already set. That fixture now calls `_declare_halt`, so it can no
+    longer stand in for the code; this arm stays regardless, because it is the only one that drives
+    the halt through `_tick_symbol` rather than calling the declaration point directly.
 
     This one drives the REAL halt path through `_tick_symbol` and then prevents the writer from
     running at all — which is the `CancelledError` case, the concurrent-`status()` case, and the
