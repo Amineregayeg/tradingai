@@ -27163,6 +27163,32 @@ uncontrolled scan.
 > log. **A side effect nothing asserts on is not covered by the test that triggers it.** Coverage
 > that counts executed lines would have called this covered.
 
+#### `B414` ADDENDUM — IT RECURRED THREE HOURS LATER, IN THE SAME TASK, ON THE SAME STATEMENT, and the author of this entry is who it happened to
+
+**The strongest evidence this entry could have.** Execute filed `B414` — *a side effect nothing
+asserts on is not covered by the test that triggers it* — and three hours later, in `T-0141`, added
+`position_id` to that **same `logger.error` call** so an operator told *a position of unknown size
+may exist* would have a way to find it.
+
+```
+mutation: delete position_id from the logger.error call   ->   KILLS NOTHING
+every arm drives that line. none reads the log.
+```
+
+**The rule was written, by that author, about that statement, in that file.** It still did not
+transfer to the next field added to it. **Now covered by an arm that captures the loguru record and
+asserts its fields** — which is the only form that could have caught either instance.
+
+> **A lesson that fails to transfer three hours later, in the same file, to the same line, is not a
+> lesson anyone was going to remember at three months.** That is the argument for arms and guards
+> over notes, and it is why `B412`'s fixes went into the tools rather than into another standing note.
+
+**And the same task produced a second instance of the same shape one layer up:** execute's sweep for
+absent-vs-`None` across every key `_position_units` reads was **itself vacuous on the first run** —
+the base dict never reached `units`, so it reported *same* for the wrong reason. **The instrument
+checking for vacuous arms was vacuous.** Caught by controlling it, which is the fifth time this week
+that the catch came from controlling an instrument rather than reading it.
+
 **The same commit carries two `M-10` wording slips**, both asserting knowledge of the venue we do not
 have: review's *"sends a quantity the venue rejects"* → *"would reject"*, and a second execute found
 sweeping for siblings — *"a size the venue accepts"*, **which asserts an acceptance never observed.**
