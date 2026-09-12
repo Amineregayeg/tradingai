@@ -27285,6 +27285,42 @@ the real pre-`0006` constraint admitted **5** and never admitted `REJECTED`. **A
 right now creates a constraint that never existed.** The halt's outcome value makes it worse; it
 does not make it wrong.
 
+**`0002`'s VALUE IS NOW ESTABLISHED FROM PRODUCTION'S OWN SCHEMA, not from the model — and review
+was right that the derivation mattered even though the number did not change.**
+
+```
+2580ffe  2026-07-19 22:40   0002 ADDED, its CHECK written as a LITERAL of FOUR. No cohort CHECK.
+8fdaf6a  2026-07-19 22:54   0002 REWRITTEN to import the live model. Fourteen minutes later.
+```
+
+**So reading `app.models` at `0002`'s landing commit is right by luck** — the model said five
+throughout — **and the justification is the very method `B405` is about: reading a migration's
+historical constraint off the model instead of off the migration.** Review flagged it against the
+manager's own standard, *an inaccurate freeze reads as settled and is worse than the live import it
+replaces*.
+
+**Settled by one read-only query, because `ck_decision_records_cohort` is created by `0002` and by
+no other revision:**
+
+```
+ck_decision_records_cohort present in production  ->  1
+  => production ran the REWRITTEN 0002, so the frozen 5 / 4 / 2 are CORRECT
+corroboration: the live outcome CHECK admits
+  WIN LOSS BE OPEN ABSTAINED ABANDONED REJECTED   (7, the expected end state)
+```
+
+**Right value, now for the right reason.** Had the constraint been absent, production would have run
+the original `0002`, whose outcome CHECK admitted **four** and which created no cohort CHECK at all —
+and the frozen tuples would have been wrong for the database they claim to describe.
+
+**AND THREE OF THE FOUR FREEZES HAVE NO ARM CAPABLE OF FAILING.** `DECIDED_BY_VALUES` is 3 at
+`0007`'s landing commit and 3 at `HEAD`; `SIGNAL_DIRECTIONS` (2) and `DECISION_COHORTS` (4) have not
+moved since `0002`. **Only `DECISION_OUTCOMES` ever changed.** So an arm asserting *"`0007` emits
+`UNSET`/`ICT`/`RULE_ENGINE`"* **passes identically against frozen and unfrozen code** — and the suite
+would report a clean sweep over three freezes it never exercised. **The arm must MUTATE THE LIVE
+MODEL** — add a fourth `DECIDED_BY` value and assert `0007` still emits three. Required, not
+suggested.
+
 **THE FREEZE, DERIVED — this was the thing that would have made the task unbuildable if history were
 not recoverable:**
 
