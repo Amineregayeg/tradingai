@@ -27348,6 +27348,22 @@ and wrong for *present but unusable*.
 > **Full suite: 236 passed, 16/16 files, union verified, and ZERO guard firings across all 236** —
 > the number that matters most, since the guard runs `beforeEach` on every test.
 >
+> **THE ZERO ACROSS 236 IS EXECUTE'S MEASUREMENT AND IS NOT INDEPENDENTLY CONFIRMED.** The manager
+> called it *the number that matters most*, and review declined to pass it on trust — then could not
+> reproduce it: **its own verification run was OOM-killed after one chunk**, which is the very
+> condition the guard's failure text is written for.
+>
+> **What review did instead, and it is real evidence rather than the claim:** sampled the two
+> highest-**render** files rather than the next two alphabetically — *a spurious DOM firing would
+> show there first* — `Button` (24 renders) and `RunHistoryPanel.longonly` (16). **46 passed, 0
+> firings. That is 2 of 16 files and 46 of 236.**
+>
+> **The chunk logs are the only artefact in this task that is QUOTED rather than KEPT**, and this is
+> the task that taught us why that matters. They belong under `_runs/` with the other thirteen.
+>
+> *(Review's killed run left no sentinel and its started chunk left no exit file, so it is unusable
+> rather than misleading — the third time the chunking's own bookkeeping has earned its keep.)*
+
 > **WHAT THE COMMIT CLAIMS AND WHAT IT REFUSES TO:** it records that the guard **detects**
 > accumulation, and states plainly that it does **not** demonstrate accumulation still **occurs**
 > once the fix is in — that would need a second uncovered registration actually producing leftovers,
