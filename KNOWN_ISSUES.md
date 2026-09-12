@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-13 (newest entries B428 and B429, which must be read together — B428: THE ALPACA TICK PATH CANNOT RUN AT ALL. crypto_loop.py:2051 calls self.paper.on_tick unguarded; on_tick is not in the adapter base (zero hits, control place_order three) and is defined only by paper.py and cft_sim.py, while _build_broker puts a real AlpacaAdapter in that slot — so every tick raises AttributeError BEFORE any signal is evaluated, _loop catches it per symbol and logs logger.warning, and the engine reports running=true paused=false halt_reason=None forever. B179's signature on the venue we are about to trade, and worse: the engine cannot place an order at all. It is also why part D's order path has never actually run. B429: a live Alpaca position would have NO STOP — place_order never reads request.sl/tp and sends no bracket (0 hits), while cryptofundtrader.py and oanda.py both send it (4 hits each, the control that makes the zero mean something), and the only SL/TP enforcement in the tree is inside the simulators' on_tick — the very method AlpacaAdapter lacks. B428 is why B429 has never bitten, so fixing B428 alone ARMS B429 the same hour and B429 must land first or with it. No Alpaca order has been driven: what is measured is that the code does not send a stop, not a stopless position observed at the venue.)
+Last updated: 2026-09-13 (newest entry B430 — THE ENGINE CANNOT SELECT ALPACA AT ALL. BROKER_MODE is a Final "sim" in fixed_config:85, main.py constructs LiveCryptoLoop with no argument so the fallback always wins, apply_config runs only if config is not None from reset_run(config=None), RunConfig is never built with broker_mode, and BROKER_MODE is env-read zero times — so _select_venue can never return alpaca and _build_broker never constructs an AlpacaAdapter. Part D's order path is DEPLOYED BUT UNREACHABLE, which is the single shared reason B427, B428, B429 and T-0130 are all latent rather than seven independent strokes of luck. Excellent as a safety property — real-money trading cannot be switched on by a setting, a row or a click, only by a code edit and a deploy — but nobody chose it as an interlock: no comment names it as the live-trading gate, no arm asserts it, and Final[str] reads as a default rather than a lock. The hazard is the uncrossing: whoever edits that one token arms B427, B428, B429 and T-0130 at once, and B429 means the first position carries no stop. Say so AT the constant first; do NOT fix it by making BROKER_MODE configurable, which would convert a deploy decision into a runtime one. Bound: this is about the engine LOOP — the probe ladder calls AlpacaAdapter directly and is reachable today.)
 
 ---
 
@@ -28507,3 +28507,55 @@ at the venue.
 **FOR THE FIRST-ORDER LADDER:** probe 3 is a minimum-size buy and probe 4 closes it immediately, so
 the exposure is seconds at roughly $1 of notional. That is a bound by **size and duration**, not by a
 stop, and the runbook now says so rather than implying the position is protected.
+
+---
+
+### B430 — THE ENGINE CANNOT SELECT ALPACA AT ALL. `BROKER_MODE` is a `Final` `"sim"` with no override path — an INTERLOCK NOBODY DESIGNED, holding back every order-path defect we have filed
+
+**Found by review while bounding `B428`'s blast radius; every link verified independently by manager.
+It is the reason `B428` cannot fire today — and it is a much larger fact than that.**
+
+```
+fixed_config.py:85       BROKER_MODE: Final[str] = "sim"
+crypto_loop.py:203       self.broker_mode = (broker_mode or fixed.BROKER_MODE).lower()
+main.py:235              live_loop = LiveCryptoLoop()          <- NO ARGUMENT, so the fallback wins
+crypto_loop.py:1265      apply_config(cfg) sets self.broker_mode = cfg.broker_mode
+crypto_loop.py:1307      ...called only `if config is not None`, from reset_run(config=None)
+RunConfig(...)           constructed with broker_mode ZERO times
+BROKER_MODE              env-read ZERO times (no environ / getenv / os.env anywhere)
+```
+
+**`_select_venue()` reads `self.broker_mode`, which is always `"sim"`. So `venue == "alpaca"` is
+unreachable in any deployed configuration**, and `_build_broker` never constructs an
+`AlpacaAdapter`.
+
+**WHAT THIS MEANS FOR WHAT WE HAVE BEEN BUILDING.** Part D's order path is **deployed but
+unreachable**. `T-0140`, `T-0141`, `T-0143`, `B428`, `B429`, `B427` and `T-0130` are all defects on a
+path the running engine cannot enter. That is why every one of them is latent, and it is a single
+shared reason rather than seven independent strokes of luck.
+
+> **The whole Alpaca order path is held behind one constant that reads like configuration and is
+> not.**
+
+**THIS IS GOOD NEWS AND IT IS ALSO THE ENTRY.** As a safety property it is excellent — real-money
+trading cannot be switched on by a settings change, a database row, or an operator click; it takes a
+code edit and a deploy, which is the right ceremony for that decision. **But nobody chose it as an
+interlock.** It has no comment saying *this is the live-trading gate*, no arm asserting it, and its
+name and `Final[str]` typing read as a default rather than a lock. `B424` again, at the top of the
+system: **a safety property that holds, held by something other than the code that would violate
+it.**
+
+**THE HAZARD IS THE UNCROSSING.** Whoever changes `BROKER_MODE` to reach Alpaca — a one-token edit
+that will look trivial and obviously correct — **arms `B428`, `B429`, `B427` and `T-0130`
+simultaneously**, and `B429` means the first position would carry no stop. Nothing in the file warns
+them.
+
+**WHAT TO DO, in order:** (1) say so *at the constant*, naming what crossing it turns on — cheapest
+and most valuable; (2) make the live-trading gate explicit and asserted rather than incidental; (3)
+only then treat the order-path defects as things that can reach production. **Do not "fix" this by
+making `BROKER_MODE` configurable.** That would convert a code-review-and-deploy decision into a
+runtime one, which is the wrong direction for the single switch that turns on real money.
+
+**BOUND ON THE CLAIM:** this says the *engine loop* cannot select Alpaca. It says nothing about the
+first-order probe ladder, which calls `AlpacaAdapter` directly and never enters the loop — that path
+is reachable today and is exactly how the ladder places a real order.
