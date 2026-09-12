@@ -27404,7 +27404,18 @@ and wrong for *present but unusable*.
 > half is running; **if it fails there, the detector discriminates, and the same two-invocation row
 > proves it.**
 >
-> **NOTHING IS COMMITTED.** Execute declined to land a canary it had shown to be inert, and said so
+> **QUIET IS NOT INERT — review's addition, aimed at a reader six months out.** After the fix the
+canary fires **only** if the fix is removed or a new uncovered registration appears. **That is a
+regression guard behaving correctly, not a dead arm.**
+
+> **This task deleted THREE arms for being inert.** Without that sentence, the fourth reader deletes
+> one that is doing its job — and the deletion will look like the same good judgement each of the
+> first three was.
+
+**The test is not "does it ever fail" but "is there a state in which it WOULD".** An inert arm has
+none; a quiet guard has one and it is not currently reached.
+
+**NOTHING IS COMMITTED.** Execute declined to land a canary it had shown to be inert, and said so
 > before being asked. **A corrected mechanism late beats a green commit telling future readers this
 > was closed.**
 
@@ -27582,6 +27593,14 @@ flaw and reported a confirmation.**
 counter for the OTHER file's content. **The counter is the part execute's probe could not have had**,
 because a manual `div` cannot distinguish *my own earlier render* from *the previous file's*.
 
+**AND THE SAME SHAPE IN THE MANAGER'S OWN INSTRUCTION, one turn later.** I told execute the entry
+must record *"that would need a second uncovered registration, and none has been found."*
+**Execute noticed that sentence was a claim about its SEARCH rather than about the code, went and
+looked, and falsified it** — two packages, three registrations. **A bound phrased as *none has been
+found* invites exactly one reading and it is the wrong one:** it reads as a property of the world and
+is a property of the looking. *(`a-cannot-is-a-claim-about-my-search`, which I had written down and
+still reproduced in a sentence I asked someone else to carry.)*
+
 **HOW TO APPLY, and it is a question rather than a rule:** before reporting a confirmation, ask
 **what my instrument shares with the one I am checking.** Same fixture shape, same probe, same query,
 same harness — each shared element is a blind spot the confirmation cannot see past. **A
@@ -27621,6 +27640,20 @@ tractable.
   const g = globalThis;
   if (typeof g.afterEach === 'function') { g.afterEach(...) }   <- same typeof guard, same trap
 ```
+
+**WHERE THE CLASS LIVES, measured by review with an instrument deliberately unlike execute's
+counter — `B421` applied by its author, one turn after filing it:**
+
+```
+--singleFork   a node_modules module marked by FILE1 is INHERITED by FILE2   deps run ONCE per process
+               a local src/ module's id DIFFERS per file                     OUR source RE-RUNS per file
+isolation      neither persists
+```
+
+> **`setup.ts` is not special.** Everything of ours re-executes per test file, setup included; **only
+> externalised `node_modules` dependencies are cached for the process.** That is why the fix works
+> where execute put it — and it **bounds the audit surface to third-party packages registering hooks
+> at import**, which is three modules here: enumerable rather than estimated.
 
 **THE PRECISE CLAIM, and the precision is the point:** *a second and third registration EXIST and are
 subject to the same defect; they are LATENT because the feature they guard is unused.*
