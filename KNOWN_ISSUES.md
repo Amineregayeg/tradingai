@@ -27304,10 +27304,40 @@ no other revision:**
 
 ```
 ck_decision_records_cohort present in production  ->  1
-  => production ran the REWRITTEN 0002, so the frozen 5 / 4 / 2 are CORRECT
-corroboration: the live outcome CHECK admits
-  WIN LOSS BE OPEN ABSTAINED ABANDONED REJECTED   (7, the expected end state)
+  => production ran the REWRITTEN 0002
 ```
+
+**THAT PROVES LESS THAN THE CONCLUSION FIRST DRAWN FROM IT, and review caught the gap in the
+manager's inference rather than in its own query.** The rewritten `0002` is precisely the file that
+builds its CHECK **at RUN TIME** from whatever the model holds that day:
+
+```
+8fdaf6a:0002   f"outcome IS NULL OR {_sql_in('outcome', DECISION_OUTCOMES)}"
+
+2026-07-19 22:54   0002 rewritten to import the model     model = 5
+2026-08-09 19:43   0006 lands, ABANDONED joins            model = 6
+```
+
+**So "the rewritten `0002` ran, therefore five" skips the run-time dependence that is the ENTIRE
+reason `0002` needed freezing.** Both histories leave the cohort constraint present; the live CHECK
+admitting seven is true under either, since `0008` widened it afterwards.
+
+**CLOSED by one more read-only line — `0002` creates the table, so the first row is an upper bound on
+when `0002` ran:**
+
+```
+min(created_at) in decision_records   2026-07-22 04:00:09    rows 1678
+the cutoff                            2026-08-09 19:43
+corroboration: earliest engine_run    2026-08-04 00:43:12
+```
+
+**Eighteen days before the model gained a sixth value. So `0002` ran while the model held FIVE, and
+the frozen `5 / 4 / 2` is confirmed by the schema's own history.**
+
+> **The value never moved. The justification moved twice** — from *the model at a landing commit*
+> (`B405`'s own method), to *the rewritten file ran* (one step short), to *the table predates the
+> sixth value*. **A file that will be trusted without re-derivation must not carry a reason that
+> stops one step short.**
 
 **Right value, now for the right reason.** Had the constraint been absent, production would have run
 the original `0002`, whose outcome CHECK admitted **four** and which created no cohort CHECK at all —
