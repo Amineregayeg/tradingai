@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-12 (newest entry B419 — .get() cannot tell KEY ABSENT from KEY PRESENT = None, so an Alpaca FILLED order with no venue-reported quantity was recorded at the SUBMITTED size; fixed at 252e7d5 with `if "filled_units" in res`, and paper/cft_sim still fall back because they omit the key. AND B418's MECHANISM IS CORRECTED: it is a SHARED jsdom DOM accumulating across files, NOT a shared module registry. Execute's own two-invocation control caught its own detector passing under BOTH normal isolation and --singleFork — a detector that passes in both detects nothing — and the row review and the manager insisted the task rest on is what caught it. vi.mock is hoisted per test file even in one process so each file's own mock IS in force; what leaks is the DOCUMENT, with PROBE2's body holding PROBE1's node before any render. Review's 22/13/9 census is arithmetically right but its pathway does not occur. The silent half is real on a different axis: a PRESENCE assertion can pass on another file's node while ABSENCE and duplicate-role lookups fail loudly. Nothing committed.)
+Last updated: 2026-09-12 (newest entry B422 — ANY MODULE-SCOPE REGISTRATION IS INSTALLED ONCE PER PROCESS, NOT ONCE PER FILE. vi.mock is immune only because vitest hoists it; cleanup hooks, interceptors and global resets are not, so under one process the FIRST file to register owns the hook and every later file silently has none — and none of them appear in a config where anyone would look, which is why B418's config pin could report health while the suite was broken. Also B421 — a VERIFICATION THAT REUSES THE ORIGINAL INSTRUMENT'S DESIGN TESTS THE INSTRUMENT, NOT THE CLAIM: review confirmed a wrong mechanism by rebuilding execute's probe and inherited its flaw, so two seats agreeing was worth nothing. And B418 CORRECTED A SECOND TIME: the DOM does not cross files either — measured other=0 — it accumulates WITHIN a later file, so a canary must be PER-TEST, since the first file is immune and a later file's first test is clean.)
 
 ---
 
@@ -27321,6 +27321,33 @@ and wrong for *present but unusable*.
 
 ### B418 — THE FRONTEND SUITE'S CORRECTNESS DEPENDS ON NOT BEING RUN IN ONE PROCESS, and `isolate` does not guard that. **THE MECHANISM IS A SHARED jsdom DOM THAT ACCUMULATES ACROSS FILES — NOT a shared module registry (corrected below)**
 
+> ## ⇢ CORRECTED A SECOND TIME — THE DOM DOES NOT CROSS FILES EITHER. It accumulates WITHIN a later file
+>
+> **Review re-measured with a DIFFERENT instrument — real RTL renders plus a counter for the OTHER
+> file's content — rather than rebuilding execute's probe. That separation is what told the three
+> stories apart:**
+>
+> ```
+>                       ISOLATION            --singleFork
+> FILEA  every test     0 before             0 before          <- the FIRST file is IMMUNE: it owns the hook
+> FILEB  test1          0 before             0 before          <- a later file's FIRST test is clean
+> FILEB  test2          0 before             own=1  other=0     <- its OWN test1's render. NONE of FILEA's.
+> ```
+>
+> **`other = 0` kills the cross-file story**, exactly as each file's own `vi.mock` being in force
+> killed the registry story. **All three stories are now separated by measurement rather than by
+> argument.**
+>
+> **THE ACTUAL MECHANISM:** under one process the cleanup hook is registered **once per PROCESS**, so
+> **only the first file owns it.** Later files get no cleanup between their own tests, and their
+> renders pile up **within** the file. The `"multiple elements with the role heading"` failures are a
+> later file colliding with **itself**.
+>
+> **WHY A CANARY MUST BE PER-TEST, NOT PER-FILE:** the first file is immune **and** a later file's
+> first test is clean, **so a per-file check, or one placed in a single file, passes under the exact
+> condition it exists to catch.** Both are inert shapes execute had already built, and they are now
+> `M-2`.
+
 > ## ⇢ MECHANISM CORRECTED — EVERYTHING BELOW ABOUT A SHARED MODULE REGISTRY IS WRONG
 >
 > **Found by execute's own two-invocation control, on the detector it had just built. The detector
@@ -27538,3 +27565,54 @@ does this field's emptiness MEAN — and finding one did not prompt the other.**
 
 **Fix is one line: `if "filled_units" in res:`.** It keeps `M-3`'s must-miss intact, because
 paper and sim still fall back, and closes the Alpaca path.
+
+### B421 — A VERIFICATION THAT REUSES THE ORIGINAL INSTRUMENT'S DESIGN TESTS THE INSTRUMENT, NOT THE CLAIM. Two seats agreeing is worth nothing when both inherited one design
+
+**Review's own diagnosis of why a wrong mechanism survived a review pass, filed because it explains a
+failure this register would otherwise record as bad luck.**
+
+`B418`'s mechanism was wrong twice. **The second time, review "independently confirmed" execute's
+DOM-leak story by REBUILDING EXECUTE'S PROBE — manual `div` and all — so it inherited the probe's
+flaw and reported a confirmation.**
+
+> **The instrument was the thing shared, so the agreement measured the instrument.** Two seats, one
+> design, one blind spot — and the count of agreeing observers rose while the evidence did not.
+
+**What broke it open was an instrument that differed by construction:** real RTL renders plus a
+counter for the OTHER file's content. **The counter is the part execute's probe could not have had**,
+because a manual `div` cannot distinguish *my own earlier render* from *the previous file's*.
+
+**HOW TO APPLY, and it is a question rather than a rule:** before reporting a confirmation, ask
+**what my instrument shares with the one I am checking.** Same fixture shape, same probe, same query,
+same harness — each shared element is a blind spot the confirmation cannot see past. **A
+confirmation is worth its INDEPENDENCE, not its existence**, and re-running someone's script is worth
+approximately nothing.
+
+Related: `B398` (an instrument that cannot see its target), `B412` (a clean zero over an empty set),
+and this entry's own `M-6` control — **the two-invocation pair is what caught the inert canary,
+because the two runs differ by construction rather than by intent.**
+
+### B422 — ANY MODULE-SCOPE REGISTRATION IS INSTALLED ONCE PER PROCESS, NOT ONCE PER FILE. Mocks are immune only because vitest hoists them, and nothing else is
+
+**Review's generalisation from `B418`, and it is worth more than `B418`.** The canary hunt spent
+three wrong mechanisms establishing one fact:
+
+```
+vi.mock                      HOISTED and applied per test file    -> immune, measured
+cleanup hooks                module-scope registration            -> ONCE PER PROCESS
+interceptors, global resets  module-scope registration            -> ONCE PER PROCESS
+```
+
+**Under one process, the first file to register owns the hook and every later file silently has
+none.** That is precisely why `B418`'s failures looked like cross-file contamination and were not:
+a later file had no cleanup **of its own**.
+
+> **The dangerous property: none of these appear in a config where anyone would look.** `pool` and
+> `isolate` are in `vite.config.ts`; a cleanup hook registered at module scope in a setup file is
+> invisible to any audit of the runner's configuration — which is the whole reason `B418`'s config
+> pin could report health while the suite was broken.
+
+**This is not vitest-specific.** Any test runner, any process-shared harness: **registration at
+module scope is per-process, and the first registrant wins.** The countermeasure is the same one
+`B418` arrived at the hard way — **assert the OUTCOME per unit of work (per test), never the
+configuration, and never per file**, because the first unit is always immune.
