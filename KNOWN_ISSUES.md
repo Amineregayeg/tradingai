@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-12 (B416 — B405's DEFECT EXISTS IN FOUR MORE VOCABULARIES AND THE GUARD WRITTEN FOR IT TODAY IS BLIND TO EVERY ONE, because it filters `if "rejection_code" not in source: continue` and sets its floor at the count it could already see. 0002, 0006, 0007 and 0008 import live vocabularies from app.models.decision_record, and 0006's downgrade derives its 0005 from DECISION_OUTCOMES minus a member — B405 character for character. Latent until an outcome value is added, which is exactly what T-0141's deferred halt record would do. Fix is its own task: freeze four vocabularies across four ALREADY-DEPLOYED migrations and widen the arm to refuse ANY app.* import, which needs the real-server harness. Also B415 — halt-vs-skip was decided by block.startswith('KILL SWITCH'), so a new halt reason reaches the operator labelled a routine skip; and B413 RULED: the truthful halt outcome value is consolidated with B416's freeze into one migration and one harness run, since adding a value before the freeze would arm B416 immediately.)
+Last updated: 2026-09-12 (B418 — THE FRONTEND SUITE'S CORRECTNESS RESTS ON A VITEST RUNNER DEFAULT. vite.config.ts pins only environment: 'jsdom' — no pool, no isolate — and of the keys mocked across the seven files stubbing @/services/api, 60 are defined by exactly one file so a leak RAISES, while 13 are defined by several so a leak RESOLVES TO THE WRONG DATA AND PASSES. Surfaced when full vitest was OOM-killed three times and --singleFork FABRICATED seven failures in untouched files; the control settled it at 13/13 under normal isolation, and that run is counted in neither direction. Remedy ruled AHEAD of B416's freeze because every frontend number quoted this week depends on it. Also B417 — every crypto position size printed to the operator as 0.000 because of f'{units:.3f}' against a minimum of 0.000012941, making a live position indistinguishable from the NON_POSITIVE_SIZE refusal; and B417b, the entry line's conditional bound over the whole implicit concatenation so its else branch dropped pair, direction and size.)
 
 ---
 
@@ -27241,3 +27241,71 @@ that job**; the grep missed it because it names the constraint through a `_CONST
 
 > **The alarming version of a finding is the one to verify hardest.** A frightening conclusion is the
 > one you most want to report immediately, and the one most likely to be an artefact of the search.
+
+### B417 — EVERY CRYPTO POSITION SIZE WAS PRINTED TO THE OPERATOR AS `0.000`, and the entry line's conditional silently dropped pair, direction and size on its other branch
+
+**Found by execute self-reviewing its own `T-0141` diff, both operator-visible, and `a` is LIVE.**
+
+**`B417a` — `f"{units:.3f}"` on a crypto size.** BTC's minimum order is `0.000012941` (`B409`) and a
+1% risk entry on a five-figure account is `1e-4` to `1e-3`.
+
+```
+Entered BTC/USD LONG 0.000        <- every BTC entry the engine has ever logged
+0.000 units run on                <- every runner remainder
+```
+
+> **The trade was real and the number in front of the operator was zero** — and zero is
+> **indistinguishable from the `NON_POSITIVE_SIZE` refusal we have a code for.** The operator surface
+> rendered a live position as the one thing that means *no position was taken*.
+
+**A format string is not a rounding choice when the quantity's own minimum is five decimal places
+below it.** `B409` measured that minimum the same day; the formatter predates it and nobody
+re-derived it, which is `B385`'s lesson — *any claim of the form "safe because it only does X" dies
+at the next edit* — applied to a display width.
+
+**`B417b` — the conditional bound over the whole implicit concatenation.** The else branch emitted
+only `"@ 70000 (SL 99, no exit plan)"`: **pair, direction and size all dropped.** LATENT, because
+`strategy_step.py:224,248` set `partial_price` on both paths so every real signal takes the first
+branch. **It surfaced from a hand-built signal in an arm written for the size format** — the arm
+found a second defect its author was not looking for, which is the case for fixtures that are not
+copies of production shapes.
+
+**AND ONE IN EXECUTE'S OWN RESOLVER, recorded because the distinction is the reusable part:**
+**ABSENT AND UNUSABLE ARE NOT THE SAME ANSWER.** The first version folded them, so a full fill
+reporting `NaN` fell back to the **submitted** size — `B411`'s defect reached through the fallback
+instead of through the field. **Found by driving ten shapes through it rather than by reading it**,
+and it is `a-default-must-be-the-alarming-state` one layer in: the fallback was right for *absent*
+and wrong for *present but unusable*.
+
+### B418 — THE FRONTEND SUITE'S CORRECTNESS RESTS ON A VITEST RUNNER DEFAULT, and on 13 of the mocked keys a leak RESOLVES TO THE WRONG DATA AND PASSES
+
+**Measured by review after execute reported a runner-configuration hazard; this is the half execute's
+own warning did not cover, and it is the dangerous half.**
+
+```
+vite.config.ts pins:   environment: 'jsdom'        <- and nothing else
+                       no `pool`, no `isolate`
+7 files stub @/services/api
+  60 keys defined by exactly ONE file    -> a leak RAISES            (loud: execute's 7 fabricated reds)
+  13 keys defined by SEVERAL files       -> a leak RESOLVES to the WRONG DATA and PASSES   (silent)
+```
+
+**So the suite is correct because a default happens to isolate it.** Change the runner's default,
+run with `--singleFork` for memory, or upgrade vitest, and **13 keys stop failing loudly and start
+answering wrongly.** `assumption-in-a-default`, on the instrument the whole frontend is certified by.
+
+**HOW IT SURFACED, which is the evidence that it is not theoretical:** full vitest was **OOM-killed
+three times**, once running alone, with 5.9 GB free and swap untouched at the moment of death — a
+spike during parallel jsdom setup. `--pool=forks --singleFork` survived and **fabricated seven
+failures**, all in two files the commit did not touch, because one shared process plus module-scope
+mocks is exactly the leak above. **The control settled it:** those two files under normal isolation,
+same tree, 13/13 passed. **That run is counted in neither direction.**
+
+**The `236` the commit rests on is a union of six isolated invocations, verified rather than
+summed** — each of the 16 files in exactly one log, none missing, none unexpected, every exit 0, and
+the total independently matching a whole-suite run from before the mutation kills.
+
+**REMEDY, ruled ahead of `B416`'s consolidated freeze:** pin `pool` and `isolate` in
+`vite.config.ts`, and add a canary arm that fails when isolation is lost. **Every frontend number
+quoted this week depends on this**, and changing that config re-opens all of them — so it is
+verified on its own rather than folded into another task.
