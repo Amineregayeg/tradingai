@@ -9,11 +9,15 @@ Two people work on TradingAI, each with their own Claude sessions:
 | `malek/` | Malek's sessions (updated automatically about every 2 hours) | Amine |
 | `amine/` | Amine's sessions | Malek |
 
-## If you are starting a session
+## If you are starting a session — AND BEFORE EVERY NEW TASK
 
 1. Read the **other** side's `CURRENT.md`: the goal, the state, what is in progress, and what must not be touched.
+   **Do this again before starting each new task, not only at the start of a session.** If the task would change
+   something the other side lists under "In progress" or "Do not touch", stop and ask before changing it.
 2. Read that side's newest file in `log/` for what changed recently.
 3. Then read your own `CURRENT.md` and carry on.
+
+(On Malek's machine this is enforced: every new task runs `handoff_sync.py peek` against `amine/CURRENT.md`.)
 
 ## What each folder contains
 
