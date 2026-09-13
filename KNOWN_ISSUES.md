@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-13 (B432 amended — THE CONTROL WAS NOT CLEAN AND THE PROPOSED FIX WAS WRONG. test_t0011_census, cited as the suite that patches the network correctly, patches _ticker_price and still makes four connection attempts to fapi.binance.com through shadow.py's fetch_roster_panels. It was chosen as the control because it looked clean by the same name the scan was keyed on, so it shared the scan's blind spot, and the structural arm first proposed — keyed on _ticker_price — would have certified that second route as fixed. A route-agnostic socket-blocking autouse fixture found 29 connecting tests, not three; that fixture is the fix. B432 remains the newest entry; B429 landed at 7f0ee09 with a test-coverage follow-up in progress.)
+Last updated: 2026-09-13 (B429 marked FIXED at 7f0ee09 with follow-ups a4b9a34, 34d4d03 and c3101f1, all passed review, NOT deployed. The adapter now attaches the stop, always re-reads the order nested, treats only a stop leg in a WORKING status as protection, and on refusal cancels the entry and its live legs, closes, and OBSERVES flat before filing a rejection — halting when flat cannot be observed. Residuals stated beside their constants: the {new, held} allow-list is unmeasured, a refusal after the re-read is not caught (B427), page fullness depends on an unmeasured server cap, symbol spelling is unmeasured, and the venue was never consulted — probe 3 is the evidence for four of them. Review caught, across four rounds, among other things an Alert built with a nonexistent AlertStatus member that could never have been written. B432 remains the newest numbered entry.)
 
 ---
 
@@ -28527,6 +28527,61 @@ at the venue.
 **FOR THE FIRST-ORDER LADDER:** probe 3 is a minimum-size buy and probe 4 closes it immediately, so
 the exposure is seconds at roughly $1 of notional. That is a bound by **size and duration**, not by a
 stop, and the runbook now says so rather than implying the position is protected.
+
+#### FIXED — `7f0ee09`, with follow-ups `a4b9a34`, `34d4d03`, `c3101f1`. All four PASSED review. NOT DEPLOYED (production is still `6ae6aca`)
+
+**What the adapter now does** (`AlpacaAdapter.place_order` → `_require_protection`):
+
+```
+1  send the protection: BRACKET for sl+tp, OTO for sl only
+2  ALWAYS re-read the order, nested; POST legs are logged, never the verdict
+3  protected  iff  a leg that is itself a stop (type or stop_price) is in WORKING_STOP_LEG_STATUSES
+   — order_class alone is NOT evidence: it echoes what was ordered
+4  not protected -> cancel the entry and every non-terminal leg by id, close by symbol, then OBSERVE:
+   no position; no open order or live leg on the open-order page; this order and its legs terminal
+5  observed flat -> AlpacaProtectionNotAccepted -> REJECTED / PROTECTION_NOT_ACCEPTED, no halt
+   anything else, including an observation that fails -> AlpacaUnprotectedPositionOpen -> HALT + CRITICAL Alert
+```
+
+**What review caught across four rounds, each of which would otherwise have shipped:** a close
+*accepted* read as a position *closed*; an unfilled entry never cancelled; four false-flat routes in the
+observation (not-found through the error channel, unmeasured symbol spelling, a single unpaginated page,
+a resting child rolled up under a filled parent); the protection check trusting the order class that was
+*requested*; a refused stop leg still reading as a stop because status was never consulted; the CRITICAL
+Alert built with `AlertStatus.ACTIVE`, which does not exist, inside a handler that swallowed the error —
+**the durable alert could never have been written**; and arms blind to a writer inside the recorder, to a
+float-formatting regression, to a failed re-read collapsed into "no legs", and to a stored row that lost
+whether the entry filled once the order id reached real length.
+
+**RESIDUALS — stated beside their constants, NOT closed:**
+
+```
+WORKING_STOP_LEG_STATUSES = {new, held}   membership UNMEASURED. Too narrow -> over-remediation (a needless
+                                          close, the safe direction). Probe 3 is the evidence to widen it.
+a stop leg read `new`                     may not yet be validated; a refusal AFTER the re-read is not caught.
+                                          Closing it needs bounded resolution: B427's.
+the open-order page                       fullness is tested against the REQUESTED limit; a server cap below
+                                          it would defeat the guard. direction=DESC narrows, does not close.
+symbol spelling of positions and orders   unmeasured (R-7). Compared as canonical forms by EQUALITY. Probe 3
+                                          records both verbatim.
+a stop leg already `filled` at re-read    would file PROTECTION_NOT_ACCEPTED although the protection fired.
+                                          Near-unreachable; stated, not special-cased.
+the stored rejection_reason               bounded at 300. Facts come first — legs, entry=<status>/<filled_qty>
+                                          from the POST-remediation read, cancel=, close=, order=<full id> —
+                                          and {detail} may be truncated after them by design.
+the venue                                 NEVER CONSULTED. Every arm drives doubles. Whether Alpaca accepts a
+                                          bracket or OTO on crypto is unestablished.
+```
+
+**Open for the next commit touching `test_b429_stop_is_placed.py`:** ENTRY3's docstring (`:503`) says a
+quantity is recorded "AS THE VENUE SENT IT", while the code strips whitespace. Left deliberately, under
+follow-up 3's additions-only rule.
+
+**Reachability:** the engine loop still cannot select Alpaca (`B430`), so none of this runs from the
+engine. **It runs on probe 3**, which calls the adapter directly — and there, neither the halt nor the
+decision row exists, only the raised exception. The runbook's probe-3 branches account for that.
+**Found while building it and filed separately:** `B432` (tests reaching the network, 29 not 3) and the
+`B427` addendum (two adapter methods ignoring what they are asked).
 
 ---
 
