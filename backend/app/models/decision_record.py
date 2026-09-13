@@ -147,9 +147,10 @@ REJECTION_MIN_SIZE = "MIN_SIZE"
 #:
 #: **ITS OWN CODE, for `MIN_SIZE`'s reason.** Filed as `VENUE_TRANSPORT` it would read as a
 #: transient blip that clears on its own; filed as `VENUE_DIRECTION_UNSUPPORTED` it would name the
-#: wrong capability. This is a venue that will refuse the same order every time until the
-#: protection is placeable, and the whole value of the code is telling an operator which of those
-#: three worlds they are in — `B375`'s confusion is what sharing one would rebuild.
+#: wrong capability. It is not transient: it recurs while the observed condition holds — the venue
+#: created no working stop, OR parked one in a status `WORKING_STOP_LEG_STATUSES` does not yet admit
+#: (that list is unmeasured, and then too narrow). Telling an operator which world they are in is the
+#: whole value of the code — `B375`'s confusion is what sharing one would rebuild.
 REJECTION_PROTECTION_NOT_ACCEPTED = "PROTECTION_NOT_ACCEPTED"
 REJECTION_PROP_FIRM_TARGET_REACHED = "PROP_FIRM_TARGET_REACHED"
 REJECTION_PROP_FIRM_HALTED_DAILY_LOSS = "PROP_FIRM_HALTED_DAILY_LOSS"

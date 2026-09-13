@@ -299,10 +299,11 @@ class ExecutionService:
             # ------------------------------------------------------------------
             # **`B429`. THE VENUE TOOK THE ORDER AND NOT THE STOP — AND THE POSITION IS CLOSED.**
             #
-            # A genuine rejection: nothing is open, so recording the decision as not taken is
-            # true. Its own code for `MIN_SIZE`'s reason — filed as `VENUE_TRANSPORT` it would
-            # read as transient and clear on its own, when the venue will refuse the same order
-            # every time until the protection is placeable.
+            # A genuine rejection: flat was OBSERVED within what the adapter checked, so recording
+            # the decision as not taken is true. Its own code for `MIN_SIZE`'s reason — filed as
+            # `VENUE_TRANSPORT` it would read as transient. It recurs while the condition holds:
+            # no working stop, or a stop parked in a status the adapter's allow-list does not yet
+            # admit (then the list is too narrow, and the exception's leg statuses say so).
             # ------------------------------------------------------------------
             return {"status": "REJECTED",
                     "reason": redact_for_storage(str(exc)),

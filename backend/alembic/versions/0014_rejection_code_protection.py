@@ -18,9 +18,10 @@ The fix attaches the protection and then reads the response back. Three outcomes
 
 **WHY ITS OWN CODE, and not `VENUE_TRANSPORT` or `VENUE_DIRECTION_UNSUPPORTED`.** `MIN_SIZE`'s
 argument one migration along: transport says *transient, it will clear*; direction-unsupported
-names a different capability. This is a venue that will refuse the same order every time until the
-protection is placeable, and telling an operator which of those three worlds they are in is the
-entire value of the column (`B375`).
+names a different capability. It is not transient: it recurs while the observed condition holds —
+the venue created no working stop, or parked one in a status the adapter's allow-list does not yet
+admit, in which case that unmeasured list is too narrow. Telling an operator which world they are in
+is the entire value of the column (`B375`).
 
 **DEPLOY ORDER IS LOAD-BEARING AND FAILS SILENTLY IF SPLIT (`B410`).** Production's CHECK closes the
 vocabulary at eighteen values without this one. If code emitting `PROTECTION_NOT_ACCEPTED` reached

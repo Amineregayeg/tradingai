@@ -410,6 +410,29 @@ async def test_BRANCH_2_close_THROWS_because_nothing_filled_and_flat_is_observed
 
 
 @pytest.mark.asyncio
+async def test_the_STORED_refusal_reason_leads_with_the_LEG_STATUSES_inside_the_storage_bound():
+    """**What probe 3's outcome exists to record — which status the venue parks a stop leg in — must
+    survive into the durable row.** The service stores `redact_for_storage(str(exc))`, bounded at
+    300 characters; with a long remediation detail, anything after the first ~300 is cut. So the
+    leg statuses lead, and the message makes no prediction about the venue."""
+    from app.core.logging import redact_for_storage
+
+    a = _adapter(_placed(), reread=_parent(legs=[_stop("accepted"), _tp("new")]),
+                 cancel_raises_for=("order-1", "leg-stop", "leg-tp"), close_raises=True)
+    with pytest.raises(AlpacaProtectionNotAccepted) as caught:
+        await a.place_order(_req())
+
+    full = str(caught.value)
+    stored = redact_for_storage(full)
+    assert len(full) > 300, "premise: the detail is long enough for the storage bound to cut"
+    assert "accepted/stop" in stored and "new/limit" in stored, (
+        f"the leg statuses did not survive the 300-character storage bound: {stored!r}"
+    )
+    assert "every time" not in full, "the message still predicts the venue will always refuse"
+    assert "too narrow" in stored, "the allow-list caveat was cut from the stored reason"
+
+
+@pytest.mark.asyncio
 async def test_R3_an_ACCEPTED_CLOSE_is_not_a_FILLED_close():
     """**R-1 / R-3, `B427` inside `B429`.** The close was accepted and the position is still there."""
     a = _adapter(_placed(), reread=_parent(legs=[_stop("rejected")]), positions_after=["BTC/USD"])
@@ -672,6 +695,17 @@ async def test_the_unprotected_halt_leaves_NO_DECISION_ROW_AT_ALL(monkeypatch):
     is not patched, writes its row, and the test passes. Naming them buys diagnostics only. So the
     assertion that carries the weight is at the boundary every row must cross, the `DecisionRecord`
     constructor, and the construction sites are pinned below.
+
+    **WHAT THIS ARM CATCHES, PRECISELY** — because its earlier message said "it sees any writer, named
+    or not", which was false for exactly the case that mattered (it no-opped the recorder, so a writer
+    inside the recorder was invisible to it):
+
+        CATCHES      any DecisionRecord construction that EXECUTES during this drive — real name,
+                     alias, or module-attribute access — including inside _record_unprotected_position,
+                     which now runs with only its database session stubbed
+        DOES NOT     a writer on a path this drive never executes
+                     a row inserted WITHOUT constructing the model (core `insert(...)`, raw SQL,
+                     bulk mappings) — the constructor is never called
     """
     loop, acts = _drive_tick(monkeypatch, _raise_unprotected)
 
@@ -705,16 +739,46 @@ async def test_the_unprotected_halt_leaves_NO_DECISION_ROW_AT_ALL(monkeypatch):
             wrote.append(_n)
         monkeypatch.setattr(loop, name, _w)
 
-    async def _noop(*a, **k):
-        return None
-    monkeypatch.setattr(loop, "_record_unprotected_position", _noop)
+    # ------------------------------------------------------------------
+    # **THE RECORDER RUNS. Only its database session is stubbed.** (Review's REVIEW_FAIL on 7f0ee09.)
+    #
+    # The first version no-opped `_record_unprotected_position`, so a DecisionRecord written INSIDE
+    # the recorder never reached the constructor patch above — the net had a hole exactly where a
+    # future "record this halt properly" edit would land. The site pin below catches only the literal
+    # name `DecisionRecord`, so measured on the committed tree: a writer in the recorder by its real
+    # name died only on the pin, and by ALIAS or ATTRIBUTE access it died on NOTHING. Letting the
+    # recorder run puts every construction, however it is spelled, through the patched class.
+    # ------------------------------------------------------------------
+    import app.db.session as sess
+
+    alerts: list = []
+
+    class _Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        def add(self, row):
+            alerts.append(row)
+
+        async def commit(self):
+            return None
+
+    monkeypatch.setattr(sess, "async_session_maker", lambda: _Session())
 
     with pytest.raises(AlpacaUnprotectedPositionOpen):
         await loop._tick_symbol("BTC/USD", "BTCUSDT")
 
+    # THE RECORDER DID RUN — otherwise "no row" is satisfied by it never executing.
+    assert any(type(r).__name__ == "Alert" for r in alerts), (
+        f"the recorder did not write its alert, so it may not have run at all: {alerts!r}"
+    )
     assert built == [], (
         f"a DecisionRecord was CONSTRUCTED on the unprotected-position path: {built}. This is the "
-        f"assertion that carries the weight — it sees any writer, named or not."
+        f"assertion that carries the weight: it sees any construction EXECUTED on this drive, in any "
+        f"spelling, the recorder included — not a path the drive skips, and not a core/raw insert."
     )
     assert wrote == [], f"a known writer fired on the unprotected-position path: {wrote} (diagnostic)"
     assert acts, "the tick never reached the order path, so 'no row' would be true for the wrong reason"
@@ -808,7 +872,15 @@ async def test_L4_the_recorder_CLEARS_the_alarm_on_success_and_NAMES_a_failure(m
 
 
 def test_the_SET_of_DecisionRecord_CONSTRUCTION_SITES_is_pinned():
-    """**`M-2`'s shape, and the reason the arm above can be trusted.**
+    """**`M-2`'s shape — DEFENCE IN DEPTH, and narrower than it looks.**
+
+    **WHAT THIS ARM CATCHES, PRECISELY:** a call spelled with the bare name `DecisionRecord(...)` in
+    `crypto_loop.py`. It does NOT catch an alias (`from ... import DecisionRecord as DR; DR(...)`),
+    module-attribute access (`dr_mod.DecisionRecord(...)`), `getattr`, or a core/raw insert. Measured
+    on 7f0ee09 with a writer planted inside `_record_unprotected_position`: by real name this arm died,
+    by alias or attribute nothing died — until the driven no-row arm was made to run the recorder.
+    Chasing every spelling statically is open-ended; **the driven arm is the robust net, and this one
+    only makes a new bare-name construction site a deliberate edit.**
 
     The constructor patch is the boundary every row must cross — but only while every writer
     actually builds a `DecisionRecord`. A fifth writer is a deliberate decision someone should
@@ -899,7 +971,7 @@ async def test_REACHABILITY_service_files_observed_flat_as_REJECTED_with_its_OWN
     assert res["status"] == "REJECTED", res
     assert res["rejection_code"] == REJECTION_PROTECTION_NOT_ACCEPTED, (
         f"filed under {res.get('rejection_code')!r} — as VENUE_TRANSPORT it reads as transient and "
-        f"clears on its own, when the venue will refuse the same order every time"
+        f"clears on its own, when it recurs while its condition holds"
     )
 
 

@@ -298,8 +298,9 @@ class AlpacaProtectionNotAccepted(BrokerError):
     and no open order for the symbol — before this is raised.
 
     **ITS OWN TYPE BECAUSE IT MAPS TO ITS OWN CODE**, for `AlpacaBelowMinimumSize`'s reason: filed
-    as `VENUE_TRANSPORT` it would read as a transient blip that clears on its own, when it is a
-    venue capability that will refuse the same order every time.
+    as `VENUE_TRANSPORT` it would read as a transient blip that clears on its own. It is not
+    transient: it recurs for as long as the observed condition holds — the venue created no working stop, OR it parked one in a status `WORKING_STOP_LEG_STATUSES` does not yet admit, in which case that unmeasured list is too narrow and the venue refused nothing. The message carries the re-read leg statuses FIRST so an operator — and
+    probe 3's saved artefact — can tell which.
 
     **Raised ONLY on observed flat**, so it is an ordinary rejection — no position exists and the
     decision is correctly recorded as not taken. The first version raised this whenever the close
@@ -1183,11 +1184,21 @@ class AlpacaAdapter(BrokerAdapter):
             raise AlpacaUnprotectedPositionOpen(symbol=request.pair, order_id=order_id,
                                                 detail=detail)
 
+        # **THE LEG STATUSES FIRST, AND NO PREDICTION** (review, manager). This string is stored as
+        # `redact_for_storage(str(exc))`, which bounds it at 300 characters, and a realistic message
+        # was already over 400 before any leg data — so anything appended was cut from the durable
+        # REJECTED row. And the (status, kind) pairs are THE datum probe 3's outcome exists to produce:
+        # which status the venue parks a stop leg in. The old ending, "this venue will refuse the
+        # same order every time", was false in exactly that case — if the venue parks a working stop
+        # in a status our list does not admit, the venue refused nothing and the list is too narrow.
+        leg_view = ("re-read FAILED" if reread_error is not None else
+                    ",".join(f"{self._order_status(l) or '?'}/{self._leg_kind(l) or '?'}" for l in legs)
+                    or "none")
         raise AlpacaProtectionNotAccepted(
-            f"Alpaca accepted the {request.pair} order and no WORKING stop leg was observed "
-            f"(asked {wanted}, order_class={got!r}, {len(legs)} leg(s) on the re-read). "
-            f"Remediation: {detail}. FLAT WAS OBSERVED, so nothing is open. This venue will refuse "
-            f"the same order every time until the protection is placeable.",
+            f"no working stop leg on re-read of {request.pair} {order_id}: legs=[{leg_view}] "
+            f"(asked {wanted}, class={got!r}). Admitted working statuses: "
+            f"{sorted(WORKING_STOP_LEG_STATUSES)} - if a stop leg above is in another working status, "
+            f"that list is too narrow and the venue refused nothing. Remediation: {detail}",
             broker="alpaca",
         )
 
@@ -1316,7 +1327,13 @@ class AlpacaAdapter(BrokerAdapter):
             return False, (f"flat NOT OBSERVED: order {order_id} still has {len(unfinished)} "
                            f"non-terminal part(s) ({', '.join(self._order_status(o) or '?' for o in unfinished)})")
 
-        return True, f"flat OBSERVED: no position, no open order or live leg for {symbol}, order {order_id} terminal"
+        # **SCOPED TO WHAT WAS CHECKED** (review). The earlier "no position, no open order or live leg
+        # for <symbol>" was false in exactly one tree: a DIFFERENT filled parent's take-profit still
+        # resting, rolled up under a parent the OPEN listing excludes. A log line is read in the
+        # moment, so the scope goes in the line, not in a caveat after it. The "flat OBSERVED" prefix
+        # is kept — four arms assert it, and it is not a substring of "flat NOT OBSERVED".
+        return True, (f"flat OBSERVED: no position for {symbol}; no open order or live leg for it on "
+                      f"the open-order page; order {order_id} and its legs terminal")
 
     @staticmethod
     def _protection_class(placed) -> str | None:
