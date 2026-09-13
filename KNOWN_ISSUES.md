@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-13 (newest entry B436 — OverflowError escapes handlers that catch only TypeError and ValueError, off the order path: the streaming price callback in main.py, analysis helpers, monitoring, and the finnhub calendar timestamp, where the overflow is in datetime.fromtimestamp rather than float so a string input reaches it, and whose handler catches OSError — right on some platforms, absent on the Linux host we deploy to. That calendar feeds the news windows that gate entries; what the gate does when the parse raises is unmeasured. Found by an AST sweep controlled three ways, with a precondition test ruling out five syntax matches that cannot overflow. The order-path sites are fixed in B433's follow-up.)
+Last updated: 2026-09-13 (newest entries B437 and B438. B437 — every Alpaca SDK call runs synchronously inside async code: _call does getattr then method(*args) inline with no to_thread, so each round trip blocks the event loop, stalling other symbols, the websocket and the API; B429 and B427 add calls, and the fix is to_thread in _call, reviewed on its own. B438 — the kill switch and the positions close record an Alpaca close as CLOSED when it is merely accepted (positions.py treats anything outside not_found/error/rejected/failed as closed; close_all_positions marks CLOSED on an Order body), and on the DEPLOYED build they reach Alpaca through the saved connection, which B430 does not govern: for Alpaca, observe_only selects the paper endpoint rather than blocking orders, the adapter has no observe_only check, and the manager's close-all has none. Latent only because the paper account holds no position; probe 3 opens one. Fix ruled into B427.)
 
 ---
 
@@ -29135,3 +29135,77 @@ belongs to another sweep), and a conversion hidden inside a helper (`Decimal(x)`
 finnhub line was flagged for the wrong reason — the float — and is an instance for a different one.
 
 All implausible inputs; none on the order path. Latent.
+
+---
+
+### B437 — EVERY ALPACA SDK CALL RUNS SYNCHRONOUSLY INSIDE ASYNC CODE, so each round trip BLOCKS THE EVENT LOOP — the engine's other symbols, the websocket and the API all wait on it
+
+**Measured by execute during B427's design; verified by manager at `0485b0f`.** `alpaca-py`'s `TradingClient` is
+synchronous (`alpaca/common/rest.py` uses `requests`), and the adapter calls it inline:
+
+```python
+async def _call(self, name, *args, **kwargs):
+    method = getattr(self._client, name, None)
+    ...
+    result = method(*args, **kwargs)          # no asyncio.to_thread, no run_in_executor
+```
+
+**An `async def` that performs a blocking network call does not yield while it waits.** For the duration of every
+Alpaca request, nothing else in the process runs: not the other symbols' ticks (the loop ticks them sequentially),
+not the websocket pushes, not the API handlers.
+
+**Why this is filed now:** `B429` already makes up to three calls per order (submit, and the re-reads), and `B427`
+adds up to six bounded re-reads. Each is a stall. The design accepts that for B427, because the fix below changes
+every adapter call and is wider than B427.
+
+**Fix direction:** run the SDK call off the event loop — `await asyncio.to_thread(method, *args, **kwargs)` inside
+`_call`, the one place every call already passes through. It needs its own review: exceptions raised in the worker
+thread must still reach `_call`'s existing classification, and any object the SDK shares between calls must be safe
+to use from a thread. Not a deploy-D blocker; its cost scales with how many Alpaca calls each tick makes.
+
+---
+
+### B438 — THE KILL SWITCH AND THE POSITIONS CLOSE RECORD AN ALPACA CLOSE AS CLOSED WHEN IT IS MERELY ACCEPTED — and on the DEPLOYED build they reach Alpaca through the saved connection, which B430 does not govern
+
+**Found from execute's B427 measurement M4; the reach traced by manager at `0485b0f` and `6ae6aca`.** Latent today
+only because the Alpaca paper account has never held a position.
+
+**THE MISREAD.** `AlpacaAdapter.close_position` returns `{position_id, partial, result: str(Order)}` — the closing
+Order's status and filled quantity are discarded (B427's first addendum). The consumers then read an order that was
+only ACCEPTED as a position that is CLOSED:
+
+```
+api/routers/positions.py      _FAIL_STATUSES = {"not_found", "error", "rejected", "failed"}
+                              anything outside that set -> treated as closed; "accepted" is outside it
+manager.close_all_positions   calls each adapter's close_all_positions, which marks CLOSED on an Order body
+                              — the kill switch's own path
+```
+
+**A kill switch that reports CLOSED on acceptance is `B429`'s false flat on the most safety-critical surface in the
+system:** it tells the operator the book is flat at the moment it matters most, before anything has filled.
+
+**THE REACH, which is the part that was not known.** `B430` keeps the ENGINE LOOP off Alpaca. It does NOT govern the
+broker manager:
+
+```
+manager._make_adapter      _ALPACA_ALIASES -> constructs an AlpacaAdapter from a broker_connections row
+                           (present at the deployed 6ae6aca)
+observe_only, for Alpaca   manager.py: paper = not environment.startswith("live") or observe_only
+                           -> it selects the PAPER ENDPOINT. It is NOT a trading gate.
+AlpacaAdapter              contains no observe_only check at all (0 occurrences)
+manager.close_all_positions  no observe_only check before closing
+```
+
+So the saved Alpaca connection can place and close real orders on the paper account, and the kill switch will send
+closes to it. (`observe_only` selecting the endpoint is `B408`'s territory; what it means here is that an
+"observe-only" Alpaca connection is not observe-only for the kill switch.)
+
+**Why it is latent, and when it stops being:** the paper account holds no position, so there is nothing to close.
+**Probe 3 opens one.** A kill switch pulled while probe 3's position is open would send the close and report CLOSED on
+acceptance. The runbook's probes close through `close_position` directly, not the kill switch — but that is a
+procedure, not a guard.
+
+**Fix, ruled into `B427`:** `close_position` and `close_all_positions` resolve their close orders to a terminal state
+with the same bounded resolver, and return the mapped status and fill; `positions.py` and the manager stop treating a
+non-terminal close as closed — an accepted close that does not reach terminal is "submitted, not confirmed", never
+CLOSED.
