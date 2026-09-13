@@ -29512,3 +29512,16 @@ Before `B441` the same request could hang with no bound at all, so this is not a
 answers "already in progress", saying how long the first has run and what it has reported so far. (2) Not built,
 and needs a ruling on the response's shape: the switch answers within the proxy bound with what it has closed so
 far, and keeps reporting the rest through the websocket and the audit log.
+
+**AMENDMENT — THE NUMBER FROM `B442`'s DESIGN (execute), AND THE MANAGER'S RULING ON IT.** Sweep (b)'s lock wait
+was ruled as the normal-path bound 3C + B, with C derived live from the client. With the SDK's default retry count
+(3) and wait (3s) left in place, and the builder's 3s connect and 10s read, **C = 4 × 13 + 3 × 3 = 61s and
+3C + B = 188s**, already above nginx's 120s before sweep (a) has run. Without 429s it is 44s.
+- **Not taken:** lowering the SDK retry count to 1 (C = 29s, 92s). It would change every call, entries and closes
+  alike, and at the kill switch it would fail closes that three retries would have ridden out.
+- **Ruled:** (b)'s wait = min(3C + B, `KILL_SWITCH_RESPONSE_DEADLINE_S` − time since close-all began), floored at 0,
+  with the deadline 100s. An arm reads `deploy/nginx-web.conf` and asserts the deadline stays below the `/api/`
+  proxy timeout. When the deadline cuts the wait short, the expiry row says so and names the derived figure.
+- **Residuals, stated:** sweep (a) alone can pass 100s with enough positions on a degraded venue, which leaves (b)
+  no wait and still risks the 504; that is this entry's unbuilt response-shape fix. And the deadline is counted per
+  adapter, while `broker_manager` closes adapters one after another.
