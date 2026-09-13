@@ -1,6 +1,6 @@
 # Malek — current state
 
-_Last updated: 2026-09-14 00:25 WAT, by Malek's manager session. Updated about every 2 hours._
+_Last updated: 2026-09-14 00:45 WAT, by Malek's manager session. Updated about every 2 hours._
 
 ## Goal right now
 
@@ -45,12 +45,14 @@ defect found goes into `KNOWN_ISSUES.md` with a B-number. A commit is only "done
 2. **The first real orders ("probes" 1–4)**, run by hand on the paper account, following Malek's runbook. They answer
    questions only Alpaca can: does it accept a stop-loss attached to a crypto order, does it acknowledge before
    filling, how it spells symbols, and whether an attached stop blocks a partial close.
-3. `B437`: Alpaca calls currently block the app while they wait — move them to one worker queue per account.
-4. **`B428b`, the largest remaining piece: manage and record positions on Alpaca** (register `B444`). Today the 70%
+3. `B445` + `B446`: the kill switch's report can lose rows (a confirmed close shown as a failure), and a cancelled
+   kill switch is silently swallowed. Queued right after `B442`.
+4. `B437`: Alpaca calls currently block the app while they wait — move them to one worker queue per account.
+5. **`B428b`, the largest remaining piece: manage and record positions on Alpaca** (register `B444`). Today the 70%
    take-profit would silently never happen on Alpaca, and a stop or target filling at Alpaca would write no trade
    and leave the decision open.
-5. Part E.
-6. Switch the engine to Alpaca (`B430`), last.
+6. Part E.
+7. Switch the engine to Alpaca (`B430`), last.
 
 ## Open decisions (Malek's)
 
