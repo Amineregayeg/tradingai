@@ -50,6 +50,10 @@ _CHAIN = [
     ("0011", "0011_rejection_code_transport.py", "0010"),
     ("0012", "0012_rejection_code_min_size.py", "0011"),
     ("0013", "0013_outcome_unsized_fill.py", "0012"),
+    # `B429`. Fired for this one too, the moment the file appeared and before any arm for
+    # its contents existed — four times running now (`0005`, `0009`, `0010`, `0014`). The
+    # cost of adding a line is exactly what makes the omission visible.
+    ("0014", "0014_rejection_code_protection.py", "0013"),
 ]
 
 
@@ -709,7 +713,8 @@ def test_each_migration_FREEZES_the_vocabulary_that_was_live_when_it_RAN():
     0002   5  the column and its first CHECK           0010  16  rejection_code's first CHECK
     0006   6  + ABANDONED                              0011  17  + VENUE_TRANSPORT
     0007   3  decided_by's vocabulary                  0012  18  + MIN_SIZE
-    0008   7  + REJECTED
+    0008   7  + REJECTED                               0014  19  + PROTECTION_NOT_ACCEPTED
+    0013   8  + UNSIZED_FILL
     ```
 
     Each revision's contents were recovered from the model as it stood at that migration's landing
@@ -726,6 +731,7 @@ def test_each_migration_FREEZES_the_vocabulary_that_was_live_when_it_RAN():
 
     m2, m6, m7, m8 = load("0002"), load("0006"), load("0007"), load("0008")
     m10, m11, m12, m13 = load("0010"), load("0011"), load("0012"), load("0013")
+    m14 = load("0014")
 
     EXPECTED = {
         ("0002", "_OUTCOMES_AT_0002"): {"WIN", "LOSS", "BE", "OPEN", "ABSTAINED"},
@@ -737,8 +743,19 @@ def test_each_migration_FREEZES_the_vocabulary_that_was_live_when_it_RAN():
             "WIN", "LOSS", "BE", "OPEN", "ABSTAINED", "ABANDONED", "REJECTED"},
         ("0013", "_OUTCOMES_AT_0013"): {
             "WIN", "LOSS", "BE", "OPEN", "ABSTAINED", "ABANDONED", "REJECTED", "UNSIZED_FILL"},
+        # `B429`. Nineteen codes, AS A SET — `0012`'s eighteen plus the one this revision adds.
+        # Written out rather than derived from `_CODES_AT_0012`, because deriving it here would
+        # make the arm agree with the migration by construction and test nothing.
+        ("0014", "_CODES_AT_0014"): {
+            "NO_REFERENCE_PRICE", "DEGENERATE_STOP", "ENTRY_DRIFT", "THROUGH_STOP",
+            "NON_POSITIVE_SIZE", "VENUE_DIRECTION_UNSUPPORTED", "MIN_SIZE",
+            "PROTECTION_NOT_ACCEPTED", "PROP_FIRM_TARGET_REACHED",
+            "PROP_FIRM_HALTED_DAILY_LOSS", "PROP_FIRM_HALTED_MAX_DRAWDOWN",
+            "PROP_FIRM_HALTED", "PROP_FIRM_WOULD_BREACH_DAILY_LOSS",
+            "PROP_FIRM_WOULD_BREACH_MAX_DRAWDOWN", "BROKER_UNAVAILABLE",
+            "VENUE_TRANSPORT", "VENUE_RAISED", "UNCODED_LEGACY", "UNCLASSIFIED"},
     }
-    mods = {"0002": m2, "0006": m6, "0007": m7, "0008": m8, "0013": m13}
+    mods = {"0002": m2, "0006": m6, "0007": m7, "0008": m8, "0013": m13, "0014": m14}
     for (stem, name), expected in EXPECTED.items():
         actual = set(getattr(mods[stem], name))
         assert actual == expected, (
@@ -749,6 +766,12 @@ def test_each_migration_FREEZES_the_vocabulary_that_was_live_when_it_RAN():
     assert len(m10._CODES_AT_0010) == 16
     assert len(m11._CODES_AT_0011) == 17
     assert len(m12._CODES_AT_0012) == 18
+    # `B429`. The DOWNGRADE target: `0014` must rebuild exactly `0012`'s eighteen, and the new
+    # code must be absent from it — a downgrade that left it in would permit a value the revision
+    # it claims to restore never knew, which is `0011`'s original defect.
+    assert "PROTECTION_NOT_ACCEPTED" not in m14._CODES_AT_0012
+    assert set(m14._CODES_AT_0012) == set(m12._CODES_AT_0012)
+    assert "PROTECTION_NOT_ACCEPTED" in m14._CODES_AT_0014
     assert "VENUE_TRANSPORT" not in m10._CODES_AT_0010
     assert "VENUE_TRANSPORT" in m11._CODES_AT_0011
     assert "MIN_SIZE" not in m11._CODES_AT_0011
@@ -766,12 +789,15 @@ def test_each_migration_FREEZES_the_vocabulary_that_was_live_when_it_RAN():
     )
     assert set(m11._CODES_AT_0010) == set(m10._CODES_AT_0010)
     assert set(m12._CODES_AT_0011) == set(m11._CODES_AT_0011)
+    assert set(m14._CODES_AT_0012) == set(m12._CODES_AT_0012), (
+        "0014's downgrade would restore a 0012 that never existed"
+    )
 
     # The LIVE vocabularies belong to the NEWEST revision for each, and to no other.
     from app.models.decision_record import DECISION_OUTCOMES, REJECTION_CODES
 
-    assert set(m12._CODES_AT_0012) == set(REJECTION_CODES), (
-        "HEAD's rejection vocabulary has moved past 0012 — a code the database's CHECK refuses, so "
+    assert set(m14._CODES_AT_0014) == set(REJECTION_CODES), (
+        "HEAD's rejection vocabulary has moved past 0014 — a code the database's CHECK refuses, so "
         "the rejection is LOST rather than recorded (B410). A new code needs a new migration."
     )
     assert set(m13._OUTCOMES_AT_0008) == set(m8._OUTCOMES_AT_0008), (

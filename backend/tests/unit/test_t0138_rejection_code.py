@@ -200,7 +200,10 @@ async def test_the_idle_broker_path_does_NOT_alarm():
 
 async def test_the_vocabulary_is_CLOSED_and_every_code_is_distinct():
     # 16 at part 3, 17 once `VENUE_TRANSPORT` joined (`B403`'s transport half), 18 once `MIN_SIZE`
-    # got its owner (`T-0140`, the venue's sizing floor). The number is pinned so that widening
+    # got its owner (`T-0140`, the venue's sizing floor), 19 once `PROTECTION_NOT_ACCEPTED` did
+    # (`B429`, migration `0014`: the venue took the order and not the stop, and flat was observed).
+    # **This guard caught `B429` adding the code and the migration but skipping THIS edit** — on
+    # the full suite, not on any targeted run, which is the argument for the full suite. The number is pinned so that widening
     # the vocabulary is a DELIBERATE edit here AND a schema change in `alembic/`, never a constant
     # someone appends to — which is the whole reason the column carries a CHECK constraint.
     #
@@ -208,8 +211,9 @@ async def test_the_vocabulary_is_CLOSED_and_every_code_is_distinct():
     # migration widening the CHECK is a row the database refuses at write time, so the rejection
     # is lost rather than recorded (`B410`). The names are listed, not just counted, because a
     # count survives a rename and a rename is what breaks the CHECK.
-    assert len(REJECTION_CODES) == len(set(REJECTION_CODES)) == 18
+    assert len(REJECTION_CODES) == len(set(REJECTION_CODES)) == 19
     assert "MIN_SIZE" in REJECTION_CODES
+    assert "PROTECTION_NOT_ACCEPTED" in REJECTION_CODES
     assert "VENUE_TRANSPORT" in REJECTION_CODES
 
     # The CHECK constraint must admit exactly this vocabulary — same source, so this compares the

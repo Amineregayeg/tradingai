@@ -19,7 +19,11 @@ from enum import Enum
 from app.core.exceptions import BrokerError, DirectionNotSupported
 # Imported lazily inside the module rather than at package import: `alpaca.py` must stay
 # importable without the SDK (`B328`), and it is — the SDK lives inside its methods.
-from app.services.broker.alpaca import AlpacaBelowMinimumSize
+from app.services.broker.alpaca import (
+    AlpacaBelowMinimumSize,
+    AlpacaProtectionNotAccepted,
+    AlpacaUnprotectedPositionOpen,
+)
 from app.core.logging import logger, redact_for_storage
 from app.db.enums import DirectionType, OrderType
 from app.models.decision_record import (
@@ -30,6 +34,7 @@ from app.models.decision_record import (
     REJECTION_THROUGH_STOP,
     REJECTION_VENUE_DIRECTION_UNSUPPORTED,
     REJECTION_MIN_SIZE,
+    REJECTION_PROTECTION_NOT_ACCEPTED,
     REJECTION_VENUE_TRANSPORT,
 )
 from app.services.broker.base import BrokerAdapter, OrderRequest
@@ -272,6 +277,38 @@ class ExecutionService:
                     "venue": getattr(exc, "broker", None),
                     "requested_units": float(exc.requested),
                     "min_order_size": float(exc.minimum),
+                    "sized_units": lot_size, "equity_at_entry": acct.equity}
+        except AlpacaUnprotectedPositionOpen:
+            # ------------------------------------------------------------------
+            # **`B429`. NOT A REJECTION, AND IT MUST BE CAUGHT BEFORE `BrokerError`.**
+            #
+            # Every other branch here returns `status: REJECTED`, which asserts NO POSITION WAS
+            # TAKEN. This exception means the opposite: the venue would not take the stop, the
+            # remediating close FAILED, and a live unprotected position may exist. Filing it as a
+            # rejection would write a row saying the engine declined to trade while the venue
+            # holds an open position with no stop — `B399`'s false row, in the worst possible
+            # direction.
+            #
+            # So it is RE-RAISED, unhandled by this layer on purpose, and `crypto_loop`'s
+            # order-path handler branches on the type and HALTS. Catching it here at all is
+            # deliberate: without this clause `BrokerError` below would swallow it, and the
+            # ordering is the same hazard `AlpacaBelowMinimumSize` documents above.
+            # ------------------------------------------------------------------
+            raise
+        except AlpacaProtectionNotAccepted as exc:
+            # ------------------------------------------------------------------
+            # **`B429`. THE VENUE TOOK THE ORDER AND NOT THE STOP — AND THE POSITION IS CLOSED.**
+            #
+            # A genuine rejection: nothing is open, so recording the decision as not taken is
+            # true. Its own code for `MIN_SIZE`'s reason — filed as `VENUE_TRANSPORT` it would
+            # read as transient and clear on its own, when the venue will refuse the same order
+            # every time until the protection is placeable.
+            # ------------------------------------------------------------------
+            return {"status": "REJECTED",
+                    "reason": redact_for_storage(str(exc)),
+                    "rejection_code": REJECTION_PROTECTION_NOT_ACCEPTED,
+                    "pair": sig.symbol, "direction": sig.direction.value,
+                    "venue": getattr(exc, "broker", None),
                     "sized_units": lot_size, "equity_at_entry": acct.equity}
         except BrokerError as exc:
             # ------------------------------------------------------------------

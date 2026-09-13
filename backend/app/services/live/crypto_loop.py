@@ -24,6 +24,7 @@ from app.services.broker.paper import PaperBroker
 #: A set rather than a literal so the spelling lives in ONE place (`B184`); `manager.py`
 #: keeps its own aliases for the CONNECT path, which is a different entry point.
 _ALPACA_MODES = {"alpaca", "alpaca_paper", "alpaca-paper"}
+from app.services.broker.alpaca import AlpacaUnprotectedPositionOpen
 from app.services.execution.service import ExecMode, ExecutionService
 from app.services.live import fixed_config as fixed
 from app.services.live import exit_shadow
@@ -167,6 +168,14 @@ class BlockReason(str):
 #: the kill switch would make *halted because a partial could not be sized* and *someone pressed
 #: stop* the same event to every count and every panel.
 HALT_PARTIAL_UNSIZED = "a partial fill left a position we could not size"
+
+#: **`B429`.** The venue would not accept the stop AND flat was not observed after cancelling
+#: the entry and closing the position — a close still resting counts, so a
+#: live position may exist with no stop at the venue and none in process. **Its own value,
+#: per `M-7`** — sharing `HALT_PARTIAL_UNSIZED` would make *a partial we could not size* and
+#: *a position we could not protect* the same event to every count and every panel, when the
+#: operator action differs: one is reconcile the SIZE, this one is place a stop or flatten.
+HALT_UNPROTECTED_POSITION = "a position may be open at the venue with no stop"
 
 #: Statuses that mean the venue acted on the order. `B316` already records that `service.py`
 #: defaults a status-less reply to `FILLED`, so absence never arrives here as absence.
@@ -751,6 +760,85 @@ class LiveCryptoLoop:
         except Exception:  # noqa: BLE001
             raw = str(len(entry_df))
         return hashlib.sha1(raw.encode()).hexdigest()[:16]
+
+    async def _record_unprotected_position(self, pair: str, sig, exc) -> None:
+        """Record a halt declared because a position may be open with no stop (`B429`).
+
+        **AN ALERT ONLY, AND THE ABSENCE OF A `DecisionRecord` IS DELIBERATE.** Its sibling
+        `_record_unsized_fill` writes one because `UNSIZED_FILL` says exactly what happened there.
+        No value in the vocabulary says *the venue took the order, refused the stop, and the close
+        failed*: `REJECTED` asserts no position (false), `OPEN` asserts one of known size that we
+        are managing (false — nothing is managing it), `UNSIZED_FILL` asserts we could not size it
+        (we could; we could not PROTECT it). **A row is worse than no row when every available
+        value is affirmatively wrong** — `B399`, and the reason `UNSIZED_FILL` had to be added
+        rather than borrowed. A ninth outcome belongs with `B427`/`T-0130`, which own that
+        vocabulary; this does not smuggle one in.
+
+        **AND NO ROW EXISTS YET — "no NEW row" and "no row" are different states, and the argument
+        above needs the second.** Traced and then DRIVEN (`test_the_unprotected_halt_leaves_NO_
+        DECISION_ROW_AT_ALL`): `_record_signal_decision` has one call site, inside the fill branch,
+        after `execution.execute()` returns, and this halt fires in the `except` around that call —
+        so nothing has been written for this signal. Were a row already claiming `OUTCOME_OPEN`,
+        declining to write would LEAVE it asserting a managed position of known size, which is the
+        thing this docstring rejects and worse for being on disk already. The manager asked for the
+        trace rather than accepting the claim, which is why it is stated here and not in a message.
+
+        Mirrors the writer contract `_declare_halt` depends on: every failure is appended rather
+        than raised, and the LAST statement clears the alarm unconditionally so a success cannot
+        leave it standing.
+        """
+        failures: list[str] = []
+        order_id = getattr(exc, "order_id", None)
+
+        try:
+            from datetime import timedelta
+
+            from app.db.enums import AlertPriority, AlertStatus, AlertType
+            from app.db.session import async_session_maker
+            from app.models.alert import Alert
+
+            async with async_session_maker() as db:
+                db.add(Alert(
+                    type=AlertType.RISK_WARNING,
+                    priority=AlertPriority.CRITICAL,
+                    pair=pair,
+                    message=(
+                        f"ENGINE HALTED — {HALT_UNPROTECTED_POSITION}. The venue accepted the "
+                        f"order, refused the stop, and flat was NOT observed after cancel and close "
+                        f"(a slow fill and a failed close both land here — see the detail). There is "
+                        f"NO STOP at the venue and none in this process. No new entries."
+                    ),
+                    suggested_action={
+                        "action": "flatten_or_place_stop_at_venue",
+                        "pair": pair,
+                        "order_id": order_id,
+                    },
+                    context_json={
+                        "halt_reason": HALT_UNPROTECTED_POSITION,
+                        "order_id": order_id,
+                        "detail": getattr(exc, "detail", None),
+                        "signal_sl": float(sig.sl) if sig.sl is not None else None,
+                        "signal_tp": float(sig.tp) if sig.tp is not None else None,
+                        "run_id": str(self.run_id) if self.run_id else None,
+                    },
+                    # `PENDING`, as its sibling `_record_unsized_fill` writes. The first version said
+                    # `ACTIVE`, a member `AlertStatus` does not have: the AttributeError landed in the
+                    # `except` below and became one log line, so the CRITICAL alert for an unprotected
+                    # position would NEVER have been written. Found by the L-4 arm the kill set demanded.
+                    status=AlertStatus.PENDING,
+                    expires_at=datetime.now(timezone.utc) + timedelta(days=365),
+                ))
+                await db.commit()
+        except Exception as exc2:  # noqa: BLE001 - a failed write must not un-halt the engine
+            failures.append(f"alert: {type(exc2).__name__}")
+            logger.error("live.unprotected_position.alert_failed", error=str(exc2), pair=pair)
+
+        # UNCONDITIONAL, so a success CLEARS the alarm `_declare_halt` armed. A conditional
+        # assignment here would leave "NOT YET WRITTEN" standing after a successful write, which
+        # is the alarm that cries wolf and then gets ignored.
+        self.halt_record_failed = (
+            f"{HALT_UNPROTECTED_POSITION} — {', '.join(failures)}" if failures else None
+        )
 
     async def _record_unsized_fill(self, pair: str, entry_df, sig, res: dict) -> None:
         """The two DURABLE records of a halt: one for the corpus, one for the operator.
@@ -2316,6 +2404,37 @@ class LiveCryptoLoop:
         # ------------------------------------------------------------------
         try:
             res = await self.execution.execute(sig)
+        except AlpacaUnprotectedPositionOpen as exc:
+            # ------------------------------------------------------------------
+            # **`B429`. A POSITION MAY BE OPEN AND UNPROTECTED — SO NO REJECTION ROW.**
+            #
+            # The handler below records `REJECTION_VENUE_RAISED` for anything the broker raises:
+            # a row asserting the engine did not trade. Here the venue TOOK the order, would not
+            # take the stop, and flat was NOT observed after remediation — a live position with no stop at
+            # the venue and none in process (`B428`). That row would be false in the direction
+            # that hides the danger, which is the `PARTIALLY_FILLED`-recorded-as-refused defect
+            # this file already documents forty lines down.
+            #
+            # Halting and arming the alarm are ONE act (`B424`) — see `_declare_halt`.
+            # ------------------------------------------------------------------
+            self._declare_halt(HALT_UNPROTECTED_POSITION)
+            logger.error(
+                "live.unprotected_position — HALTING. The venue accepted the order, refused the "
+                "stop, and flat was not observed after cancel and close. Reconcile AT THE VENUE before "
+                "restarting: there is no stop there and none in this process.",
+                pair=pair, direction=sig.direction.value,
+                order_id=getattr(exc, "order_id", None),
+                detail=getattr(exc, "detail", None),
+            )
+            await self._act(
+                BLOCK_HALT,
+                f"{pair} {sig.direction.value} — HALTED: {HALT_UNPROTECTED_POSITION} "
+                f"(order {getattr(exc, 'order_id', 'UNREPORTED')})",
+            )
+            # LAST, and after the halt is already in force (`M-7`): this records the halt, it does
+            # not perform it. A failure here cannot un-halt.
+            await self._record_unprotected_position(pair, sig, exc)
+            raise
         except Exception as exc:  # noqa: BLE001 - recorded, then re-raised to the loop's handler
             await self._record_rejected_signal(
                 pair, entry, sig,

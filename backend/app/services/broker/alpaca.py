@@ -214,6 +214,127 @@ class AlpacaBelowMinimumSize(BrokerError):
         self.minimum = minimum
 
 
+#: **`B429` / R-10. How many open orders the flat-check asks for, and why it is modest.**
+#:
+#: `TradingClient.get_orders` is ONE request with no pagination, so the answer is a PAGE. A page that
+#: comes back FULL may have truncated the order being looked for, so a full page is a failed
+#: observation and halts. That test is only sound if a full page is recognisable: request 500 from a
+#: server that silently caps at, say, 100, and the page comes back SHORTER than requested — reading
+#: as complete while being a prefix. So N is kept well under any plausible cap.
+#:
+#: **RESIDUAL, NOT CLOSED:** fullness is tested against the requested limit; a server cap below it
+#: would defeat this. The cap is unmeasured from this repository.
+#:
+#: The request also sends `direction=desc`, so the entry and close this remediation JUST created sort
+#: onto page one and truncation can only drop OLDER orders. **That narrows the residual; it does not
+#: close it** — newest-first is the server's sort order and is as unmeasured as the cap, and a stale
+#: resting order for this symbol from earlier still depends on N staying under the cap.
+FLAT_CHECK_ORDER_LIMIT = 100
+
+#: **`B429`. The ONLY statuses in which a stop leg counts as protection.** AFFIRMATIVELY WORKING
+#: ONLY, and the narrowness is argued from asymmetric cost rather than from any reading of the
+#: venue's docs:
+#:
+#:     wrongly EXCLUDE a working status   -> a needless cancel-and-close. Safe, and unreachable today (B430).
+#:     wrongly INCLUDE a non-working one  -> a refused stop reads as protected. That IS B429.
+#:
+#: `held` is the member that must be right — bracket legs wait in it for the parent to fill, and
+#: omitting it would remediate every bracket. `accepted`, `pending_new` and `accepted_for_bidding`
+#: are pre-acceptance or pre-routing and are EXCLUDED until measured; so are `partially_filled`,
+#: `filled`, `pending_replace`, `pending_review` and anything not yet named.
+#:
+#: **MEMBERSHIP IS UNMEASURED.** Probe 3 places through `place_order`, so it is the evidence to widen
+#: this set: if the venue parks stop legs in `accepted`, probe 3 over-remediates its own position and
+#: records the status — an informative outcome, not a failure.
+#:
+#: RESIDUAL, stated rather than special-cased: a stop leg already `filled` at the re-read means the
+#: position was stopped out within milliseconds. Remediation then observes flat and files
+#: `PROTECTION_NOT_ACCEPTED`, which is false — the protection was accepted and fired. Near-unreachable.
+#:
+#: RESIDUAL N-1 (review), stated rather than closed: **a stop leg read `new` may not yet be
+#: validated; a refusal that completes after the re-read is not caught here. Closing it needs bounded
+#: resolution, which is `B427`'s.** `new` is overloaded between "validated and active" and "not yet
+#: validated", and without polling the two cannot be split.
+#:
+#: What always-re-reading DOES buy: it catches a refusal that has COMPLETED by the time of the GET;
+#: it returns legs the POST response omitted (`Order.legs` is Optional, `nested=True` rolls them up);
+#: and it removes the short-circuit that read protection off the acknowledgement. `new` stays on the list regardless — a filled
+#: bracket's working stop plausibly reads `new`, and dropping it would remediate correctly protected
+#: positions.
+WORKING_STOP_LEG_STATUSES: frozenset[str] = frozenset({"new", "held"})
+
+#: Order statuses after which an order can no longer fill. Anything NOT here — including a status
+#: nobody has named yet — is treated as still able to fill: cancelled by remediation, and NOT flat.
+#:
+#: **This set decides FLAT, so its cost is the allow-list's argument inverted:** wrongly including a
+#: resumable status reads a live order as finished — a false flat, which is B429 — while wrongly
+#: excluding a terminal one only over-halts. Hence:
+#:
+#:     `done_for_day` is NOT terminal — it names its own impermanence and can fill on a later day.
+#:                    (Probably unreachable on crypto, which trades continuously; excluded anyway,
+#:                    because it is the false-flat direction and it must agree with this definition.)
+#:     `stopped`, `suspended`, `calculated` are NOT terminal — anything that might still fill is live.
+#:     `replaced` IS terminal for the object itself: the replaced order cannot fill and its successor
+#:                    carries a NEW id. This path never calls `replace_order`, so no successor arises
+#:                    here — do not reason "replaced is terminal, therefore flat" about a
+#:                    venue-initiated replacement, whose successor this set says nothing about.
+TERMINAL_ORDER_STATUSES: frozenset[str] = frozenset(
+    {"filled", "canceled", "expired", "rejected", "replaced"}
+)
+
+#: The largest `FLAT_CHECK_ORDER_LIMIT` the full-page guard is argued safe for — an arm asserts the
+#: bound, because a test double never caps and so no behavioural arm can tell 100 from 10000.
+FLAT_CHECK_ORDER_LIMIT_CEILING = 200
+
+
+class AlpacaProtectionNotAccepted(BrokerError):
+    """The venue took the order and did NOT take the stop — and FLAT WAS THEN OBSERVED.
+
+    **`B429`.** `place_order` attaches `stop_loss`/`take_profit` and then READS THE RESPONSE BACK.
+    A venue that REFUSES a bracket raises, which is safe: no position, loud error. A venue that
+    ACCEPTS the order and ignores the attachment leaves a position nobody is protecting, and
+    nothing downstream would ever ask — so absence of the protection on the response is treated as
+    a failure: the entry is cancelled, any position is closed, and flat is OBSERVED — no position
+    and no open order for the symbol — before this is raised.
+
+    **ITS OWN TYPE BECAUSE IT MAPS TO ITS OWN CODE**, for `AlpacaBelowMinimumSize`'s reason: filed
+    as `VENUE_TRANSPORT` it would read as a transient blip that clears on its own, when it is a
+    venue capability that will refuse the same order every time.
+
+    **Raised ONLY on observed flat**, so it is an ordinary rejection — no position exists and the
+    decision is correctly recorded as not taken. The first version raised this whenever the close
+    call did not throw, which is an ACCEPTED close, not a filled one (review's REVIEW_FAIL).
+    """
+
+
+class AlpacaUnprotectedPositionOpen(BrokerError):
+    """**The protection was not accepted AND flat could not be observed afterwards.**
+
+    The one state this codebase must never reach quietly: a live position, no stop at the venue,
+    no stop in process (`B428` — this adapter has no `on_tick`), and the size derived from a stop
+    that was never placed.
+
+    **NOT A REJECTION, and that distinction is the whole point.** `crypto_loop`'s order-path
+    handler records `REJECTION_VENUE_RAISED` for anything the broker raises — a row asserting no
+    position was taken. Here a position IS open, so that row would be false in the direction that
+    hides the danger, which is the `PARTIALLY_FILLED`-recorded-as-refused defect one venue along.
+    The loop branches on this type and HALTS instead.
+    """
+
+    def __init__(self, *, symbol: str, order_id: str, detail: str) -> None:
+        super().__init__(
+            f"UNPROTECTED POSITION MAY BE OPEN at Alpaca on {symbol}: the venue did not accept "
+            f"the stop and flat was NOT observed after remediation ({detail}). Order {order_id}. "
+            f"There "
+            f"is no stop at the venue and none in process — reconcile at the venue before "
+            f"restarting.",
+            broker="alpaca",
+        )
+        self.symbol = symbol
+        self.order_id = order_id
+        self.detail = detail
+
+
 class AlpacaAssetUnusable(BrokerError):
     """The venue's asset record cannot support an order decision (`T-0140`).
 
@@ -822,8 +943,50 @@ class AlpacaAdapter(BrokerAdapter):
                 symbol=request.pair, requested=quantity, minimum=limits.min_order_size,
             )
 
-        from alpaca.trading.enums import OrderSide, TimeInForce
-        from alpaca.trading.requests import MarketOrderRequest
+        from alpaca.trading.enums import OrderClass, OrderSide, TimeInForce
+        from alpaca.trading.requests import (
+            MarketOrderRequest, StopLossRequest, TakeProfitRequest,
+        )
+
+        # ------------------------------------------------------------------
+        # `B429`. **THE PROTECTION GOES WITH THE ORDER, OR THE ORDER DOES NOT GO.**
+        #
+        # This method received `request.sl` and `request.tp` and **discarded both**. Not ignored
+        # in the harmless sense: `execution/service.py:174` SIZES THE POSITION FROM `sig.sl` and
+        # `:166` refuses to trade when price is already through it — so the risk model was
+        # computed from a stop nothing placed. Worse than dropping an input, because the dropped
+        # input was still being used to justify the quantity.
+        #
+        # And nothing else would have caught it. The only SL/TP enforcement in this codebase is
+        # `PaperBroker.on_tick` and `cft_sim.on_tick`, both simulators; `AlpacaAdapter` has no
+        # `on_tick` at all (`B428`). So a live position here had no stop at the venue and no stop
+        # in process.
+        #
+        # **THE CONTRACT IS ALREADY WRITTEN IN THIS FILE**, twenty lines down, on
+        # `close_position`: *"HONOUR `lot_size` rather than ignore it — the contract is honour it
+        # or refuse loudly, and silently closing everything when a caller asked for 30% is the
+        # ambiguity that contract exists to prevent."* Same file, same question, one honoured.
+        #
+        # `cryptofundtrader.py:666` and `oanda.py:420` both attach the stop. Alpaca was the only
+        # adapter that dropped it.
+        # ------------------------------------------------------------------
+        protection: dict = {}
+        if request.sl is not None and request.tp is not None:
+            protection = {
+                "order_class": OrderClass.BRACKET,
+                "stop_loss": StopLossRequest(stop_price=float(request.sl)),
+                "take_profit": TakeProfitRequest(limit_price=float(request.tp)),
+            }
+        elif request.sl is not None:
+            # **STOP-ONLY IS ITS OWN SHAPE, not a bracket with a missing leg.** `sig.tp` is
+            # legitimately `None` on this path (`crypto_loop.py:1023`, `:1899` both guard it)
+            # while `sl` is what the size was computed from, so this is the case that must work.
+            # Alpaca spells a stop-only attachment `OTO`; `BRACKET` requires both legs and would
+            # be refused.
+            protection = {
+                "order_class": OrderClass.OTO,
+                "stop_loss": StopLossRequest(stop_price=float(request.sl)),
+            }
 
         # `str(quantity)` — the venue types quantities as strings and the SDK does not coerce, so
         # handing it a float would send `0.30000000000000004` for a third of a position.
@@ -833,8 +996,26 @@ class AlpacaAdapter(BrokerAdapter):
             side=OrderSide.BUY if request.direction == DirectionType.LONG else OrderSide.SELL,
             time_in_force=TimeInForce.GTC,
             client_order_id=request.client_order_id,
+            **protection,
         )
         placed = self._require_model(await self._call("submit_order", order), "submit_order")
+
+        # ------------------------------------------------------------------
+        # **AND VERIFY IT LANDED, because the dangerous failure is the SILENT one.**
+        #
+        # A venue that REFUSES a bracket raises, which is safe — no position, loud error. A venue
+        # that ACCEPTS the order and ignores the protection leaves a naked position we believe is
+        # protected, and nothing downstream would ever ask. Whether Alpaca supports brackets on
+        # CRYPTO is not established — the SDK imposes no asset-class restriction, so the answer
+        # lives on the server and no test here can reach it.
+        #
+        # So this does not assume either way: it reads back what the venue SAYS it created. The
+        # response carries `order_class` and `legs`, so an ignored attachment is detectable rather
+        # than invisible. **This turns the unknown into a loud failure instead of a quiet one**,
+        # which is the only property available without placing a real order.
+        # ------------------------------------------------------------------
+        if protection:
+            await self._require_protection(placed, request)
 
         # `B411` — TWO DEFECTS IN ONE PREDICATE, and this line held both.
         #
@@ -899,6 +1080,256 @@ class AlpacaAdapter(BrokerAdapter):
             "client_order_id": request.client_order_id,
             "fill": float(getattr(placed, "filled_avg_price", None) or 0) or None,
         }
+
+    async def _require_protection(self, placed, request) -> None:
+        """**`B429`: the order stands only if a WORKING STOP LEG is observed. Otherwise remediate.**
+
+        Detection alone is not a fix — raising without closing leaves exactly the state this entry
+        describes. The achievable invariant is **NEVER LEAVE AN UNPROTECTED POSITION OPEN**:
+        placement and protection are not atomic at this venue as far as anyone has established.
+
+        **THE EVIDENCE, AND HOW IT GOT NARROWER THREE TIMES:**
+
+            first      `order_class == wanted or legs`   any leg, any class — a take-profit alone passed
+            S-1        a leg that is itself a STOP        a CANCELED stop leg still has a stop type
+            this       a stop leg WHOSE STATUS IS WORKING, read from a nested RE-READ, every time
+
+        *Order class alone is not evidence* — a parent can report `bracket` with its stop child
+        `rejected` (review's P-1). *The POST response is not evidence either* — it is the
+        ACKNOWLEDGEMENT, `B427`'s subject. So the order is re-read with `nested=True` on every call
+        and the POST legs are logged, never the verdict. That catches a refusal already COMPLETE at
+        the GET and legs the POST omitted; it does NOT catch a refusal completing after the GET on a
+        leg that read `new` (residual N-1, stated at `WORKING_STOP_LEG_STATUSES`). One GET is the cost.
+
+        A re-read that FAILS is not evidence of protection, and remediates.
+
+        Not claimed: that Alpaca accepts a bracket or OTO on crypto, or which statuses its stop legs
+        pass through. Everything here is driven against doubles; the venue was not consulted.
+        """
+        from alpaca.trading.requests import GetOrderByIdRequest
+
+        wanted = "bracket" if (request.sl is not None and request.tp is not None) else "oto"
+        got = self._protection_class(placed)
+        post_legs = getattr(placed, "legs", None) or []
+        order_id = str(getattr(placed, "id", "") or "unknown")
+
+        reread = None
+        reread_error = None
+        try:
+            reread = self._require_model(
+                await self._call("get_order_by_id", order_id, GetOrderByIdRequest(nested=True)),
+                "get_order_by_id")
+        except Exception as exc:  # noqa: BLE001 - a failed re-read is not evidence; it remediates
+            reread_error = f"{type(exc).__name__}: {exc}"
+
+        legs = (getattr(reread, "legs", None) or []) if reread is not None else []
+        if any(self._is_working_stop_leg(leg) for leg in legs):
+            return
+
+        logger.error(
+            "alpaca.protection_not_observed — no WORKING stop leg on the nested re-read. "
+            "Cancelling the entry and every live leg, closing any position, then OBSERVING flat.",
+            symbol=request.pair, order_id=order_id, wanted=wanted, order_class=got,
+            post_legs=[(self._order_status(l), self._leg_kind(l)) for l in post_legs],
+            reread_legs=[(self._order_status(l), self._leg_kind(l)) for l in legs],
+            reread_error=reread_error, sl=request.sl, tp=request.tp,
+        )
+
+        # ------------------------------------------------------------------
+        # **REMEDIATION NOW RUNS ON A TREE WITH CHILDREN**, which the earlier version never saw:
+        # parent `bracket`, stop child REFUSED, take-profit child STILL RESTING. Cancelling only the
+        # parent leaves that TP live — and cancelling a FILLED parent raises anyway (R-9). So every
+        # leg the re-read shows as non-terminal is cancelled by its own id, after the parent.
+        #
+        # **The verdict comes only from observation**, and a step failure is never the verdict: each
+        # is attempted, logged at ERROR, and carried into the detail of whichever exception is raised.
+        # ------------------------------------------------------------------
+        steps: list[str] = []
+        if reread_error is not None:
+            steps.append(f"re-read FAILED ({reread_error}) — legs unknown, parent cancel only")
+
+        to_cancel = [order_id] + [
+            str(getattr(leg, "id", "")) for leg in legs
+            if getattr(leg, "id", None) and self._order_status(leg) not in TERMINAL_ORDER_STATUSES
+        ]
+        for oid in to_cancel:
+            try:
+                await self._call("cancel_order_by_id", oid)
+                steps.append(f"cancel {oid} accepted")
+            except Exception as exc:  # noqa: BLE001 - recorded; the observation decides
+                steps.append(f"cancel {oid} FAILED ({type(exc).__name__}: {exc})")
+                logger.error("alpaca.protection_remediation.cancel_failed", symbol=request.pair,
+                             order_id=oid, error=f"{type(exc).__name__}: {exc}")
+
+        try:
+            # BY SYMBOL: the entry may already have filled, and what has to go is the POSITION.
+            await self.close_position(request.pair)
+            # **A SUBMISSION, not a fill** — named that way so an operator reading the halt can
+            # tell a slow close from a failed one.
+            steps.append("close SUBMITTED, not yet observed filled")
+        except Exception as exc:  # noqa: BLE001 - recorded; the observation decides
+            steps.append(f"close FAILED ({type(exc).__name__}: {exc})")
+            logger.error("alpaca.protection_remediation.close_failed", symbol=request.pair,
+                         order_id=order_id, error=f"{type(exc).__name__}: {exc}")
+
+        flat, observed = await self._observe_flat(request.pair, order_id)
+        detail = "; ".join(steps + [observed])
+
+        if not flat:
+            # NO POLL AND NO BOUND HERE (manager's ruling). A close that has not filled YET is
+            # "flat not observed" and halts. That over-halts, which is the right direction:
+            # `B427` owns bounded resolution, the bound is a trading decision, and this path is
+            # unreachable today (`B430`).
+            raise AlpacaUnprotectedPositionOpen(symbol=request.pair, order_id=order_id,
+                                                detail=detail)
+
+        raise AlpacaProtectionNotAccepted(
+            f"Alpaca accepted the {request.pair} order and no WORKING stop leg was observed "
+            f"(asked {wanted}, order_class={got!r}, {len(legs)} leg(s) on the re-read). "
+            f"Remediation: {detail}. FLAT WAS OBSERVED, so nothing is open. This venue will refuse "
+            f"the same order every time until the protection is placeable.",
+            broker="alpaca",
+        )
+
+    @staticmethod
+    def _order_status(order) -> str:
+        """An order's status as a lowercase string, `""` when it cannot be read.
+
+        `.value` explicitly — `str(OrderStatus.HELD)` is `'OrderStatus.HELD'` (`B411`'s trap). An
+        unreadable status is `""`, which is in neither `WORKING_STOP_LEG_STATUSES` nor
+        `TERMINAL_ORDER_STATUSES`: not protection, and still able to fill.
+        """
+        raw = getattr(order, "status", None)
+        return str(getattr(raw, "value", raw) or "").lower()
+
+    @staticmethod
+    def _leg_kind(leg) -> str:
+        raw = getattr(leg, "order_type", None) or getattr(leg, "type", None)
+        return str(getattr(raw, "value", raw) or "").lower()
+
+    @classmethod
+    def _is_working_stop_leg(cls, leg) -> bool:
+        """A stop leg AND in an affirmatively working status. Both halves are required: a canceled
+        stop leg is still a stop type with a `stop_price` (P-2)."""
+        return cls._is_stop_leg(leg) and cls._order_status(leg) in WORKING_STOP_LEG_STATUSES
+
+    @staticmethod
+    def _is_stop_leg(leg) -> bool:
+        """True only for a leg the venue created AS A STOP: a stop-family order type, or a
+        `stop_price`. A limit leg is a take-profit and protects nothing on the downside.
+
+        Reads `.value` for the enum (`B411`'s trap — `str(OrderType.STOP)` is `'OrderType.STOP'`),
+        and treats an unreadable leg as NOT a stop, because this is the check that must refuse on
+        doubt.
+        """
+        raw = getattr(leg, "order_type", None) or getattr(leg, "type", None)
+        kind = str(getattr(raw, "value", raw) or "").lower()
+        if kind in ("stop", "stop_limit", "trailing_stop"):
+            return True
+        return getattr(leg, "stop_price", None) not in (None, "", 0, "0")
+
+    @staticmethod
+    def _same_symbol(a: object, b: str) -> bool:
+        """Compare venue symbols with the separator removed.
+
+        Alpaca writes crypto ORDERS as `BTC/USD`; whether a POSITION comes back as `BTC/USD` or
+        `BTCUSD` has not been observed from this repository. An exact comparison would, under the
+        second form, report *no position for this symbol* and read as FLAT — a false flat on the
+        one check whose whole job is to refuse one. Normalising both sides is correct under either
+        form, so the question does not need answering to be safe.
+        """
+        norm = lambda v: str(v or "").replace("/", "").replace("-", "").upper()  # noqa: E731
+        return norm(a) == norm(b)
+
+    async def _observe_flat(self, symbol: str, order_id: str) -> tuple[bool, str]:
+        """**Positive evidence of flat, or not flat.** Returns `(flat, what_was_observed)`.
+
+        THREE observations, because each alone reads a live state as flat:
+
+            positions          a resting close, entry, or take-profit leg is invisible
+            open orders        a filled position with no order left is invisible
+            THIS order, by id  a filled PARENT may be excluded by `status=OPEN`, taking its still-resting
+                               take-profit leg (rolled up under it by `nested=True`) out of the list with
+                               it — so the orders this remediation created are re-read directly and every
+                               leg must be terminal
+
+        **AN OBSERVATION THAT CANNOT BE MADE IS NOT EVIDENCE OF FLAT.** Every failure returns `False`: a
+        query that raises, and an open-orders page that came back FULL, which could have truncated the
+        order this is looking for. No helper that turns an error into an empty list is used —
+        `_raw_positions` raises through `_call`, and orders are queried here directly because
+        `get_orders(status)` ignores its argument (noted for `B427`).
+
+        Orders are fetched with `nested=True` so child legs are visible, and the symbol is NOT flat if
+        any order OR ANY OF ITS LEGS for it is non-terminal. R-10's page limit counts parents; legs
+        arrive with them.
+        """
+        from alpaca.common.enums import Sort
+        from alpaca.trading.enums import QueryOrderStatus
+        from alpaca.trading.requests import GetOrderByIdRequest, GetOrdersRequest
+
+        limit = FLAT_CHECK_ORDER_LIMIT
+        try:
+            positions = await self._raw_positions()
+        except Exception as exc:  # noqa: BLE001 - an unmakeable observation is NOT flat
+            return False, f"flat NOT OBSERVED: position query failed ({type(exc).__name__}: {exc})"
+
+        held = [p for p in positions if self._same_symbol(getattr(p, "symbol", None), symbol)]
+        if held:
+            return False, f"flat NOT OBSERVED: {len(held)} position(s) still open for {symbol}"
+
+        try:
+            # EVERY FIELD STATED, none left to a server default: OPEN, an explicit limit (R-10),
+            # newest first (narrows R-10), nested so legs are visible, and NO `symbols` filter —
+            # server-side filtering matches on a spelling nobody has measured (R-7).
+            orders = await self._call("get_orders", GetOrdersRequest(
+                status=QueryOrderStatus.OPEN, limit=limit, direction=Sort.DESC, nested=True)) or []
+            self._require_model(orders, "get_orders")
+        except Exception as exc:  # noqa: BLE001 - an unmakeable observation is NOT flat
+            return False, f"flat NOT OBSERVED: open-order query failed ({type(exc).__name__}: {exc})"
+
+        if len(orders) >= limit:
+            return False, (f"flat NOT OBSERVED: open-order page returned {len(orders)} — full, so "
+                           f"an order for {symbol} may have been truncated")
+
+        resting = [o for o in orders if self._same_symbol(getattr(o, "symbol", None), symbol)]
+        if resting:
+            return False, f"flat NOT OBSERVED: {len(resting)} open order(s) still resting for {symbol}"
+        live_legs = [
+            leg for o in orders for leg in (getattr(o, "legs", None) or [])
+            if self._same_symbol(getattr(leg, "symbol", None), symbol)
+            and self._order_status(leg) not in TERMINAL_ORDER_STATUSES
+        ]
+        if live_legs:
+            return False, f"flat NOT OBSERVED: {len(live_legs)} child leg(s) still live for {symbol}"
+
+        try:
+            mine = self._require_model(
+                await self._call("get_order_by_id", order_id, GetOrderByIdRequest(nested=True)),
+                "get_order_by_id")
+        except Exception as exc:  # noqa: BLE001 - an unmakeable observation is NOT flat
+            return False, (f"flat NOT OBSERVED: re-read of order {order_id} failed "
+                           f"({type(exc).__name__}: {exc})")
+
+        unfinished = [o for o in [mine] + list(getattr(mine, "legs", None) or [])
+                      if self._order_status(o) not in TERMINAL_ORDER_STATUSES]
+        if unfinished:
+            return False, (f"flat NOT OBSERVED: order {order_id} still has {len(unfinished)} "
+                           f"non-terminal part(s) ({', '.join(self._order_status(o) or '?' for o in unfinished)})")
+
+        return True, f"flat OBSERVED: no position, no open order or live leg for {symbol}, order {order_id} terminal"
+
+    @staticmethod
+    def _protection_class(placed) -> str | None:
+        """`placed.order_class` as a plain lowercase string, or `None` when it cannot be read.
+
+        The SDK types it as an enum, and `str(OrderClass.BRACKET)` is `'OrderClass.BRACKET'` while
+        the member equals `'bracket'` — the `B411` trap, which cost a fill predicate that never
+        fired. Read `.value` explicitly.
+        """
+        raw = getattr(placed, "order_class", None)
+        if raw is None:
+            return None
+        return str(getattr(raw, "value", raw)).lower() or None
 
     async def close_position(self, position_id: str, lot_size: float | None = None) -> dict:
         """Close by symbol, and **HONOUR `lot_size` rather than ignore it** (`T-0038`).
