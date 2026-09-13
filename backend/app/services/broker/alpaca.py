@@ -1241,9 +1241,9 @@ class AlpacaAdapter(BrokerAdapter):
         `Order.filled_qty` is `str | float | None`, default `None`, and it has THREE states — every
         collapse of two of them is a false fact in the one field that records whether exposure happened:
 
-            absent / unparseable / non-finite   -> "?"
-            present, numerically zero           -> the raw value as sent ("0", "0.000", ...)
-            present, numerically non-zero       -> the raw value as sent ("0.00001294", ...)
+            absent / blank / unparseable / non-finite   -> "?"
+            present, numerically zero           -> the value as sent, whitespace-stripped ("0", "0.000")
+            present, numerically non-zero       -> the value as sent, whitespace-stripped ("0.00001294")
 
         * **Absent is not zero** (review): rendering `None` as `0` stores `canceled/0`, "never filled",
           for a quantity nobody read.
@@ -1251,7 +1251,9 @@ class AlpacaAdapter(BrokerAdapter):
           files it on one side or the other. It is tested for explicitly.
         * **Parse to decide, store what came in** (manager): `str(float("0.00001294"))` is `1.294e-05`,
           which no longer matches the venue and will not be found by anyone searching for it. A string
-          is kept verbatim; a float — which has no verbatim text — is written positionally via Decimal.
+          is kept as sent with only surrounding whitespace STRIPPED (not verbatim: " 0.5 " stores `0.5`,
+          which keeps the token free of the space that terminates it); a float — which has no text of its
+          own — is written positionally via Decimal.
         """
         import math
         from decimal import Decimal

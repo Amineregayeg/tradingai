@@ -296,6 +296,11 @@ async def test_a_FAILED_RE_READ_is_not_evidence_of_protection():
         await a.place_order(_req())
     assert _called(a, "close_position")
     assert "re-read FAILED" in str(caught.value)
+    # **SCOPED TO THE TOKEN** (review, A-2). The line above is also satisfied by the remediation step's
+    # own "re-read FAILED (...)" — the text occurs TWICE — so a failed re-read stored as `legs=[none]`
+    # killed nothing. `legs=[none]` is a probe-3 FINDING (the venue created no legs); recording a
+    # transport failure as that finding, in the token read first, is the defect this line catches.
+    assert "legs=[re-read FAILED]" in str(caught.value), str(caught.value)
 
 
 @pytest.mark.asyncio
@@ -456,6 +461,9 @@ async def test_MSG1_the_STORED_row_distinguishes_a_FILLED_entry_from_an_UNFILLED
     # The parent's cancel fails (it filled) and the resting take-profit leg's cancel succeeds.
     assert "cancel=1ok/1failed" in filled and "close=submitted" in filled
     assert "close=failed" in unfilled
+    # **A COUNT WITH A DIRECTION** (review, A-3). `1ok/1failed` is a FIXED POINT of swapping the counts,
+    # so the line above cannot see a swap; the unfilled row's parent and take-profit cancels both succeed.
+    assert "cancel=2ok/0failed" in unfilled, f"cancel counts for the unfilled row: {unfilled!r}"
     for stored in (filled, unfilled):
         assert f"order={REAL_ORDER_ID}" in stored, f"the full venue order id was cut: {stored!r}"
         assert "rejected/stop" in stored and "new/limit" in stored, f"leg statuses cut: {stored!r}"
@@ -510,6 +518,16 @@ async def test_ENTRY3b_an_UNREADABLE_quantity_never_stores_the_same_row_as_a_con
     _z, zero_row = await _stored_refusal("canceled", "0.000")
     _u, unknown_row = await _stored_refusal("canceled", None)
     assert zero_row != unknown_row, "a confirmed zero and an unreadable quantity store the same row"
+    # **NOT ONE ZERO SPELLING — EVERY NUMBER** (review, A-1). The line above compares against "0.000"
+    # alone, so an unreadable quantity rendered "0" or "0.0" still differs from it and passes: A != B on
+    # an incidental difference of spelling. The unknown token must not parse as a number at all.
+    token = unknown_row.split("entry=canceled/", 1)[1].split(" ", 1)[0]
+    try:
+        float(token)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError(f"an unreadable quantity stored a NUMBER: {token!r}")
 
 
 @pytest.mark.asyncio
