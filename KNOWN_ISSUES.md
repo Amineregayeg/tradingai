@@ -29374,6 +29374,30 @@ a read timeout, a connection error after sending, a duplicate `client_order_id` 
 (a halt), never REJECTED. Only a failure that proves nothing was created stays a refusal. **It lands with `B441`**,
 because a timeout turns hangs into exactly these ambiguous failures.
 
+**AMENDMENT — THE SAME RETRY SELLS A PARTIAL CLOSE TWICE (execute, measured on loopback).** One 504 on
+`close_position(symbol, ClosePositionRequest(qty="0.003"))`, and the server received TWO
+`DELETE /v2/positions/BTCUSD?qty=0.003`. If the first was processed, the second sells another 0.003. That is the
+exit ladder's 70% partial sold twice, which takes the runner. Setting `_retry_codes = [429]` stops it.
+
+**The exception map execute measured**, which decides what counts as "not created":
+```
+refused, no listener      requests.ConnectionError  chain NewConnectionError > ConnectionRefusedError   NOT SENT
+connect timeout           requests.ConnectTimeout   (also a ConnectionError)                            NOT SENT
+read timeout              requests.ReadTimeout      (NOT a ConnectionError)                             SENT
+reset after server read   requests.ConnectionError  chain ProtocolError > RemoteDisconnected            SENT
+HTTP 4xx / 5xx            alpaca APIError, .status_code set                                             SENT
+```
+**One class, `requests.ConnectionError`, means both "refused, not sent" and "reset, sent"**, and only the exception
+chain tells them apart, so an `isinstance` check would file a sent order as never created. `APIError.code` and
+`.message` run `json.loads` on the body and RAISE on a non-JSON body (measured on a text 500); only `.status_code` is
+safe to read. A duplicate `client_order_id` is a 422 like any validation refusal, so no type or status identifies it.
+
+**Manager's rulings on the lookup:** a 404 proves the order was not created only after a 422, where the API answered
+this request. After a sent-and-unanswered failure (a 5xx, a read timeout, a reset, an unknown type) the lookup repeats
+within the resolution budget, and an order never found is UNRESOLVED, not REJECTED. A found order counts as ours
+only if its symbol, side and quantity match the request. The ids are 8 hex characters, so a collision across an
+account's history is possible.
+
 ---
 
 ### B441 — ALPACA SDK REQUESTS CARRY NO HTTP TIMEOUT. A hung connection blocks the event loop forever today, and would strand a thread under any threaded dispatch
