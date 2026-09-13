@@ -28612,3 +28612,34 @@ property, and the handler is exactly where a second failure is most likely, beca
 something has already gone wrong. **A recovery path deserves the same scrutiny as a happy path and
 almost never gets it** — it has no tests of its own here, and it was reached in this instance only
 because an arm failed for an unrelated reason.
+
+#### ADDENDUM — TWO THINGS THE FIX ITSELF PRODUCED, both found by review, both verified by manager
+
+**1. `closed_trades` NOW HAS TWO TYPES UNDER ONE NAME, ACROSS TWO ENDPOINTS.** Making the field
+nullable was the correct fix — `null` means *we could not count*, which is the distinction this entry
+exists to draw. But the same key is produced elsewhere without it:
+
+```
+/api/engine/status        crypto_loop.py:485   "closed_trades": closed_n     int | NULL  (:433)
+run history               engine.py:264        "closed_trades": int(agg[0] or 0)   int, never null
+```
+
+**Not a defect today, and that was checked rather than assumed:** no consumer reads both payloads —
+`EnginePage` fetches status, `RunHistoryPanel` takes the other, and a sweep for a file fetching both
+returns nothing. **It is recorded because the disagreement is invisible unless you read both
+producers**, and the next person to unify, cache or generate types for these payloads will
+reasonably assume one name means one type. The nullable one is the honest one; the other should gain
+the same distinction rather than lose it, since `int(agg[0] or 0)` also folds *no rows* into `0`.
+
+**Filed here rather than as its own number because this entry's fix is what created it** — a reader
+tracing `closed_trades` nullability arrives here, and that is where the note has to be.
+
+**2. A TYPE DECLARATION IS NOT A CONSUMER, and a grep cannot tell them apart.** The first follow-up
+(`cdd6d0a`) appeared to render the new `counts_unavailable` reason on both surfaces because the token
+was present in both files. **Both hits were the TypeScript interface field** — the payload was
+*declared* and never *rendered*. Corrected at `bce150b`, which review PASSED after checking the
+render rather than the name.
+
+> **The name being present is evidence that someone intended the feature, not that the feature
+> exists.** Same family as testing a candidate tree and reporting it as production: the artefact
+> that proves intent sits exactly where the artefact that proves behaviour would be.
