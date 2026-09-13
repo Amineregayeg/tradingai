@@ -735,6 +735,54 @@ def test_B1_a_venue_PRICE_is_positive_and_finite_or_None(raw):
     assert readable_price(raw) is None, f"{raw!r} was read as a price: {readable_price(raw)!r}"
 
 
+@pytest.mark.parametrize("helper", ["readable_quantity", "readable_price"])
+@pytest.mark.parametrize("raw", [
+    __import__("json").loads("1" + "0" * 400), "1" + "0" * 400, True, False,
+], ids=["json_int_401_digits", "string_401_digits", "true", "false"])
+def test_B7_NEITHER_helper_raises_or_reads_a_BOOL_as_a_number(helper, raw):
+    """**The contract covers every value `json.loads` can produce, not only plausible ones** (manager, from
+    review's finding on `b4e6e1f`). `float()` of a 401-digit INT raises OverflowError, which the first
+    version's `except` did not catch — the same digits as a STRING read as inf and were already `None`, so a
+    string-only arm could never have found it. And `isinstance(True, int)` made `True` a fill of one unit."""
+    import app.services.broker.base as base
+
+    assert getattr(base, helper)(raw) is None, f"{helper}({type(raw).__name__}) did not read as unreadable"
+
+
+def test_B7b_real_numbers_still_read_after_the_bool_rule():
+    from app.services.broker.base import readable_price, readable_quantity
+
+    assert [readable_quantity(x) for x in (1, 1.0, "0")] == [1.0, 1.0, 0.0]
+    assert [readable_price(x) for x in (1, 1.0)] == [1.0, 1.0]
+
+
+@pytest.mark.parametrize("res", [
+    {"status": "FILLED", "filled_units": __import__("json").loads("1" + "0" * 400)},
+    {"status": "FILLED", "units": __import__("json").loads("1" + "0" * 400)},
+    {"status": "PARTIALLY_FILLED", "filled_units": __import__("json").loads("1" + "0" * 400)},
+    {"status": "FILLED", "filled_units": True},
+    {"status": "FILLED", "units": True},
+], ids=["filled_units_401_digits", "units_401_digits", "partial_401_digits", "filled_units_true", "units_true"])
+def test_B8_position_units_NEVER_raises_and_never_sizes_a_BOOL(res):
+    """**The fourth site of the class** (execute, sweeping for sibling "never raises" claims):
+    `_position_units`' own `positive()` had the same `except (TypeError, ValueError)` and read `True` as
+    one unit. K-12's contract — the runbook's probe runs it on a raw venue dict."""
+    from app.services.live.crypto_loop import LiveCryptoLoop
+
+    assert LiveCryptoLoop._position_units(res) is None
+
+
+def test_B8b_an_ordinary_size_still_reads_and_WHICH_KEY_is_read_is_unchanged():
+    """The delegation changes how a value is PARSED and must not change which key is read (manager):
+    `filled_units` ABSENT on a paper FILLED result still falls back to `units`; PRESENT-None does not."""
+    from app.services.live.crypto_loop import LiveCryptoLoop
+
+    assert LiveCryptoLoop._position_units({"status": "FILLED", "units": 0.004}) == 0.004
+    assert LiveCryptoLoop._position_units({"status": "FILLED", "units": 0.004, "filled_units": None}) is None
+    assert LiveCryptoLoop._position_units({"status": "FILLED", "units": 0.004, "filled_units": 0.003}) == 0.003
+    assert LiveCryptoLoop._position_units({"status": "PARTIALLY_FILLED", "filled_units": "0.0005"}) == 0.0005
+
+
 def test_B1b_the_price_and_quantity_rules_DIFFER_only_at_zero_and_below():
     from app.services.broker.base import readable_price, readable_quantity
 
@@ -1048,7 +1096,16 @@ def _status_decisions_outside_classifier(tree: ast.AST, vocabulary: set[str]) ->
         elif isinstance(node, ast.Dict):
             hit = any(k is not None and _vocab_literal(k) for k in node.keys)
         elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-              and node.func.attr in ("startswith", "endswith")):
+              and node.func.attr in ("startswith", "endswith")
+              and not isinstance(node.func.value, ast.Constant)):
+            # SCOPED BY RECEIVER, NOT BY LENGTH (manager's ruling). A LITERAL receiver provably is not a
+            # status (review measured 'loaded'.endswith('d') firing), so it is ignored. Any other receiver
+            # with a non-empty prefix/suffix of an order-result word FIRES — `status.endswith("ED")` matches
+            # FILLED, REJECTED and CANCELED, and a suffix match is `B411`'s own defect. There are ZERO
+            # startswith/endswith calls in crypto_loop today (manager, AST-measured), so a strict rule has no
+            # false positives; a benign one added later should fail here and be exempted by name, with a
+            # reason, rather than be silenced by a threshold. (An EMPTY prefix is always true and decides
+            # nothing, so it is not a status comparison.)
             args = [a.value for a in node.args if isinstance(a, ast.Constant) and isinstance(a.value, str) and a.value]
             test = str.startswith if node.func.attr == "startswith" else str.endswith
             hit = any(test(v, a) for a in args for v in vocabulary)
@@ -1084,8 +1141,14 @@ def test_V4_what_a_status_MEANS_is_decided_ONLY_in_the_classifier():
         assert _status_decisions_outside_classifier(planted, vocabulary), f"the {shape} plant was not seen"
     quiet = ("def neighbours(res, t, event):\n    payload = {'status': res.get('status')}\n"
              "    if t.status == TradeStatus.CLOSED:\n        pass\n"
-             "    if event.get('status') == 'refused':\n        pass\n")
-    assert _status_decisions_outside_classifier(ast.parse(quiet), vocabulary) == []
+             "    if event.get('status') == 'refused':\n        pass\n"
+             "    if 'loaded'.endswith('d') or 'LOADED'.endswith('ED'):\n        pass\n")
+    assert _status_decisions_outside_classifier(ast.parse(quiet), vocabulary) == [], (
+        _status_decisions_outside_classifier(ast.parse(quiet), vocabulary))
+    # And the B411 shape fires, at full length AND at two characters — the case a length threshold hid.
+    for suffix in ("FILLED", "ED"):
+        planted = ast.parse(f"def b411(status):\n    if status.endswith('{suffix}'):\n        pass\n")
+        assert _status_decisions_outside_classifier(planted, vocabulary), f"status.endswith({suffix!r}) was not seen"
     # And the classifier itself IS seen, so "nothing outside" is not "nothing anywhere".
     everywhere = [n for n in ast.walk(tree) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)
                   and n.id in {"FILL_BEARING_STATUSES", "REFUSAL_STATUSES"}]

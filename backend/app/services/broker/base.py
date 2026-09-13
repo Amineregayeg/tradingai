@@ -11,22 +11,39 @@ from app.schemas.broker import Position
 
 
 def readable_quantity(raw) -> float | None:
-    """A venue QUANTITY as a finite float, or `None` when it cannot be read. **Never raises.**
+    """A venue QUANTITY as a finite float, or `None` when it cannot be read.
+
+    **WHAT IT CATCHES, EXACTLY** — no broader claim: `None`, a bool, a blank string, and anything whose
+    `float()` raises TypeError, ValueError or OverflowError all return `None`; a non-finite result returns
+    `None`. That covers every value `json.loads` can produce. An arbitrary object whose `__float__` raises
+    some OTHER exception would still propagate — a venue reply cannot carry one, so it is stated, not guarded.
 
     The ONE decision about whether a venue number is readable (`B426`: one rule, not a copy per
     consumer). Absent, blank, unparseable and non-finite are all UNREADABLE; **zero is a reading** —
     nothing filled. `float("nan")` and `float("inf")` (and `"1e999"`) parse WITHOUT raising, which is
     why they are tested for explicitly rather than left to an `except`.
 
+    **Two holes the first version had, both in the function written to end `K-4b`'s class** (review's
+    finding on `b4e6e1f`, extended by the manager):
+
+        a bool      `isinstance(True, int)` is True, so `True` read as 1.0 — a JSON `true` in filled_qty
+                    would record a fill of ONE WHOLE UNIT, and `False` a confident "nothing filled".
+                    A bool is not a number; it is rejected BEFORE any numeric handling.
+        a huge int  `json.loads` of a 401-digit number is an int, and `float()` of it raises
+                    OverflowError, which `except (TypeError, ValueError)` did not catch — so the
+                    "never raises" claim was false for an input a venue reply can carry. The SAME digits
+                    as a STRING go through `float()` to inf and then to `None`, so only the int form
+                    raised — which is why an arm feeding strings could never have found it.
+
     Lives here, in the broker contract, because two layers need it and neither should import the
     other: `AlpacaAdapter.place_order` (`filled_units`, and the stored refusal's `_qty_token`) and
     `ExecutionService`, which normalises what ANY producer returns (`B433`).
     """
-    if raw is None or (isinstance(raw, str) and not raw.strip()):
+    if raw is None or isinstance(raw, bool) or (isinstance(raw, str) and not raw.strip()):
         return None
     try:
         value = float(raw)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
     if not math.isfinite(value):
         return None
@@ -34,7 +51,10 @@ def readable_quantity(raw) -> float | None:
 
 
 def readable_price(raw) -> float | None:
-    """A venue PRICE as a positive finite float, or `None` when there is no usable price. **Never raises.**
+    """A venue PRICE as a positive finite float, or `None` when there is no usable price.
+
+    Catches exactly what `readable_quantity` catches — it delegates the parse, and so the bool and
+    overflow rules — and additionally returns `None` for a price at or below zero.
 
     The parse is `readable_quantity`'s; **the zero rule is per field, and reusing it blindly is `B426`'s
     lesson** (manager's correction to `B433`):

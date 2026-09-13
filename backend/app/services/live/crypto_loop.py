@@ -25,6 +25,7 @@ from app.services.broker.paper import PaperBroker
 #: keeps its own aliases for the CONNECT path, which is a different entry point.
 _ALPACA_MODES = {"alpaca", "alpaca_paper", "alpaca-paper"}
 from app.services.broker.alpaca import AlpacaUnprotectedPositionOpen
+from app.services.broker.base import readable_quantity
 from app.services.execution.service import ExecMode, ExecutionService
 from app.services.live import fixed_config as fixed
 from app.services.live import exit_shadow
@@ -1255,15 +1256,12 @@ class LiveCryptoLoop:
             shape. *We cannot establish the size* is exactly what an unparseable quantity means,
             so it takes the same path as an absent one: the halt.
             """
-            if value is None:
-                return None
-            try:
-                number = float(value)
-            except (TypeError, ValueError):
-                return None
-            if number != number or number in (float("inf"), float("-inf")):
-                return None          # NaN and infinity are not sizes either
-            return number if number > 0 else None
+            # **ONE PARSE (`B426`)**, the broker contract's: its own `float()` / `except (TypeError, ValueError)`
+            # raised OverflowError on a 401-digit int — out of the function K-12 says must never raise,
+            # which the runbook's probe step runs on a raw venue dict — and read `True` as a position of
+            # one unit. `readable_quantity` rejects both; a SIZE must then also be above zero.
+            number = readable_quantity(value)
+            return number if number is not None and number > 0 else None
 
         # The kind of fill comes from the ONE classifier (`T-0130`, K-11); this method keeps its
         # signature — a plain dict — because the runbook's probe step calls it by name on a raw result.
