@@ -28628,8 +28628,36 @@ run history               engine.py:264        "closed_trades": int(agg[0] or 0)
 `EnginePage` fetches status, `RunHistoryPanel` takes the other, and a sweep for a file fetching both
 returns nothing. **It is recorded because the disagreement is invisible unless you read both
 producers**, and the next person to unify, cache or generate types for these payloads will
-reasonably assume one name means one type. The nullable one is the honest one; the other should gain
-the same distinction rather than lose it, since `int(agg[0] or 0)` also folds *no rows* into `0`.
+reasonably assume one name means one type.
+
+**THE ASYMMETRY IS CORRECT, NOT ACCIDENTAL — and my first statement of this entry said otherwise.**
+I wrote that the run-history producer "also folds *no rows* into `0`", i.e. carried `B431`'s defect
+unfixed. **That is wrong.** Review measured it and I confirmed:
+
+```
+agg[0]  func.count(Trade.id)                            a COUNT — never NULL
+agg[1]  func.coalesce(func.sum(Trade.pnl_dollars), 0)   already coalesced in SQL
+fetch   .one() on an aggregate, WHERE but NO group_by   always exactly one row
+route   try/except occurrences, lines 119-278: ZERO     a DB failure RAISES, it does not zero
+```
+
+**A count over zero rows returning `0` is the right answer, not an unknown collapsed into a value.**
+The `or 0` is a third redundant guard. `B431`'s defect requires an *unknown state* to collapse into
+zero, and that producer has none.
+
+> **`status()` is nullable because it HAS a fallback in which the ledger source can be absent.
+> Run-history is non-nullable because it queries the database directly with no fallback — answer or
+> raise. They are not the same measurement, and that is why their types differ.**
+
+**This makes the warning land harder rather than softer.** *"The other endpoint has the same bug"*
+invites someone to fix a non-bug. *"They differ because only one of them has an unknown state"* tells
+them which direction of unification is even meaningful: **do not flatten `status()` to non-nullable
+to match.** The nullable one is carrying information the other cannot have.
+
+**And the error is `M-9`'s shape, for at least the fourth time in this thread:** a right conclusion
+resting on a justification that would not survive re-derivation, written into the artefact people
+read *instead of* re-deriving. I generalised `B431`'s defect onto a neighbouring producer without
+checking whether it had the precondition the defect requires.
 
 **Filed here rather than as its own number because this entry's fix is what created it** — a reader
 tracing `closed_trades` nullability arrives here, and that is where the note has to be.
