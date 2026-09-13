@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-14 (newest entry B446 — a cancelled kill-switch trigger is swallowed: the adapter converts CancelledError to BrokerError, the manager catches it, and trigger returns normally. Also B445: B366's fix is unreachable because broker_manager flattens each adapter's exception to one error row, so the partial report never reaches the kill switch and a confirmed close is counted as a failure. And B444.)
+Last updated: 2026-09-14 (newest entry B447 — on Alpaca the engine can never enter from flat: AlpacaAdapter.reference_price reads an open position's current_price, so it returns None when flat and ExecutionService rejects every market entry as NO_REFERENCE_PRICE. Found writing the first-order probes against the deployed fb3dab6.)
 
 ---
 
@@ -29658,3 +29658,28 @@ disconnect (not measured).
 as a shielded task, awaits it on cancellation, records the result, then re-raises. Arms: a cancelled trigger still
 closes every position, returns no normal result, and the awaiting task sees `CancelledError` with the full report
 logged.
+
+---
+
+### B447 — ON ALPACA THE ENGINE CAN NEVER ENTER FROM FLAT. `AlpacaAdapter.reference_price` reads the current price of an OPEN POSITION, so with no position it returns None, and `ExecutionService` rejects every market entry as `NO_REFERENCE_PRICE`
+
+**Found by manager while writing the first-order probes, by reading `fb3dab6`, the build deployed 2026-09-14.
+Probe 0 measures the flat case on the real paper account.**
+
+```
+AlpacaAdapter.reference_price(pair)   position = await self._call("get_open_position", pair)   except BrokerError: return None
+                                      price = position.current_price
+ExecutionService.execute (MARKET)     mark = await self.broker.reference_price(sig.symbol)
+                                      if mark is None or mark <= 0: return REJECTED, NO_REFERENCE_PRICE
+PaperBroker.reference_price           float(self._price(pair))  — the simulator's own feed, always present
+```
+
+**An entry is placed only when the account is FLAT for that symbol** (`_entry_block_reason` blocks while a
+position is open), **and flat is exactly when this returns None.** So on Alpaca every entry the strategy approves
+would be recorded as a refusal "no reference price available". It would look like a market-data outage on a venue
+whose data is fine. Latent while `B430` keeps the loop off Alpaca; it never surfaced because the simulators price
+from their own feed.
+
+**Fix direction (part of `B428b`):** price from a source that exists when flat — the venue's latest crypto
+quote or trade, or the Binance ticker the loop already marks with (`_ticker_price`) — never from a position.
+The source is named in the result, because the sizing price and the fill come from different feeds (`B278`).
