@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-13 (newest entries B433 and B434. B433 — the fill path collapses an empty fill value twice: AlpacaAdapter.place_order computes the fill PRICE as float(x or 0) with no try, so a garbage average price raises after submission and becomes a false refusal for an existing order, while nan and inf pass through; and the loop formats a present-None fill with :.0f, so the Entered notification never fires. Price is not quantity: the settle path uses fill_price verbatim, so a stored 0.0 would compute realized R against a zero entry — the existing or-None for zero is correct for price. B434 — REJECTION_THROUGH_STOP cannot fire at the default 0.25R drift limit because the drift check answers first, so through-stop refusals are labelled ENTRY_DRIFT: a corpus risk, not an order-path one. Also B317 marked FIXED by T-0130 at 6ded9b5, with the note that a text search for the removed setdefault still returns 1 because the comment quotes it — verify removals by AST.)
+Last updated: 2026-09-13 (newest entry B435 — the fill branch drops the decision row of a position that actually opened, on ANY exception before the commit, with only a warning: _record_signal_decision's blanket except leaves no row and no _open_decision entry, so the close path finds nothing in memory or the database and the trade's outcome and realized R are never recorded. B271's defect in the branch where the venue acted. Not closed by B433's fill-price normalisation, which removes only the garbage and NaN triggers. The fix is a ruling — halt and alert as for an unsized fill, or retry — and it is LIVE on the simulator path whenever the database write fails. Earlier today: B433 and B434.)
 
 ---
 
@@ -28946,3 +28946,44 @@ refusal is labelled as ordinary drift, so the rejection-reason counts can never 
 already passed the stop, and `THROUGH_STOP` reads as a condition that never occurs rather than one that is never
 recorded. `T-0130`'s arm reached it only by raising the drift limit, an honest drive of a path the loop never
 takes. **Fix direction: test the more specific condition first.**
+
+---
+
+### B435 — THE FILL BRANCH DROPS THE DECISION ROW OF A POSITION THAT ACTUALLY OPENED, on ANY exception, with only a warning. `B271`'s defect in the branch where a position exists
+
+**Surfaced by review's loop sweep during the `B433` follow-up (a garbage fill price triggering it); the general
+case verified by manager at `bad8514`. Confirmed unfiled: `B271` names `_record_signal_decision` once, only to say
+the reject-branch fix is not simply to call it, and never mentions the open branch.**
+
+```python
+async def _record_signal_decision(...):      # called ONLY in the fill branch, after the venue took the order
+    try:
+        ...
+        await db.commit()
+        self._open_decision[pair] = str(rec.id)
+    except Exception as exc:  # noqa: BLE001 - never let bookkeeping kill the loop
+        logger.warning("record decision failed", pair=pair, error=str(exc))
+```
+
+**Any exception before the commit completes** — a failed database write, a conversion that raises — **leaves a
+position OPEN at the venue with no decision row and no `_open_decision` entry**, and the only trace is a WARNING.
+
+**WHAT THAT COSTS, traced rather than assumed:** when the position later closes, the close path does
+`dec_id = self._open_decision.pop(pair, None)`, finds nothing, falls back to `_open_decision_id_from_db(pair)`,
+and finds nothing there either. **The trade's outcome and realized R are never recorded.** The feedback corpus
+loses a real trade silently, and the position was traded without the record the rest of the system assumes
+exists.
+
+**Why it is `B271` and worse.** `B271` is the reject branch dropping a signal that produced no position. This is the
+branch where the venue ACTED — so the lost row describes real exposure, and "never let bookkeeping kill the loop"
+has quietly become "let bookkeeping lose a trade".
+
+**It is not closed by `B433`.** `B433`'s follow-up normalises the fill price in the service, which removes the
+garbage-fill and NaN triggers (a NaN fill had been writing `Decimal('NaN')`). **Every other exception in that
+method still takes this path.**
+
+**The fix is a ruling, not a code choice:** failing to record the decision of a REAL position is the same class
+as `B413`/`T-0143`'s halt record — a failure that must not vanish. The obvious candidate is to treat it like the
+unsized fill: halt with its own reason and write a CRITICAL Alert carrying enough to reconstruct the row. Whether
+to halt or to retry is a trading-behaviour decision. Latent behind `B430` for Alpaca; **live on the simulator path**
+whenever the database write fails.
