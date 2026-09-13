@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-13 (B429 marked FIXED at 7f0ee09 with follow-ups a4b9a34, 34d4d03 and c3101f1, the first REVIEW_FAIL on test coverage and the three follow-ups PASSED, NOT deployed. The adapter now attaches the stop, always re-reads the order nested, treats only a stop leg in a WORKING status as protection, and on refusal cancels the entry and its live legs, closes, and OBSERVES flat before filing a rejection — halting when flat cannot be observed. Residuals stated beside their constants: the {new, held} allow-list is unmeasured, a refusal after the re-read is not caught (B427), page fullness depends on an unmeasured server cap, symbol spelling is unmeasured, and the venue was never consulted — probe 3 is the evidence for four of them. Review caught, across four rounds, among other things an Alert built with a nonexistent AlertStatus member that could never have been written. B432 remains the newest numbered entry.)
+Last updated: 2026-09-13 (newest entries B433 and B434. B433 — the fill path collapses an empty fill value twice: AlpacaAdapter.place_order computes the fill PRICE as float(x or 0) with no try, so a garbage average price raises after submission and becomes a false refusal for an existing order, while nan and inf pass through; and the loop formats a present-None fill with :.0f, so the Entered notification never fires. Price is not quantity: the settle path uses fill_price verbatim, so a stored 0.0 would compute realized R against a zero entry — the existing or-None for zero is correct for price. B434 — REJECTION_THROUGH_STOP cannot fire at the default 0.25R drift limit because the drift check answers first, so through-stop refusals are labelled ENTRY_DRIFT: a corpus risk, not an order-path one. Also B317 marked FIXED by T-0130 at 6ded9b5, with the note that a text search for the removed setdefault still returns 1 because the comment quotes it — verify removals by AST.)
 
 ---
 
@@ -20208,6 +20208,40 @@ slot, what is deployed, and what the venue does — and each of those is a separ
 
 Related: **B316**, **B302**, **B303**, **B309**, **B221**.
 
+#### FIXED — `T-0130` at `6ded9b5`, covering `B316` and `B317`. PASSED review. NOT DEPLOYED
+
+The `setdefault("status", "FILLED")` is deleted; a non-dict result from `place_order` becomes a dict with
+NO status. `crypto_loop` has ONE pure classifier, `classify_order_status()`: strings only, then FILL
+(`FILLED`, `PARTIALLY_FILLED`), REFUSAL (`REJECTED`, `rejected`, both as emitted by their producers), and
+UNRESOLVED as the complement. UNRESOLVED halts through `_declare_halt(HALT_ORDER_UNRESOLVED)` and writes a
+CRITICAL Alert carrying what a truthful decision row would need — no `DecisionRecord`, because every
+existing outcome would be false and a placeholder outcome would later be rewritten (`B423`). `B427` owns that
+row. **The simulator's ordinary fills and refusals were driven through the real service and never reach
+UNRESOLVED**, so starting the engine does not halt it on a refused signal.
+
+**Four things this entry got wrong or did not know, stated for the next reader:**
+
+```
+the title          half right: the default lived in service.py, but the MISCLASSIFICATION (an unknown
+                   status recorded as a refusal) was crypto_loop's else, which service.py could not fix
+the containment    this entry's "safe because of who holds the slot" was already stale — AlpacaAdapter
+                   CAN occupy the slot; B430 is what keeps it latent
+coverage           NO existing arm pinned the default: deleting it left 35 files / 723 tests green
+the worst case     not "an unknown fill looks done" — measured: a CANCELED order with a real fill was
+                   recorded as a REJECTION, denying a position that exists
+```
+
+**HOW TO VERIFY THE REMOVAL — NOT WITH A TEXT SEARCH.** `grep 'setdefault("status"' service.py` still returns
+1 after the fix: the comment explaining the removal quotes the removed line. The same trap hit a test in
+this change (`"ExecMode.OBSERVE" not in getsource(...)` failed on the comment explaining why OBSERVE is
+unreachable). **A text query about code is answered by a comment about the code, and the tempting fix is to
+delete the comment.** Use the AST: zero `setdefault("status", ...)` calls at `6ded9b5`, one at the parent.
+
+**Arm reach, recorded not closed:** the out-of-classifier AST arm does not see `match`/`case`, `__contains__`,
+dict dispatch or `startswith`; the literal arm does not see subscript assignment, annotated assignment or
+`IfExp`; `_plain` has no arm for `Decimal`/NaN reaching a JSON write. And the classifier docstring's "before any
+comparison" over-claims for a `str` subclass with a raising `__eq__`, which venue JSON cannot produce.
+
 ### B318 — `_handle_response` SWALLOWS THE PARSE EXCEPTION AND LOGS NOTHING ON EITHER DEGRADED PATH, so the condition B316 and B317 describe would leave no trace if it has already happened
 
 `backend/app/services/broker/cryptofundtrader.py`, tail of `_handle_response`:
@@ -28849,3 +28883,66 @@ a list someone has to maintain.
 
 Not a production defect; a test-reliability defect that can hide one, and at 29 tests it is the
 larger half of the suite's claim to be offline. Still unfixed.
+
+---
+
+### B433 — THE FILL PATH COLLAPSES AN EMPTY FILL VALUE TWICE: the adapter's fill PRICE raises after submission, and the loop FORMATS a present-None fill
+
+**Found by review beside `T-0130`, both driven; verified by manager at `6ded9b5`. The first is `K-4b`'s class
+ONE LINE BELOW `K-4b`'s fix, in the same result dict — execute has owned it as scoping the fix to the field the
+finding named rather than to the class.**
+
+**1. THE ADAPTER'S FILL PRICE** (`AlpacaAdapter.place_order`, no `try` around it):
+
+```python
+"fill": float(getattr(placed, "filled_avg_price", None) or 0) or None
+```
+
+```
+"garbage"   -> ValueError AFTER submission -> not a BrokerError -> escapes execute() -> the loop's
+               venue-raised backstop files a REJECTION for an order that EXISTS at the venue
+"nan" "inf" -> pass straight through as nan / inf
+0 / None    -> None
+```
+
+**PRICE IS NOT QUANTITY, and the fix must not copy `_readable_qty`'s zero rule.** A filled quantity of 0 is a
+reading (nothing filled). **A fill price of 0 is not a price.** The settle path uses it verbatim —
+`entry = float(fill if fill is not None else rec.signal_entry)` — so a stored `0.0` computes realized R against
+an entry of ZERO. The existing `or None` turning 0 into None is therefore CORRECT for price and must survive:
+non-positive, blank, unparseable and non-finite are all UNREADABLE.
+
+**2. THE LOOP FORMATS A PRESENT-None FILL** (the fill branch's entry message):
+
+```python
+f"@ {res.get('fill', sig.entry):.0f} ..."        # {"fill": None}.get("fill", entry) -> None -> TypeError
+```
+
+The adapter emits `"fill": None` whenever the average price is absent, blank or zero, so this is reachable
+wherever a fill is reported before its price. The decision is RECORDED and the position PUSHED first, so
+bookkeeping survives — **but the f-string is evaluated before `_act` runs, so the "Entered" notification never
+fires and the tick raises.** `.get(key, default)` collapses absent and present-None — the second emptiness axis.
+**And the default is wrong even when it applies:** displaying `sig.entry` after "@" states a fill price nobody
+reported. Show that the fill price was unreported instead.
+
+Latent behind `B430`. Not a deploy-D blocker.
+
+---
+
+### B434 — `REJECTION_THROUGH_STOP` CANNOT FIRE AT THE DEFAULT DRIFT LIMIT, so a market already through the stop is recorded as `ENTRY_DRIFT`
+
+**Found by review beside `T-0130`; verified by manager at `6ded9b5`.** In `ExecutionService.execute`, the drift
+check returns BEFORE the through-stop check:
+
+```
+drift_r = abs(mark - sig.entry) / intended_risk
+if drift_r > max_entry_drift_r (default 0.25):   return ... REJECTION_ENTRY_DRIFT
+...
+if long and mark <= sig.sl (or short and >=):    return ... REJECTION_THROUGH_STOP
+```
+
+A market through its stop is at least 1R from entry, which always exceeds 0.25R, so the first check answers.
+**The order is refused either way — this is not an order-path risk.** It is a CORPUS risk: every through-stop
+refusal is labelled as ordinary drift, so the rejection-reason counts can never show how often the market had
+already passed the stop, and `THROUGH_STOP` reads as a condition that never occurs rather than one that is never
+recorded. `T-0130`'s arm reached it only by raising the drift limit, an honest drive of a path the loop never
+takes. **Fix direction: test the more specific condition first.**
