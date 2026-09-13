@@ -160,6 +160,25 @@ async def close_position(
                 error=str(exc),
             )
             continue
+        # **`B438`/`B427`. A CLOSE THAT WAS SUBMITTED AND NOT CONFIRMED IS NOT A CLOSED POSITION.** Alpaca's
+        # close returned no status at all, which the check below read as success — so an ACCEPTED close
+        # answered 204. Its close is now resolved, and `close_confirmed` is False for anything short of a
+        # terminal fill. The close was SENT to this adapter, so no other adapter is tried: the answer is a
+        # non-success that says the position may still be open. Adapters that do not report the key
+        # (the simulators) are unaffected.
+        if (result or {}).get("close_confirmed") is False:
+            logger.error(
+                "Position close SUBMITTED, NOT CONFIRMED", position_id=position_id,
+                broker=adapter.broker_name, venue_status=result.get("venue_status"),
+                filled_units=result.get("filled_units"), resolution=result.get("resolution"),
+            )
+            raise HTTPException(
+                status_code=502,
+                detail=(f"The close for '{position_id}' was SUBMITTED to {adapter.broker_name} and NOT "
+                        f"CONFIRMED (venue status {result.get('venue_status')!r}, filled "
+                        f"{result.get('filled_units')!r}). The position may still be open — check it at "
+                        f"the venue before acting again."),
+            )
         status = str((result or {}).get("status", "")).lower()
         if status in _FAIL_STATUSES:
             logger.info(

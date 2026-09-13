@@ -104,6 +104,12 @@ class Client:
         self.submitted.append(order_data)
         return _order(str(order_data.qty))
 
+    def get_order_by_id(self, order_id, filter=None):
+        """`B427`: `place_order` re-reads its order until terminal. This venue answers with the order as
+        submission reported it — an arm that replaces `submit_order` sets `self.last_order` to steer it."""
+        self.calls.append(("get_order_by_id", str(order_id)))
+        return getattr(self, "last_order", None)
+
     def get_account(self):
         self.calls.append(("get_account",))
         class _Acct:
@@ -111,10 +117,17 @@ class Client:
         return _Acct()
 
 
+async def _instant_sleep(_seconds):
+    """`B427`: the resolver's sleep, replaced so no arm waits for real time."""
+    return None
+
+
 def _adapter(assets=None, **kw):
     assets = assets if assets is not None else {"BTC/USD": _asset("BTC/USD", min_order_size=BTC_MIN)}
     client = Client(assets, **kw)
-    return AlpacaAdapter(client, paper=True), client
+    adapter = AlpacaAdapter(client, paper=True)
+    adapter._sleep = _instant_sleep
+    return adapter, client
 
 
 import contextlib

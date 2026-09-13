@@ -1037,18 +1037,24 @@ def test_V2_every_status_LITERAL_a_producer_can_emit_is_CLASSIFIED():
 
     emitted: dict[str, set[str]] = {}
     for module, names in ((service, {"execute"}), (paper, {"place_order"}),
-                          (cft_sim, {"place_order", "_reject"}), (alpaca, {"place_order"})):
+                          (cft_sim, {"place_order", "_reject"}), (alpaca, {"place_order", "_order_result"})):
         for value, sites in _status_literals(inspect.getsource(module), names).items():
             emitted.setdefault(value, set()).update(f"{module.__name__.rsplit('.', 1)[-1]}.{s}" for s in sites)
 
     # THE DENOMINATOR IS THE IDENTITY OF WHAT WAS FOUND, not a count: each producer must be seen.
-    for must in ("service.execute", "paper.place_order", "cft_sim._reject", "alpaca.place_order"):
+    # `B427` moved Alpaca's status mapping out of place_order into `_order_result`, the one mapping.
+    for must in ("service.execute", "paper.place_order", "cft_sim._reject", "alpaca._order_result"):
         assert any(s.startswith(must) for sites in emitted.values() for s in sites), (
             f"the scan found no status literal in {must}; it may be scanning nothing"
         )
     assert {"rejected", "REJECTED", "FILLED", "observed"} <= set(emitted), sorted(emitted)
 
-    unclassified = {v: sorted(s) for v, s in emitted.items() if v not in known}
+    # **A BOUNDED, REASONED EXEMPTION, not a list of unresolved statuses** (M-2's shape). UNRESOLVED stays the
+    # complement; this names the one literal a producer emits ON PURPOSE to land there.
+    deliberately_unresolved = {
+        "SUBMITTED": "Alpaca's result for an order returned with no readable status — not a known outcome, so it halts",
+    }
+    unclassified = {v: sorted(s) for v, s in emitted.items() if v not in known and v not in deliberately_unresolved}
     assert not unclassified, (
         f"a producer emits a status the loop does not classify: {unclassified}. Decide whether it is a "
         f"fill, a refusal, or not reachable from the loop — do not let it fall into UNRESOLVED by accident."

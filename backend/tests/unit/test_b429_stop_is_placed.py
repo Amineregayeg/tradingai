@@ -128,6 +128,11 @@ def _adapter(placed, *, reread=PROTECTED, reread_raises=False, reread_after=TERM
     a = AlpacaAdapter.__new__(AlpacaAdapter)
     a.sent = []
     a._paper = True
+
+    async def _instant_sleep(_seconds):     # `B427`: the resolver never waits for real time in an arm
+        return None
+
+    a._sleep = _instant_sleep
     reads = {"n": 0}
 
     async def _call(name, *args, **kwargs):
@@ -209,7 +214,10 @@ async def test_a_stop_with_NO_target_is_sent_as_OTO_not_a_broken_bracket():
 
 @pytest.mark.asyncio
 async def test_an_order_with_NO_stop_is_unchanged():
-    """**The control.** No stop requested -> an ordinary order, no re-read, nothing closed."""
+    """**The control.** No stop requested -> an ordinary order, no PROTECTION re-read, nothing closed.
+
+    `B427`: the order IS re-read now — once, by the resolver, which stops on a terminal parent. That read
+    is resolution, not protection: no leg is inspected and nothing is cancelled or closed."""
     a = _adapter(_placed("simple"))
     res = await a.place_order(_req(sl=None, tp=None))
 
@@ -217,7 +225,8 @@ async def test_an_order_with_NO_stop_is_unchanged():
     assert submitted.stop_loss is None and submitted.take_profit is None
     assert submitted.order_class is None
     assert res["status"] == "FILLED", "a plain order stopped working"
-    assert not _called(a, "get_order_by_id") and not _called(a, "close_position")
+    assert len(_called(a, "get_order_by_id")) == 1, "the resolver did not read, or read past a terminal order"
+    assert not _called(a, "cancel_order_by_id") and not _called(a, "close_position")
 
 
 # =====================================================================================

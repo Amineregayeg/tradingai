@@ -64,32 +64,47 @@ class _Account:
         self.currency = "USD"
 
 
-class _FailedBody:
-    """`FailedClosePositionDetails` — `code` and `message` are REQUIRED on the real model."""
+def _close_order(symbol, status="filled", filled_qty="0.01"):
+    """A REAL `alpaca.trading.models.Order` — what `TradingClient.close_position(symbol)` returns.
 
-    def __init__(self, code=422, message="insufficient qty"):
-        self.code = code
-        self.message = message
+    **`B439`.** This double used to return a `ClosePositionResponse` look-alike (`body`, an HTTP `status`
+    int) — the return type of `close_all_positions`, a DIFFERENT SDK method this adapter never calls. The
+    adapter read the real Order the same way, `int(order.status)` raised for every status, and the kill
+    switch ended after its first position; this file stayed green because its double answered for the
+    other method. `test_the_close_double_returns_what_the_SDK_ANNOTATES` pins the double to the SDK.
+    """
+    import uuid
+    from datetime import datetime, timezone
+
+    from alpaca.trading.enums import OrderClass, OrderStatus, TimeInForce
+    from alpaca.trading.models import Order
+
+    now = datetime.now(timezone.utc)
+    return Order(
+        id=uuid.uuid4(), client_order_id=f"close-{symbol}", created_at=now, updated_at=now,
+        submitted_at=now, status=OrderStatus(status), time_in_force=TimeInForce.GTC,
+        order_class=OrderClass.SIMPLE, extended_hours=False, symbol=symbol, qty="0.01",
+        filled_qty=filled_qty, filled_avg_price="70000" if status == "filled" else None,
+    )
 
 
-class _CloseResponse:
-    """`ClosePositionResponse`: `body` is an `Order` on success, `FailedClosePositionDetails` on
-    failure, alongside an HTTP `status` int. **This venue can express a per-position failure and
-    CFT could not** — there I had to record "a partial close would still read as CLOSED" as an
-    unclosable gap."""
-
-    def __init__(self, body=None, status=200):
-        self.body = body if body is not None else object()
-        self.status = status
+async def _instant_sleep(_seconds):
+    """The resolver's sleep, replaced: no arm waits for real time (`B427`)."""
+    return None
 
 
 class TradingClientMock:
-    def __init__(self, positions=None, account=None, close_result=None, close_error=None):
+    """`close_status` is the status every close order is created with and RE-READ as, per symbol when a
+    dict — so an accepted close that never fills stays accepted on every re-read, as the venue would say."""
+
+    def __init__(self, positions=None, account=None, close_status="filled", close_error=None):
         self._positions = positions if positions is not None else [_Position()]
         self._account = account if account is not None else _Account()
-        self._close_result = close_result
+        self._close_status = close_status
         self._close_error = close_error or {}
+        self._orders: dict[str, object] = {}
         self.closed: list[tuple] = []
+        self.rereads: list[str] = []
 
     def get_account(self):
         if isinstance(self._account, Exception):
@@ -102,6 +117,7 @@ class TradingClientMock:
         return list(self._positions)
 
     def get_orders(self, filter=None):
+        self.orders_filter = filter
         return []
 
     def close_position(self, symbol_or_asset_id, close_options=None):
@@ -109,12 +125,23 @@ class TradingClientMock:
         err = self._close_error.get(symbol_or_asset_id)
         if err is not None:
             raise err
-        return self._close_result if self._close_result is not None else _CloseResponse()
+        status = (self._close_status.get(symbol_or_asset_id, "filled")
+                  if isinstance(self._close_status, dict) else self._close_status)
+        order = _close_order(symbol_or_asset_id, status=status,
+                             filled_qty="0.01" if status == "filled" else "0")
+        self._orders[str(order.id)] = order
+        return order
+
+    def get_order_by_id(self, order_id, filter=None):
+        self.rereads.append(str(order_id))
+        return self._orders[str(order_id)]
 
 
 def _adapter(paper: bool = True, **kw) -> tuple[AlpacaAdapter, TradingClientMock]:
     mock = TradingClientMock(**kw)
-    return AlpacaAdapter(mock, paper=paper), mock
+    adapter = AlpacaAdapter(mock, paper=paper)
+    adapter._sleep = _instant_sleep
+    return adapter, mock
 
 
 # ======================================================================================
@@ -463,21 +490,40 @@ def test_a_WHOLE_close_sends_no_size():
 # ======================================================================================
 
 
-def test_a_FAILED_close_body_is_reported_FAILED_and_not_CLOSED():
-    """**This venue can express a per-position failure and CFT could not.**
+def test_the_close_double_returns_what_the_SDK_ANNOTATES():
+    """**`B439`'s guard, read from the SDK at test time rather than named here** (manager): a type written
+    into this file records today's SDK and passes silently the day the SDK changes its annotation."""
+    import typing
 
-    `ClosePositionResponse.body` is `FailedClosePositionDetails` — `code` and `message` — when the
-    close failed, and the SDK does NOT raise for it. A row marked CLOSED on the strength of "no
-    exception" would state something false, which is `B337`'s shape by a different cause. On CFT I
-    had to record that gap as unclosable because its response shape is unobserved.
-    """
-    adapter, _ = _adapter(
-        positions=[_Position(symbol="BTC/USD")],
-        close_result=_CloseResponse(body=_FailedBody(code=422, message="insufficient qty")),
+    from alpaca.trading.client import TradingClient
+
+    annotated = typing.get_type_hints(TradingClient.close_position)["return"]
+    models = [t for t in typing.get_args(annotated) or (annotated,) if isinstance(t, type)
+              and t.__module__.startswith("alpaca.")]
+    assert models, f"the SDK's close_position annotation names no alpaca model: {annotated!r}"
+    returned = TradingClientMock().close_position("BTC/USD")
+    assert isinstance(returned, tuple(models)), (
+        f"the double returns {type(returned).__name__}; the SDK annotates {annotated!r}")
+    assert "ClosePositionResponse" not in {m.__name__ for m in models}, (
+        "the SDK now annotates close_position with the close-ALL response type — re-derive B439")
+
+
+def test_an_ACCEPTED_close_that_never_FILLS_is_FAILED_not_CLOSED_and_the_loop_CONTINUES():
+    """**`B439` + `B427`/`B438` on the kill switch's path.** Driven with real SDK Orders: before, the first
+    close raised inside the classifier and every later position was NOT_ATTEMPTED. An accepted close that
+    is still accepted when the budget is spent is FAILED WITH A REASON — never CLOSED — and the loop goes on."""
+    adapter, mock = _adapter(
+        positions=[_Position(symbol=s) for s in ("BTC/USD", "ETH/USD", "LTC/USD")],
+        close_status={"BTC/USD": "filled", "ETH/USD": "accepted", "LTC/USD": "filled"},
     )
     report = asyncio.run(adapter.close_all_positions())
-    assert report[0]["disposition"] == "FAILED"
-    assert "422" in report[0]["reason"] and "insufficient qty" in report[0]["reason"]
+    by_pair = {r["pair"]: r for r in report}
+    assert [by_pair[p]["disposition"] for p in ("BTC/USD", "ETH/USD", "LTC/USD")] == ["CLOSED", "FAILED", "CLOSED"]
+    assert by_pair["ETH/USD"]["status"] == "failed"
+    assert "SUBMITTED and NOT CONFIRMED" in by_pair["ETH/USD"]["reason"], by_pair["ETH/USD"]["reason"]
+    assert by_pair["ETH/USD"]["close"]["resolution"]["resolved"] is False
+    assert by_pair["BTC/USD"]["close"]["close_confirmed"] is True
+    assert len(mock.closed) == 3, "the loop did not reach every position"
 
 
 def test_a_per_position_failure_is_FAILED_and_the_loop_CONTINUES():

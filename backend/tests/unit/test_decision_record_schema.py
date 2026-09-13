@@ -54,6 +54,7 @@ _CHAIN = [
     # its contents existed — four times running now (`0005`, `0009`, `0010`, `0014`). The
     # cost of adding a line is exactly what makes the omission visible.
     ("0014", "0014_rejection_code_protection.py", "0013"),
+    ("0015", "0015_rejection_code_venue_ended_unfilled.py", "0014"),
 ]
 
 
@@ -714,7 +715,7 @@ def test_each_migration_FREEZES_the_vocabulary_that_was_live_when_it_RAN():
     0006   6  + ABANDONED                              0011  17  + VENUE_TRANSPORT
     0007   3  decided_by's vocabulary                  0012  18  + MIN_SIZE
     0008   7  + REJECTED                               0014  19  + PROTECTION_NOT_ACCEPTED
-    0013   8  + UNSIZED_FILL
+    0013   8  + UNSIZED_FILL                           0015  20  + VENUE_ENDED_UNFILLED
     ```
 
     Each revision's contents were recovered from the model as it stood at that migration's landing
@@ -731,7 +732,7 @@ def test_each_migration_FREEZES_the_vocabulary_that_was_live_when_it_RAN():
 
     m2, m6, m7, m8 = load("0002"), load("0006"), load("0007"), load("0008")
     m10, m11, m12, m13 = load("0010"), load("0011"), load("0012"), load("0013")
-    m14 = load("0014")
+    m14, m15 = load("0014"), load("0015")
 
     EXPECTED = {
         ("0002", "_OUTCOMES_AT_0002"): {"WIN", "LOSS", "BE", "OPEN", "ABSTAINED"},
@@ -754,8 +755,17 @@ def test_each_migration_FREEZES_the_vocabulary_that_was_live_when_it_RAN():
             "PROP_FIRM_HALTED", "PROP_FIRM_WOULD_BREACH_DAILY_LOSS",
             "PROP_FIRM_WOULD_BREACH_MAX_DRAWDOWN", "BROKER_UNAVAILABLE",
             "VENUE_TRANSPORT", "VENUE_RAISED", "UNCODED_LEGACY", "UNCLASSIFIED"},
+        # `B427`. Twenty — `0014`'s nineteen plus the one this revision adds. Written out, as above.
+        ("0015", "_CODES_AT_0015"): {
+            "NO_REFERENCE_PRICE", "DEGENERATE_STOP", "ENTRY_DRIFT", "THROUGH_STOP",
+            "NON_POSITIVE_SIZE", "VENUE_DIRECTION_UNSUPPORTED", "MIN_SIZE",
+            "PROTECTION_NOT_ACCEPTED", "VENUE_ENDED_UNFILLED", "PROP_FIRM_TARGET_REACHED",
+            "PROP_FIRM_HALTED_DAILY_LOSS", "PROP_FIRM_HALTED_MAX_DRAWDOWN",
+            "PROP_FIRM_HALTED", "PROP_FIRM_WOULD_BREACH_DAILY_LOSS",
+            "PROP_FIRM_WOULD_BREACH_MAX_DRAWDOWN", "BROKER_UNAVAILABLE",
+            "VENUE_TRANSPORT", "VENUE_RAISED", "UNCODED_LEGACY", "UNCLASSIFIED"},
     }
-    mods = {"0002": m2, "0006": m6, "0007": m7, "0008": m8, "0013": m13, "0014": m14}
+    mods = {"0002": m2, "0006": m6, "0007": m7, "0008": m8, "0013": m13, "0014": m14, "0015": m15}
     for (stem, name), expected in EXPECTED.items():
         actual = set(getattr(mods[stem], name))
         assert actual == expected, (
@@ -792,12 +802,16 @@ def test_each_migration_FREEZES_the_vocabulary_that_was_live_when_it_RAN():
     assert set(m14._CODES_AT_0012) == set(m12._CODES_AT_0012), (
         "0014's downgrade would restore a 0012 that never existed"
     )
+    assert set(m15._CODES_AT_0014) == set(m14._CODES_AT_0014), (
+        "0015's downgrade would restore a 0014 that never existed"
+    )
+    assert "VENUE_ENDED_UNFILLED" not in m15._CODES_AT_0014 and "VENUE_ENDED_UNFILLED" in m15._CODES_AT_0015
 
     # The LIVE vocabularies belong to the NEWEST revision for each, and to no other.
     from app.models.decision_record import DECISION_OUTCOMES, REJECTION_CODES
 
-    assert set(m14._CODES_AT_0014) == set(REJECTION_CODES), (
-        "HEAD's rejection vocabulary has moved past 0014 — a code the database's CHECK refuses, so "
+    assert set(m15._CODES_AT_0015) == set(REJECTION_CODES), (
+        "HEAD's rejection vocabulary has moved past 0015 — a code the database's CHECK refuses, so "
         "the rejection is LOST rather than recorded (B410). A new code needs a new migration."
     )
     assert set(m13._OUTCOMES_AT_0008) == set(m8._OUTCOMES_AT_0008), (
@@ -975,3 +989,56 @@ def test_every_DOWNGRADE_emits_the_PREVIOUS_revision_and_ignores_the_live_model(
             f"existed is worse than one that fails, because it succeeds"
         )
         assert "A_NINTH_OUTCOME" not in check, f"{stem}'s downgrade followed the live model"
+
+
+def test_0015_ONLY_WIDENS_the_rejection_code_CHECK():
+    """**`B427`, manager's condition on ruling C.** A deploy's rollback stays CODE-ONLY only while every
+    migration in it widens: the old code never writes the new value and the wider CHECK admits all it
+    does. So both halves are asserted — `0015` performs no operation but dropping and recreating the one
+    rejection-code CHECK, and what it creates is a strict superset of what it replaced, by exactly one code.
+    """
+    import sys
+    import types
+    from unittest import mock
+
+    calls: list[tuple] = []
+    checks: dict[str, str] = {}
+
+    class _RecordingOp:
+        def __getattr__(self, name):
+            def _record(*args, **kwargs):
+                calls.append((name, args[0] if args else None))
+                if name == "create_check_constraint":
+                    checks[args[0]] = str(args[2])
+            return _record
+
+    fake_op = _RecordingOp()
+    path = next(_versions_dir().glob("0015_*.py"))
+    for direction in ("upgrade", "downgrade"):
+        calls.clear()
+        checks.clear()
+        with mock.patch.dict(sys.modules, {"alembic": types.SimpleNamespace(op=fake_op)}):
+            spec = importlib.util.spec_from_file_location("_mig_0015_widen", path)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            getattr(mod, direction)()
+        assert calls == [("drop_constraint", "ck_decision_records_rejection_code"),
+                         ("create_check_constraint", "ck_decision_records_rejection_code")], (
+            f"0015.{direction} does more than swap the rejection-code CHECK: {calls}"
+        )
+        emitted = set(re.findall(r"'([A-Z_]+)'", checks["ck_decision_records_rejection_code"]))
+        if direction == "upgrade":
+            upgraded = emitted
+        else:
+            downgraded = emitted
+    assert downgraded < upgraded and upgraded - downgraded == {"VENUE_ENDED_UNFILLED"}, (
+        f"0015 does not widen by exactly one code: added {sorted(upgraded - downgraded)}, "
+        f"removed {sorted(downgraded - upgraded)}"
+    )
+    m14 = next(_versions_dir().glob("0014_*.py"))
+    spec = importlib.util.spec_from_file_location("_mig_0014_for_0015", m14)
+    mod14 = importlib.util.module_from_spec(spec)
+    with mock.patch.dict(sys.modules, {"alembic": types.SimpleNamespace(op=fake_op)}):
+        spec.loader.exec_module(mod14)
+    assert downgraded == set(mod14._CODES_AT_0014), "0015's downgrade target is not 0014's upgrade vocabulary"
+

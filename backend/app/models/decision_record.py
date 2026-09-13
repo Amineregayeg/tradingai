@@ -152,6 +152,13 @@ REJECTION_MIN_SIZE = "MIN_SIZE"
 #: (that list is unmeasured, and then too narrow). Telling an operator which world they are in is the
 #: whole value of the code — `B375`'s confusion is what sharing one would rebuild.
 REJECTION_PROTECTION_NOT_ACCEPTED = "PROTECTION_NOT_ACCEPTED"
+#: **`B427`. The venue ACKNOWLEDGED the order and then ENDED it — cancelled, expired or rejected — with a
+#: READABLE filled quantity of exactly ZERO.** No position exists, so REJECTED is true (manager's
+#: ruling C). ONLY on a readable zero: an unreadable quantity is exposure unknown and stays UNRESOLVED,
+#: which halts. Its own code rather than `VENUE_TRANSPORT` (nothing failed to arrive — the venue
+#: answered, after the fact) or `VENUE_RAISED` (nothing raised): an operator reading it learns the
+#: order reached the book and did not trade, which is a different investigation from either.
+REJECTION_VENUE_ENDED_UNFILLED = "VENUE_ENDED_UNFILLED"
 REJECTION_PROP_FIRM_TARGET_REACHED = "PROP_FIRM_TARGET_REACHED"
 REJECTION_PROP_FIRM_HALTED_DAILY_LOSS = "PROP_FIRM_HALTED_DAILY_LOSS"
 REJECTION_PROP_FIRM_HALTED_MAX_DRAWDOWN = "PROP_FIRM_HALTED_MAX_DRAWDOWN"
@@ -207,6 +214,7 @@ REJECTION_CODES: tuple[str, ...] = (
     REJECTION_VENUE_DIRECTION_UNSUPPORTED,
     REJECTION_MIN_SIZE,
     REJECTION_PROTECTION_NOT_ACCEPTED,
+    REJECTION_VENUE_ENDED_UNFILLED,
     REJECTION_PROP_FIRM_TARGET_REACHED,
     REJECTION_PROP_FIRM_HALTED_DAILY_LOSS,
     REJECTION_PROP_FIRM_HALTED_MAX_DRAWDOWN,

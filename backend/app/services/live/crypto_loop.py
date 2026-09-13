@@ -842,8 +842,8 @@ class LiveCryptoLoop:
         are managing (false — nothing is managing it), `UNSIZED_FILL` asserts we could not size it
         (we could; we could not PROTECT it). **A row is worse than no row when every available
         value is affirmatively wrong** — `B399`, and the reason `UNSIZED_FILL` had to be added
-        rather than borrowed. A ninth outcome belongs with `B427`/`T-0130`, which own that
-        vocabulary; this does not smuggle one in.
+        rather than borrowed. Neither `T-0130` nor `B427`, which own that vocabulary, added a ninth
+        outcome — both ruled no row where every value is false — and this does not smuggle one in.
 
         **AND NO ROW EXISTS YET — "no NEW row" and "no row" are different states, and the argument
         above needs the second.** Traced and then DRIVEN (`test_the_unprotected_halt_leaves_NO_
@@ -912,29 +912,33 @@ class LiveCryptoLoop:
         )
 
     async def _on_unresolved_order(self, pair: str, entry_df, sig, res: dict, trace=None) -> None:
-        """`place_order` returned neither a fill nor a refusal. **THE SEAM WHERE `B427` ATTACHES.**
+        """`place_order` returned neither a fill nor a refusal, AFTER resolution. **The halt for exposure unknown.**
 
         **`T-0130`.** An absent or unrecognised status means the engine cannot say whether the venue
         acted. Recording a fill invents a position; recording a refusal denies one that may exist
         and that nothing would then manage (`B427`'s worst case). So this halts, as the other two
         *we cannot establish what we hold* states do, and records the halt — without a row.
 
-        **WHAT `B427` REPLACES HERE, AND WHAT IT MUST NOT.** Resolving the order to a terminal state
-        — a bounded re-read, the timeout recorded as a result — belongs at the top of this method,
-        followed by classifying the RESOLVED result through the same three branches. The bound is a
-        trading decision and is not taken here. **The first case to resolve rather than halt on is a
-        TERMINAL status with a KNOWN filled quantity** — `CANCELED` with a non-zero fill is a
-        position of known size, not an unknown. What stays: anything still unresolved after
-        resolution halts, because an order nobody can classify is not a refusal.
+        **`B427` RESOLVES ORDERS BEFORE THEY REACH HERE — IN THE ADAPTER, NOT IN THIS METHOD** (manager's
+        ruling A). `AlpacaAdapter.place_order` re-reads the order until it is terminal or
+        `ORDER_RESOLUTION_BUDGET_S` is spent, and maps the verdict: a `CANCELED` order with a known fill
+        arrives as PARTIALLY_FILLED, one ended with a readable zero as REJECTED. **So what reaches this
+        seam is what stayed unresolved when the budget expired** — an acknowledgement nothing confirmed, a
+        terminal status with an unreadable quantity, a replaced order. Do NOT add resolution here: it
+        would re-read orders the adapter already gave up on, and probe 3, which calls `place_order`
+        directly, would never exercise it. What stays: anything still unresolved halts, because an order
+        nobody can classify is not a refusal.
 
-        **NO `DecisionRecord`, deliberately** (manager's ruling). `REJECTED` denies a position,
-        `OPEN` asserts one of known size, `UNSIZED_FILL` asserts the venue acted; none is true of
-        *unknown*, and a row is worse than none when every available value is affirmatively wrong
-        (`B399`). Nor a new outcome written to be overwritten once `B427` resolves the order — that
-        is `B423`'s silent rewrite of a stored outcome, built in on purpose. **So the row is DEFERRED
-        TO `B427` WITH EVERYTHING NEEDED TO WRITE IT TRUTHFULLY**: the alert carries every input
-        `_record_signal_decision` would have used, so the corpus's missing row is recoverable
-        rather than lost.
+        **NO `DecisionRecord`, deliberately and PERMANENTLY for what reaches here** (manager's ruling,
+        restated after `B427`). An order the adapter RESOLVED never reaches this seam: it goes through the
+        FILL or REFUSAL branch and gets a true row there. What does reach it — the budget spent on a
+        non-terminal order, or a terminal state whose quantity cannot be read — is exactly the case where
+        exposure is unknown, and for it `REJECTED` denies a position, `OPEN` asserts one of known size and
+        `UNSIZED_FILL` asserts the venue acted: none is true, and a row is worse than none when every
+        available value is affirmatively wrong (`B399`). No later task writes it either — an outcome
+        stored now to be rewritten later is `B423`'s silent rewrite. **The missing row is recoverable from
+        the alert, which carries every input `_record_signal_decision` would have used**, once an operator
+        has found the order at the venue.
 
         Same ordering as the other halt sites (`M-7`): the halt is in force before anything is
         written, so a failed write cannot un-halt.

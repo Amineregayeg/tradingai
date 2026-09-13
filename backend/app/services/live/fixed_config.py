@@ -42,6 +42,7 @@ from __future__ import annotations
 from typing import Final
 
 from app.services.broker.alpaca import ALPACA_CRYPTO_LONG_ONLY
+from app.services.broker.alpaca import ORDER_RESOLUTION_BUDGET_S as _ALPACA_ORDER_RESOLUTION_BUDGET_S
 from app.services.broker.base import DirectionPolicy
 
 #: Instruments watched, as pair -> Binance symbol.
@@ -110,6 +111,14 @@ MAX_CONCURRENT: Final[int] = 3
 
 #: Seconds between polls of the live price.
 POLL_INTERVAL: Final[float] = 10.0
+
+#: **`B427`. How long an order (and a close) is re-read toward a terminal state before the engine stops
+#: waiting — MALEK'S TO SET.** Latency before the loop proceeds, and on expiry the order halts the engine as
+#: UNRESOLVED. **Defined once, in `alpaca.py`, and named here rather than copied:** `fixed_config` imports
+#: that module, so the adapter cannot import this one; an arm asserts the two names are the SAME object.
+#: To change the value, change it at `alpaca.ORDER_RESOLUTION_BUDGET_S` (refused at import if it is not a
+#: positive, finite number of seconds at or under its ceiling).
+ORDER_RESOLUTION_BUDGET_S: Final[float] = _ALPACA_ORDER_RESOLUTION_BUDGET_S
 
 
 def as_dict() -> dict:

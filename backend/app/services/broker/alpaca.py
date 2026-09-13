@@ -47,6 +47,8 @@ directory deep is invisible to the discovery walk while the suite stays green.
 from __future__ import annotations
 
 import asyncio
+import math
+import time
 from datetime import datetime, timezone
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
@@ -55,6 +57,7 @@ from typing import Any, Callable
 from app.core.exceptions import BrokerError, DirectionNotSupported
 from app.core.logging import logger
 from app.db.enums import DirectionType
+from app.models.decision_record import REJECTION_VENUE_ENDED_UNFILLED
 from app.schemas.broker import Position
 from app.services.broker.base import (
     Account, BrokerAdapter, DirectionPolicy, OrderRequest, readable_price, readable_quantity,
@@ -252,9 +255,10 @@ FLAT_CHECK_ORDER_LIMIT = 100
 #: `PROTECTION_NOT_ACCEPTED`, which is false — the protection was accepted and fired. Near-unreachable.
 #:
 #: RESIDUAL N-1 (review), stated rather than closed: **a stop leg read `new` may not yet be
-#: validated; a refusal that completes after the re-read is not caught here. Closing it needs bounded
-#: resolution, which is `B427`'s.** `new` is overloaded between "validated and active" and "not yet
-#: validated", and without polling the two cannot be split.
+#: validated; a refusal that completes after the re-read is not caught here.** `new` is overloaded between
+#: "validated and active" and "not yet validated", and one read cannot split them. **`B427` did not close
+#: this:** its resolver re-reads the PARENT until terminal and does not re-check the stop leg, so a leg
+#: refused after the protection read is still unseen.
 #:
 #: What always-re-reading DOES buy: it catches a refusal that has COMPLETED by the time of the GET;
 #: it returns legs the POST response omitted (`Order.legs` is Optional, `nested=True` rolls them up);
@@ -281,6 +285,65 @@ WORKING_STOP_LEG_STATUSES: frozenset[str] = frozenset({"new", "held"})
 TERMINAL_ORDER_STATUSES: frozenset[str] = frozenset(
     {"filled", "canceled", "expired", "rejected", "replaced"}
 )
+
+#: **`B427`. HOW LONG `place_order` AND THE CLOSES WAIT FOR AN ORDER TO REACH A TERMINAL STATE.**
+#:
+#: A TRADING PARAMETER, and MALEK'S TO SET (re-exported as `fixed_config.ORDER_RESOLUTION_BUDGET_S`, an
+#: arm asserts they are the same object). It is latency before the loop proceeds: `TradingClient` is
+#: synchronous, the loop ticks symbols one after another every `POLL_INTERVAL` (10s), so a slow order
+#: delays every later symbol in that tick by up to this much, and each re-read blocks the event loop for
+#: its round trip. 5.0 is the proposed conservative default — half a tick. **The design does not depend
+#: on the value:** a different budget changes how many reads happen, never what an unresolved order does.
+#:
+#: **FAIL-SAFE ON EXPIRY.** An order still non-terminal when the budget is spent is reported with its
+#: last venue status, which the loop classifies UNRESOLVED and HALTS on (`_on_unresolved_order`).
+#:
+#: **RESIDUAL, stated (manager's ruling D):** an order still `partially_filled` at expiry is reported
+#: PARTIALLY_FILLED at the filled size with `terminal=False` — `T-0141`'s ruling — and **its remainder may
+#: still fill, untracked (`B411`).** Resolution makes that rarer, not worse: most partials reach a terminal
+#: state inside the budget. Cancelling the remainder would be a new trading action, and is not taken.
+ORDER_RESOLUTION_BUDGET_S: float = 5.0
+
+#: The read schedule, in seconds from the start of resolution. Past the last offset, reads continue at
+#: the schedule's final gap for as long as the budget allows — so a larger budget adds reads rather than
+#: leaving the tail unwatched, and a smaller one simply stops earlier.
+ORDER_RESOLUTION_READ_OFFSETS_S: tuple[float, ...] = (0.0, 0.25, 0.75, 1.75, 3.0, 4.5)
+
+#: The largest budget accepted. A tick is `POLL_INTERVAL` (10s); a minute of blocking the loop per order is
+#: already far past any trading intent, so a larger value is a units mistake (milliseconds typed as
+#: seconds), not a choice.
+ORDER_RESOLUTION_BUDGET_CEILING_S: float = 60.0
+
+
+def resolution_budget_problem(value) -> str | None:
+    """Why `value` is not a usable resolution budget, or `None` when it is (review's B-2).
+
+    A bool is not a number (`isinstance(True, int)`); NaN compares False to everything, so it would give
+    no reads that LOOK like a timeout; inf or a huge int would read forever. Each is refused by name.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return f"not a number of seconds: {value!r}"
+    try:
+        seconds = float(value)
+    except OverflowError:
+        return "too large to be a number of seconds"
+    if not math.isfinite(seconds):
+        return f"not finite: {value!r}"
+    if seconds <= 0:
+        return f"not positive: {value!r}"
+    if seconds > ORDER_RESOLUTION_BUDGET_CEILING_S:
+        return f"above the {ORDER_RESOLUTION_BUDGET_CEILING_S}s ceiling: {value!r}"
+    return None
+
+
+#: Refused at IMPORT, so a bad value set here cannot reach a running engine at all.
+if resolution_budget_problem(ORDER_RESOLUTION_BUDGET_S) is not None:
+    raise ValueError(f"ORDER_RESOLUTION_BUDGET_S is {resolution_budget_problem(ORDER_RESOLUTION_BUDGET_S)}")
+
+#: The terminal statuses after which an order ENDED without completing — derived from the terminal set,
+#: not a second list of statuses (`B426`): terminal, minus the one that completed (`filled`) and the one
+#: whose successor carries a new id this code never follows (`replaced`).
+ENDED_ORDER_STATUSES: frozenset[str] = TERMINAL_ORDER_STATUSES - {"filled", "replaced"}
 
 #: The largest `FLAT_CHECK_ORDER_LIMIT` the full-page guard is argued safe for — an arm asserts the
 #: bound, because a test double never caps and so no behavioural arm can tell 100 from 10000.
@@ -474,6 +537,13 @@ class AlpacaAdapter(BrokerAdapter):
     #: `fixed_config.SYMBOLS`, so unlike MT5 there is no symbol vocabulary to invent (`B305`'s
     #: problem does not arise). Left empty so the caller's list is used.
     default_pairs: list[str] = []
+
+    #: `B427`. The resolver's clock and sleep — CLASS attributes, so an adapter built without `__init__`
+    #: (a test double) still has them, and any instance can override them so no arm waits for real time.
+    #: `asyncio.sleep`, not `time.sleep`: a wait between re-reads must not block the event loop, even
+    #: though each re-read itself does (the SDK is synchronous).
+    _clock: Callable[[], float] = staticmethod(time.monotonic)
+    _sleep: Callable[[float], Any] = staticmethod(asyncio.sleep)
 
     def __init__(self, client: Any, *, paper: bool = True) -> None:
         """`client` is an `alpaca.trading.client.TradingClient` — or the mock presenting its shape.
@@ -743,17 +813,45 @@ class AlpacaAdapter(BrokerAdapter):
         )
 
     async def get_orders(self, status: str | None = None) -> list[dict]:
-        orders = await self._call("get_orders") or []
-        return [
-            {
+        """Orders, with `status` in the ENGINE's spelling and the venue's own beside it (`B427` addendum).
+
+        **TWO DEFECTS, both fixed here.** The `status` argument was DEAD — the SDK was called with no
+        filter, so a caller asking for open orders got the server default and could not know it. It is now
+        honoured, or refused loudly when the venue's filter cannot express it (`open`, `closed`, `all`).
+        And each order's `status` was the enum's lowercase VALUE (`"filled"`) while every other method of
+        this adapter returns the uppercase mapping (`"FILLED"`) — one key, two vocabularies, so a caller
+        comparing against the loop's sets silently got False. `status` now comes from `_order_result`, the
+        one mapping; the raw value is `venue_status`. Unpaginated still: the server's default page size
+        applies, and a caller that must see everything should use a bounded query of its own.
+        """
+        if status is None:
+            orders = await self._call("get_orders") or []
+        else:
+            from alpaca.trading.enums import QueryOrderStatus
+            from alpaca.trading.requests import GetOrdersRequest
+
+            try:
+                query = QueryOrderStatus(str(status).lower())
+            except ValueError:
+                raise BrokerError(
+                    f"get_orders cannot filter by {status!r}: the venue's order filter takes only "
+                    f"{sorted(q.value for q in QueryOrderStatus)}. Refusing rather than returning "
+                    f"orders the caller did not ask for.", broker=self.broker_name,
+                ) from None
+            orders = await self._call("get_orders", GetOrdersRequest(status=query)) or []
+        rows = []
+        for o in orders:
+            mapped = self._order_result(o)
+            rows.append({
                 "id": str(getattr(o, "id", "")),
                 "pair": str(getattr(o, "symbol", "") or ""),
-                "status": str(getattr(getattr(o, "status", None), "value", getattr(o, "status", ""))),
+                "status": mapped["status"],
+                "venue_status": mapped["venue_status"],
+                "filled_units": mapped["filled_units"],
                 "side": str(getattr(getattr(o, "side", None), "value", getattr(o, "side", ""))),
                 "qty": str(getattr(o, "qty", "") or ""),
-            }
-            for o in orders
-        ]
+            })
+        return rows
 
     async def get_recent_trades(self, since: datetime | None = None) -> list[dict]:
         """Filled orders are this venue's trade record — there is no separate deals endpoint.
@@ -1004,6 +1102,14 @@ class AlpacaAdapter(BrokerAdapter):
             client_order_id=request.client_order_id,
             **protection,
         )
+        # `B427` (review's B-2): an unusable resolution budget is refused HERE, before submission, where a
+        # refusal sends nothing. After submission it could only be clamped.
+        problem = resolution_budget_problem(ORDER_RESOLUTION_BUDGET_S)
+        if problem is not None:
+            raise BrokerError(
+                f"refusing to place an order: ORDER_RESOLUTION_BUDGET_S is {problem}, so its outcome could "
+                f"not be resolved. Nothing was sent.", broker=self.broker_name,
+            )
         placed = self._require_model(await self._call("submit_order", order), "submit_order")
 
         # ------------------------------------------------------------------
@@ -1020,68 +1126,46 @@ class AlpacaAdapter(BrokerAdapter):
         # than invisible. **This turns the unknown into a loud failure instead of a quiet one**,
         # which is the only property available without placing a real order.
         # ------------------------------------------------------------------
+        first_read = None
         if protection:
-            await self._require_protection(placed, request)
+            first_read = await self._require_protection(placed, request)
 
-        # `B411` — TWO DEFECTS IN ONE PREDICATE, and this line held both.
+        # ------------------------------------------------------------------
+        # **`B427`. THE ACKNOWLEDGEMENT IS NOT AN OUTCOME — RESOLVE THE ORDER, BOUNDED, THEN REPORT IT.**
         #
-        # It read `str(getattr(placed, "status", "")).endswith("filled")`. `OrderStatus` is a
-        # `str`-mixin enum, so `str(OrderStatus.FILLED)` is `'OrderStatus.FILLED'` while the member
-        # itself equals `'filled'` — **exactly the trap already pinned for `BaseURL` in
-        # `test_t0138_order_path.py`, rebuilt one module later by the author of that arm.** So the
-        # predicate was BLIND: it never fired on a real fill. And `crypto_loop.py:1858` opens a
-        # position on `status == "FILLED"`, which means **a real filled order was invisible to the
-        # platform** — the venue holding a position the engine never recorded, the worst direction
-        # for this class of error to point.
+        # This returned the SUBMISSION RESPONSE's status and quantity. An order the venue ACCEPTED and
+        # filled a moment later was classified at the moment of acceptance: before `T-0130` as a false
+        # refusal, since `T-0130` as UNRESOLVED, which halts. So the order is re-read until it is terminal
+        # or `ORDER_RESOLUTION_BUDGET_S` is spent, and the result maps the LATEST venue statement.
+        # `B429`'s nested protection read is the first read, so a fill already terminal by then costs no
+        # further request. On expiry the last status is reported as it is, and the loop's UNRESOLVED seam
+        # halts — no second failure path.
         #
-        # And the suffix match was LOOSE: `partially_filled` also ends with `filled`, so fixing
-        # only the blindness would have reported a partial as full and recorded a position at the
-        # size we ASKED for instead of the size we GOT. Hence an EXACT match on `.value`, and a
-        # partial that says so — it is deliberately not `"FILLED"`, so the loop does not record a
-        # full position from one. **A partial fill still leaves a real position we do not track**;
-        # that is logged as an open question rather than resolved here (`B411`).
-        raw_status = getattr(getattr(placed, "status", None), "value",
-                             getattr(placed, "status", "")) or "submitted"
-        if raw_status == "filled":
-            status = "FILLED"
-        elif raw_status == "partially_filled":
-            status = "PARTIALLY_FILLED"
-            # `B414`. THIS WAS `%s` WITH POSITIONAL ARGS, AND LOGURU FORMATS WITH `str.format` —
-            # so the placeholders stayed literal and the symbol, the requested size and the filled
-            # size were ALL DROPPED. The register recorded that a partial fill "logs at ERROR",
-            # which was true and worthless: the line said a partial happened and not for what or
-            # how much. Mine is the only percent-format logger call in `app/` (184 files, AST
-            # sweep with a planted control), so the convention was never in doubt — I just used
-            # the other language's.
-            #
-            # **AND NO ARM CAUGHT IT.** `test_a_PARTIAL_fill_is_NOT_reported_as_FILLED` executes
-            # this exact line and never looks at the log, which is why the arm is green and the
-            # log was empty. A side effect nothing asserts on is not covered by the test that
-            # triggers it.
+        # **Resolution lives HERE, not in the service or loop (manager's ruling A)**: probe 3 calls this
+        # method directly, so this is the only place the real venue will exercise it before the engine does.
+        # The acknowledgement is kept beside the verdict (`resolution.ack_*`), never overwritten.
+        # ------------------------------------------------------------------
+        resolved, resolution = await self._resolve_order(str(getattr(placed, "id", "") or ""), first_read)
+        verdict = self._order_result(resolved if resolved is not None else placed)
+        ack = self._order_result(placed)
+        status = verdict["status"]
+
+        if status == "PARTIALLY_FILLED":
+            # `B414`: keyword arguments, because loguru formats with `str.format` and a `%s` line dropped
+            # every value. `B411`: a partial leaves a real position; `terminal` says whether it can grow.
             logger.error(
-                "alpaca.partial_fill — the venue opened a position SMALLER than the order and "
-                "the engine does not track partials",
-                symbol=request.pair, requested=str(quantity),
-                filled=str(getattr(placed, "filled_qty", None)),
+                "alpaca.partial_fill — the venue opened a position SMALLER than the order",
+                symbol=request.pair, requested=str(quantity), filled=str(verdict["filled_units"]),
+                venue_status=verdict["venue_status"], terminal=verdict["terminal"],
+                resolved=resolution["resolved"],
             )
-        else:
-            status = str(raw_status).upper()
 
-        filled_raw = getattr(placed, "filled_qty", None)
-
-        return {
+        result = {
             "status": status,
             # What the VENUE says it filled, `None` when it did not say — never defaulted to the
-            # submitted quantity, which would report a fill we have no evidence of.
-            #
-            # **`T-0130` (review's K-4b): PARSED, NEVER RAISED.** This was `float(filled_raw)`, run
-            # AFTER the order was submitted and outside any `try`: a blank or unparseable quantity
-            # raised ValueError — not a `BrokerError` — out of `execute()` into the loop's venue-raised
-            # backstop, which filed a REFUSAL for an order that exists. And `float("nan")` does not
-            # raise at all, so catching ValueError alone would have stored NaN. The same three-state
-            # decision the stored refusal makes (`readable_quantity`): unreadable is `None`, and a FILLED
-            # result carrying the key with `None` takes the loop's unsized-fill halt.
-            "filled_units": readable_quantity(filled_raw),
+            # submitted quantity, which would report a fill we have no evidence of. Parsed by
+            # `readable_quantity` (`T-0130` K-4b): unreadable is `None`, never raised, never NaN.
+            "filled_units": verdict["filled_units"],
             "position_id": str(getattr(placed, "id", "")),
             "pair": request.pair,
             "direction": request.direction.value,
@@ -1092,16 +1176,19 @@ class AlpacaAdapter(BrokerAdapter):
             "quantise_increment": float(limits.min_trade_increment),
             "min_order_size": float(limits.min_order_size),
             "client_order_id": request.client_order_id,
-            # **`B433` (F-1), THE SIBLING ONE LINE BELOW `K-4b`.** This was
-            # `float(filled_avg_price or 0) or None`: "garbage" raised ValueError after submission — a
-            # false refusal through the venue-raised backstop — and NaN and inf passed through. The
-            # PARSE is `readable_quantity`'s; the ZERO RULE IS PER FIELD (manager): a zero quantity is a
-            # reading, a zero or negative price is not a price, so `readable_price` keeps what `or None`
-            # got right and adds what it missed (a truthy -5.0 was kept).
-            "fill": readable_price(getattr(placed, "filled_avg_price", None)),
+            # `readable_price` (`B433`): a zero, negative, unparseable or non-finite price is None.
+            "fill": verdict["fill"],
+            "venue_status": verdict["venue_status"],
+            "terminal": verdict["terminal"],
+            "resolution": {**resolution, "ack_status": ack["venue_status"],
+                           "ack_filled_units": ack["filled_units"]},
         }
+        if "rejection_code" in verdict:
+            result["rejection_code"] = verdict["rejection_code"]
+            result["reason"] = verdict["reason"]
+        return result
 
-    async def _require_protection(self, placed, request) -> None:
+    async def _require_protection(self, placed, request):
         """**`B429`: the order stands only if a WORKING STOP LEG is observed. Otherwise remediate.**
 
         Detection alone is not a fix — raising without closing leaves exactly the state this entry
@@ -1144,7 +1231,8 @@ class AlpacaAdapter(BrokerAdapter):
 
         legs = (getattr(reread, "legs", None) or []) if reread is not None else []
         if any(self._is_working_stop_leg(leg) for leg in legs):
-            return
+            # `B427`: the nested re-read is handed back, to be the resolver's FIRST read.
+            return reread
 
         logger.error(
             "alpaca.protection_not_observed — no WORKING stop leg on the nested re-read. "
@@ -1186,7 +1274,11 @@ class AlpacaAdapter(BrokerAdapter):
 
         try:
             # BY SYMBOL: the entry may already have filled, and what has to go is the POSITION.
-            await self.close_position(request.pair)
+            # **The SDK call, not `self.close_position`** (`B427`): the public method now RESOLVES the close
+            # order, and this remediation's verdict is the flat OBSERVATION below, not the close — a
+            # manager's ruling on `B429` put no poll and no bound here. Whether remediation should wait for
+            # its close to resolve is an open question for that ruling, not a side effect of this one.
+            await self._call("close_position", request.pair)
             # **A SUBMISSION, not a fill** — named that way so an operator reading the halt can
             # tell a slow close from a failed one.
             close_view = "submitted"
@@ -1201,10 +1293,11 @@ class AlpacaAdapter(BrokerAdapter):
         detail = "; ".join(steps + [observed])
 
         if not flat:
-            # NO POLL AND NO BOUND HERE (manager's ruling). A close that has not filled YET is
-            # "flat not observed" and halts. That over-halts, which is the right direction:
-            # `B427` owns bounded resolution, the bound is a trading decision, and this path is
-            # unreachable today (`B430`).
+            # NO POLL AND NO BOUND HERE (manager's ruling on `B429`). A close that has not filled YET is
+            # "flat not observed" and halts. That over-halts, which is the right direction. `B427` added
+            # bounded resolution to `place_order` and the public closes but deliberately NOT to this
+            # remediation's close (it calls the SDK directly), so this behaviour is unchanged; whether
+            # remediation should wait for its close is a separate ruling. Unreachable today (`B430`).
             raise AlpacaUnprotectedPositionOpen(symbol=request.pair, order_id=order_id,
                                                 detail=detail)
 
@@ -1279,6 +1372,118 @@ class AlpacaAdapter(BrokerAdapter):
         return format(Decimal(repr(value)), "f")
 
     @staticmethod
+    def _resolution_offsets(budget: float) -> list[float]:
+        """The offsets (seconds from the start) at which the resolver reads, for `budget`. Every offset is
+        at or before the budget, so no read — and no sleep before it — runs past the deadline. A budget of
+        zero is one immediate read."""
+        schedule = list(ORDER_RESOLUTION_READ_OFFSETS_S)
+        offsets = [o for o in schedule if o <= budget] or [0.0]
+        gap = schedule[-1] - schedule[-2]
+        nxt = schedule[-1] + gap
+        while gap > 0 and nxt <= budget:
+            offsets.append(nxt)
+            nxt += gap
+        return offsets
+
+    async def _resolve_order(self, order_id: str, first_read=None) -> tuple[Any, dict]:
+        """**`B427`. Re-read an order until it is TERMINAL or the budget is spent. NEVER raises.**
+
+        Returns `(last_order_read_or_first_read, resolution)`. `first_read` is a re-read ALREADY made —
+        `B429`'s nested protection read — so a fill that is terminal by then costs no further request.
+        A read that fails is "not yet", never a verdict: it is recorded and the next read is tried.
+        The VERDICT is always the latest venue statement; `resolution["resolved"]` says whether a
+        re-read confirmed a terminal state.
+
+        Only `Exception` is caught, so a cancellation during a wait propagates — the callers' abnormal-
+        exit handling (`close_all_positions`' in-flight rows) depends on seeing it.
+        """
+        from alpaca.trading.requests import GetOrderByIdRequest
+
+        # Read at CALL time, where Malek sets it. A value changed at runtime to something unusable is not
+        # refused here — this runs AFTER a submission, where raising is K-4b's false refusal — it is
+        # CLAMPED to one immediate read and the problem recorded, so it cannot pass for a timeout.
+        budget = ORDER_RESOLUTION_BUDGET_S
+        problem = resolution_budget_problem(budget)
+        if problem is not None:
+            budget = 0.0
+        start = self._clock()
+        last = first_read
+        reads = 1 if first_read is not None else 0
+        errors: list[str] = []
+
+        def _terminal(order) -> bool:
+            return order is not None and self._order_status(order) in TERMINAL_ORDER_STATUSES
+
+        if not _terminal(last):
+            for offset in self._resolution_offsets(budget):
+                if offset == 0.0 and first_read is not None:
+                    continue
+                wait = start + offset - self._clock()
+                if wait > 0:
+                    await self._sleep(wait)
+                reads += 1
+                try:
+                    last = self._require_model(
+                        await self._call("get_order_by_id", order_id, GetOrderByIdRequest(nested=True)),
+                        "get_order_by_id")
+                except Exception as exc:  # noqa: BLE001 - a failed read is "not yet", never a verdict
+                    errors.append(f"{type(exc).__name__}: {str(exc)[:160]}")
+                if _terminal(last):
+                    break
+
+        return last, {
+            "resolved": _terminal(last),
+            "reads": reads,
+            "elapsed_s": round(self._clock() - start, 3),
+            "budget_s": budget,
+            "budget_problem": problem,
+            "read_errors": errors[:6],
+        }
+
+    def _order_result(self, order) -> dict:
+        """**`B427`. ONE mapping from a venue Order to the engine's result**, for `place_order`, the closes
+        and `get_orders`. Built from the vocabularies that exist — `TERMINAL_ORDER_STATUSES` (and
+        `ENDED_ORDER_STATUSES`, derived from it), `readable_quantity`, `readable_price` — so what a status
+        MEANS to the loop is still decided only by `classify_order_status`.
+
+        ```
+        venue status               filled quantity         -> status               note
+        filled                     any (None -> unsized)   -> FILLED
+        partially_filled           any                     -> PARTIALLY_FILLED     terminal False (ruling D)
+        canceled/expired/rejected  readable, > 0           -> PARTIALLY_FILLED     a CLOSED partial: known size
+        canceled/expired/rejected  readable, exactly 0     -> REJECTED + VENUE_ENDED_UNFILLED (ruling C)
+        canceled/expired/rejected  unreadable or negative  -> the venue status, UPPER -> UNRESOLVED (exposure unknown)
+        replaced                   —                       -> REPLACED -> UNRESOLVED (successor id not followed)
+        anything else, incl. none  —                       -> the venue status UPPER, or SUBMITTED -> UNRESOLVED
+        ```
+
+        `B411`: the status is read by `.value` and matched EXACTLY (`_order_status`) — `str(OrderStatus)`
+        is `'OrderStatus.FILLED'`, and `partially_filled` also ends with `filled`.
+        """
+        venue = self._order_status(order)
+        qty = readable_quantity(getattr(order, "filled_qty", None))
+        out: dict = {
+            "venue_status": venue or None,
+            "terminal": venue in TERMINAL_ORDER_STATUSES,
+            "filled_units": qty,
+            "fill": readable_price(getattr(order, "filled_avg_price", None)),
+        }
+        if venue == "filled":
+            out["status"] = "FILLED"
+        elif venue == "partially_filled":
+            out["status"] = "PARTIALLY_FILLED"
+        elif venue in ENDED_ORDER_STATUSES and qty is not None and qty > 0:
+            out["status"] = "PARTIALLY_FILLED"
+        elif venue in ENDED_ORDER_STATUSES and qty is not None and qty == 0:
+            out["status"] = "REJECTED"
+            out["rejection_code"] = REJECTION_VENUE_ENDED_UNFILLED
+            out["reason"] = (f"the venue acknowledged the order and then ended it ({venue}) with nothing "
+                             f"filled — no position exists")
+        else:
+            out["status"] = venue.upper() if venue else "SUBMITTED"
+        return out
+
+    @staticmethod
     def _order_status(order) -> str:
         """An order's status as a lowercase string, `""` when it cannot be read.
 
@@ -1348,7 +1553,8 @@ class AlpacaAdapter(BrokerAdapter):
         query that raises, and an open-orders page that came back FULL, which could have truncated the
         order this is looking for. No helper that turns an error into an empty list is used —
         `_raw_positions` raises through `_call`, and orders are queried here directly because
-        `get_orders(status)` ignores its argument (noted for `B427`).
+        a bounded, newest-first, nested query is needed that the adapter's `get_orders` does not make —
+        it honours a status filter since `B427` but is still unpaginated.
 
         Orders are fetched with `nested=True` so child legs are visible, and the symbol is NOT flat if
         any order OR ANY OF ITS LEGS for it is non-terminal. R-10's page limit counts parents; legs
@@ -1441,18 +1647,47 @@ class AlpacaAdapter(BrokerAdapter):
         Alpaca expresses it as `ClosePositionRequest(qty=...)`. **Imported inside the method**, for
         `B328`'s reason: this module must stay importable without the SDK.
         """
+        # **`B427`/`B438`. THE CLOSE IS AN ORDER, AND AN ACCEPTED ORDER IS NOT A CLOSED POSITION.** This
+        # returned `str(result)` and nothing else, so the close order's status and filled quantity were
+        # discarded and a caller could not tell "the close was accepted" from "the close filled" —
+        # `positions.py` read the missing status as closed. The close order is resolved with the same
+        # resolver and budget as an entry, and `close_confirmed` is True ONLY for a terminal FILLED close.
         if lot_size is None:
-            result = await self._call("close_position", position_id)
-            return {"position_id": position_id, "partial": False, "result": str(result)}
+            order = await self._call("close_position", position_id)
+            return {"position_id": position_id, "partial": False, **(await self._close_outcome(order))}
 
         from alpaca.trading.requests import ClosePositionRequest
 
         # `qty` IS A STRING ON THIS VENUE. Passing a float would send `0.30000000000000004` for a
         # third of a position; the venue types it as a string and the SDK does not coerce.
         options = ClosePositionRequest(qty=str(lot_size))
-        result = await self._call("close_position", position_id, options)
+        order = await self._call("close_position", position_id, options)
         return {"position_id": position_id, "partial": True, "qty": str(lot_size),
-                "result": str(result)}
+                **(await self._close_outcome(order))}
+
+    async def _close_outcome(self, order) -> dict:
+        """Resolve a close ORDER and report it: the mapped verdict, the acknowledgement beside it, and
+        `close_confirmed` — True only when the close is terminal and FILLED. **Never raises.**
+
+        `TradingClient.close_position(symbol)` returns an `Order` (its annotation and its code). It is
+        NOT `ClosePositionResponse` — that is the return type of `close_all_positions`, an endpoint this
+        adapter never calls; reading an Order as one is `B439`.
+        """
+        order_id = str(getattr(order, "id", "") or "")
+        resolved, resolution = await self._resolve_order(order_id)
+        verdict = self._order_result(resolved if resolved is not None else order)
+        ack = self._order_result(order)
+        return {
+            "order_id": order_id or None,
+            "status": verdict["status"],
+            "venue_status": verdict["venue_status"],
+            "terminal": verdict["terminal"],
+            "filled_units": verdict["filled_units"],
+            "fill": verdict["fill"],
+            "close_confirmed": verdict["status"] == "FILLED" and verdict["terminal"],
+            "resolution": {**resolution, "ack_status": ack["venue_status"],
+                           "ack_filled_units": ack["filled_units"]},
+        }
 
     async def close_all_positions(self) -> list[dict]:
         """**Malek's ruled property, on its third venue** — the shape is reused, not rebuilt.
@@ -1463,12 +1698,12 @@ class AlpacaAdapter(BrokerAdapter):
         The dispositions come from `BrokerAdapter` (`T-0132`) rather than being redefined here — a
         ruled property that lives in one implementation is a property of that implementation.
 
-        **AND THIS VENUE CAN EXPRESS A PER-POSITION FAILURE, WHICH CFT COULD NOT.**
-        `ClosePositionResponse.body` is an `Order` on success and `FailedClosePositionDetails` —
-        carrying `code` and `message` — on failure, with an HTTP `status` int alongside. On CFT I
-        had to record *"a partial close would still read as CLOSED"* as an unclosable gap because
-        that venue's response shape is unobserved. Here it is typed, so a failed row carries the
-        venue's own reason instead of an inference.
+        **WHAT A ROW SAYS, AFTER `B439` AND `B427`.** Each close is `close_position(symbol)`, which returns an
+        `Order` — not `ClosePositionResponse`, the type of an endpoint this adapter never calls. The close
+        order is RESOLVED (`_close_outcome`) and reported CLOSED only when it is terminal and FILLED; a close
+        the venue refused raises inside `_call` and is FAILED with its reason; a close submitted and not
+        confirmed within the budget is FAILED WITH A REASON saying exactly that (`B337`). The resolved
+        order is attached to the row as `close`.
         """
         report: dict[str, dict] = {}
         try:
@@ -1507,14 +1742,15 @@ class AlpacaAdapter(BrokerAdapter):
                            "at the venue.",
                 )
                 try:
-                    result = await self._call("close_position", symbol)
+                    order = await self._call("close_position", symbol)
                 except Exception as exc:  # noqa: BLE001 - ANY exception, loop CONTINUES
                     row.update(
                         disposition=self.FAILED, status="failed", _in_flight=False,
                         reason=f"{type(exc).__name__}: {exc}",
                     )
                     continue
-                row.update(**self._classify_close(result), result=str(result), _in_flight=False)
+                outcome = await self._close_outcome(order)
+                row.update(**self._close_disposition(outcome), close=outcome, _in_flight=False)
         except BaseException as exc:  # noqa: BLE001 - CancelledError is not an Exception
             for _row in report.values():
                 if _row.pop("_in_flight", False):
@@ -1536,28 +1772,36 @@ class AlpacaAdapter(BrokerAdapter):
             row.pop("_in_flight", None)
         return list(report.values())
 
-    def _classify_close(self, result: Any) -> dict:
-        """Read the venue's own answer. **A response is not a close** (`B367`).
+    def _close_disposition(self, outcome: dict) -> dict:
+        """A resolved close, in the kill switch's ruled vocabulary. **A response is not a close** (`B367`).
 
-        `ClosePositionResponse.body` is `FailedClosePositionDetails` when the close failed, and the
-        SDK does not raise for it — so a row marked CLOSED on the strength of "no exception" would
-        be stating something false, which is `B337`'s shape by a different cause.
+        **`B439`. THIS REPLACED `_classify_close`, WHICH READ THE WRONG METHOD'S RETURN TYPE.** It treated
+        the result of `close_position(symbol)` as a `ClosePositionResponse` and did `int(result.status)`;
+        on the `Order` that method really returns, `.status` is an `OrderStatus`, so `int()` raised for
+        EVERY status — outside the per-position `try` — and the kill switch ended after its first
+        position, reporting every other one NOT_ATTEMPTED. Its tests stayed green because their double
+        returned the other method's type.
+
+        CLOSED only for a CONFIRMED close — terminal and FILLED. Anything else is FAILED WITH A REASON,
+        because that is where *outcome unknown* belongs and why no fourth disposition exists (`B337`):
+        a close SUBMITTED and not confirmed inside the budget may still fill, or may not, and the reason
+        says so.
         """
-        body = getattr(result, "body", None)
-        code = getattr(body, "code", None)
-        message = getattr(body, "message", None)
-        if code is not None or message is not None:
-            return {
-                "disposition": self.FAILED, "status": "failed",
-                "reason": f"the venue refused this close: code={code} {message}",
-            }
-        http = getattr(result, "status", None)
-        if http is not None and int(http) >= 300:
-            return {
-                "disposition": self.FAILED, "status": "failed",
-                "reason": f"the venue answered HTTP {http} for this close, which is not a success",
-            }
-        return {"disposition": self.CLOSED, "status": "closed", "reason": None}
+        if outcome["close_confirmed"]:
+            return {"disposition": self.CLOSED, "status": "closed", "reason": None}
+        seen = (f"venue status {outcome['venue_status']!r}, filled {outcome['filled_units']!r}, "
+                f"{outcome['resolution']['reads']} read(s) over {outcome['resolution']['elapsed_s']}s")
+        if outcome["status"] == "REJECTED":
+            reason = (f"the venue ENDED this close unfilled ({seen}) — the position is still OPEN "
+                      f"and must be closed another way")
+        elif outcome["status"] == "PARTIALLY_FILLED":
+            reason = (f"the close PARTIALLY filled ({seen}) — part of the position is still OPEN "
+                      f"and MUST be checked at the venue")
+        else:
+            reason = (f"the close was SUBMITTED and NOT CONFIRMED within "
+                      f"{outcome['resolution']['budget_s']}s ({seen}) — the position may still be open "
+                      f"and MUST be checked at the venue")
+        return {"disposition": self.FAILED, "status": "failed", "reason": reason}
 
     async def stream_prices(self, pairs: list[str], callback: Callable) -> None:
         """Poll per pair. Alpaca has a websocket feed; this shape is what the contract requires."""
