@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-13 (B435 amended — it is FOUR recorders with the same warn-and-continue except: _record_signal_decision, _resolve_decision, _persist_live_close and _record_rejected_signal, none reporting failure, against _record_unsized_fill as the control that does. Verified as a mechanism, not observed: _resolve_decision pops the dict entry before its try, the close path's fallback picks the newest OPEN row for the symbol, and its 'at most one can match' rests on an entry block that reads venue positions rather than decision rows — so a failed resolve followed by a failed open lets a later trade's P&L be written into an earlier trade's decision. A lost record becomes a wrong one. The ruling covers all four sites, which are not equal: three guard a real position, one a refusal.)
+Last updated: 2026-09-13 (newest entry B436 — OverflowError escapes handlers that catch only TypeError and ValueError, off the order path: the streaming price callback in main.py, analysis helpers, monitoring, and the finnhub calendar timestamp, where the overflow is in datetime.fromtimestamp rather than float so a string input reaches it, and whose handler catches OSError — right on some platforms, absent on the Linux host we deploy to. That calendar feeds the news windows that gate entries; what the gate does when the parse raises is unmeasured. Found by an AST sweep controlled three ways, with a precondition test ruling out five syntax matches that cannot overflow. The order-path sites are fixed in B433's follow-up.)
 
 ---
 
@@ -29087,3 +29087,51 @@ row does NOT block future entries on its symbol, because the block reads the ven
 is the unsized-fill precedent. `_record_rejected_signal` guards a refusal with no exposure — halting the engine
 because a refusal row failed to write is a different trade-off, and may deserve an alert without a halt. **This is a
 trading-behaviour decision for Malek**, and it should be made for all four at once.
+
+---
+
+### B436 — `OverflowError` ESCAPES HANDLERS THAT CATCH ONLY `TypeError`/`ValueError`, in code OFF the order path — including the calendar timestamp that feeds the news windows gating entries
+
+**Found by execute's AST sweep while closing `B433`'s overflow residual on the order path; two instances verified by
+manager at `f00a7ad`.** The order-path sites (`readable_quantity`, `readable_price`, `_position_units`' `positive()`)
+are fixed in `B433`'s follow-up. These are the rest.
+
+**The instrument, and why it was trusted:** every `float()`/`int()` in a `try` BODY whose handlers name `TypeError` or
+`ValueError` but not `OverflowError`, `ArithmeticError`, `Exception` or `BaseException`, over all 184 `.py` files under
+`app/`. Controlled three ways: a synthetic module (finds two narrow plants, skips the broad handlers); committed HEAD
+via `git archive` (16 narrow, including the two known order-path sites); the candidate (14, those two gone).
+
+**The precondition, because a syntax match is not an instance:** `OverflowError` comes only from `float()` of a huge
+INT or `int()` of an infinite float. `float()` of a digit STRING returns `inf` rather than raising, and `int()` of a
+digit string is arbitrary-precision. So five hits are NOT instances — `int(Retry-After header)` in `cryptofundtrader.py`
+and `oanda.py`, `int(token)` in `telemetry/census.py`, `float(value.strip())` in `evaluation/feedback.py`, and
+`exit_shadow.py`'s floats of the strategy's own values.
+
+**INSTANCES:**
+
+```
+main.py  _on_price_tick          try: bid = float(bid_raw); ask = float(ask_raw)
+                                 except (TypeError, ValueError):
+                                 -> a JSON integer bid of 401 digits raises OverflowError OUT OF THE STREAMING CALLBACK
+
+calendar/finnhub.py              try: return datetime.fromtimestamp(float(raw_str), tz=timezone.utc)
+                                 except (ValueError, OSError):
+                                 -> the overflow is in fromtimestamp, not float: float("inf") is fine, and
+                                    fromtimestamp(inf) raises "timestamp out of range for platform time_t"
+                                 -> so a STRING input reaches it too, unlike the order-path parses
+
+ict/detector.py _safe_float, ict/indicators.py _safe_val     analysis helpers; a huge int input is implausible
+monitoring/data_health.py                                    floats of DB-row values
+```
+
+**The calendar instance is the one that matters.** Its handler catches `OSError` — the author anticipated an
+out-of-range timestamp, and some platforms do raise `OSError` there. **On this Linux host it raises `OverflowError`,
+which escapes.** A defence that is correct on one platform and absent on the one we deploy to. And the news windows it
+feeds GATE ENTRIES: what the gate does when this parse raises — fail open, fail closed, or read as "not evaluated" — is
+**unmeasured**, and is the question to answer before this is ranked.
+
+**The sweep's stated limits:** it sees only TRY-GUARDED conversions (an unguarded `float()` raises on everything and
+belongs to another sweep), and a conversion hidden inside a helper (`Decimal(x)`, `math.*` on an int) is not seen. The
+finnhub line was flagged for the wrong reason — the float — and is an instance for a different one.
+
+All implausible inputs; none on the order path. Latent.
