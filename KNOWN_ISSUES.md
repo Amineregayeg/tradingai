@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-13 (newest entry B430 — THE ENGINE CANNOT SELECT ALPACA AT ALL. BROKER_MODE is a Final "sim" in fixed_config:85, main.py constructs LiveCryptoLoop with no argument so the fallback always wins, apply_config runs only if config is not None from reset_run(config=None), RunConfig is never built with broker_mode, and BROKER_MODE is env-read zero times — so _select_venue can never return alpaca and _build_broker never constructs an AlpacaAdapter. Part D's order path is DEPLOYED BUT UNREACHABLE, which is the single shared reason B427, B428, B429 and T-0130 are all latent rather than seven independent strokes of luck. Excellent as a safety property — real-money trading cannot be switched on by a setting, a row or a click, only by a code edit and a deploy — but nobody chose it as an interlock: no comment names it as the live-trading gate, no arm asserts it, and Final[str] reads as a default rather than a lock. The hazard is the uncrossing: whoever edits that one token arms B427, B428, B429 and T-0130 at once, and B429 means the first position carries no stop. Say so AT the constant first; do NOT fix it by making BROKER_MODE configurable, which would convert a deploy decision into a runtime one. Bound: this is about the engine LOOP — the probe ladder calls AlpacaAdapter directly and is reachable today.)
+Last updated: 2026-09-13 (newest entry B431 — AN except BODY IS OUTSIDE ITS OWN PROTECTION. status()'s handler, commented "never let the panel 500", reads self.paper._closed unguarded; _closed is simulator-only, so with an incapable broker AND the database unreachable it raises AttributeError that the enclosing except does not catch, because the raise happens inside the handler rather than inside the try. The conjunction is the point: either condition alone is fine, and it is the both-at-once case — a degraded venue during a database outage — in which an operator most needs status() to answer. What it would have reported is the incapability itself, so the surface dies of the thing it exists to report. Fixed with B428a because a report that cannot be delivered is not loud; filed separately because it is independent of B428 and findable only under its own name. The generalisation: every except whose body can raise has this property, and the handler is where a second failure is MOST likely because it runs only when something has already gone wrong. Also B430's guarantee sharpened per execute — apply_config DOES assign broker_mode from a RunConfig, so the path is closed by nothing being able to SUPPLY one rather than by there being no setter, which is the weaker kind that breaks when someone adds a schema field.)
 
 ---
 
@@ -28529,6 +28529,15 @@ BROKER_MODE              env-read ZERO times (no environ / getenv / os.env anywh
 unreachable in any deployed configuration**, and `_build_broker` never constructs an
 `AlpacaAdapter`.
 
+**THE GUARANTEE IS WEAKER THAN "THERE IS NO SETTER", and execute was right to correct the shape of
+this argument.** `apply_config` *does* assign `self.broker_mode` from a `RunConfig`. The path is
+closed not by the absence of a setter but by **nothing being able to supply a `RunConfig` that
+carries one** — `broker_mode` appears zero times in `app/schemas/` and `app/api/`.
+
+> **A guarantee held by "no caller supplies it" breaks the day someone adds a field to a schema.**
+> A guarantee held by "there is no setter" does not. This is the first kind, and the difference is
+> the whole reason to write it at the constant rather than trust it.
+
 **WHAT THIS MEANS FOR WHAT WE HAVE BEEN BUILDING.** Part D's order path is **deployed but
 unreachable**. `T-0140`, `T-0141`, `T-0143`, `B428`, `B429`, `B427` and `T-0130` are all defects on a
 path the running engine cannot enter. That is why every one of them is latent, and it is a single
@@ -28559,3 +28568,47 @@ runtime one, which is the wrong direction for the single switch that turns on re
 **BOUND ON THE CLAIM:** this says the *engine loop* cannot select Alpaca. It says nothing about the
 first-order probe ladder, which calls `AlpacaAdapter` directly and never enters the loop — that path
 is reachable today and is exactly how the ladder places a real order.
+
+---
+
+### B431 — AN `except` BODY IS OUTSIDE ITS OWN PROTECTION. `status()`'s "never let the panel 500" handler reads a simulator-only member unguarded, so the one surface that would report an incapable broker DIES OF THE THING IT EXISTS TO REPORT
+
+**Found by execute through an arm failing for its own reason while building `B428a`. Verified by
+manager at HEAD — not on disk, since execute's fix was already in the working tree.**
+
+```python
+except Exception as exc:  # noqa: BLE001 - never let the panel 500
+    logger.warning("status: DB read failed, using in-memory", error=str(exc))
+    ...
+    closed = [c for c in self.paper._closed if c.get("reason") != "replay"]   # <- CAN RAISE
+```
+
+`_closed` is a **simulator-only** member (`REQUIRED_BROKER_CAPABILITIES`). With an incapable broker
+in `self.paper` **and** the database unreachable, this raises `AttributeError` — **and the `except`
+above it does not catch it**, because the exception is raised inside the handler rather than inside
+the `try`.
+
+> **An exception handler's body is not covered by that handler.** The comment `never let the panel
+> 500` states the intent exactly, and the code beneath it defeats it on the one path where the
+> handler was the last line of defence.
+
+**THE CONJUNCTION IS THE POINT.** Either condition alone is fine: a capable broker with the DB down
+takes this path successfully, and an incapable broker with the DB up never enters it. **It is exactly
+the both-at-once case — a degraded venue during a database outage — in which an operator most needs
+`status()` to answer, and it is the case where `status()` raises.**
+
+**And what it would have reported is the incapability itself.** The surface that exists to say *the
+broker cannot do what the loop needs* dies of that same condition. That is `B428`'s theme one layer
+out: there the failure was swallowed as a warning, here the report cannot be delivered at all.
+
+**FIXED WITH `B428a` RATHER THAN SEPARATELY, which is right** — *a report that cannot be delivered is
+not loud*, so it is in scope for "make the failure loud". **Filed separately because the defect is
+independent of `B428`** and is findable only under its own name: the resulting `closed_trades: 0` is
+now explained by `broker_missing` on the same payload, because a bare zero there reads as a quiet
+day, which is the register's oldest recurring shape.
+
+**THE GENERALISATION IS WORTH MORE THAN THE INCIDENT.** Every `except` whose body can raise has this
+property, and the handler is exactly where a second failure is most likely, because it runs only when
+something has already gone wrong. **A recovery path deserves the same scrutiny as a happy path and
+almost never gets it** — it has no tests of its own here, and it was reached in this instance only
+because an arm failed for an unrelated reason.
