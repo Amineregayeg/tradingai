@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-13 (newest entries B437 and B438. B437 — every Alpaca SDK call runs synchronously inside async code: _call does getattr then method(*args) inline with no to_thread, so each round trip blocks the event loop, stalling other symbols, the websocket and the API; B429 and B427 add calls, and the fix is to_thread in _call, reviewed on its own. B438 — the kill switch and the positions close record an Alpaca close as CLOSED when it is merely accepted (positions.py treats anything outside not_found/error/rejected/failed as closed; close_all_positions marks CLOSED on an Order body), and on the DEPLOYED build they reach Alpaca through the saved connection, which B430 does not govern: for Alpaca, observe_only selects the paper endpoint rather than blocking orders, the adapter has no observe_only check, and the manager's close-all has none. Latent only because the paper account holds no position; probe 3 opens one. Fix ruled into B427.)
+Last updated: 2026-09-13 (newest entry B439 — DEPLOYED: the Alpaca kill switch aborts after the first position. AlpacaAdapter.close_all_positions calls the SDK's per-symbol close_position, which returns an Order, and _classify_close reads it as the ClosePositionResponse that only close_all_positions returns — int() of the OrderStatus enum raises for every status, outside the per-position try, ending the close-all. At most one position is closed or submitted and the rest are reported NOT_ATTEMPTED: loud, not a false flat, but the kill switch cannot do its job. Present since T-0136; the suite is green because its double for close_position returns the other method's type. Also B438 corrected: it had described the kill switch as reporting CLOSED on acceptance; that misread belongs to the single-position close only. Fixes ruled into B427.)
 
 ---
 
@@ -29209,3 +29209,66 @@ procedure, not a guard.
 with the same bounded resolver, and return the mapped status and fill; `positions.py` and the manager stop treating a
 non-terminal close as closed — an accepted close that does not reach terminal is "submitted, not confirmed", never
 CLOSED.
+
+#### CORRECTION (execute, measured; manager verified on a real SDK Order at HEAD and `6ae6aca`) — THE KILL SWITCH DOES NOT REPORT CLOSED ON ACCEPTANCE. IT ABORTS AT THE FIRST POSITION. This entry described two routes as one
+
+This entry said `close_all_positions` "marks CLOSED on an Order body". **That was false**, and the manager had repeated it
+to Malek. The two close routes fail DIFFERENTLY:
+
+```
+single position   positions.py -> AlpacaAdapter.close_position -> returns str(result), status never classified
+                  -> positions.py treats anything outside not_found/error/rejected/failed as closed
+                  -> an ACCEPTED close reads as CLOSED                       <- this entry's misread, true HERE only
+kill switch       manager.close_all_positions -> AlpacaAdapter.close_all_positions -> _classify_close(Order)
+                  -> int(<OrderStatus>) raises ValueError for EVERY status -> the whole close-all ends
+                  -> at most ONE position closed or submitted, the rest NOT_ATTEMPTED  <- filed as B439
+```
+
+The kill switch fails LOUD, not false-flat — which is better than this entry claimed and still means it cannot do its
+job past the first position. The fix ruled into `B427` covers both routes: every close order is resolved to a terminal
+state and returned with its mapped status.
+
+---
+
+### B439 — DEPLOYED: THE ALPACA KILL SWITCH ABORTS AFTER THE FIRST POSITION. The per-symbol close returns an `Order`, and the adapter parses it as the OTHER close method's response — and the suite is green because its double returns the other method's type too
+
+**Found by execute while building B427's close resolution, driven with the SDK's real `alpaca.trading.models.Order`
+(no network); verified by manager on a real Order at HEAD, and the identical lines confirmed at the deployed `6ae6aca`.
+Present since T-0136 (`54c3982`).**
+
+```
+AlpacaAdapter.close_all_positions  for each position: _call("close_position", symbol), then _classify_close(result)
+TradingClient.close_position       -> Union[Order, dict]                         returns an ORDER
+TradingClient.close_all_positions  -> Union[List[ClosePositionResponse], dict]   the type _classify_close expects
+_classify_close                    reads .body, then int(result.status) as an HTTP code
+on a real Order                    .status is the OrderStatus enum -> int() raises ValueError, for accepted AND filled
+```
+
+**The adapter calls one SDK method and reads its result as if it came from the other.** The per-symbol close never
+returns a `ClosePositionResponse`; only the `DELETE /positions` endpoint does, and this adapter never calls it. The
+`ValueError` lands outside the per-position `try`, in the loop's outer handler, which ends the whole close-all:
+
+```
+close_all over 2 positions, close returning a real Order:
+    BrokerError "ended abnormally after 1 of 2 position(s)"
+    BTCUSD  FAILED        "SENT and the outcome was NEVER OBSERVED"
+    ETHUSD  NOT_ATTEMPTED
+```
+
+**On the DEPLOYED build, with Alpaca positions open, pulling the kill switch closes or submits AT MOST ONE of them and
+reports the rest NOT_ATTEMPTED.** It fails loud and its report is truthful, so this is not a false flat. But the kill
+switch cannot do its job past the first position. The Alpaca connection is reachable by the kill switch whatever `B430`
+says (`B438`). Latent only while the paper account holds nothing; probe 3 opens the first position.
+
+**WHY THE SUITE IS GREEN — the part worth keeping.** `test_t0136`'s `TradingClientMock.close_position` returns
+`_CloseResponse(body=..., status=200)`: a double of the WRONG METHOD. Two arms —
+`test_an_unpriceable_position_can_STILL_BE_CLOSED` and `test_a_per_position_failure_is_FAILED_and_the_loop_CONTINUES` —
+assert CLOSED rows that the real SDK can never produce. **A double kinder than reality, in the one shape where the
+difference is the defect:** it returned exactly what the adapter wanted to read, so it tested the adapter's
+expectation rather than the SDK.
+
+**Fix, ruled into B427:** close orders are resolved to a terminal state by the resolver, which replaces
+`_classify_close`'s HTTP reading entirely. The double returns a real `Order` for `close_position`, with an arm
+asserting it matches the SDK's signature so it cannot drift to the other method's type again. An arm drives
+close-all over several positions with real `Order` returns and proves the loop continues past the first. An
+unconfirmed close is FAILED with a reason, not a fourth disposition (`B337`).
