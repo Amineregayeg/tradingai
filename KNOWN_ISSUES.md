@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-13 (newest entry B442 — the kill switch does not stop an entry that already passed its gate: the loop checks kill_switch.is_armed, suspends in the bias fetch, then submits, and nothing re-checks, so a position can open after the switch reported the book closed. Also B440: an Alpaca submission failure that does not prove non-creation is filed as REJECTED/VENUE_TRANSPORT, and the SDK re-POSTs on 504. And B441: SDK requests carry no HTTP timeout. Found during B437's design.)
+Last updated: 2026-09-13 (newest entry B443 — the kill switch request can outlast nginx's 120s API proxy timeout: on a degraded venue each position takes ~27.5s to close and confirm, so the operator gets a 504 while the closes continue unseen, and a second pull races the first. Also B440-B442 from B437's design.)
 
 ---
 
@@ -29474,3 +29474,35 @@ the check and the send. For Alpaca, once calls can suspend, add an account-level
 that check through the verdict; `close_all_positions` takes it before enumerating. Then a switch armed first is seen
 by the entry, and an entry already in progress is seen by the switch. The switch's wait for the lock needs a bound:
 on expiry it enumerates anyway and says so in its report.
+
+---
+
+### B443 — THE KILL SWITCH REQUEST CAN OUTLAST THE API PROXY'S 120-SECOND TIMEOUT. The operator gets a 504 while the closes carry on unseen, and pulling the switch again races the first pull
+
+**Found by manager while ruling on `B442`'s design, by reading the deployed proxy config and the code. The 504 is
+not driven, and neither is whether the handler keeps running after nginx drops the connection.**
+
+```
+deploy/nginx-web.conf  (6ae6aca and HEAD)   location /api/ { proxy_read_timeout 120s; }
+frontend api.ts request()                   fetch() with no timeout, so nginx's 120s is the bound
+POST /api/prop-firm/kill-switch             kill_switch.arm(); await kill_switch.trigger(...) — the report is the response
+fb3dab6, per position                       close call (<=13s) + resolution (budget + one read, ~14.5s) ~= 27.5s, one after another
+```
+
+On a healthy venue a close fills in milliseconds and resolves on its first read, so the switch returns quickly.
+**On a degraded venue — which is when the switch gets pulled — the request takes ~27.5s × N positions**, and
+longer with 429 retries, so five open positions already pass 120s. nginx then answers 504. The frontend throws
+"Request Failed" and the report never reaches the operator, while the handler very likely keeps closing, because
+Starlette does not cancel a normal endpoint when the client disconnects (not measured here). **An operator who reads
+the 504 as "the kill switch failed" pulls it again**, and a second trigger enumerates and closes the same positions
+while the first is still at it. For full closes the venue should refuse the second, since the quantity is already
+reserved by the first close order, producing FAILED rows for positions that are closing. That is loud, but it is
+confusing at exactly the wrong moment.
+
+Before `B441` the same request could hang with no bound at all, so this is not a regression in kind. `B427` and
+`B441` made the duration BOUNDED, and this entry is about where that bound falls relative to the proxy's.
+
+**Fix direction:** (1) folded into `B442`'s commit: a second trigger while one is running must not close again. It
+answers "already in progress", saying how long the first has run and what it has reported so far. (2) Not built,
+and needs a ruling on the response's shape: the switch answers within the proxy bound with what it has closed so
+far, and keeps reporting the rest through the websocket and the audit log.
