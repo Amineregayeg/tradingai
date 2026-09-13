@@ -192,6 +192,12 @@ class LiveLoopBrokerProxy(BrokerAdapter):
             return {"status": "error", "error": self.unavailable_reason}
         return await target.close_position(position_id, lot_size)
 
+    @property
+    def last_close_all_report(self) -> dict | None:
+        """The target's live close-all report, so a second kill-switch trigger can say what the first has
+        reported so far (`B443` item 6). `None` with no target, or a target that publishes none."""
+        return getattr(self._resolve(), "last_close_all_report", None)
+
     async def close_all_positions(self) -> list[dict]:
         """**The kill switch's path.**
 

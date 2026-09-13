@@ -1,42 +1,71 @@
 """Kill switch — emergency position closure for prop firm compliance."""
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.exceptions import ComplianceError
+from app.core.kill_switch_state import KILL_SWITCH_STATE, KillSwitchState
 from app.core.logging import logger
 
 
 class KillSwitch:
     """
-    In-memory kill switch state.
     arm() → marks armed with optional reason.
-    trigger() → closes all positions, audits, and notifies via WebSocket.
+    trigger() → arms if not armed, closes all positions, audits, and notifies via WebSocket.
+
+    **THE STATE IS `app.core.kill_switch_state.KILL_SWITCH_STATE`, NOT THIS OBJECT'S** (`B442`, manager's
+    ruling 1). Every adapter reads that object at the moment it SENDS, so an entry that passed the loop's
+    gate before the switch was pulled is refused at submission. `_armed` and `_reason` were class
+    attributes shadowed per instance; they are properties over the shared state now, so there is ONE
+    switch per process however many `KillSwitch()` objects exist — an instance with state of its own would
+    be a switch no adapter reads.
     """
 
-    _armed: bool = False
-    _reason: str | None = None
+    def __init__(self, state: KillSwitchState = KILL_SWITCH_STATE) -> None:
+        self._state = state
+
+    @property
+    def _armed(self) -> bool:
+        return self._state.armed
+
+    @property
+    def _reason(self) -> str | None:
+        return self._state.reason
 
     def arm(self, reason: str | None = None) -> None:
         """Arm the kill switch (does NOT close positions)."""
-        self._armed = True
-        self._reason = reason
+        self._state.armed = True
+        self._state.reason = reason
         logger.warning("Kill switch ARMED", reason=reason)
 
     def disarm(self) -> None:
-        """Disarm the kill switch."""
-        self._armed = False
-        self._reason = None
+        """Disarm the kill switch — **REFUSED WHILE A TRIGGER IS CLOSING POSITIONS** (review's K2-12, ruled).
+
+        A disarm mid-sweep reopens sends, and `AlpacaAdapter`'s second sweep could then close a position the
+        engine had just opened. No production code calls this today; the refusal protects the future caller.
+        The mark it reads is cleared in `trigger()`'s `finally`, so a trigger that raised or was cancelled
+        never leaves the switch undisarmable (K2-10).
+        """
+        started = self._state.trigger_started
+        if started is not None:
+            raise ComplianceError(
+                f"the kill switch is still closing positions (a trigger started "
+                f"{time.monotonic() - started:.1f}s ago); it can be disarmed after it reports"
+            )
+        self._state.armed = False
+        self._state.reason = None
         logger.info("Kill switch disarmed")
 
     @property
     def is_armed(self) -> bool:
-        return self._armed
+        return self._state.armed
 
     @property
     def reason(self) -> str | None:
-        return self._reason
+        return self._state.reason
 
     async def trigger(
         self,
@@ -45,13 +74,65 @@ class KillSwitch:
         reason: str | None = None,
     ) -> dict:
         """
-        Close all positions via broker_manager.close_all_positions().
-        Persist audit log entry.
-        Broadcast kill_switch_triggered via ws_manager.
-        Send SMTP alert if configured.
+        Arm (if not already armed), close all positions via broker_manager.close_all_positions(),
+        persist an audit log entry, broadcast via ws_manager, send an SMTP alert if configured.
 
-        Returns: {positions_closed, positions_failed_to_close, details, message}
+        **A SECOND TRIGGER WHILE ONE IS RUNNING CLOSES NOTHING** (`B443`, manager's item 6). It answers
+        *already in progress*, with how long the first has run and the rows reported so far. Without this,
+        an operator whose request timed out at the proxy pulls again, and every position gets a second close
+        order — a second sell. The check and the mark are set with no `await` between them, and the mark is
+        cleared in `finally`: on return, on raise, and on cancellation (K2-10).
+
+        **IT ARMS ITSELF FIRST** (review's K2-11, ruled). Both callers arm before triggering, but a caller
+        that only triggered would sweep while sends were still open. Idempotent: an armed switch keeps the
+        reason it was armed with.
+
+        Returns: {positions_closed, positions_failed_to_close, positions_not_attempted, details, message}
         """
+        state = self._state
+        if state.trigger_started is not None:
+            return self._already_in_progress(user_id, reason)
+        state.trigger_started = time.monotonic()
+        state.trigger_started_at = datetime.now(timezone.utc).isoformat()
+        try:
+            if not state.armed:
+                self.arm(reason=reason or "Manual kill switch trigger")
+            return await self._run_trigger(db, user_id, reason)
+        finally:
+            state.trigger_started = None
+            state.trigger_started_at = None
+
+    def _already_in_progress(self, user_id: str, reason: str | None) -> dict:
+        from app.services.broker.manager import broker_manager
+
+        started = self._state.trigger_started
+        elapsed = time.monotonic() - started if started is not None else 0.0
+        rows = broker_manager.close_all_rows_so_far()
+        logger.warning(
+            "Kill switch trigger REFUSED: a trigger is already closing positions",
+            user_id=user_id, reason=reason, in_progress_for_s=round(elapsed, 1),
+            started_at=self._state.trigger_started_at, rows_so_far=len(rows),
+        )
+        return {
+            "positions_closed": 0,
+            "positions_failed_to_close": 0,
+            "positions_not_attempted": 0,
+            "already_in_progress": True,
+            "in_progress_for_s": round(elapsed, 1),
+            "details": rows,
+            "message": (
+                f"Kill switch ALREADY IN PROGRESS: a trigger started {elapsed:.1f}s ago "
+                f"({self._state.trigger_started_at}) and has reported {len(rows)} row(s) so far. This request "
+                f"closed nothing and sent nothing; the first trigger's report is the one to read."
+            ),
+        }
+
+    async def _run_trigger(
+        self,
+        db: AsyncSession,
+        user_id: str,
+        reason: str | None = None,
+    ) -> dict:
         effective_reason = reason or self._reason or "Manual kill switch trigger"
         logger.warning(
             "Kill switch TRIGGERED",
@@ -248,4 +329,4 @@ def _smtp_send_sync(msg, settings) -> None:  # type: ignore[no-untyped-def]
     logger.info("Kill switch SMTP alert sent")
 
 
-kill_switch = KillSwitch()
+kill_switch = KillSwitch(KILL_SWITCH_STATE)

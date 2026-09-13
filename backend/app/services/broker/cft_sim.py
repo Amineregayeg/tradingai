@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Awaitable, Callable
 
+from app.core.kill_switch_state import refuse_if_armed
 from app.core.logging import logger
 from app.db.enums import DirectionType, OrderType
 from app.models.decision_record import (
@@ -456,6 +457,10 @@ class SimPropFirmBroker(BrokerAdapter):
             if (request.order_type != OrderType.MARKET and request.price)
             else await self._fetch_price(request.pair)
         )
+        # `B442`: THE KILL SWITCH, READ AFTER THE LAST SUSPENSION. `_fetch_price` awaits the injected price
+        # source, and measured with one that awaits, this body YIELDS there — so a check above it is a check
+        # before a suspension, which is the defect. Nothing below awaits before the insert. Submissions only.
+        refuse_if_armed(venue="cft_sim", pair=request.pair, client_order_id=request.client_order_id)
 
         # Pre-trade rule check: if this order's worst case (its stop-loss) would
         # breach the daily-loss or max-drawdown limit, refuse before accepting.

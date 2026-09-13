@@ -161,16 +161,19 @@ def test_B1_the_builder_retries_only_429_and_mounts_a_timeout_for_every_scheme()
 
 def test_B1b_the_SDK_still_reads_the_two_attributes_the_builder_sets():
     """**Read from the installed SDK's source at test time**: the day `_one_request` stops reading
-    `self._retry_codes` or `self._session`, the builder's settings do nothing and this fails first."""
+    `self._retry_codes` or `self._session`, the builder's settings do nothing and this fails first. And
+    (`B442`) the day `__init__` stops storing `self._api_key`, every adapter on an account would share no
+    order lock — the builder refuses, and this says why first."""
     from alpaca.common.rest import RESTClient
 
     one = inspect.getsource(RESTClient._one_request)
     init = inspect.getsource(RESTClient.__init__)
     assert "self._retry_codes" in one and "self._session.request" in one, one
     assert "self._retry_codes" in init and "self._session" in init
+    assert "self._api_key" in init, init
 
 
-@pytest.mark.parametrize("missing", ["_retry_codes", "_session"])
+@pytest.mark.parametrize("missing", ["_retry_codes", "_session", "_api_key"])
 def test_B1c_the_builder_REFUSES_a_client_without_either_attribute(monkeypatch, missing):
     import requests as rq
 
@@ -184,6 +187,8 @@ def test_B1c_the_builder_REFUSES_a_client_without_either_attribute(monkeypatch, 
                 self._retry_codes = [429, 504]
             if missing != "_session":
                 self._session = rq.Session()
+            if missing != "_api_key":
+                self._api_key = "k"
 
     monkeypatch.setattr(sdk, "TradingClient", _Renamed)
     with pytest.raises(BrokerError, match=missing):
@@ -295,7 +300,9 @@ def _failure(kind, venue, monkeypatch):
         code, body = {"500_text": (500, b"internal error"), "503": (503, {"code": 1, "message": "unavailable"}),
                       "504": (504, b"gateway timeout"), "403": (403, {"code": 1, "message": "insufficient"}),
                       "422": (422, {"code": 1, "message": "client_order_id must be unique"}),
-                      "429": (429, {"code": 1, "message": "rate limited"}), "404": (404, {"code": 1, "message": "nf"})}[kind]
+                      "429": (429, {"code": 1, "message": "rate limited"}), "404": (404, {"code": 1, "message": "nf"}),
+                      "403_html": (403, b"<html><body>403 Forbidden</body></html>"),
+                      "429_html": (429, b"<html><body>429 Too Many Requests</body></html>")}[kind]
         venue.scripts["GET order"] = [(code, body)]
 
     async def _go():
@@ -311,6 +318,10 @@ def _failure(kind, venue, monkeypatch):
 EXPECTED = [
     ("refused", "not_created"), ("connect_timeout", "not_created"), ("403", "not_created"),
     ("429", "not_created"), ("404", "not_created"),
+    # Follow-up for fb3dab6 (review): a NON-JSON 4xx — an HTML page, as a proxy sends — is still NOT_CREATED.
+    # D1b's non-JSON case is a 500, unanswered either way, so a classifier reading `.code` (which json-decodes
+    # the body and raises) survived.
+    ("403_html", "not_created"), ("429_html", "not_created"),
     ("422", "answered"),
     ("read_timeout", "unanswered"), ("reset", "unanswered"), ("500_text", "unanswered"),
     ("503", "unanswered"), ("504", "unanswered"),
@@ -406,6 +417,9 @@ def test_P5_a_lookup_that_FAILS_after_a_422_is_UNRESOLVED(venue):
     venue.scripts["GET by_client_order_id"] = [(500, b"down")]
     res = _run(adapter.place_order(_req()))
     assert res["status"] == "SUBMISSION_UNCONFIRMED", res
+    # Follow-up for fb3dab6 (review): the ANSWERED path makes exactly ONE lookup. The full schedule gives the same
+    # verdict here, so without this count a 422 walking the UNANSWERED schedule survived.
+    assert venue.hits["GET by_client_order_id"] == 1, venue.hits
 
 
 def test_P6_a_NOT_CREATED_failure_raises_the_refusal_and_looks_nothing_up(venue):
@@ -431,6 +445,29 @@ def test_P7_a_FOUND_order_that_does_not_MATCH_the_request_is_not_adopted(venue, 
     assert res["status"] == "SUBMISSION_UNCONFIRMED", res
     assert "does not match this request" in res["reason"] and f"{field} venue=" in res["reason"], res["reason"]
     assert venue.hits.get("GET order", 0) == 0, "a mismatched order was resolved as ours"
+
+
+@pytest.mark.parametrize("field,venue_value,adopted", [
+    # Follow-up for fb3dab6 (review): qty is compared as a DECIMAL — the venue's "0.010" IS the "0.01" we sent.
+    # A string comparison survived P7, whose mismatch is "0.02".
+    ("qty", "0.010", True),
+    # ... and symbol by EQUALITY: "BTC/USDT" is not "BTC/USD" (T-0139's D2 trap). P7's mismatch is ETH/USD, so a
+    # substring match survived.
+    ("symbol", "BTC/USDT", False),
+], ids=["qty_0.010_is_0.01", "symbol_BTC-USDT_is_not_BTC-USD"])
+def test_P7b_the_match_is_by_VALUE_not_by_TEXT(venue, field, venue_value, adopted):
+    adapter, _client = _built_adapter(venue.url)
+    oid = str(uuid.uuid4())
+    found = _order_json(oid, status="filled", **{field: venue_value})
+    venue.scripts["POST /v2/orders"] = [(504, b"gateway timeout")]
+    venue.scripts["GET by_client_order_id"] = [(200, found)]
+    venue.scripts["GET order"] = [(200, found)]
+
+    res = _run(adapter.place_order(_req()))
+    if adopted:
+        assert res["status"] == "FILLED", res
+    else:
+        assert res["status"] == "SUBMISSION_UNCONFIRMED" and f"{field} venue=" in res["reason"], res
 
 
 # ---------------------------------------------------------------------------------------------------

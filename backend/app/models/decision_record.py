@@ -159,6 +159,12 @@ REJECTION_PROTECTION_NOT_ACCEPTED = "PROTECTION_NOT_ACCEPTED"
 #: answered, after the fact) or `VENUE_RAISED` (nothing raised): an operator reading it learns the
 #: order reached the book and did not trade, which is a different investigation from either.
 REJECTION_VENUE_ENDED_UNFILLED = "VENUE_ENDED_UNFILLED"
+#: **`B442`. The KILL SWITCH was armed when this order reached the adapter's send**, so nothing was sent. The
+#: loop's gate reads the switch before it suspends for data; a switch pulled in that window used to let the
+#: entry through, opening a position after the switch reported the book closed. Its own code, not a halt
+#: or a venue refusal: the strategy produced the signal, and the operator's switch refused it — a row
+#: that says so is how "the engine traded after I pulled the switch" is answered from the record.
+REJECTION_KILL_SWITCH_ARMED = "KILL_SWITCH_ARMED"
 REJECTION_PROP_FIRM_TARGET_REACHED = "PROP_FIRM_TARGET_REACHED"
 REJECTION_PROP_FIRM_HALTED_DAILY_LOSS = "PROP_FIRM_HALTED_DAILY_LOSS"
 REJECTION_PROP_FIRM_HALTED_MAX_DRAWDOWN = "PROP_FIRM_HALTED_MAX_DRAWDOWN"
@@ -215,6 +221,7 @@ REJECTION_CODES: tuple[str, ...] = (
     REJECTION_MIN_SIZE,
     REJECTION_PROTECTION_NOT_ACCEPTED,
     REJECTION_VENUE_ENDED_UNFILLED,
+    REJECTION_KILL_SWITCH_ARMED,
     REJECTION_PROP_FIRM_TARGET_REACHED,
     REJECTION_PROP_FIRM_HALTED_DAILY_LOSS,
     REJECTION_PROP_FIRM_HALTED_MAX_DRAWDOWN,

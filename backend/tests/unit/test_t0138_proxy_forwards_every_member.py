@@ -36,7 +36,8 @@ DELIBERATELY_NOT_FORWARDED = {
     "CLOSED": "ruled kill-switch disposition constant",
     "FAILED": "ruled kill-switch disposition constant",
     "NOT_ATTEMPTED": "ruled kill-switch disposition constant",
-    "last_close_all_report": "written by whoever ran the switch; the proxy holds no report",
+    # `last_close_all_report` left this list with `B442`: a second kill-switch trigger answers with the rows the
+    # first has reported so far, read through the proxy from the held broker — so the proxy FORWARDS it now.
     "direction_policy": "read off the held broker directly by ExecutionService, not via the proxy",
 }
 

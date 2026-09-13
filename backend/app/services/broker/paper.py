@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Callable
 
+from app.core.kill_switch_state import refuse_if_armed
 from app.core.logging import logger
 from app.db.enums import DirectionType, OrderType
 from app.models.decision_record import REJECTION_VENUE_DIRECTION_UNSUPPORTED
@@ -232,6 +233,10 @@ class PaperBroker(BrokerAdapter):
 
     # ---- order management ----
     async def place_order(self, request: OrderRequest) -> dict:
+        # `B442`: THE KILL SWITCH, READ AT THE SEND. The loop's gate read it before suspending; this body
+        # never suspends (measured: it completes on the first `send`), so a check anywhere before the insert
+        # is a check at the send. Submissions only — `close_position`/`close_all_positions` never read it.
+        refuse_if_armed(venue="paper", pair=request.pair, client_order_id=request.client_order_id)
         if request.lot_size <= 0:
             raise ValueError("lot_size must be > 0")
 

@@ -128,6 +128,7 @@ def _adapter(placed, *, reread=PROTECTED, reread_raises=False, reread_after=TERM
     a = AlpacaAdapter.__new__(AlpacaAdapter)
     a.sent = []
     a._paper = True
+    a._account_key = f"client:{id(a)}"      # `B442`: what __init__ sets — this double's order lock is its own
 
     async def _instant_sleep(_seconds):     # `B427`: the resolver never waits for real time in an arm
         return None

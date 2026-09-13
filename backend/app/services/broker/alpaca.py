@@ -47,6 +47,8 @@ directory deep is invisible to the discovery walk while the suite stays green.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import hashlib
 import math
 import time
 from datetime import datetime, timezone
@@ -55,6 +57,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Callable
 
 from app.core.exceptions import BrokerError, DirectionNotSupported
+from app.core.kill_switch_state import KILL_SWITCH_RESPONSE_DEADLINE_S, refuse_if_armed
 from app.core.logging import logger, redact_for_storage
 from app.db.enums import DirectionType
 from app.models.decision_record import REJECTION_VENUE_ENDED_UNFILLED
@@ -371,12 +374,13 @@ def build_trading_client(api_key: str, api_secret: str, *, paper: bool, url_over
     if url_override is not None:
         kwargs["url_override"] = url_override
     client = TradingClient(api_key, api_secret, **kwargs)
-    missing = [name for name in ("_retry_codes", "_session") if not hasattr(client, name)]
+    missing = [name for name in ("_retry_codes", "_session", "_api_key") if not hasattr(client, name)]
     if missing:
         raise BrokerError(
-            f"refusing to build an Alpaca client: the SDK no longer exposes {missing}, so its retry codes "
-            f"and request timeout cannot be set — the client it would return retries a POST on 504 and "
-            f"can hang forever (B440, B441). Re-derive build_trading_client against the installed SDK.",
+            f"refusing to build an Alpaca client: the SDK no longer exposes {missing}, so its retry codes, "
+            f"request timeout or account identity cannot be set or read — the client it would return retries a "
+            f"POST on 504, can hang forever (B440, B441), or shares no order lock with another adapter on the "
+            f"same account (B442). Re-derive build_trading_client against the installed SDK.",
             broker="alpaca",
         )
     client._retry_codes = list(ALPACA_RETRY_STATUS_CODES)
@@ -384,6 +388,142 @@ def build_trading_client(api_key: str, api_secret: str, *, paper: bool, url_over
     client._session.mount("https://", adapter)
     client._session.mount("http://", adapter)
     return client
+
+
+# ---------------------------------------------------------------------------------------------------
+# `B442` — ONE ORDER LOCK PER ACCOUNT
+# ---------------------------------------------------------------------------------------------------
+#
+# The kill switch is read at the SEND (`refuse_if_armed`), which closes the window for an entry that has not
+# reached `submit_order`. It cannot close the other half: an entry ALREADY SUBMITTED and still resolving can
+# fill after the switch enumerates the book. So `place_order` holds its account's lock from the switch check
+# through the verdict, and `close_all_positions`' second sweep takes it before re-enumerating: a switch armed
+# first is seen by the entry, and an entry already in progress is seen by the switch.
+#
+# **PER ACCOUNT, NOT PER ADAPTER.** `broker_manager` builds an adapter per stored connection and the loop builds
+# its own, so two instances can trade one account; a per-instance lock excludes nothing between them.
+#
+# **ONE LOCK PER ACCOUNT, NEVER ONE PER EVENT LOOP** (manager's ruling 4). An `asyncio.Lock` contended on a
+# second loop raises (measured). Keying by (loop, account) would silence that by handing a second live loop a
+# second lock — no mutual exclusion at all, with the arm green. In production there is ONE loop: the engine is
+# `asyncio.create_task` on the app's loop, and the kill-switch route runs on that same loop. The two-loop case
+# is pytest's fresh loop per test. So: a lock whose loop is CLOSED is replaced, and a DIFFERENT LIVE loop
+# raises `AccountLockLoopConflict` — loudly, before anything is sent.
+
+
+class AccountLockLoopConflict(RuntimeError):
+    """This account's order lock belongs to a DIFFERENT, still-open event loop. No mutual exclusion is possible
+    across loops, so nothing proceeds as though it had one. Not a `BrokerError`: nothing reached the venue, and
+    nothing downstream may read it as a transport failure to retry."""
+
+    def __init__(self, holder: dict | None) -> None:
+        self.holder = dict(holder) if holder else None
+        super().__init__(
+            "this Alpaca account's order lock belongs to a DIFFERENT live event loop, so no mutual exclusion is "
+            f"possible between an entry and the kill switch; refusing to proceed as if there were (holder: "
+            f"{_describe_holder(self.holder)})"
+        )
+
+
+@dataclass
+class _AccountLock:
+    lock: asyncio.Lock
+    loop: asyncio.AbstractEventLoop
+    #: What holds it, for the kill switch's report: `{"symbol", "client_order_id", "what", "since"}`. Never the
+    #: account key.
+    holder: dict | None = None
+
+
+_ACCOUNT_LOCKS: dict[str, _AccountLock] = {}
+
+
+def account_key_of(client: Any) -> str:
+    """The key an order lock is registered under: a SHA-256 of the client's API key id. **Never logged** — not
+    the key, not the hash. `build_trading_client` refuses a client without `_api_key`, and production reaches
+    this adapter only through the builder (`B1d`); a test double without a string key gets a lock of its own
+    (`client:<id>`), which excludes nothing between two doubles — and `AlpacaAdapter` says so when built."""
+    api_key = getattr(client, "_api_key", None)
+    if isinstance(api_key, str) and api_key:
+        return "account:" + hashlib.sha256(api_key.encode("utf-8")).hexdigest()
+    return f"client:{id(client)}"
+
+
+def _account_lock(account_key: str) -> _AccountLock:
+    running = asyncio.get_running_loop()
+    entry = _ACCOUNT_LOCKS.get(account_key)
+    if entry is None or entry.loop.is_closed():
+        entry = _AccountLock(lock=asyncio.Lock(), loop=running)
+        _ACCOUNT_LOCKS[account_key] = entry
+    elif entry.loop is not running:
+        raise AccountLockLoopConflict(entry.holder)
+    return entry
+
+
+@contextlib.asynccontextmanager
+async def _holding_with_bounded_wait(lock: asyncio.Lock, wait_s: float):
+    """The account lock with a BOUNDED wait — yields whether it was acquired — and released on EVERY exit
+    (review's K2-13). `async with lock` cannot bound a wait, so this is the one place the lock is acquired by
+    hand, and its release is this context manager's `finally`. `place_order` takes the lock with `async with`.
+
+    A zero wait still acquires a FREE lock: `Lock.acquire` returns without suspending, before the timeout's
+    callback can run. A cancellation from outside is not a timeout and propagates."""
+    acquired = False
+    try:
+        try:
+            async with asyncio.timeout(max(0.0, wait_s)):
+                await lock.acquire()
+            acquired = True
+        except TimeoutError:
+            pass
+        yield acquired
+    finally:
+        if acquired:
+            lock.release()
+
+
+def _describe_holder(holder: dict | None) -> str:
+    if not holder:
+        return "nothing recorded"
+    if holder.get("symbol") or holder.get("client_order_id"):
+        return f"an entry for {holder.get('symbol')} (client_order_id {holder.get('client_order_id')})"
+    return str(holder.get("what") or "unnamed")
+
+
+def _client_retry_settings(client: Any) -> tuple[int, float]:
+    """The retries and inter-retry sleep THIS client will actually make, read live; the SDK's own defaults for a
+    client that does not carry them (a test double)."""
+    try:
+        from alpaca.common.constants import DEFAULT_RETRY_ATTEMPTS, DEFAULT_RETRY_WAIT_SECONDS
+    except ImportError:  # `B328`: importable without the SDK — and then there is no client to retry
+        DEFAULT_RETRY_ATTEMPTS, DEFAULT_RETRY_WAIT_SECONDS = 0, 0
+    retry = getattr(client, "_retry", None)
+    wait = getattr(client, "_retry_wait", None)
+    if not isinstance(retry, int) or isinstance(retry, bool) or retry < 0:
+        retry = DEFAULT_RETRY_ATTEMPTS
+    if not isinstance(wait, (int, float)) or isinstance(wait, bool) or not math.isfinite(wait) or wait < 0:
+        wait = DEFAULT_RETRY_WAIT_SECONDS
+    return retry, float(wait)
+
+
+def entry_lock_normal_hold_bound_s(client: Any) -> float:
+    """**How long an entry on the NORMAL path may hold its account's lock: 3C + B** (manager's ruling 3c).
+
+        C = one SDK call = (retry + 1) · (connect + read) + retry · retry_wait     retries and sleep read LIVE
+        B = ORDER_RESOLUTION_BUDGET_S
+        normal path = submit (C) + protection re-read (C) + resolution (B + C)
+
+    Read from the live module constants and the client at call time, never a literal (review's K2-14). For
+    `build_trading_client`'s client at alpaca-py 0.44.0 — retry 3, retry_wait 3s, connect 3s, read 10s, budget
+    5s — C = 61s and **3C + B = 188s**; with no 429 retry C = 13s and it is 44s.
+
+    **NOT THE WORST CASE, deliberately.** An ambiguous submission adds a lookup (4C + 2B) and a protection
+    failure's remediation reaches 9C + B; the latter closes its own position, and the kill switch's expiry row
+    reports whatever was not waited for. `close_all_positions` also caps the wait at
+    `KILL_SWITCH_RESPONSE_DEADLINE_S` from its own start, because 188s is past the proxy's cut (`B443`).
+    """
+    retry, wait = _client_retry_settings(client)
+    call = (retry + 1) * (ALPACA_HTTP_CONNECT_TIMEOUT_S + ALPACA_HTTP_READ_TIMEOUT_S) + retry * wait
+    return 3 * call + ORDER_RESOLUTION_BUDGET_S
 
 
 SUBMISSION_NOT_CREATED = "not_created"
@@ -709,6 +849,16 @@ class AlpacaAdapter(BrokerAdapter):
         self._client = client
         self._paper = bool(paper)
         self.connected: bool = False
+        #: `B442`: the key this adapter's ORDER LOCK is registered under — shared with every adapter on the same
+        #: account. Never logged.
+        self._account_key: str = account_key_of(client)
+        if self._account_key.startswith("client:"):
+            logger.warning(
+                "alpaca.order_lock_per_client — this client carries no readable API key id, so its order lock "
+                "is its OWN and excludes nothing between it and another adapter on the same account. "
+                "build_trading_client refuses such a client; only a test double reaches this.",
+                client_type=type(client).__name__,
+            )
 
         #: WHERE THIS CLIENT POINTS, or `None` if it could not say (`B389`, `T-0138`).
         #:
@@ -1263,6 +1413,25 @@ class AlpacaAdapter(BrokerAdapter):
                 f"refusing to place an order: ORDER_RESOLUTION_BUDGET_S is {problem}, so its outcome could "
                 f"not be resolved. Nothing was sent.", broker=self.broker_name,
             )
+        # **`B442`. THE KILL SWITCH, READ AT THE SEND, UNDER THIS ACCOUNT'S ORDER LOCK.** The loop's gate read the
+        # switch before suspending for data; this reads it again with no suspension before `submit_order`, and the
+        # lock is held from here through the verdict, so the kill switch's second sweep sees an entry that was
+        # already in progress. The refusal is raised HERE — outside `_call` and outside the submission `try` —
+        # because through either it would become a `BrokerError`, be classified an unanswered submission, and be
+        # looked up as an order that was never sent (review's K2-8). A second LIVE event loop raises before the
+        # lock is taken: nothing is sent.
+        account = _account_lock(self._account_key)
+        async with account.lock:
+            account.holder = {"symbol": request.pair, "client_order_id": request.client_order_id,
+                              "what": "place_order", "since": time.monotonic()}
+            try:
+                refuse_if_armed(venue="alpaca", pair=request.pair, client_order_id=request.client_order_id)
+                return await self._submit_and_resolve(order, request, protection, quantity, requested, limits)
+            finally:
+                account.holder = None
+
+    async def _submit_and_resolve(self, order, request, protection, quantity, requested, limits) -> dict:
+        """Submission, the `B440` lookup, and the verdict — called ONLY by `place_order`, under the account lock."""
         try:
             placed = self._require_model(await self._call("submit_order", order), "submit_order")
         except BrokerError as exc:
@@ -2018,8 +2187,28 @@ class AlpacaAdapter(BrokerAdapter):
         the venue refused raises inside `_call` and is FAILED with its reason; a close submitted and not
         confirmed within the budget is FAILED WITH A REASON saying exactly that (`B337`). The resolved
         order is attached to the row as `close`.
+
+        **TWO SWEEPS (`B442`, manager's ruling 3).** An entry already SUBMITTED and still resolving when the switch
+        is pulled can fill after the book is enumerated. Waiting for it BEFORE the first close would hold every
+        open position hostage to one entry — up to 3C + B, 188s for the builder's client — on the degraded venue
+        where the switch is most likely pulled. So:
+
+            (a) enumerate and close NOW, taking no lock;
+            (b) then take this account's order lock — the entry holds it through its verdict — with a wait of
+                min(3C + B, KILL_SWITCH_RESPONSE_DEADLINE_S − elapsed since this method started), floored at 0;
+                re-enumerate; close what (a) did not see, or confirmed CLOSED and is open again.
+
+        (b) NEVER re-closes a position whose close in (a) FAILED or is unconfirmed: that close order may still be
+        working, and a second close is a second sell. Every row from both sweeps is kept — a symbol can appear
+        twice, closed in (a) and then a new position closed in (b) — and each row's reason names its sweep.
+        If the wait expires, or the lock belongs to another live event loop, (b) enumerates anyway and a
+        NOT_ATTEMPTED row names the in-flight entry, which MAY EXIST at the venue.
+
+        The switch never refuses its own closes: nothing on this path reads the kill switch (review's K2-9).
         """
         report: dict[str, dict] = {}
+        self.last_close_all_report = report
+        started = self._clock()
         try:
             positions = await self._raw_positions()
         except Exception as exc:  # noqa: BLE001
@@ -2028,67 +2217,15 @@ class AlpacaAdapter(BrokerAdapter):
                 f"report on them: {exc}. Nothing was attempted.", broker=self.broker_name,
             ) from exc
 
-        for index, raw in enumerate(positions):
-            report[f"#{index}"] = {
-                "position_id": str(getattr(raw, "symbol", "") or "").strip(),
-                "pair": str(getattr(raw, "symbol", "UNKNOWN")),
-                "disposition": self.NOT_ATTEMPTED,
-                "status": "failed",
-                "reason": "the close loop never reached this position",
-            }
-        self.last_close_all_report = report
-
         try:
-            for index, _raw in enumerate(positions):
-                row = report[f"#{index}"]
-                symbol = row["position_id"]
-                if not symbol:
-                    row.update(
-                        disposition=self.FAILED, status="failed",
-                        reason="the venue sent no symbol, so this position could not be addressed "
-                               "and no close was sent for it",
-                    )
-                    continue
-                row.update(
-                    disposition=self.FAILED, status="failed", _in_flight=True,
-                    reason="the close for this position was SENT and the outcome was never "
-                           "observed. The position may or may not be closed and MUST be checked "
-                           "at the venue.",
-                )
-                try:
-                    order = await self._call("close_position", symbol)
-                except Exception as exc:  # noqa: BLE001 - ANY exception, loop CONTINUES
-                    # `B440`/`B441`: the SAME type-based question as a submission — did this close reach the venue?
-                    kind = classify_submission_failure(exc)
-                    if kind == SUBMISSION_UNANSWERED:
-                        prefix = ("the close MAY HAVE REACHED the venue and no answer came — the position may be "
-                                  "closed or still open and MUST be checked at the venue")
-                    else:
-                        prefix = "the venue did not take this close"
-                    row.update(
-                        disposition=self.FAILED, status="failed", _in_flight=False,
-                        reason=f"{prefix}: {type(exc).__name__}: {exc}",
-                    )
-                    continue
-                # INSIDE the per-position guard (manager, after review's B-12 note): surviving a bad position must
-                # come from the loop's STRUCTURE, not from `_close_outcome` promising never to raise — `B439` was
-                # exactly a raise outside this guard. The close WAS SENT by this point, so the reason says so.
-                try:
-                    outcome = await self._close_outcome(order)
-                    row.update(**self._close_disposition(outcome), close=outcome, _in_flight=False)
-                except Exception as exc:  # noqa: BLE001 - ANY exception, loop CONTINUES
-                    row.update(
-                        disposition=self.FAILED, status="failed", _in_flight=False,
-                        reason=(f"the close was SENT (order {getattr(order, 'id', None)}) but its outcome could "
-                                f"not be read ({type(exc).__name__}: {exc}) — the position MUST be checked at "
-                                f"the venue"),
-                    )
+            await self._close_sweep(report, "a", positions)
+            await self._close_sweep_b(report, started)
         except BaseException as exc:  # noqa: BLE001 - CancelledError is not an Exception
             for _row in report.values():
                 if _row.pop("_in_flight", False):
                     _row["reason"] = (
-                        f"{type(exc).__name__}: the close for this position was SENT and the "
-                        f"outcome was NEVER OBSERVED — the loop did not survive to record it "
+                        f"[sweep {_row.get('sweep')}] {type(exc).__name__}: the close for this position was SENT "
+                        f"and the outcome was NEVER OBSERVED — the loop did not survive to record it "
                         f"({exc}). It MUST be checked at the venue."
                     )
             failure = BrokerError(
@@ -2103,6 +2240,162 @@ class AlpacaAdapter(BrokerAdapter):
         for row in report.values():
             row.pop("_in_flight", None)
         return list(report.values())
+
+    async def _close_sweep(self, report: dict[str, dict], sweep: str, positions: list, **fields) -> None:
+        """Publish a NOT_ATTEMPTED row for every position FIRST (`B303`), then close them one by one. ANY exception
+        on one position is that position's FAILED row and the loop CONTINUES; only a `BaseException` ends it,
+        and `close_all_positions` turns that into a partial report."""
+        keys = []
+        for index, raw in enumerate(positions):
+            key = f"{sweep}#{index}"
+            report[key] = {
+                "position_id": str(getattr(raw, "symbol", "") or "").strip(),
+                "pair": str(getattr(raw, "symbol", "UNKNOWN")),
+                "disposition": self.NOT_ATTEMPTED,
+                "status": "failed",
+                "sweep": sweep,
+                "reason": f"[sweep {sweep}] the close loop never reached this position",
+                **fields,
+            }
+            keys.append(key)
+
+        for key in keys:
+            row = report[key]
+            symbol = row["position_id"]
+            if not symbol:
+                row.update(
+                    disposition=self.FAILED, status="failed",
+                    reason=f"[sweep {sweep}] the venue sent no symbol, so this position could not be addressed "
+                           "and no close was sent for it",
+                )
+                continue
+            row.update(
+                disposition=self.FAILED, status="failed", _in_flight=True,
+                reason=f"[sweep {sweep}] the close for this position was SENT and the outcome was never "
+                       "observed. The position may or may not be closed and MUST be checked at the venue.",
+            )
+            try:
+                order = await self._call("close_position", symbol)
+            except Exception as exc:  # noqa: BLE001 - ANY exception, loop CONTINUES
+                # `B440`: a close that failed ambiguously may have reached the venue — the operator is told which.
+                kind = classify_submission_failure(exc)
+                if kind == SUBMISSION_UNANSWERED:
+                    prefix = ("the close MAY HAVE REACHED the venue and no answer came — the position may be "
+                              "closed or still open and MUST be checked at the venue")
+                else:
+                    prefix = "the venue did not take this close"
+                row.update(
+                    disposition=self.FAILED, status="failed", _in_flight=False,
+                    reason=f"[sweep {sweep}] {prefix}: {type(exc).__name__}: {exc}",
+                )
+                continue
+            try:
+                # `B427`: the close order is RESOLVED; CLOSED only for a confirmed fill (`_close_disposition`).
+                outcome = await self._close_outcome(order)
+                disposition = self._close_disposition(outcome)
+                disposition["reason"] = (f"[sweep {sweep}] {disposition['reason']}" if disposition.get("reason")
+                                         else f"[sweep {sweep}] the close order was confirmed FILLED")
+                row.update(**disposition, close=outcome, _in_flight=False)
+            except Exception as exc:  # noqa: BLE001 - ANY exception, loop CONTINUES (review's X-16)
+                row.update(
+                    disposition=self.FAILED, status="failed", _in_flight=False,
+                    reason=(f"[sweep {sweep}] the close was SENT (order {getattr(order, 'id', None)}) but its "
+                            f"outcome could not be read ({type(exc).__name__}: {exc}) — the position MUST be "
+                            f"checked at the venue"),
+                )
+
+    async def _close_sweep_b(self, report: dict[str, dict], started: float) -> None:
+        """Sweep (b): wait (bounded) for an entry in flight on this account, re-enumerate, close what is new."""
+        derived = entry_lock_normal_hold_bound_s(self._client)
+        remaining = KILL_SWITCH_RESPONSE_DEADLINE_S - (self._clock() - started)
+        wait = max(0.0, min(derived, remaining))
+        deadline_bounded = remaining < derived
+        try:
+            account = _account_lock(self._account_key)
+        except AccountLockLoopConflict as conflict:
+            self._in_flight_entry_row(report, conflict.holder, 0.0, derived, deadline_bounded, conflict=True)
+            await self._sweep_b_closes(report, derived)
+            return
+
+        async with _holding_with_bounded_wait(account.lock, wait) as acquired:
+            if not acquired:
+                self._in_flight_entry_row(report, account.holder, wait, derived, deadline_bounded, conflict=False)
+                await self._sweep_b_closes(report, derived)
+                return
+            account.holder = {"symbol": None, "client_order_id": None,
+                              "what": "close_all_positions sweep (b)", "since": time.monotonic()}
+            try:
+                await self._sweep_b_closes(report, derived)
+            finally:
+                account.holder = None
+
+    async def _sweep_b_closes(self, report: dict[str, dict], derived: float) -> None:
+        try:
+            positions = await self._raw_positions()
+        except Exception as exc:  # noqa: BLE001 - (a)'s rows stand; what (b) could not see is said, not dropped
+            report["b#enumeration"] = {
+                "position_id": "", "pair": "UNKNOWN", "disposition": self.NOT_ATTEMPTED, "status": "failed",
+                "sweep": "b", "lock_wait_bound_s": derived,
+                "reason": (f"[sweep b] the second enumeration FAILED ({type(exc).__name__}: {exc}), so a position "
+                           f"opened after sweep (a) enumerated — by an entry that was in flight when the switch "
+                           f"was pulled — is NOT in this report and was NOT closed. Check the venue."),
+            }
+            return
+
+        swept = [r for r in report.values() if r.get("sweep") == "a" and r.get("position_id")]
+        to_close, left = [], []
+        for raw in positions:
+            symbol = str(getattr(raw, "symbol", "") or "").strip()
+            earlier = [r for r in swept if symbol and self._same_symbol(r["position_id"], symbol)]
+            if earlier and any(r["disposition"] != self.CLOSED for r in earlier):
+                left.append(symbol)   # (a)'s close FAILED or is unconfirmed and may still be working: never a second sell
+                continue
+            to_close.append(raw)
+        if left:
+            logger.warning(
+                "alpaca.close_all.sweep_b_left_open — still open after sweep (a) sent a close that FAILED or is "
+                "unconfirmed; NOT closed again (a second close is a second sell). Sweep (a)'s rows report them.",
+                symbols=left,
+            )
+        await self._close_sweep(report, "b", to_close, lock_wait_bound_s=derived)
+
+    def _in_flight_entry_row(self, report, holder, waited, derived, deadline_bounded, *, conflict: bool) -> None:
+        """**The expiry row** (manager's ruling 5, review's K2-15): NOT_ATTEMPTED, naming the entry's symbol AND
+        client_order_id, saying it MAY EXIST — counted among NOT ATTEMPTED (still open). It over-alarms when the
+        entry ends unfilled, which is the right direction."""
+        holder = holder or {}
+        who = _describe_holder(holder)
+        if conflict:
+            why = ("this account's order lock belongs to a DIFFERENT live event loop, so no mutual exclusion was "
+                   "possible and sweep (b) did not wait")
+        elif deadline_bounded:
+            why = (f"sweep (b) waited {waited:.1f}s of the up to {derived:.1f}s (3C + B) an in-flight entry may need, "
+                   f"because the report must return before the proxy cuts the request "
+                   f"(KILL_SWITCH_RESPONSE_DEADLINE_S = {KILL_SWITCH_RESPONSE_DEADLINE_S:.0f}s from the start of "
+                   f"close_all_positions)")
+        else:
+            why = (f"sweep (b)'s {waited:.1f}s wait for it expired — the up to {derived:.1f}s (3C + B) an in-flight "
+                   f"entry may need")
+        report["b#in_flight_entry"] = {
+            "position_id": str(holder.get("symbol") or ""),
+            "pair": str(holder.get("symbol") or "UNKNOWN"),
+            "client_order_id": holder.get("client_order_id"),
+            "disposition": self.NOT_ATTEMPTED,
+            "status": "failed",
+            "sweep": "b",
+            "lock_wait_bound_s": derived,
+            "waited_s": round(waited, 3),
+            "deadline_bounded": bool(deadline_bounded and not conflict),
+            "reason": (f"[sweep b] {who} was still being placed: {why}. That entry MAY EXIST at the venue — any "
+                       f"position it opens was NOT enumerated and NOT closed. Check the venue."),
+        }
+        logger.error(
+            "alpaca.close_all.in_flight_entry_not_waited_for — sweep (b) enumerated WITHOUT the account's order "
+            "lock; a position the in-flight entry opens is not in this report",
+            symbol=holder.get("symbol"), client_order_id=holder.get("client_order_id"), holder=holder.get("what"),
+            waited_s=round(waited, 3), lock_wait_bound_s=derived, deadline_bounded=deadline_bounded,
+            loop_conflict=conflict,
+        )
 
     def _close_disposition(self, outcome: dict) -> dict:
         """A resolved close, in the kill switch's ruled vocabulary. **A response is not a close** (`B367`).

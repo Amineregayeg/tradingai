@@ -203,7 +203,8 @@ async def test_the_vocabulary_is_CLOSED_and_every_code_is_distinct():
     # got its owner (`T-0140`, the venue's sizing floor), 19 once `PROTECTION_NOT_ACCEPTED` did
     # (`B429`, migration `0014`: the venue took the order and not the stop, and flat was observed),
     # 20 once `VENUE_ENDED_UNFILLED` did (`B427`, migration `0015`: the venue acknowledged the order and
-    # then ended it with a readable filled quantity of zero).
+    # then ended it with a readable filled quantity of zero), 21 once `KILL_SWITCH_ARMED` did (`B442`, migration
+    # `0016`: the kill switch was armed when the order reached the adapter's send, so nothing was sent).
     # **This guard caught `B429` adding the code and the migration but skipping THIS edit** — on
     # the full suite, not on any targeted run, which is the argument for the full suite. The number is pinned so that widening
     # the vocabulary is a DELIBERATE edit here AND a schema change in `alembic/`, never a constant
@@ -213,7 +214,8 @@ async def test_the_vocabulary_is_CLOSED_and_every_code_is_distinct():
     # migration widening the CHECK is a row the database refuses at write time, so the rejection
     # is lost rather than recorded (`B410`). The names are listed, not just counted, because a
     # count survives a rename and a rename is what breaks the CHECK.
-    assert len(REJECTION_CODES) == len(set(REJECTION_CODES)) == 20
+    assert len(REJECTION_CODES) == len(set(REJECTION_CODES)) == 21
+    assert "KILL_SWITCH_ARMED" in REJECTION_CODES
     assert "VENUE_ENDED_UNFILLED" in REJECTION_CODES
     assert "MIN_SIZE" in REJECTION_CODES
     assert "PROTECTION_NOT_ACCEPTED" in REJECTION_CODES

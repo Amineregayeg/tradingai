@@ -16,7 +16,7 @@ import uuid
 from dataclasses import dataclass
 from enum import Enum
 
-from app.core.exceptions import BrokerError, DirectionNotSupported
+from app.core.exceptions import BrokerError, DirectionNotSupported, KillSwitchArmed
 # Imported lazily inside the module rather than at package import: `alpaca.py` must stay
 # importable without the SDK (`B328`), and it is — the SDK lives inside its methods.
 from app.services.broker.alpaca import (
@@ -36,6 +36,7 @@ from app.models.decision_record import (
     REJECTION_MIN_SIZE,
     REJECTION_PROTECTION_NOT_ACCEPTED,
     REJECTION_VENUE_TRANSPORT,
+    REJECTION_KILL_SWITCH_ARMED,
 )
 from app.services.broker.base import BrokerAdapter, OrderRequest, readable_price
 
@@ -228,6 +229,22 @@ class ExecutionService:
         )
         try:
             res = await self.broker.place_order(req)
+        except KillSwitchArmed as exc:
+            # `B442`: THE KILL SWITCH, READ AT THE SEND. The loop's gate read it before suspending for data;
+            # every adapter the loop binds reads it again at submission and raises this, having sent NOTHING.
+            # It is a `ComplianceError`, not a `BrokerError` — so no clause below would catch it, and it
+            # would escape to the loop's venue-raised backstop and be filed `VENUE_RAISED` (review's K2-7).
+            # The mapping's EXISTENCE is what matters; it is first only so a reader meets it first.
+            logger.warning(
+                "ExecutionService: entry REFUSED at submission, the kill switch is armed; nothing was sent",
+                mode=self.mode.value, symbol=sig.symbol, direction=sig.direction.value,
+                client_order_id=req.client_order_id, reason=str(exc),
+            )
+            return {"status": "REJECTED", "reason": str(exc),
+                    "rejection_code": REJECTION_KILL_SWITCH_ARMED,
+                    "pair": sig.symbol, "direction": sig.direction.value,
+                    "client_order_id": req.client_order_id,
+                    "sized_units": round(units, 8), "equity_at_entry": acct.equity}
         except DirectionNotSupported as exc:
             # A VENUE CAPABILITY REFUSAL IS A RESULT, NOT AN ERROR — so it is turned back into
             # the rejection shape every other refusal on this path already uses, and the

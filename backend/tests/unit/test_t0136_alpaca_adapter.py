@@ -130,6 +130,11 @@ class TradingClientMock:
         order = _close_order(symbol_or_asset_id, status=status,
                              filled_qty="0.01" if status == "filled" else "0")
         self._orders[str(order.id)] = order
+        if status == "filled" and isinstance(self._positions, list):
+            # `B442`: A FILLED CLOSE LEAVES NO POSITION. This double used to keep listing it, which nothing read
+            # twice until `close_all_positions` gained a second sweep — and against a book that never empties,
+            # sweep (b) closed every confirmed position again. The venue would not list it.
+            self._positions = [p for p in self._positions if getattr(p, "symbol", None) != symbol_or_asset_id]
         return order
 
     def get_order_by_id(self, order_id, filter=None):
@@ -227,9 +232,11 @@ def test_the_factory_still_constructs_with_raw_data_FALSE():
             import requests
 
             captured.update(paper=paper, raw_data=raw_data)
-            # `B440`/`B441`: the builder sets these two SDK attributes and REFUSES a client without them.
+            # `B440`/`B441`/`B442`: the builder sets two SDK attributes, reads a third, and REFUSES a client
+            # without any of them.
             self._retry_codes = [429, 504]
             self._session = requests.Session()
+            self._api_key = key
             captured["client"] = self
 
     import alpaca.trading.client as alpaca_client
@@ -560,7 +567,9 @@ def test_the_report_survives_an_ABNORMAL_EXIT_and_names_the_in_flight_row():
     assert rows["ETH/USD"]["disposition"] == "FAILED"
     assert "CancelledError" in rows["ETH/USD"]["reason"] and "SENT" in rows["ETH/USD"]["reason"]
     assert rows["LTC/USD"]["disposition"] == "NOT_ATTEMPTED"
-    assert rows["LTC/USD"]["reason"] == "the close loop never reached this position"
+    # `B442`: every row's reason names its sweep (manager's ruling 3a); this position was in sweep (a).
+    assert rows["LTC/USD"]["reason"] == "[sweep a] the close loop never reached this position"
+    assert rows["LTC/USD"]["sweep"] == "a"
 
 
 def test_it_RAISES_rather_than_reporting_nothing_when_it_cannot_enumerate():
@@ -585,6 +594,8 @@ def test_the_close_path_does_NOT_depend_on_the_numeric_coercion():
     assert [r["disposition"] for r in report] == ["CLOSED"] * 3
     assert len(mock.closed) == 3
 
-    # The must-miss: get_positions STILL refuses that payload.
+    # The must-miss: get_positions STILL refuses that payload. On a FRESH venue — the one above has closed
+    # (and, since `B442`'s double models it, no longer lists) every position.
+    fresh, _ = _adapter(positions=positions)
     with pytest.raises(AlpacaFieldUnreadable):
-        asyncio.run(adapter.get_positions())
+        asyncio.run(fresh.get_positions())

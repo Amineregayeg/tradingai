@@ -269,6 +269,10 @@ class BrokerManager:
         self._reconnect_ticks: int = 0
         self._price_stream_tasks: list[asyncio.Task] = []
         self._price_callback: Callable | None = None
+        # `B443` item 6: what a kill switch in progress has reported so far, for a SECOND trigger to answer
+        # with. The list is the one `close_all_positions` is filling; the adapter is the one it is awaiting.
+        self._close_all_results: list[dict] | None = None
+        self._close_all_current: BrokerAdapter | None = None
 
     # ------------------------------------------------------------------
     # Startup
@@ -809,26 +813,41 @@ class BrokerManager:
     async def close_all_positions(self) -> list[dict]:
         """Kill switch: close ALL positions across ALL adapters."""
         results: list[dict] = []
-        for connection_id, adapter in self._adapters.items():
-            try:
-                adapter_results = await adapter.close_all_positions()
-                results.extend(adapter_results)
-            except Exception as exc:
-                logger.error(
-                    "Kill switch: error closing positions",
-                    connection_id=connection_id,
-                    broker=adapter.broker_name,
-                    error=str(exc),
-                )
-                results.append(
-                    {
-                        "broker": adapter.broker_name,
-                        "connection_id": connection_id,
-                        "status": "error",
-                        "error": str(exc),
-                    }
-                )
+        self._close_all_results = results
+        try:
+            for connection_id, adapter in self._adapters.items():
+                self._close_all_current = adapter
+                try:
+                    adapter_results = await adapter.close_all_positions()
+                    results.extend(adapter_results)
+                except Exception as exc:
+                    logger.error(
+                        "Kill switch: error closing positions",
+                        connection_id=connection_id,
+                        broker=adapter.broker_name,
+                        error=str(exc),
+                    )
+                    results.append(
+                        {
+                            "broker": adapter.broker_name,
+                            "connection_id": connection_id,
+                            "status": "error",
+                            "error": str(exc),
+                        }
+                    )
+        finally:
+            self._close_all_current = None
         return results
+
+    def close_all_rows_so_far(self) -> list[dict]:
+        """**What the kill switch in progress has reported so far** (`B443` item 6) — COPIES, never the rows
+        themselves: the adapters finished, then the live report of the one being awaited, if it publishes one
+        (`AlpacaAdapter.last_close_all_report`). Simulators close without suspending, so theirs appear whole."""
+        rows = [dict(r) for r in (self._close_all_results or [])]
+        live = getattr(self._close_all_current, "last_close_all_report", None)
+        if isinstance(live, dict):
+            rows.extend(dict(r) for r in list(live.values()))
+        return [{k: v for k, v in r.items() if not str(k).startswith("_")} for r in rows]
 
     # ------------------------------------------------------------------
     # Adapter lookup

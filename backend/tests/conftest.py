@@ -30,6 +30,27 @@ from app.db.session import get_session
 from app.main import create_app
 
 # ---------------------------------------------------------------------------
+# `B442`: the kill switch is ONE per process — isolate it per test
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _kill_switch_state_isolated():
+    """`KillSwitch()` objects share `app.core.kill_switch_state.KILL_SWITCH_STATE` (manager's ruling 1), which every
+    adapter reads at the send. A test that arms a switch would otherwise refuse every order in every later test
+    in the process. Reset before AND after, and fail the test that leaves a trigger marked in progress — that
+    is the state `trigger()`'s `finally` exists to prevent (review's K2-10), and resetting it silently would
+    hide exactly that defect."""
+    from app.core.kill_switch_state import KILL_SWITCH_STATE as state
+
+    state.armed, state.reason, state.trigger_started, state.trigger_started_at = False, None, None, None
+    yield
+    leaked = state.trigger_started is not None
+    state.armed, state.reason, state.trigger_started, state.trigger_started_at = False, None, None, None
+    assert not leaked, "a kill-switch trigger was left marked IN PROGRESS after the test ended"
+
+
+# ---------------------------------------------------------------------------
 # Test settings override — use SQLite in-memory for unit tests
 # ---------------------------------------------------------------------------
 
