@@ -20,10 +20,14 @@ interface EngineStatus {
   balance: number
   total_pnl: number
   total_pnl_pct: number
-  win_rate: number
-  closed_trades: number
-  wins: number
-  losses: number
+  // B431: NULL when the engine could not COUNT, which is not the same as counting zero. A
+  // broker without a realized-trade ledger (any real venue adapter) with the database also
+  // unreachable leaves these unknown, and the backend now says so instead of sending 0.
+  win_rate: number | null
+  closed_trades: number | null
+  wins: number | null
+  losses: number | null
+  counts_unavailable?: string[]
   open_positions: number
   risk_pct: number
   entry_tf: string
@@ -112,8 +116,12 @@ export function EnginePanel() {
         <Stat k="Win rate" v={s.closed_trades ? `${s.win_rate}%` : '—'} c="#e3b341" />
         <Stat
           k="Wins / Losses"
-          v={`${s.wins}W · ${s.losses}L`}
-          c={s.wins >= s.losses ? '#00d68f' : '#ff3b5c'}
+          // `${s.wins}W` on a null renders the literal string "nullW", and `null >= null` is
+          // TRUE in JS — so the unknown case would have printed nullW · nullL in the colour that
+          // means winning. An em dash is the only honest render of a number nobody has.
+          v={s.wins == null || s.losses == null ? '—' : `${s.wins}W · ${s.losses}L`}
+          c={s.wins == null || s.losses == null ? '#55556a'
+             : s.wins >= s.losses ? '#00d68f' : '#ff3b5c'}
         />
         <Stat k="Open" v={String(s.open_positions)} />
       </div>

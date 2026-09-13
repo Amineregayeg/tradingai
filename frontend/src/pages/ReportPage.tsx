@@ -12,10 +12,16 @@ interface EngineStatus {
   equity: number
   total_pnl: number
   total_pnl_pct: number
-  win_rate: number
-  closed_trades: number
-  wins: number
-  losses: number
+  // **`B431`. NULL WHEN THE ENGINE COULD NOT COUNT**, which is not the same as counting zero —
+  // a broker without a realized-trade ledger with the database also unreachable. This page
+  // already knows the lesson for its OTHER data source: `loadFailed` below carries the comment
+  // "An outage must not render as 'no trades'", written for the /api/trades fetch three lines
+  // before this payload is read naively. Same file, same class, two sources, one defended.
+  win_rate: number | null
+  closed_trades: number | null
+  wins: number | null
+  losses: number | null
+  counts_unavailable?: string[]
   started_at: string | null
 }
 
@@ -154,11 +160,22 @@ export default function ReportPage() {
         <div style={{ background: 'rgba(245,158,11,0.10)', border: '1px solid #5c3d00', borderRadius: 10, padding: '11px 14px', marginBottom: 14, display: 'flex', gap: 10, alignItems: 'flex-start' }}>
           <span style={{ fontSize: 15, lineHeight: 1.2 }}>⚠️</span>
           <div style={{ fontSize: 12, color: '#e3b341', lineHeight: 1.5 }}>
-            <b>Live paper trading only — {s.closed_trades} closed {s.closed_trades === 1 ? 'trade' : 'trades'}.</b>{' '}
-            {s.closed_trades < 200 ? (
-              <>This is <b>far below the {200} trades</b> needed to tell an edge from noise, so none of these figures are a track record. </>
+            {/* **`null < 200` IS `true` IN JAVASCRIPT**, so the small-sample verdict below used to
+                fire on a count that is UNKNOWN rather than small — telling the reader the sample
+                is far below 200 when nobody had counted it. On the page that exists to be read as
+                evidence, that is the worst place for the reassuring-by-default reading. */}
+            {s.closed_trades == null ? (
+              <><b>Live paper trading only — the closed-trade count is UNAVAILABLE.</b>{' '}
+              The engine could not read its realized-trade ledger, so the figures on this page are
+              not merely thin, they are <b>unverified</b>. Treat nothing here as a track record
+              until the count returns. </>
             ) : (
-              <>Sample size is adequate, but significance still has to be measured, not assumed. </>
+              <><b>Live paper trading only — {s.closed_trades} closed {s.closed_trades === 1 ? 'trade' : 'trades'}.</b>{' '}
+              {s.closed_trades < 200 ? (
+                <>This is <b>far below the {200} trades</b> needed to tell an edge from noise, so none of these figures are a track record. </>
+              ) : (
+                <>Sample size is adequate, but significance still has to be measured, not assumed. </>
+              )}</>
             )}
             Backtest-replay rows are <b>excluded</b> from this page. The strategy's edge has <b>not</b> passed
             out-of-sample validation — the corrected backtest of the base method loses money (−16% over 15 months).
@@ -178,8 +195,13 @@ export default function ReportPage() {
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
           <Metric big label="Equity" value={money(s.equity)} sub={`from ${money(s.starting_balance)} starting`} />
           <Metric big label="Net P&L" value={(pnlPos ? '+' : '') + money(s.total_pnl)} sub={`${pnlPos ? '+' : ''}${s.total_pnl_pct}% return`} color={pnlPos ? GREEN : RED} />
-          <Metric big label="Win Rate" value={`${s.win_rate}%`} sub={`${s.wins}W · ${s.losses}L`} color={AMBER} />
-          <Metric big label="Total Trades" value={String(s.closed_trades)} sub="closed positions" />
+          <Metric big label="Win Rate"
+            value={s.win_rate == null ? '—' : `${s.win_rate}%`}
+            sub={s.wins == null || s.losses == null ? 'count unavailable' : `${s.wins}W · ${s.losses}L`}
+            color={AMBER} />
+          <Metric big label="Total Trades"
+            value={s.closed_trades == null ? '—' : String(s.closed_trades)}
+            sub={s.closed_trades == null ? 'count unavailable' : 'closed positions'} />
         </div>
 
         {/* Equity curve */}
@@ -207,7 +229,8 @@ export default function ReportPage() {
           <Metric label="Best Trade" value={stats.nClosed ? '+' + money2(stats.best) : '—'} color={stats.nClosed ? GREEN : undefined} />
           <Metric label="Worst Trade" value={stats.nClosed ? money2(stats.worst) : '—'} color={stats.nClosed ? RED : undefined} />
           <Metric label="Balance" value={money(s.balance)} sub="realized cash" />
-          <Metric label="Wins / Losses" value={`${s.wins} / ${s.losses}`} />
+          <Metric label="Wins / Losses"
+            value={s.wins == null || s.losses == null ? '—' : `${s.wins} / ${s.losses}`} />
         </div>
 
         {/* Honest framing — important for client trust */}

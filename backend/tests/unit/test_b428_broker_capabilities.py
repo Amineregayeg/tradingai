@@ -479,3 +479,78 @@ def test_the_HANDOFF_CHECK_can_actually_FLAG_something():
     # And a planted receiver must be caught by the population arm's comparison.
     planted = {"ExecutionService", "SomeNewThingThatKeepsTheBroker"}
     assert planted != _HANDOFF_RECEIVERS, "the population comparison cannot detect a new receiver"
+
+
+# =====================================================================================
+# B431 — "COULD NOT COUNT" MUST NOT RENDER AS "COUNTED ZERO"
+# =====================================================================================
+
+class _VenueShaped(_ContractOnly):
+    """**The shape `B428a` deliberately PERMITS**: `on_tick` present, `_closed` absent.
+
+    This is the case the first version of the B431 guard got wrong, and it is not exotic — it is
+    what any real venue adapter looks like once it grows position management.
+    """
+    broker_name = "venue-shaped"
+
+    def on_tick(self, pair, price, ts=None):
+        return []
+
+    async def get_account(self):
+        return Account(account_id="x", broker="venue", balance=9_750.0, equity=9_800.0,
+                       currency="USD", unrealized_pl=50.0)
+
+
+async def test_a_broker_with_NO_LEDGER_reports_UNKNOWN_counts_not_ZERO():
+    """**REVIEW_FAIL on `2f0b2a8`, and the mechanism is worth more than the fix.**
+
+    The first guard returned `0` and justified it in a comment: *"`broker_missing` on this same
+    payload names `_closed` and is what discriminates no trades from cannot count them."*
+    **Narrowing `REQUIRED_BROKER_CAPABILITIES` to `("on_tick",)` — which was the right change —
+    made `broker_missing` unable to ever contain `_closed`.** The discriminator the comment
+    pointed at stopped existing, and the comment went on claiming it.
+
+    So a correct narrowing of one list silently invalidated a justification written for the wider
+    one. Nothing failed, because no arm asserted the discriminator existed. This is that arm.
+    """
+    loop = LiveCryptoLoop()
+    loop.paper = _VenueShaped()
+    loop.broker_missing = LiveCryptoLoop._missing_capabilities(loop.paper)
+
+    # The premise: this broker is NOT reported incapable — that is the whole point of the case.
+    assert loop.broker_missing == (), (
+        "the fixture is reported incapable, so it is not the permitted shape this arm is about"
+    )
+
+    s = await loop.status()
+
+    assert s["counts_unavailable"] == ["_closed"], (
+        f"nothing on the payload says the counts could not be computed: "
+        f"counts_unavailable={s['counts_unavailable']!r}, broker_missing={s['broker_missing']!r}"
+    )
+    for key in ("closed_trades", "wins", "losses", "win_rate"):
+        assert s[key] is None, (
+            f"{key} is {s[key]!r} — a number here is a MEASUREMENT, and this call measured "
+            f"nothing. B179: a substituted zero reads as a counted zero."
+        )
+    # AND THE MONEY FIGURES COME FROM THE BROKER, not from starting_balance + 0. Reporting the
+    # starting balance as the current one is "no P&L" where the truth is "P&L unknown" — the same
+    # substitution one field along.
+    assert s["balance"] == 9_750.0 and s["equity"] == 9_800.0, (
+        f"balance/equity were derived from a realized total that does not exist: "
+        f"{s['balance']} / {s['equity']}"
+    )
+
+
+async def test_the_SIMULATOR_still_reports_MEASURED_counts():
+    """**The control.** Every assertion above is satisfied by a `status()` that returns `None` for
+    everything always, which would be worse than the defect."""
+    loop = LiveCryptoLoop()
+    s = await loop.status()
+
+    assert s["counts_unavailable"] == [], (
+        f"the bound simulator reports its own ledger unavailable: {s['counts_unavailable']}"
+    )
+    assert s["closed_trades"] is not None and s["win_rate"] is not None, (
+        "the measured path now returns None too, so the discrimination above means nothing"
+    )

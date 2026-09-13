@@ -363,6 +363,9 @@ class LiveCryptoLoop:
         """
         acct = await self.paper.get_account()
         closed_n = wins = losses = 0
+        #: Ledger-derived fields this call could NOT compute, by name. Empty is the
+        #: measured state; a non-empty list is why every count below is `None`.
+        counts_unavailable: list[str] = []
         try:
             from sqlalchemy import select
 
@@ -404,26 +407,50 @@ class LiveCryptoLoop:
             # fallback matches the happy path — never fold replay into live counts,
             # and derive realized from the live closes only (not paper.balance,
             # which the warmup seeds with replay pnl).
-            # **`B428a`: THE REPORTING SURFACE MUST SURVIVE THE CONDITION IT REPORTS.**
+            # **`B431`: THE REPORTING SURFACE MUST SURVIVE THE CONDITION IT REPORTS — AND MUST
+            # NOT SUBSTITUTE ZEROS FOR THE FIGURES IT COULD NOT COMPUTE.**
             #
-            # `_closed` is a simulator-only member (`REQUIRED_BROKER_CAPABILITIES`), so on an
-            # incapable broker this line raised — and `status()` is the one place that would have
-            # TOLD anyone the broker was incapable. The panel 500'd precisely when it had
-            # something to say, and the `except` above exists so it never does.
+            # `_closed` is the simulator's realized-trade ledger. A venue adapter does not have
+            # one, which `B428a` deliberately PERMITS — only `on_tick` is required. So this path
+            # has two distinct outcomes and they must not look alike:
             #
-            # The counts below are then 0, which does NOT mean "no trades": `broker_missing` on
-            # this same payload names `_closed` and is what discriminates *no trades* from
-            # *cannot count them*. Found by an arm failing for its own reason rather than the
-            # code's, which is the shape worth chasing rather than stubbing past.
-            closed = [c for c in getattr(self.paper, "_closed", None) or []
-                      if c.get("reason") != "replay"]
-            closed_n = len(closed)
-            wins = sum(1 for c in closed if c["pnl"] > 0)
-            losses = sum(1 for c in closed if c["pnl"] <= 0)
-            realized = sum(float(c.get("pnl", 0) or 0) for c in closed)
+            #     ledger present   -> the counts are MEASURED
+            #     ledger absent    -> the counts are UNKNOWN, and every one of them is `None`
+            #
+            # **The first version of this guard returned 0 and justified it by saying
+            # `broker_missing` names `_closed` and discriminates the two. It cannot.** Narrowing
+            # `REQUIRED_BROKER_CAPABILITIES` to `("on_tick",)` — correctly — made `broker_missing`
+            # unable to ever contain `_closed`, so the discriminator the comment pointed at
+            # stopped existing while the comment went on claiming it. Driven on a broker with
+            # `on_tick` and no `_closed`: `closed_trades 0, wins 0, losses 0, broker_missing []`,
+            # a wholly reassuring payload with nothing behind it. `B179`, reached through a
+            # correct narrowing of an unrelated list. **A comment asserting a property the code
+            # does not have is `B238`.**
+            ledger = getattr(self.paper, "_closed", None)
+            if ledger is None:
+                # NOT ZERO. `None` survives JSON as `null`, which every consumer already renders
+                # as an em dash, and which no arithmetic silently absorbs.
+                closed_n = wins = losses = None
+                counts_unavailable = ["_closed"]
+                realized = None
+            else:
+                closed = [c for c in ledger if c.get("reason") != "replay"]
+                closed_n = len(closed)
+                wins = sum(1 for c in closed if c["pnl"] > 0)
+                losses = sum(1 for c in closed if c["pnl"] <= 0)
+                realized = sum(float(c.get("pnl", 0) or 0) for c in closed)
 
-        balance = round(self.starting_balance + realized, 2)
-        equity = round(balance + acct.unrealized_pl, 2)
+        if realized is None:
+            # **THE BROKER'S OWN FIGURES, which are authoritative for a real venue anyway.**
+            # `starting_balance + realized` is a simulator idiom; with no ledger it would report
+            # the STARTING balance as the current one — "no P&L" where the truth is "P&L unknown",
+            # the same substitution one field along. `get_account()` is in the contract, so every
+            # broker has it.
+            balance = round(acct.balance, 2)
+            equity = round(acct.equity, 2)
+        else:
+            balance = round(self.starting_balance + realized, 2)
+            equity = round(balance + acct.unrealized_pl, 2)
         return {
             "running": self._running,
             "paused": self.paused,
@@ -458,7 +485,13 @@ class LiveCryptoLoop:
             "closed_trades": closed_n,
             "wins": wins,
             "losses": losses,
-            "win_rate": round(100 * wins / closed_n, 1) if closed_n else 0.0,
+            # `None`, not 0.0, when the ledger could not be read — a 0% win rate is a
+            # measurement and this is the absence of one.
+            "win_rate": (None if closed_n is None
+                         else round(100 * wins / closed_n, 1) if closed_n else 0.0),
+            #: `B431`. Names what could not be counted, so a null above is explained on
+            #: the same payload rather than by a key that cannot reach it.
+            "counts_unavailable": counts_unavailable,
             "total_pnl": round(equity - self.starting_balance, 2),
             "total_pnl_pct": round(100 * (equity / self.starting_balance - 1), 2),
             "activity": list(self.activity)[:40],
