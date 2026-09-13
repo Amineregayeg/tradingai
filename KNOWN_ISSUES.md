@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-14 (newest entry B444 — on Alpaca the engine could place a trade but not manage or record it: EXIT-001's 70% partial is keyed by the order id while Alpaca positions carry the asset id, so it is silently dropped; and nothing turns an exit at the venue into a trade row or a resolved decision, because AlpacaAdapter has no settle path. B428b, named in six entries, is scoped in none.)
+Last updated: 2026-09-14 (newest entry B446 — a cancelled kill-switch trigger is swallowed: the adapter converts CancelledError to BrokerError, the manager catches it, and trigger returns normally. Also B445: B366's fix is unreachable because broker_manager flattens each adapter's exception to one error row, so the partial report never reaches the kill switch and a confirmed close is counted as a failure. And B444.)
 
 ---
 
@@ -23878,6 +23878,11 @@ exists, runs on the kill-switch path, and throws them away.
 
 Related: **B303**, **B330**, **B352**, **B215**.
 
+**AMENDMENT, 2026-09-14 — THE FIX AT `8352b07` IS UNREACHABLE THROUGH THE REAL CALLER: see `B445`.** `kill_switch.trigger`
+reads `exc.partial_report` only when `broker_manager.close_all_positions` raises, and the manager never raises: it
+catches each adapter's exception and replaces it with one `{"status": "error"}` row. Execute drove it on code
+identical to `fb3dab6`: the report this entry was about is still discarded, one layer further in.
+
 ---
 
 ### B367 — A PARTIALLY CLOSED POSITION IS REPORTED `CLOSED`. `TRADE_RETCODE_DONE_PARTIAL` is in the SDK's SUCCESS list, so it returns rather than raising, and the adapter never inspects the response
@@ -29588,3 +29593,68 @@ how it resizes the legs, has never been observed.
 simulators use; partial exits keyed and addressed the way the venue identifies positions; the leg-quantity question
 answered by a probe before it is designed around; and what the loop does at start-up when the venue already holds
 a position it has no plan for. Plus `B437`'s two-clients note (D5).
+
+---
+
+### B445 — `B366`'s FIX IS UNREACHABLE. `broker_manager.close_all_positions` catches each adapter's exception and flattens it to one error row, so the kill switch never sees the `partial_report` it was changed to read — and a confirmed CLOSED position is reported as a failure
+
+**Found by execute while building `B442`, driven on code identical to `fb3dab6` along this path; the manager
+confirmed the two handlers by reading `fb3dab6`.**
+
+```
+AlpacaAdapter.close_all_positions   abnormal exit -> BrokerError, .partial_report = every position's row
+BrokerManager.close_all_positions   for each adapter: try ... except Exception as exc:
+                                        results.append({"broker", "connection_id", "status": "error", "error": str(exc)})
+                                    returns results — NEVER raises
+kill_switch.trigger                 try: await broker_manager.close_all_positions()
+                                    except Exception as exc: partial = getattr(exc, "partial_report", None)   <- B366's fix, unreachable
+```
+
+**Driven:** one Alpaca adapter with BTC and ETH open, and ETH's close raising.
+```
+adapter.close_all_positions() directly   BrokerError, partial_report = 2 rows (BTC CLOSED; ETH SENT and never observed)
+KillSwitch().trigger() via the manager   "Kill switch triggered: 0 position(s) closed, 1 failed", details = one "error" row
+```
+**BTC's confirmed close and ETH's "check it at the venue" are both gone. Two positions become "1 failed", and the one
+that DID close is counted as a failure with no pair named.** Wrong in the dangerous direction: an operator reads one
+failure and cannot tell which position to check. Venue-agnostic: mt5, cryptofundtrader and Alpaca all attach
+`partial_report`.
+
+**Why `B366`'s fix passed:** its arm made `broker_manager.close_all_positions` itself raise, so it tested the
+consumer against a manager that does not exist. A double kinder than the real caller, one layer out.
+
+**Fix direction:** the manager keeps an adapter's `partial_report` rows (each tagged with broker and connection id)
+when the adapter raises, and adds one error row only for positions the report does not cover. The arm drives
+`KillSwitch.trigger` through the REAL `BrokerManager` with a raising adapter.
+
+---
+
+### B446 — A CANCELLED KILL-SWITCH TRIGGER IS SWALLOWED. The adapter turns `CancelledError` into `BrokerError`, the manager catches it, `trigger` returns normally, and the next adapter's closes still go out
+
+**Found by execute while building `B442`, driven on code identical to `fb3dab6` along this path; the manager
+confirmed the handlers by reading.**
+
+```
+AlpacaAdapter.close_all_positions   except BaseException as exc:  ...  raise failure from exc     (failure is a BrokerError)
+BrokerManager.close_all_positions   except Exception  -> catches it, appends an error row, moves to the NEXT adapter
+```
+
+**Driven:** two adapters, with the trigger task cancelled while the first adapter's close was resolving. `trigger`
+RETURNED normally ("1 position(s) closed, 1 failed"), the second adapter's close for ETH/USD was still SENT, and
+nothing awaiting the task ever saw `CancelledError`. The cancelled adapter's per-position rows were then lost to
+`B445`.
+
+**Two separate questions:**
+- **Should the switch finish closing after a cancellation? RULED yes (manager, 2026-09-14).** A panic stop left
+  half done is the worst state it can leave, so the sweep runs to the end and records every row.
+- **Is a silent swallow acceptable? No.** Cancellation is a contract: whoever cancelled must learn the task did not
+  simply finish. So the sweep is shielded, every row is recorded and logged, and `CancelledError` is RE-RAISED
+  once the sweep ends.
+
+**Bears on `B443`:** a request dropped at the proxy becomes exactly this cancellation, if the server propagates the
+disconnect (not measured).
+
+**Fix direction:** the adapter re-raises `CancelledError` itself instead of converting it. `trigger` runs the sweep
+as a shielded task, awaits it on cancellation, records the result, then re-raises. Arms: a cancelled trigger still
+closes every position, returns no normal result, and the awaiting task sees `CancelledError` with the full report
+logged.
