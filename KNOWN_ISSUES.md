@@ -28926,6 +28926,27 @@ reported. Show that the fill price was unreported instead.
 
 Latent behind `B430`. Not a deploy-D blocker.
 
+#### FIXED — `b4e6e1f`. PASSED review. NOT DEPLOYED
+
+`readable_price()` and `readable_quantity()` now live in the broker contract (`base.py`), one parse with the zero rule
+PER FIELD: a non-positive price is unreadable, a zero quantity is a reading. The adapter's fill price uses
+`readable_price`, and `ExecutionService` normalises `res["fill"]` immediately after `place_order` for EVERY producer, so
+`realized_risk_per_unit`, the decision's basis and settle's entry all see a positive price or None. The loop's entry
+line reads the fill by value and says "fill price unreported" instead of presenting the signal's entry as a fill.
+
+**The class had THREE sites, not two.** The manager's first sweep covered the service and the adapter and said two;
+review's unfiltered AST pass over the loop found `_record_signal_decision`'s conversion, which fails SILENTLY (it drops
+the OPEN row with a warning) rather than raising, so no sweep for raises could see it. The arm proving the loop is
+covered (review's FU-1c, execute's SN-3) removes the normalisation AND stops the service crashing: with the crash left
+in, the arm dies upstream and never reaches the silent consumer.
+
+**Verify the entry-line fix by AST, not text:** the comment explaining it quotes the removed `.get('fill', sig.entry):.0f`.
+
+**RESIDUAL, found by review at `b4e6e1f` and widened by manager, in a follow-up commit:** both helpers catch only
+`TypeError` and `ValueError`, so a 401-digit JSON integer RAISES `OverflowError` after placement in BOTH; and both read
+a boolean as a number — `True` gives 1.0 as a price AND as a filled quantity, a fill of one whole unit; `False` gives
+0.0 as a quantity. Implausible inputs, against a contract of never raising and never inventing a number.
+
 ---
 
 ### B434 — `REJECTION_THROUGH_STOP` CANNOT FIRE AT THE DEFAULT DRIFT LIMIT, so a market already through the stop is recorded as `ENTRY_DRIFT`
