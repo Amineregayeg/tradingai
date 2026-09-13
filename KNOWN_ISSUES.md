@@ -28522,6 +28522,12 @@ Measured with the test module's own fake clock and a 5s budget: reads of 0.5s gi
 and `_close_outcome` / `_close_disposition` still run outside the kill switch's per-position `try`, so surviving a
 bad position rests on "never raises" rather than on structure — `B439` was exactly a raise outside that `try`.
 
+**WALL-TIME BOUND FIXED at `fb3dab6`, PASSED review.** No read starts once the budget is spent, in the resolver and in
+the client_order_id lookup. Measured on the probe that found it: 3s reads -> 2 reads over 6.0s, 9s reads -> 1 read over
+9.0s, against a 5s budget, which is budget plus one read. Manager's loopback drive on a real clock agrees (0.4s reads,
+1.0s budget -> 1.21s). **With `a451ec1`'s PASS on every other row, B427, B438 and B439 are FIXED as of `fb3dab6`.**
+Not deployed: production is `6ae6aca`.
+
 ---
 
 ### B428 — THE ALPACA TICK PATH CANNOT RUN AT ALL. Every tick raises before any signal is evaluated, the loop swallows it as a WARNING, and the engine reports HEALTHY forever
@@ -29228,6 +29234,9 @@ verified by manager in alpaca-py 0.44.0):**
   that did close. Loud, not a false flat. By reading, latent under `B430`; it belongs with `B428b`.
 - The SDK's own retry sleep is `time.sleep(3)`, inline, up to three times (`B441`).
 
+**D3 FIXED at `fb3dab6`, PASSED review.** Once a submission exists, a cancellation during the protection check,
+the resolution, a close's resolution or the lookup logs an ERROR carrying the order id and client_order_id, then
+re-raises. The event-loop blocking itself is NOT fixed; that is commit (3), the per-account executor.
 
 ---
 
@@ -29419,6 +29428,19 @@ within the resolution budget, and an order never found is UNRESOLVED, not REJECT
 only if its symbol, side and quantity match the request. The ids are 8 hex characters, so a collision across an
 account's history is possible.
 
+**FIXED at `fb3dab6`, PASSED review (2026-09-13).** `build_trading_client`, the one builder both construction sites
+use, sets the retry codes to 429 only and refuses to build a client if `_retry_codes` or `_session` is missing.
+`classify_submission_failure` sorts failures by type, walking `__cause__` / `args[0]` / `.reason` with no implicit
+`__context__`, and checks connect timeouts first. After a 422, one lookup is made and a 404 re-raises the refusal.
+After a sent-and-unanswered failure, lookups run within the wall-time budget and an order never found is
+`SUBMISSION_UNCONFIRMED`. A found order is adopted only if symbol, side and qty match. Manager drove it end to end
+through the real SDK against a loopback server (504 -> one POST, then found and FILLED; 422/404 -> refusal; stalled
+POST -> SUBMISSION_UNCONFIRMED; wrong qty -> UNRESOLVED; a text body with braces -> no raise).
+**Four test gaps on correct code, queued as arms in commit (2):** the 422 path's single lookup is not asserted;
+qty compared as strings survives (venue "0.010" for a sent "0.01" must be adopted); symbol by substring survives
+(venue "BTC/USDT" for a sent "BTC/USD" must NOT be adopted — T-0139's D2 trap); reading `.code` survives (a non-JSON
+403 or 429 must be NOT_CREATED).
+
 ---
 
 ### B441 — ALPACA SDK REQUESTS CARRY NO HTTP TIMEOUT. A hung connection blocks the event loop forever today, and would strand a thread under any threaded dispatch
@@ -29441,6 +29463,10 @@ event loop for about nine seconds.
 **Fix direction, not built:** a bounded connect and read timeout on every request, set once on the client rather
 than at each call site, with an arm that fails if any request goes out without one. **Not alone:** a read timeout on
 a POST is an ambiguous submission, so this lands with `B440`.
+
+**FIXED at `fb3dab6`, PASSED review (2026-09-13).** A mounted `HTTPAdapter` supplies (3s connect, 10s read) to every
+request whose timeout is `None`, which is every request the SDK sends. Manager's drive: a stalled POST and a stalled
+id-read both raised at the patched 0.5s read timeout. The SDK's 429 retry still sleeps inline until `B437`'s executor.
 
 ---
 
