@@ -126,6 +126,21 @@ export function EnginePanel() {
         <Stat k="Open" v={String(s.open_positions)} />
       </div>
 
+      {/* **B431, THIRD ITERATION OF ONE CLASS.** The sequence is worth keeping:
+              original    the panel 500'd
+              first fix   0, explained by a key that could not name what was missing
+              second fix  an em dash, explained by a key that was never RENDERED
+          A type declaration is not a consumer. Without this line the operator sees a dash and
+          cannot tell a database outage from a broker that keeps no ledger — and it is BOTH, every
+          time, because this state is only reachable when the DB read failed AND the broker has no
+          realized-trade ledger. Saying so is the whole remedy. */}
+      {s.counts_unavailable && s.counts_unavailable.length > 0 && (
+        <div style={{ fontSize: 10, color: '#f59e0b', marginTop: -4, marginBottom: 9, lineHeight: 1.4 }}>
+          Trade counts unavailable — the database read failed and this broker keeps no realized-trade
+          ledger ({s.counts_unavailable.join(', ')}). The dashes above are unknown, not zero.
+        </div>
+      )}
+
       <button
         onClick={toggle}
         style={{

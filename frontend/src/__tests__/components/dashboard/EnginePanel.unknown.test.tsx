@@ -116,3 +116,28 @@ describe('B431 — unknown counts do not render as zeros', () => {
     expect(measuredWL).not.toEqual(unknownWL)
   })
 })
+
+describe('B431 — the reason is RENDERED, not merely typed', () => {
+  it('names why the counts are unavailable, so a dash is not just a dash', async () => {
+    getStatus.mockReturnValue(UNKNOWN)
+    await mount()
+
+    // **A TYPE DECLARATION IS NOT A CONSUMER.** `counts_unavailable` existed on the payload and in
+    // the TS interface of both consumers, and was rendered by neither — so the operator saw an em
+    // dash and could not tell a database outage from a broker that keeps no ledger. Third
+    // iteration of one class: 500s, then 0 explained by an unreachable key, then a dash explained
+    // by an unrendered one.
+    const text = document.body.textContent ?? ''
+    expect(text).toMatch(/counts unavailable/i)
+    expect(text).toContain('_closed')
+    expect(text).toMatch(/unknown, not zero/i)
+  })
+
+  it('CONTROL: says nothing of the sort when the counts were measured', async () => {
+    getStatus.mockReturnValue(MEASURED)
+    await mount()
+
+    expect(document.body.textContent).toContain('3W · 2L')
+    expect(document.body.textContent).not.toMatch(/counts unavailable/i)
+  })
+})

@@ -166,9 +166,10 @@ export default function ReportPage() {
                 evidence, that is the worst place for the reassuring-by-default reading. */}
             {s.closed_trades == null ? (
               <><b>Live paper trading only — the closed-trade count is UNAVAILABLE.</b>{' '}
-              The engine could not read its realized-trade ledger, so the figures on this page are
-              not merely thin, they are <b>unverified</b>. Treat nothing here as a track record
-              until the count returns. </>
+              The database read failed and this broker keeps no realized-trade ledger
+              ({(s.counts_unavailable ?? []).join(', ') || 'source unreported'}), so the figures on
+              this page are not merely thin, they are <b>unverified</b>. Treat nothing here as a
+              track record until the count returns. </>
             ) : (
               <><b>Live paper trading only — {s.closed_trades} closed {s.closed_trades === 1 ? 'trade' : 'trades'}.</b>{' '}
               {s.closed_trades < 200 ? (

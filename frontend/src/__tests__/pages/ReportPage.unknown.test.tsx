@@ -64,6 +64,17 @@ async function mount() {
   await waitFor(() => expect(screen.getByText(/Live paper trading only/i)).toBeTruthy())
 }
 
+/** The whole banner, not just its bold lead.
+ *
+ * `getByText(/Live paper trading only/i)` matches the `<b>` element — the sample-size verdict and
+ * the missing-source name are SIBLINGS of it, so reading that node's textContent silently drops
+ * the half of the banner these arms are about. Scoped one level up, deliberately: scoping too
+ * tightly is the same error as not scoping at all, in the other direction.
+ */
+function banner(): string {
+  return screen.getByText(/Live paper trading only/i).closest('div')?.textContent ?? ''
+}
+
 describe('B431 — the report does not present unknown counts as counts', () => {
   it('CONTROL: measured counts render as numbers and the sample verdict applies', async () => {
     status = MEASURED
@@ -112,4 +123,28 @@ describe('B431 — the report does not present unknown counts as counts', () => 
       expect(unknown).toMatch(/UNAVAILABLE/i)
       expect(measured).not.toEqual(unknown)
     })
+})
+
+describe('B431 — the banner has THREE states and all three are asserted', () => {
+  it('the ADEQUATE-sample branch still renders, and it costs one literal', async () => {
+    // **MY REASON FOR SKIPPING THIS WAS WRONG IN MY OWN FAVOUR.** I said it would need 200+
+    // trades; the banner reads a NUMBER from the payload, and this fixture supplies the payload
+    // as a literal. Three-state logic with two states asserted is where the third silently
+    // becomes unreachable — found by review reading the component rather than my excuse.
+    status = { ...MEASURED, closed_trades: 250, wins: 150, losses: 100 }
+    await mount()
+
+    const text = banner()
+    expect(text).toContain('250 closed trades')
+    expect(text).toMatch(/Sample size is adequate/i)
+    expect(text).not.toMatch(/far below/i)
+    expect(text).not.toMatch(/UNAVAILABLE/i)
+  })
+
+  it('names the missing source rather than asserting a generic outage', async () => {
+    status = UNKNOWN
+    await mount()
+
+    expect(banner()).toContain('_closed')
+  })
 })
