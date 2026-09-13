@@ -229,8 +229,10 @@ FILL_OUTCOMES = (ORDER_FILLED, ORDER_PARTIALLY_FILLED)
 def classify_order_status(status: object) -> str:
     """The class of an order result's `status`: filled, partially filled, refused, or UNRESOLVED.
 
-    **Pure, total, and never raises.** Only a string is classified (review's K-3): `None`, a number,
-    `{}`, `[]`, or an object whose `__eq__` raises are UNRESOLVED before any comparison runs. The
+    **Pure, total, and never raises for any value a venue reply can carry.** Only a string is classified
+    (review's K-3): `None`, a number, `{}`, `[]`, or a non-`str` object whose `__eq__` raises are
+    UNRESOLVED before any comparison runs. A `str` SUBCLASS with a raising `__eq__` would pass the guard
+    and reach the membership test — JSON cannot produce one, so it is stated rather than guarded. The
     third class is the COMPLEMENT — nothing enumerates "not yet known", so a status nobody listed
     lands here and halts rather than in whichever branch happens to be the `else`.
     """
@@ -2769,10 +2771,19 @@ class LiveCryptoLoop:
                 f"remainder passive to STOP_HIT or SESSION_CLOSE"
                 if sig.partial_price is not None else "no exit plan"
             )
+            # **`B433` (F-2). THE FILL IS READ BY VALUE, AND NOTHING STANDS IN FOR IT.** This was
+            # `res.get('fill', sig.entry):.0f`. `.get(key, default)` returns `None` when the key is
+            # PRESENT with `None` — Alpaca's result carries `"fill": None` whenever the venue gave no
+            # usable price — so the format raised TypeError AFTER the decision was recorded and the
+            # position pushed. And where the default did apply it printed the SIGNAL's entry after "@",
+            # a fill price nobody reported. So an unreported price is said to be unreported.
+            fill_px = res.get("fill")
+            fill_text = (f"@ {fill_px:.0f}" if isinstance(fill_px, (int, float)) and not isinstance(fill_px, bool)
+                         else "@ fill price unreported")
             await self._act(
                 "entry",
                 f"Entered {pair} {sig.direction.value} {_fmt_units(opened_units)} "
-                f"@ {res.get('fill', sig.entry):.0f} (SL {sig.sl:.0f}, {exit_clause})",
+                f"{fill_text} (SL {sig.sl:.0f}, {exit_clause})",
             )
         elif outcome == ORDER_REFUSED:
             # NEVER drop a generated signal silently. A rejection (non-positive

@@ -713,6 +713,185 @@ async def test_P3_an_UNREADABLE_filled_qty_is_REPORTED_unreadable_not_RAISED_aft
 
 
 # ---------------------------------------------------------------------------------------------------
+# B433 — THE FILL PRICE (F-1, FU-1b, FU-1c) AND THE ENTRY LINE (F-2)
+#
+# Found by review beside T-0130: `float(filled_avg_price or 0) or None` one line below the K-4b fix, the
+# same class. The consumers are why zero and non-finite must be `None` (review measured three):
+# `ExecutionService`'s realized_risk_per_unit, `_record_signal_decision`'s basis and expected_r, and the
+# settle path's entry — each uses the fill whenever it is not `None`.
+# ---------------------------------------------------------------------------------------------------
+
+UNREADABLE_PRICES = ["garbage", "nan", "inf", "-inf", "1e999", "", "   ", None, "0", 0.0, "-5", -5.0]
+PRICE_IDS = ["garbage", "nan", "inf", "minus_inf", "1e999", "blank", "spaces", "None", "zero_str", "zero_float",
+             "negative_str", "negative_float"]
+
+
+@pytest.mark.parametrize("raw", UNREADABLE_PRICES, ids=PRICE_IDS)
+def test_B1_a_venue_PRICE_is_positive_and_finite_or_None(raw):
+    """**The zero rule is per field** (manager): a zero quantity is a reading, a zero price is not a
+    price, and neither is a negative one — `or None` kept a truthy -5.0."""
+    from app.services.broker.base import readable_price
+
+    assert readable_price(raw) is None, f"{raw!r} was read as a price: {readable_price(raw)!r}"
+
+
+def test_B1b_the_price_and_quantity_rules_DIFFER_only_at_zero_and_below():
+    from app.services.broker.base import readable_price, readable_quantity
+
+    assert (readable_price("70000.5"), readable_price(70000)) == (70000.5, 70000.0)
+    assert (readable_quantity("0"), readable_quantity(0.0)) == (0.0, 0.0), "a zero QUANTITY is a reading"
+    assert readable_quantity("nan") is None and readable_quantity("1e999") is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("raw", UNREADABLE_PRICES, ids=PRICE_IDS)
+async def test_B2_the_ALPACA_fill_price_is_PARSED_never_raised_after_submission(raw):
+    """F-1 at the adapter: "garbage" raised ValueError AFTER the order was submitted (a false refusal
+    through the venue-raised backstop), and NaN and inf passed through as prices."""
+    from alpaca.trading.enums import OrderStatus
+
+    from tests.unit.test_t0140_order_body import _adapter, _order, _req
+
+    adapter, client = _adapter()
+
+    def submit(order_data):
+        o = _order(str(order_data.qty))
+        object.__setattr__(o, "status", OrderStatus.FILLED)
+        object.__setattr__(o, "filled_avg_price", raw)
+        return o
+
+    client.submit_order = submit
+    result = await adapter.place_order(_req())
+    assert "fill" in result and result["fill"] is None, f"filled_avg_price {raw!r} gave fill {result.get('fill')!r}"
+
+
+@pytest.mark.asyncio
+async def test_B2b_a_READABLE_fill_price_survives_the_adapter():
+    from tests.unit.test_t0140_order_body import _adapter, _req
+
+    adapter, _client = _adapter()          # the double's order fills at "70000"
+    assert (await adapter.place_order(_req()))["fill"] == 70000.0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("raw", UNREADABLE_PRICES, ids=PRICE_IDS)
+async def test_B3_the_SERVICE_normalises_the_fill_for_EVERY_producer(raw):
+    """**FU-1b.** `if fill is not None: abs(float(fill) - sig.sl)` guarded `None` only. Only the simulators
+    and Alpaca hold the slot today, and that is `B430`'s shape, so the service makes a readable price true
+    BY CONSTRUCTION for whatever a producer forwards."""
+    res = await _service_result({"status": "FILLED", "units": 1.0, "fill": raw})
+    assert "fill" in res and res["fill"] is None, f"fill {raw!r} reached the loop as {res.get('fill')!r}"
+    assert "realized_risk_per_unit" not in res, f"a risk was computed from fill {raw!r}: {res!r}"
+
+
+@pytest.mark.asyncio
+async def test_B3b_a_READABLE_fill_is_used_and_an_ABSENT_one_stays_absent():
+    readable = await _service_result({"status": "FILLED", "units": 1.0, "fill": "100.5"})
+    assert readable["fill"] == 100.5 and readable["realized_risk_per_unit"] == pytest.approx(1.5), readable
+    absent = await _service_result({"status": "FILLED", "units": 1.0})
+    assert "fill" not in absent and "realized_risk_per_unit" not in absent, absent
+
+
+def _capture_rows(monkeypatch):
+    """Let `_record_signal_decision` RUN and capture what it builds; only the database session is stubbed."""
+    import app.db.session as sess
+
+    rows: list = []
+
+    class _Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        def add(self, row):
+            rows.append(row)
+
+        async def commit(self):
+            return None
+
+    monkeypatch.setattr(sess, "async_session_maker", lambda: _Session())
+    return rows
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("raw", ["garbage", "nan", 0.0], ids=["garbage", "nan", "zero"])
+async def test_B4_an_unreadable_fill_THROUGH_THE_LOOP_still_records_the_OPEN_decision(monkeypatch, raw):
+    """**FU-1c — the silent site.** `_record_signal_decision` does `float(fill_price)` inside a blanket
+    `except` that logs a warning, so "garbage" did not raise: it DROPPED THE OPEN ROW for a position that
+    opened, and NaN wrote `Decimal('NaN')`. Driven through the real service and the real recorder, because
+    an arm on the service's dict alone cannot show the loop is covered, and there is no raise to catch."""
+    from app.services.live import crypto_loop as mod
+
+    service = _double_service({"status": "FILLED", "units": 1.0, "fill": raw, "position_id": "p-9"})
+
+    async def _execute(_drive_signal):
+        return await service.execute(_signal())
+
+    loop, acts = _drive_tick(monkeypatch, _execute)
+    rows = _capture_rows(monkeypatch)
+
+    async def _noop(*a, **k):
+        return None
+
+    monkeypatch.setattr(mod.ws_manager, "push_position_open", _noop)
+    await loop._tick_symbol("BTC/USD", "BTCUSDT")
+
+    decisions = [r for r in rows if type(r).__name__ == "DecisionRecord"]
+    assert decisions, f"fill {raw!r}: the OPEN decision row for a position that opened was not recorded: {acts}"
+    assert decisions[0].outcome == "OPEN" and decisions[0].fill_price is None, (
+        decisions[0].outcome, decisions[0].fill_price)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("result,shown", [
+    ({"status": "FILLED", "units": 1.0, "sized_units": 1.0, "fill": None, "position_id": "p-1"}, None),
+    ({"status": "FILLED", "units": 1.0, "sized_units": 1.0, "position_id": "p-1"}, None),
+    ({"status": "FILLED", "units": 1.0, "sized_units": 1.0, "fill": 70000.0, "position_id": "p-1"}, "@ 70000"),
+], ids=["present_None", "absent", "readable_must_miss"])
+async def test_B5_the_ENTRY_line_never_presents_the_SIGNAL_entry_as_a_fill(monkeypatch, result, shown):
+    """**F-2.** `res.get('fill', sig.entry):.0f` raised TypeError on a PRESENT `None` — after the decision
+    was recorded and the position pushed — and where the default did apply it printed the signal's entry
+    after "@", a fill price nobody reported."""
+    async def _execute(_sig):
+        return dict(result)
+
+    loop, acts = _drive_tick(monkeypatch, _execute)
+    seen = _instrument(monkeypatch, loop)
+    recorded: list = []
+
+    async def _signal_row(*a, **k):
+        recorded.append(k.get("fill_price", "MISSING"))
+
+    monkeypatch.setattr(loop, "_record_signal_decision", _signal_row)
+    await loop._tick_symbol("BTC/USD", "BTCUSDT")
+
+    entry = [m for kind, m in acts if kind == "entry"]
+    assert entry and seen["push"] == 1, f"the fill branch did not complete: {acts}"
+    if shown is None:
+        assert "@ 100" not in entry[0] and "fill price unreported" in entry[0], entry[0]
+        assert recorded == [None], f"the decision was given a fill price nobody reported: {recorded}"
+    else:
+        assert shown in entry[0], entry[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field,value", [
+    ("units", __import__("decimal").Decimal("1.5")), ("filled_units", float("nan")), ("filled_units", float("inf")),
+], ids=["decimal", "nan", "inf"])
+async def test_B6_the_unresolved_ALERT_is_strict_JSON_whatever_the_result_carries(monkeypatch, field, value):
+    """**FU-5.** A Decimal or a NaN in `context_json` fails the write (or stores non-standard JSON), and the
+    alert for a position nobody tracks is the record that must not fail."""
+    import json
+
+    _loop, _acts, seen = await _drive(monkeypatch, {"status": "NEW", field: value, "position_id": "oid-1"})
+    ctx = next(r for r in seen["alerts"] if type(r).__name__ == "Alert").context_json
+    json.dumps(ctx, allow_nan=False)
+    assert isinstance(ctx[field], str), f"{field}={value!r} was stored as {ctx[field]!r}"
+
+
+# ---------------------------------------------------------------------------------------------------
 # VOCABULARY AND STRUCTURE
 # ---------------------------------------------------------------------------------------------------
 
@@ -730,9 +909,31 @@ def test_V1_the_status_sets_are_DISJOINT():
         and mod.ORDER_UNRESOLVED not in mod.FILL_OUTCOMES, classes
 
 
+def _literal_strings(expr) -> set[str]:
+    """The string constants an expression can EVALUATE to without a call: a constant, either arm of a
+    conditional, or any operand of `and`/`or` (B433, FU-4 — `"A" if c else "X"` and `x or "X"`)."""
+    if isinstance(expr, ast.Constant) and isinstance(expr.value, str):
+        return {expr.value}
+    if isinstance(expr, ast.IfExp):
+        return _literal_strings(expr.body) | _literal_strings(expr.orelse)
+    if isinstance(expr, ast.BoolOp):
+        return set().union(*(_literal_strings(v) for v in expr.values))
+    return set()
+
+
 def _status_literals(source: str, function_names: set[str]) -> dict[str, set[str]]:
-    """Every string constant a function can put under a `status` key or into a `status` variable."""
+    """Every string constant a function can put under a `status` key or into a `status` variable.
+
+    Reach, stated (B433, FU-4 widened it): a dict-literal `"status"` key; `status = ...`;
+    `status: T = ...`; `x["status"] = ...`; a `status=` keyword; each through conditionals and
+    `and`/`or`. NOT seen: a status built by a call, an f-string, or a variable whose name is not
+    `status` — Alpaca's `str(raw).upper()` is the first, and UNRESOLVED exists for it."""
     found: dict[str, set[str]] = {}
+
+    def _is_status_target(t) -> bool:
+        return (isinstance(t, ast.Name) and t.id == "status") or (
+            isinstance(t, ast.Subscript) and isinstance(t.slice, ast.Constant) and t.slice.value == "status")
+
     for fn in ast.walk(ast.parse(source)):
         if not (isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)) and fn.name in function_names):
             continue
@@ -742,11 +943,15 @@ def _status_literals(source: str, function_names: set[str]) -> dict[str, set[str
                 values = [v for k, v in zip(node.keys, node.values)
                           if isinstance(k, ast.Constant) and k.value == "status"]
             elif isinstance(node, ast.Assign):
-                if any(isinstance(t, ast.Name) and t.id == "status" for t in node.targets):
+                if any(_is_status_target(t) for t in node.targets):
                     values = [node.value]
+            elif isinstance(node, ast.AnnAssign) and node.value is not None and _is_status_target(node.target):
+                values = [node.value]
+            elif isinstance(node, ast.Call):
+                values = [k.value for k in node.keywords if k.arg == "status"]
             for v in values:
-                if isinstance(v, ast.Constant) and isinstance(v.value, str):
-                    found.setdefault(v.value, set()).add(f"{fn.name}:{node.lineno}")
+                for literal in _literal_strings(v):
+                    found.setdefault(literal, set()).add(f"{fn.name}:{node.lineno}")
     return found
 
 
@@ -773,6 +978,14 @@ def test_V2_every_status_LITERAL_a_producer_can_emit_is_CLASSIFIED():
     planted = _status_literals(
         "def place_order():\n    status = 'SUBMITTED'\n    return {'status': 'FILLED'}\n", {"place_order"})
     assert set(planted) == {"SUBMITTED", "FILLED"} and set(planted) - known == {"SUBMITTED"}, planted
+    # FU-4: each widened form is SEEN, one planted literal per form.
+    for form, literal in (("    rec['status'] = 'X_SUBSCRIPT'\n", "X_SUBSCRIPT"),
+                          ("    status: str = 'X_ANNASSIGN'\n", "X_ANNASSIGN"),
+                          ("    rec = {'status': 'FILLED' if ok else 'X_IFEXP'}\n", "X_IFEXP"),
+                          ("    rec = {'status': raw or 'X_BOOLOP'}\n", "X_BOOLOP"),
+                          ("    rec = dict(status='X_KEYWORD')\n", "X_KEYWORD")):
+        seen = _status_literals("def place_order(rec, ok, raw):\n" + form, {"place_order"})
+        assert literal in seen, f"the scan does not see {form.strip()!r}: {seen}"
 
     emitted: dict[str, set[str]] = {}
     for module, names in ((service, {"execute"}), (paper, {"place_order"}),
@@ -801,25 +1014,47 @@ def test_V2_every_status_LITERAL_a_producer_can_emit_is_CLASSIFIED():
 
 
 def _status_decisions_outside_classifier(tree: ast.AST, vocabulary: set[str]) -> list[str]:
-    """Membership tests against the classifier's own sets, and comparisons with an ORDER-RESULT literal,
-    anywhere except inside `classify_order_status`. Raw reads (`"status": res.get("status")`) are
-    records, not decisions, and are not flagged; nor are other vocabularies (`TradeStatus.CLOSED`, the
-    close path's `"refused"`)."""
+    """Every way this module could decide what a status MEANS outside `classify_order_status`.
+
+    Flagged (B433, FU-3 widened it beyond `Compare`):
+      * ANY read of the classifier's own sets — a membership test, `.__contains__`, `set(...)` of them
+      * a comparison with an ORDER-RESULT literal
+      * a `match` whose case pattern is an ORDER-RESULT literal
+      * a dict literal KEYED by an order-result literal (a dispatch table)
+      * `.startswith` / `.endswith` with a non-empty prefix or suffix of an order-result literal
+    Quiet: raw reads (`"status": res.get("status")` records, it does not decide) and other vocabularies
+    (`TradeStatus.CLOSED`, the close path's `"refused"`). NOT seen: a decision made through a helper in
+    ANOTHER module, or through a regex — stated rather than claimed."""
     sets = {"FILL_BEARING_STATUSES", "REFUSAL_STATUSES", "NOT_FROM_THIS_LOOP_STATUSES"}
     inside = set()
     for fn in ast.walk(tree):
         if isinstance(fn, ast.FunctionDef) and fn.name == "classify_order_status":
             inside |= {id(n) for n in ast.walk(fn)}
+
+    def _vocab_literal(expr) -> bool:
+        return isinstance(expr, ast.Constant) and isinstance(expr.value, str) and expr.value in vocabulary
+
     found = []
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Compare) or id(node) in inside:
+        if id(node) in inside:
             continue
-        operands = [node.left, *node.comparators]
-        uses_set = any(isinstance(o, ast.Name) and o.id in sets for o in operands)
-        literals = {c.value for o in operands for c in ast.walk(o)
-                    if isinstance(c, ast.Constant) and isinstance(c.value, str)}
-        if uses_set or literals & vocabulary:
-            found.append(f"line {node.lineno}: {ast.unparse(node)}")
+        hit = False
+        if isinstance(node, ast.Name) and node.id in sets and isinstance(node.ctx, ast.Load):
+            hit = True
+        elif isinstance(node, ast.Compare):
+            hit = any(_vocab_literal(c) for o in [node.left, *node.comparators] for c in ast.walk(o))
+        elif isinstance(node, ast.match_case):
+            hit = any(isinstance(p, ast.MatchValue) and _vocab_literal(p.value) for p in ast.walk(node.pattern))
+        elif isinstance(node, ast.Dict):
+            hit = any(k is not None and _vocab_literal(k) for k in node.keys)
+        elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+              and node.func.attr in ("startswith", "endswith")):
+            args = [a.value for a in node.args if isinstance(a, ast.Constant) and isinstance(a.value, str) and a.value]
+            test = str.startswith if node.func.attr == "startswith" else str.endswith
+            hit = any(test(v, a) for a in args for v in vocabulary)
+        if hit:
+            line = getattr(node, "lineno", None) or getattr(getattr(node, "pattern", None), "lineno", "?")
+            found.append(f"line {line}: {ast.unparse(node)[:80]}")
     return found
 
 
@@ -835,19 +1070,26 @@ def test_V4_what_a_status_MEANS_is_decided_ONLY_in_the_classifier():
     outside = _status_decisions_outside_classifier(tree, vocabulary)
     assert not outside, f"a status decision outside classify_order_status: {outside}"
 
-    # CONTROLS. A planted decision FIRES, in both shapes; the legitimate neighbours stay QUIET.
-    fires = ("def elsewhere(res):\n    if res.get('status') == 'FILLED':\n        pass\n"
-             "    if res.get('status') in REFUSAL_STATUSES:\n        pass\n")
-    assert len(_status_decisions_outside_classifier(ast.parse(fires), vocabulary)) == 2
+    # CONTROLS. Each planted decision FIRES on its own, and the legitimate neighbours stay QUIET.
+    plants = {
+        "compare": "if status == 'FILLED':\n        pass",
+        "membership": "if status in REFUSAL_STATUSES:\n        pass",
+        "contains": "if FILL_BEARING_STATUSES.__contains__(status):\n        pass",
+        "match": "match status:\n        case 'FILLED':\n            pass",
+        "dispatch": "kind = {'FILLED': 1, 'REJECTED': 2}.get(status)",
+        "startswith": "if status.startswith('FILL'):\n        pass",
+    }
+    for shape, body in plants.items():
+        planted = ast.parse(f"def elsewhere(status):\n    {body}\n")
+        assert _status_decisions_outside_classifier(planted, vocabulary), f"the {shape} plant was not seen"
     quiet = ("def neighbours(res, t, event):\n    payload = {'status': res.get('status')}\n"
              "    if t.status == TradeStatus.CLOSED:\n        pass\n"
              "    if event.get('status') == 'refused':\n        pass\n")
     assert _status_decisions_outside_classifier(ast.parse(quiet), vocabulary) == []
     # And the classifier itself IS seen, so "nothing outside" is not "nothing anywhere".
-    everywhere = [n for n in ast.walk(tree) if isinstance(n, ast.Compare)
-                  and any(isinstance(o, ast.Name) and o.id in {"FILL_BEARING_STATUSES", "REFUSAL_STATUSES"}
-                          for o in [n.left, *n.comparators])]
-    assert len(everywhere) == 2, f"expected the classifier's two membership tests, found {len(everywhere)}"
+    everywhere = [n for n in ast.walk(tree) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)
+                  and n.id in {"FILL_BEARING_STATUSES", "REFUSAL_STATUSES"}]
+    assert len(everywhere) == 2, f"expected the classifier's two reads of its sets, found {len(everywhere)}"
 
 
 def test_V3_the_loops_execution_service_is_NEVER_in_OBSERVE_mode():

@@ -57,7 +57,7 @@ from app.core.logging import logger
 from app.db.enums import DirectionType
 from app.schemas.broker import Position
 from app.services.broker.base import (
-    Account, BrokerAdapter, DirectionPolicy, OrderRequest,
+    Account, BrokerAdapter, DirectionPolicy, OrderRequest, readable_price, readable_quantity,
 )
 
 #: `PositionSide` values, read from the installed package: `['short', 'long']`.
@@ -1079,9 +1079,9 @@ class AlpacaAdapter(BrokerAdapter):
             # raised ValueError — not a `BrokerError` — out of `execute()` into the loop's venue-raised
             # backstop, which filed a REFUSAL for an order that exists. And `float("nan")` does not
             # raise at all, so catching ValueError alone would have stored NaN. The same three-state
-            # decision the stored refusal makes (`_readable_qty`): unreadable is `None`, and a FILLED
+            # decision the stored refusal makes (`readable_quantity`): unreadable is `None`, and a FILLED
             # result carrying the key with `None` takes the loop's unsized-fill halt.
-            "filled_units": self._readable_qty(filled_raw),
+            "filled_units": readable_quantity(filled_raw),
             "position_id": str(getattr(placed, "id", "")),
             "pair": request.pair,
             "direction": request.direction.value,
@@ -1092,7 +1092,13 @@ class AlpacaAdapter(BrokerAdapter):
             "quantise_increment": float(limits.min_trade_increment),
             "min_order_size": float(limits.min_order_size),
             "client_order_id": request.client_order_id,
-            "fill": float(getattr(placed, "filled_avg_price", None) or 0) or None,
+            # **`B433` (F-1), THE SIBLING ONE LINE BELOW `K-4b`.** This was
+            # `float(filled_avg_price or 0) or None`: "garbage" raised ValueError after submission — a
+            # false refusal through the venue-raised backstop — and NaN and inf passed through. The
+            # PARSE is `readable_quantity`'s; the ZERO RULE IS PER FIELD (manager): a zero quantity is a
+            # reading, a zero or negative price is not a price, so `readable_price` keeps what `or None`
+            # got right and adds what it missed (a truthy -5.0 was kept).
+            "fill": readable_price(getattr(placed, "filled_avg_price", None)),
         }
 
     async def _require_protection(self, placed, request) -> None:
@@ -1265,34 +1271,12 @@ class AlpacaAdapter(BrokerAdapter):
         """
         from decimal import Decimal
 
-        value = AlpacaAdapter._readable_qty(raw)
+        value = readable_quantity(raw)
         if value is None:
             return "?"
         if isinstance(raw, str):
             return raw.strip()
         return format(Decimal(repr(value)), "f")
-
-    @staticmethod
-    def _readable_qty(raw) -> float | None:
-        """A venue quantity as a finite float, or `None` when it cannot be read. **Never raises.**
-
-        The ONE decision about whether a quantity is readable (`B426`: one rule, not a copy per
-        consumer) — `_qty_token` renders it for the stored refusal and `place_order` reports it as
-        `filled_units`. Absent, blank, unparseable and non-finite are all UNREADABLE; zero is a
-        reading. `float("nan")` and `float("inf")` parse without raising, which is why they are tested
-        for explicitly rather than left to an `except`.
-        """
-        import math
-
-        if raw is None or (isinstance(raw, str) and not raw.strip()):
-            return None
-        try:
-            value = float(raw)
-        except (TypeError, ValueError):
-            return None
-        if not math.isfinite(value):
-            return None
-        return value
 
     @staticmethod
     def _order_status(order) -> str:

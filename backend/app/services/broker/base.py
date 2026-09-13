@@ -1,4 +1,5 @@
 """Abstract broker adapter base class."""
+import math
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -7,6 +8,46 @@ from typing import Callable
 from app.core.exceptions import DirectionNotSupported
 from app.db.enums import DirectionType, OrderType
 from app.schemas.broker import Position
+
+
+def readable_quantity(raw) -> float | None:
+    """A venue QUANTITY as a finite float, or `None` when it cannot be read. **Never raises.**
+
+    The ONE decision about whether a venue number is readable (`B426`: one rule, not a copy per
+    consumer). Absent, blank, unparseable and non-finite are all UNREADABLE; **zero is a reading** —
+    nothing filled. `float("nan")` and `float("inf")` (and `"1e999"`) parse WITHOUT raising, which is
+    why they are tested for explicitly rather than left to an `except`.
+
+    Lives here, in the broker contract, because two layers need it and neither should import the
+    other: `AlpacaAdapter.place_order` (`filled_units`, and the stored refusal's `_qty_token`) and
+    `ExecutionService`, which normalises what ANY producer returns (`B433`).
+    """
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(value):
+        return None
+    return value
+
+
+def readable_price(raw) -> float | None:
+    """A venue PRICE as a positive finite float, or `None` when there is no usable price. **Never raises.**
+
+    The parse is `readable_quantity`'s; **the zero rule is per field, and reusing it blindly is `B426`'s
+    lesson** (manager's correction to `B433`):
+
+        filled quantity  0     a READING — nothing filled
+        fill price      <= 0   NOT A PRICE — `None`
+
+    The consumers are why (measured by review): `ExecutionService`'s `realized_risk_per_unit`,
+    `_record_signal_decision`'s basis and `expected_r`, and the settle path's entry all use the fill
+    whenever it is not `None` — so a `0.0` computes against an entry of ZERO, and NaN poisons all three.
+    """
+    value = readable_quantity(raw)
+    return value if value is not None and value > 0 else None
 
 
 @dataclass

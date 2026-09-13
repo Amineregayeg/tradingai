@@ -37,7 +37,7 @@ from app.models.decision_record import (
     REJECTION_PROTECTION_NOT_ACCEPTED,
     REJECTION_VENUE_TRANSPORT,
 )
-from app.services.broker.base import BrokerAdapter, OrderRequest
+from app.services.broker.base import BrokerAdapter, OrderRequest, readable_price
 
 
 class ExecMode(str, Enum):
@@ -384,6 +384,15 @@ class ExecutionService:
         # is invented here; the bounded, redacted repr is the only raw text kept.
         if not isinstance(res, dict):
             res = {"unreadable_result": redact_for_storage(f"{type(res).__name__}: {res!r}")}
+        # **`B433` (FU-1b). THE FILL PRICE IS NORMALISED HERE, FOR EVERY PRODUCER.** Below, this read
+        # `if fill is not None: abs(float(fill) - sig.sl)` — guarding `None` and nothing else, so a
+        # forwarded "garbage" raised AFTER placement into the loop's venue-raised backstop (a false
+        # refusal, `K-4b`'s class) and 0.0, NaN and negatives were computed from as prices. Only the
+        # simulators and Alpaca can hold this slot today; relying on that is `B430`'s shape (safe by one
+        # constructor argument), so every consumer downstream sees a positive float or `None` BY
+        # CONSTRUCTION. The key's PRESENCE is kept: present-unreadable and absent stay distinct.
+        if "fill" in res:
+            res["fill"] = readable_price(res["fill"])
         res["mode"] = self.mode.value
         res["sized_units"] = round(units, 8)
         res["equity_at_entry"] = acct.equity
@@ -401,9 +410,9 @@ class ExecutionService:
         res["entry_drift_r"] = drift_r
         # The broker reports the true fill. It should equal sizing_price for
         # these in-process sims, but trust the broker's number, not our estimate.
-        fill = res.get("fill")
+        fill = res.get("fill")          # a positive finite float or None — normalised above (B433)
         if fill is not None:
-            res["realized_risk_per_unit"] = abs(float(fill) - sig.sl)
+            res["realized_risk_per_unit"] = abs(fill - sig.sl)
         logger.info(f"ExecutionService[{self.mode.value}] {sig.symbol} {sig.direction.value} "
                     f"units={units:.6f} sized@{sizing_price:.2f} "
                     f"drift={drift_r if drift_r is None else round(drift_r, 3)}R "
