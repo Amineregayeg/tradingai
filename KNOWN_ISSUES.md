@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-13 (newest entry B443 — the kill switch request can outlast nginx's 120s API proxy timeout: on a degraded venue each position takes ~27.5s to close and confirm, so the operator gets a 504 while the closes continue unseen, and a second pull races the first. Also B440-B442 from B437's design.)
+Last updated: 2026-09-14 (newest entry B444 — on Alpaca the engine could place a trade but not manage or record it: EXIT-001's 70% partial is keyed by the order id while Alpaca positions carry the asset id, so it is silently dropped; and nothing turns an exit at the venue into a trade row or a resolved decision, because AlpacaAdapter has no settle path. B428b, named in six entries, is scoped in none.)
 
 ---
 
@@ -29551,3 +29551,40 @@ was ruled as the normal-path bound 3C + B, with C derived live from the client. 
 - **Residuals, stated:** sweep (a) alone can pass 100s with enough positions on a degraded venue, which leaves (b)
   no wait and still risks the 504; that is this entry's unbuilt response-shape fix. And the deadline is counted per
   adapter, while `broker_manager` closes adapters one after another.
+
+---
+
+### B444 — ON ALPACA THE ENGINE COULD PLACE A TRADE BUT NOT MANAGE OR RECORD IT: the 70% partial never fires, and an exit at the venue never becomes a trade row or resolves its decision. `B428b` is named in six entries and scoped in none
+
+**Found by manager while answering Malek's question "what is still missing to run the simulation on Alpaca and track
+it", by reading `fb3dab6`. Not driven: `B430` keeps the loop off Alpaca, so none of this can fire today.**
+
+**1. EXIT-001's partial is silently dropped.**
+```
+crypto_loop._tick_symbol   pid = res.get("position_id"); self._tranche_plans[str(pid)] = {...}
+AlpacaAdapter.place_order  "position_id": str(placed.id)                  <- the ORDER id
+AlpacaAdapter._to_position Position(id=str(raw.asset_id), ...)            <- the ASSET id
+crypto_loop._take_partials position = next(p for p in get_positions() if str(p.id) == pid)
+                           if position is None: self._tranche_plans.pop(pid); continue
+```
+The order id never equals an asset id, so on the first tick past 2R the plan is found to have "no position",
+removed, and nothing is logged. **The 70% is never banked and the whole position rides to its stop or target.**
+The simulators use one id for both, which is why this never showed. Even with matching keys, the call is
+`close_position(pid, lot_size=...)`, and Alpaca closes by SYMBOL.
+
+**2. An exit at the venue produces no record.** On the simulators, the `on_tick` stop/target check and the
+closes call `_on_settle`, and `_on_settle_cb` -> `_persist_and_resolve` writes the `trades` row and resolves the
+`DecisionRecord`. `alpaca.py` mentions `_on_settle` zero times (paper.py 3), and has no `on_tick` (`B428`). With
+the stop and target resting at Alpaca as bracket legs (`B429`), **a stop-leg fill at the venue produces no trade
+row, no realised P&L, no websocket close event, and a decision left OPEN forever.** The equity number would move and
+nothing would say why.
+
+**3. UNMEASURED, and it could break the partial at the venue:** a bracket's resting sell legs are sized to the
+full position. Whether Alpaca then refuses a partial `close_position(qty)` as "insufficient qty available", or
+how it resizes the legs, has never been observed.
+
+**WHAT `B428b` THEREFORE HAS TO BE — a design, not a patch:** an Alpaca source of position events that replaces
+`on_tick` (mark-to-market plus exits detected from the venue's own fills), feeding the same `_on_settle` path the
+simulators use; partial exits keyed and addressed the way the venue identifies positions; the leg-quantity question
+answered by a probe before it is designed around; and what the loop does at start-up when the venue already holds
+a position it has no plan for. Plus `B437`'s two-clients note (D5).
