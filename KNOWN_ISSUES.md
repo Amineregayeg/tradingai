@@ -29053,9 +29053,12 @@ BOTH writes FAIL                               -> SUM is None -> fallback to the
 **Truncated in both directions, and in every single-failure case.** Because the fallback fires only on "no rows at
 all", ONE surviving row is taken as the whole trade. Nothing compares the persisted tranches with the tranches that
 closed. To upgrade from read to driven: a session double that stores `Trade` rows and answers the SUM query.
-*(Noted, not separately filed: the fallback's `float(ev.get("pnl", 0) or 0)` would resolve an event carrying no
-`pnl` as breakeven when no rows exist — the absent-as-zero collapse inside the both-fail branch. Whether a settle
-event can lack `pnl` is unmeasured; it belongs to B435's ruling.)* The docstring's "at most one can match" is a safety property held
+*(Not an instance today, measured by review at `9861c9c`: the fallback's `float(ev.get("pnl", 0) or 0)` would
+resolve an event carrying no `pnl` as breakeven, but the settle hook has exactly two callers — `paper.py` and
+`cft_sim.py`, each inside `_settle` — and both build the event with a literal numeric `"pnl"`, and every other close
+path goes through that `_settle`. **`own`'s `or 0` is safe only because both settle producers build `pnl`
+literally** — `B430`'s shape. It becomes an instance the day a settle producer without that dict is wired in, such
+as a venue close stream.)* The docstring's "at most one can match" is a safety property held
 by something other than the code that relies on it — `B424`'s shape. (The same fact is the good news: a stale OPEN
 row does NOT block future entries on its symbol, because the block reads the venue.)
 
