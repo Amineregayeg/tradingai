@@ -29285,6 +29285,19 @@ expectation rather than the SDK.
 
 **Fix, ruled into B427:** close orders are resolved to a terminal state by the resolver, which replaces
 `_classify_close`'s HTTP reading entirely. The double returns a real `Order` for `close_position`, with an arm
-asserting it matches the SDK's signature so it cannot drift to the other method's type again. An arm drives
+asserting it against the SDK's return ANNOTATION for `close_position`, read at test time rather than named in the
+test, so it cannot drift to the other method's type again — nor pass silently when the SDK changes the annotation. An arm drives
 close-all over several positions with real `Order` returns and proves the loop continues past the first. An
 unconfirmed close is FAILED with a reason, not a fourth disposition (`B337`).
+
+**CONFIRMED BY DRIVING ON THE DEPLOYED BUILD (review, `6ae6aca`, sockets blocked, real SDK `Order` objects):** the SDK
+annotates `close_position` as `Union[Order, Dict]`; `int()` raises `ValueError` on **18 of 18** `OrderStatus` values, so
+no status escapes; `_classify_close(Order(status=accepted))` raises outside the per-position `try`; close-all over
+`[BTC/USD, ETH/USD]` SENT the BTC close only, raised "ended abnormally after 1 of 2" and marked ETH NOT_ATTEMPTED.
+`_classify_close` is byte-identical at `e19a71e`.
+
+**OCCURRENCE BOUND — what this means today, not what it could mean.** T-0139 measured **0 orders** on the account, so
+no Alpaca position exists and nothing is exposed now. With **one** position — the most the probe ladder opens — the
+close IS sent and then reported as never observed: loud, and the operator checks the venue. **Only with two or more
+positions do the rest stay open.** Review's B427 kill set carries the fix's arm (`B-12`): the kill switch must still
+SEND the second close after the first fails.
