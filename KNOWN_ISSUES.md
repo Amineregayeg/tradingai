@@ -28513,6 +28513,15 @@ not show this.**
 resolver and in the `client_order_id` lookup loop. A read already running cannot be interrupted, so wall time is
 bounded by the budget plus one call's maximum, and that figure is stated beside the constants.
 
+**REVIEW VERDICT ON `a451ec1`: REVIEW_FAIL on ONE registered row, B-2's wall-time bound.** Every other row passed,
+each killed on a named arm, across 127 mutant rows: B-1, B-2's validation half, B-3 to B-10, B-12 (a raise on
+both a confirmed and an unconfirmed close), `get_orders`' filter and casing, the budget re-export, and the ended set.
+Measured with the test module's own fake clock and a 5s budget: reads of 0.5s give 6 reads over 5.0s, 3s give 18s,
+9s give 54s. **`a451ec1` is not to be deployed without commit (1).** Two non-blocking items were folded into
+(1): V2's `SUBMITTED` exemption is keyed by the literal, not the site (planted in `paper.place_order`, it passes);
+and `_close_outcome` / `_close_disposition` still run outside the kill switch's per-position `try`, so surviving a
+bad position rests on "never raises" rather than on structure — `B439` was exactly a raise outside that `try`.
+
 ---
 
 ### B428 — THE ALPACA TICK PATH CANNOT RUN AT ALL. Every tick raises before any signal is evaluated, the loop swallows it as a WARNING, and the engine reports HEALTHY forever
