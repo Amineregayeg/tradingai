@@ -29009,8 +29009,8 @@ pattern**, and it must either cover all four or name the ones it leaves.
 _record_signal_decision  an opened position has no row; its outcome and R are never recorded
 _resolve_decision        `dec_id = self._open_decision.pop(pair)` runs BEFORE the try, so a failed resolve leaves
                          the row at outcome=OPEN with NO dict entry — the trade's outcome and R are lost at close
-_persist_live_close      a lost tranche row truncates the P&L _resolve_decision reads from the trades rows —
-                         B223's truncation, reintroduced through a write failure (review's reading; not driven)
+_persist_live_close      EVERY single-tranche write failure records a PARTIAL P&L as the whole trade's realized R
+                         — B223's truncation, reintroduced through a write failure. See the chain below.
 _record_rejected_signal  a refused signal's row is lost; no exposure, but it is the row B271 exists to keep
 ```
 
@@ -29029,7 +29029,33 @@ So:
 ```
 
 **A lost record becomes a wrong one.** It needs two failures, but database failures cluster: one outage spanning
-a close and a later open is exactly this sequence. The docstring's "at most one can match" is a safety property held
+a close and a later open is exactly this sequence.
+
+**THE `_persist_live_close` CHAIN — mechanism read and verified by manager at `9861c9c`, deterministic; occurrence
+not observed.** Three facts, each checked in the code:
+
+```
+the close handler     await self._persist_live_close(ev); await self._resolve_decision(ev)   — for EVERY tranche
+_resolve_decision     if ev.get("partial"): ... return                                         — resolves on the runner only
+_realised_pnl_...     own = float(ev.get("pnl", 0) or 0)
+                      total = SUM(Trade.pnl_dollars) WHERE broker_id == position_id
+                      return own if total is None else float(total)   — the event's own P&L is used ONLY when NO row exists
+```
+
+With a 70% partial and a 30% runner:
+
+```
+partial write FAILS,    runner write succeeds  -> SUM finds the runner's row alone   -> realized R from the 30% only
+partial write succeeds, runner write FAILS     -> SUM finds the partial's row alone  -> the runner's event P&L IGNORED
+BOTH writes FAIL                               -> SUM is None -> fallback to the runner's own event P&L -> the 30% only
+```
+
+**Truncated in both directions, and in every single-failure case.** Because the fallback fires only on "no rows at
+all", ONE surviving row is taken as the whole trade. Nothing compares the persisted tranches with the tranches that
+closed. To upgrade from read to driven: a session double that stores `Trade` rows and answers the SUM query.
+*(Noted, not separately filed: the fallback's `float(ev.get("pnl", 0) or 0)` would resolve an event carrying no
+`pnl` as breakeven when no rows exist — the absent-as-zero collapse inside the both-fail branch. Whether a settle
+event can lack `pnl` is unmeasured; it belongs to B435's ruling.)* The docstring's "at most one can match" is a safety property held
 by something other than the code that relies on it — `B424`'s shape. (The same fact is the good news: a stale OPEN
 row does NOT block future entries on its symbol, because the block reads the venue.)
 
