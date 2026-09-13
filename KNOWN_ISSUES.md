@@ -28444,6 +28444,29 @@ calls the SDK directly with an explicit status, limit, direction and `nested`, p
 rather than from `close_position`'s return. **Every OTHER caller still does**, and the first-order
 runbook's flat check pointed at `get_orders()` until this addendum.
 
+#### SECOND ADDENDUM (review; manager verified at `6ae6aca` AND HEAD) — ONE ADAPTER EMITS `status` IN TWO SPELLINGS
+
+```
+AlpacaAdapter.place_order   maps to UPPERCASE: "FILLED", "PARTIALLY_FILLED", else raw_status.upper()
+AlpacaAdapter.get_orders    str(order.status.value) — LOWERCASE enum values: "filled", "partially_filled"
+FILL_BEARING_STATUSES       ("FILLED", "PARTIALLY_FILLED")        'filled' in it -> False
+```
+
+**Same key, same adapter, two vocabularies** — `B426`'s shape inside a single class. **No current consumer
+compares `get_orders`' status against the uppercase set**, verified: `live_loop_proxy` forwards it,
+`reconciliation.py` only COUNTS the orders, and `mt5.py`'s call is a different adapter. **So it is latent.**
+
+**It nearly produced a false finding.** The first-order runbook's probe 3 polled `get_orders()` to a terminal
+state and ran the loop's parsers on the result — which, for a REAL fill, would have read `'filled'` as not
+fill-bearing and recorded B411 as falsified, and read `_position_units` as the halt condition. The result would
+have been manufactured by this casing, not by the venue. The runbook now runs the parsers on `place_order`'s
+acknowledgement (the loop's real input) and records the venue's terminal order raw via `get_order_by_id`,
+comparing the two.
+
+**The fix, when this adapter is next opened:** one status vocabulary for everything the adapter returns, or a
+name on `get_orders`' field that says it is the venue's raw value. Whichever, a caller must not be able to compare
+the two spellings and silently get False.
+
 ---
 
 ### B428 — THE ALPACA TICK PATH CANNOT RUN AT ALL. Every tick raises before any signal is evaluated, the loop swallows it as a WARNING, and the engine reports HEALTHY forever
