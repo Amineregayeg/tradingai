@@ -28947,6 +28947,16 @@ in, the arm dies upstream and never reaches the silent consumer.
 a boolean as a number — `True` gives 1.0 as a price AND as a filled quantity, a fill of one whole unit; `False` gives
 0.0 as a quantity. Implausible inputs, against a contract of never raising and never inventing a number.
 
+**RESIDUAL CLOSED at `0485b0f`, PASSED review with no findings.** Both helpers reject a bool first and catch
+`OverflowError`; `_position_units`' inner `positive()` — a fourth site, found by execute — now delegates to
+`readable_quantity`, keeping its own `> 0` and leaving key presence unchanged (verified by review under mutation).
+Driven by the manager from the committed code: a 401-digit int or string, `True` and `False` all give None from both
+helpers and from `_position_units`; real values still read.
+
+**A cost of the strict V4 detector, stated so the first failure is expected rather than loosened:** it ignores only
+Constant receivers, with no length threshold, so a benign production `pair.endswith('d')` would FAIL it. The answer
+then is an explicit exemption with a stated reason, bounded by an arm — not a threshold.
+
 ---
 
 ### B434 — `REJECTION_THROUGH_STOP` CANNOT FIRE AT THE DEFAULT DRIFT LIMIT, so a market already through the stop is recorded as `ENTRY_DRIFT`
@@ -29135,6 +29145,12 @@ belongs to another sweep), and a conversion hidden inside a helper (`Decimal(x)`
 finnhub line was flagged for the wrong reason — the float — and is an instance for a different one.
 
 All implausible inputs; none on the order path. Latent.
+
+**CONFIRMED WITH A WIDER INSTRUMENT (review, 0485b0f):** a second sweep covering `round`, `math.*`, `fromtimestamp`,
+`timedelta` and `**` under any handler lacking overflow cover finds the same thirteen sites plus `census.py:133`, a
+`timedelta` over a constant table — not an instance. **One further limit:** both sweeps examined only handlers that
+name `TypeError` or `ValueError`. A handler naming neither — `except KeyError:`, say — around a conversion was never
+examined.
 
 ---
 
