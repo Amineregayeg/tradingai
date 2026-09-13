@@ -177,9 +177,77 @@ HALT_PARTIAL_UNSIZED = "a partial fill left a position we could not size"
 #: operator action differs: one is reconcile the SIZE, this one is place a stop or flatten.
 HALT_UNPROTECTED_POSITION = "a position may be open at the venue with no stop"
 
-#: Statuses that mean the venue acted on the order. `B316` already records that `service.py`
-#: defaults a status-less reply to `FILLED`, so absence never arrives here as absence.
+#: **`T-0130`. AN ORDER RESULT IS ONE OF THREE THINGS, AND ONLY TWO ARE ENUMERATED.**
+#:
+#: ```
+#: FILL_BEARING_STATUSES   the venue acted on the order              -> track the position
+#: REFUSAL_STATUSES        affirmatively NOT acted on                -> a rejection row
+#: anything else           UNRESOLVED: absent, None, an acknowledgement ("NEW", "ACCEPTED"),
+#:                         a terminal state that may carry a fill ("CANCELED")   -> halt
+#: ```
+#:
+#: **The third class is the complement, never a list.** Enumerating the statuses that mean "not
+#: yet known" would be a third encoding of order status beside `alpaca.py`'s venue sets, and it
+#: would be wrong the day a venue sends one nobody listed — which then lands in whichever branch the
+#: `else` is. Before `T-0130` the `else` was the REJECTION branch, so an acknowledged order the
+#: venue may still fill was recorded as refused, and `service.py` defaulted absence to `FILLED`.
+#:
+#: **Both refusal spellings are listed because both are emitted**: `service.py` returns `"rejected"`
+#: from its five pre-order refusals and `"REJECTED"` from the venue-error paths, and the adapters'
+#: `place_order` returns `"REJECTED"`. No case-folding — it would accept spellings nobody emits.
+#: The two sets are disjoint; an arm asserts it, because a name in both would be a fill AND a
+#: refusal and the first branch tested would win silently.
+#:
+#: **TUPLES, NOT FROZENSETS, ON PURPOSE** (review's K-3). A forwarded venue reply can carry `{}` or
+#: `[]` as its status, and `{} in frozenset(...)` RAISES TypeError — in the loop that escapes the tick
+#: with no row and no halt. Tuple membership compares by equality and returns False. The classifier
+#: also tests `isinstance(status, str)` before any membership test, which states the intent where it is
+#: needed and protects any future set — and is the only thing that stops a status whose `__eq__` raises.
 FILL_BEARING_STATUSES = ("FILLED", "PARTIALLY_FILLED")
+REFUSAL_STATUSES = ("REJECTED", "rejected")
+#: **NOT FROM THIS LOOP.** `service.py` returns `"observed"` only in `ExecMode.OBSERVE`, which sends
+#: no order; this loop constructs its `ExecutionService` in `ExecMode.PAPER` and never reassigns it,
+#: so the status cannot reach `_tick_symbol`. Listed so the producer-vocabulary arm has a home for it,
+#: and NOT handled: were the loop ever built in OBSERVE, it would fall into UNRESOLVED and halt every
+#: signal with "find the order at the venue" for an order never sent — so an arm pins the mode, and
+#: that change fails a test before it fails an operator (manager; `B430`'s shape, safe by one
+#: constructor argument rather than by design).
+NOT_FROM_THIS_LOOP_STATUSES = ("observed",)
+
+#: **`T-0130` / review's K-11. WHAT AN ORDER RESULT MEANS IS DECIDED IN EXACTLY ONE PLACE.** The loop
+#: used to decide it at five sites — two literal comparisons in `_position_units`, three membership
+#: tests in `_tick_symbol` — which is five guards to keep in step and `B184`'s divergence waiting to
+#: happen. Every site now asks `classify_order_status`, and an arm asserts no status membership test
+#: or status-literal comparison exists anywhere else in this module.
+ORDER_FILLED = "filled"
+ORDER_PARTIALLY_FILLED = "partially_filled"
+ORDER_REFUSED = "refused"
+ORDER_UNRESOLVED = "unresolved"
+FILL_OUTCOMES = (ORDER_FILLED, ORDER_PARTIALLY_FILLED)
+
+
+def classify_order_status(status: object) -> str:
+    """The class of an order result's `status`: filled, partially filled, refused, or UNRESOLVED.
+
+    **Pure, total, and never raises.** Only a string is classified (review's K-3): `None`, a number,
+    `{}`, `[]`, or an object whose `__eq__` raises are UNRESOLVED before any comparison runs. The
+    third class is the COMPLEMENT — nothing enumerates "not yet known", so a status nobody listed
+    lands here and halts rather than in whichever branch happens to be the `else`.
+    """
+    if not isinstance(status, str):
+        return ORDER_UNRESOLVED
+    if status in FILL_BEARING_STATUSES:
+        return ORDER_PARTIALLY_FILLED if status == "PARTIALLY_FILLED" else ORDER_FILLED
+    if status in REFUSAL_STATUSES:
+        return ORDER_REFUSED
+    return ORDER_UNRESOLVED
+
+
+#: **`T-0130`.** `place_order` returned something that is neither a fill nor a refusal, so the
+#: engine cannot say whether it holds a position. Its own value, per `M-7`: the operator action is
+#: FIND THE ORDER AT THE VENUE, which neither reconciling a size (`HALT_PARTIAL_UNSIZED`) nor
+#: placing a stop (`HALT_UNPROTECTED_POSITION`) is.
+HALT_ORDER_UNRESOLVED = "an order's outcome is unresolved, so a position may exist that is not tracked"
 
 #: **`B428a`. WHAT THIS LOOP NEEDS FROM ITS BROKER THAT THE CONTRACT DOES NOT PROMISE.**
 #:
@@ -840,6 +908,151 @@ class LiveCryptoLoop:
             f"{HALT_UNPROTECTED_POSITION} — {', '.join(failures)}" if failures else None
         )
 
+    async def _on_unresolved_order(self, pair: str, entry_df, sig, res: dict, trace=None) -> None:
+        """`place_order` returned neither a fill nor a refusal. **THE SEAM WHERE `B427` ATTACHES.**
+
+        **`T-0130`.** An absent or unrecognised status means the engine cannot say whether the venue
+        acted. Recording a fill invents a position; recording a refusal denies one that may exist
+        and that nothing would then manage (`B427`'s worst case). So this halts, as the other two
+        *we cannot establish what we hold* states do, and records the halt — without a row.
+
+        **WHAT `B427` REPLACES HERE, AND WHAT IT MUST NOT.** Resolving the order to a terminal state
+        — a bounded re-read, the timeout recorded as a result — belongs at the top of this method,
+        followed by classifying the RESOLVED result through the same three branches. The bound is a
+        trading decision and is not taken here. **The first case to resolve rather than halt on is a
+        TERMINAL status with a KNOWN filled quantity** — `CANCELED` with a non-zero fill is a
+        position of known size, not an unknown. What stays: anything still unresolved after
+        resolution halts, because an order nobody can classify is not a refusal.
+
+        **NO `DecisionRecord`, deliberately** (manager's ruling). `REJECTED` denies a position,
+        `OPEN` asserts one of known size, `UNSIZED_FILL` asserts the venue acted; none is true of
+        *unknown*, and a row is worse than none when every available value is affirmatively wrong
+        (`B399`). Nor a new outcome written to be overwritten once `B427` resolves the order — that
+        is `B423`'s silent rewrite of a stored outcome, built in on purpose. **So the row is DEFERRED
+        TO `B427` WITH EVERYTHING NEEDED TO WRITE IT TRUTHFULLY**: the alert carries every input
+        `_record_signal_decision` would have used, so the corpus's missing row is recoverable
+        rather than lost.
+
+        Same ordering as the other halt sites (`M-7`): the halt is in force before anything is
+        written, so a failed write cannot un-halt.
+        """
+        status = res.get("status")
+        self._declare_halt(HALT_ORDER_UNRESOLVED)
+        logger.error(
+            "live.order_unresolved — HALTING. place_order returned neither a fill nor a refusal, so "
+            "a position may exist at the venue that this engine does not track",
+            pair=pair, direction=sig.direction.value,
+            status=redact_for_storage(repr(status)),
+            status_key_present="status" in res,
+            position_id=res.get("position_id"),
+            client_order_id=res.get("client_order_id"),
+        )
+        await self._act(
+            BLOCK_HALT,
+            f"{pair} {sig.direction.value} — HALTED: {HALT_ORDER_UNRESOLVED} "
+            f"(status {redact_for_storage(repr(status), limit=40)}, "
+            f"order {res.get('position_id') or 'UNREPORTED'})",
+        )
+        await self._record_unresolved_order(pair, entry_df, sig, res, trace)
+
+    async def _record_unresolved_order(self, pair: str, entry_df, sig, res: dict, trace=None) -> None:
+        """The durable record of `HALT_ORDER_UNRESOLVED`: one CRITICAL alert, never a row.
+
+        The writer contract `_declare_halt` depends on, as in `_record_unprotected_position`: every
+        failure is appended rather than raised, and the LAST statement clears the alarm
+        unconditionally so a success cannot leave it standing.
+
+        **THE RESULT IS NOT STORED WHOLE.** A venue reply can carry text nobody vetted, and a
+        `context_json` column never passes the log filter. What is kept is what finds the order and
+        what shows why it was unclassifiable — the status as a bounded, redacted repr (so `None`,
+        `""` and absent stay distinguishable), whether the key was present, the key NAMES, the sizes
+        and the ids — plus `row_inputs`, the fields a truthful `DecisionRecord` needs.
+
+        **`row_inputs` IS BUILT SEPARATELY FROM THE WRITE**, so a failure assembling it still writes
+        the alert and is itself reported on `halt_record_failed`: an alert missing the inputs is an
+        incomplete durable record, and saying "written" would hide that.
+        """
+        failures: list[str] = []
+
+        def _plain(value):
+            # JSON-safe and bounded: a string is redacted, a finite number kept, anything else
+            # (NaN, a Decimal, an SDK object) becomes its bounded repr rather than failing the write.
+            if value is None or isinstance(value, (bool, int)):
+                return value
+            if isinstance(value, float) and value == value and value not in (float("inf"), float("-inf")):
+                return value
+            return redact_for_storage(value if isinstance(value, str) else repr(value))
+
+        try:
+            row_inputs = {
+                "symbol": pair,
+                "timeframe": self.entry_tf,
+                "inputs_hash": self._inputs_hash(entry_df),
+                "code_path_hash": self._code_path_hash(),
+                "reasons": [redact_for_storage(str(r)) for r in
+                            _with_exit_plan(trace.reasons if trace is not None else None)][:50],
+                "signal_dir": sig.direction.value,
+                "signal_entry": _plain(float(sig.entry)),
+                "signal_sl": _plain(float(sig.sl)),
+                "signal_tp": _plain(float(sig.tp)) if sig.tp is not None else None,
+                "sized_units": _plain(res.get("sized_units")),
+                "sizing_equity": _plain(res.get("equity_at_entry")),
+                "sizing_risk_pct": _plain(float(sig.risk_pct)),
+                "sizing_price": _plain(res.get("sizing_price")),
+                "fill_price": _plain(res.get("fill")),
+                "run_id": str(self.run_id) if self.run_id else None,
+            }
+        except Exception as exc:  # noqa: BLE001 - reported, and the alert is still written
+            failures.append(f"row_inputs: {type(exc).__name__}")
+            row_inputs = {"error": f"{type(exc).__name__}: {redact_for_storage(str(exc))}"}
+
+        try:
+            from datetime import timedelta
+
+            from app.db.enums import AlertPriority, AlertStatus, AlertType
+            from app.db.session import async_session_maker
+            from app.models.alert import Alert
+
+            async with async_session_maker() as db:
+                db.add(Alert(
+                    type=AlertType.RISK_WARNING,
+                    priority=AlertPriority.CRITICAL,
+                    pair=pair,
+                    message=(
+                        f"ENGINE HALTED — {HALT_ORDER_UNRESOLVED}. The order result was neither a "
+                        f"fill nor a refusal, so the venue may hold a position this engine is not "
+                        f"managing. Find the order at the venue before restarting. No new entries."
+                    ),
+                    suggested_action={
+                        "action": "find_order_at_venue",
+                        "pair": pair,
+                        "order_id": _plain(res.get("position_id")),
+                        "client_order_id": _plain(res.get("client_order_id")),
+                    },
+                    context_json={
+                        "halt_reason": HALT_ORDER_UNRESOLVED,
+                        "status_repr": redact_for_storage(repr(res.get("status"))),
+                        "status_key_present": "status" in res,
+                        "result_keys": sorted(str(k) for k in res)[:40],
+                        "units": _plain(res.get("units")),
+                        "filled_units": _plain(res.get("filled_units")),
+                        "position_id": _plain(res.get("position_id")),
+                        "client_order_id": _plain(res.get("client_order_id")),
+                        "row_inputs": row_inputs,
+                    },
+                    # `PENDING`, checked against the enum, as both sibling recorders write (`AS-1`).
+                    status=AlertStatus.PENDING,
+                    expires_at=datetime.now(timezone.utc) + timedelta(days=365),
+                ))
+                await db.commit()
+        except Exception as exc:  # noqa: BLE001 - a failed write must not un-halt the engine
+            failures.append(f"alert: {type(exc).__name__}")
+            logger.error("live.order_unresolved.alert_failed", error=str(exc), pair=pair)
+
+        self.halt_record_failed = (
+            f"{HALT_ORDER_UNRESOLVED} — {', '.join(failures)}" if failures else None
+        )
+
     async def _record_unsized_fill(self, pair: str, entry_df, sig, res: dict) -> None:
         """The two DURABLE records of a halt: one for the corpus, one for the operator.
 
@@ -1050,7 +1263,9 @@ class LiveCryptoLoop:
                 return None          # NaN and infinity are not sizes either
             return number if number > 0 else None
 
-        status = res.get("status")
+        # The kind of fill comes from the ONE classifier (`T-0130`, K-11); this method keeps its
+        # signature — a plain dict — because the runbook's probe step calls it by name on a raw result.
+        kind = classify_order_status(res.get("status"))
         # **`B419`. `.get()` CANNOT TELL "KEY ABSENT" FROM "KEY PRESENT AND `None`", and those are
         # the two cases this function exists to separate.** Membership can, so membership is what
         # is tested.
@@ -1067,10 +1282,10 @@ class LiveCryptoLoop:
         reported = "filled_units" in res
         filled = positive(res.get("filled_units"))
 
-        if status == "PARTIALLY_FILLED":
+        if kind == ORDER_PARTIALLY_FILLED:
             return filled
 
-        if status == "FILLED":
+        if kind == ORDER_FILLED:
             # **ABSENT AND UNUSABLE ARE NOT THE SAME ANSWER, and collapsing them substitutes a
             # size for one we were given and could not read.** `paper.py` and `cft_sim.py` never
             # report a filled quantity, so absence is their normal and `units` is the fill. But a
@@ -2454,10 +2669,11 @@ class LiveCryptoLoop:
         # there stays exactly ONE call to `_record_signal_decision` — a second call site is a
         # second place the sizing inputs can be forgotten, which
         # `test_decision_record_schema.py` asserts against by AST.
-        status = res.get("status")
+        status = res.get("status")          # the RAW value, for logs and records only
+        outcome = classify_order_status(status)   # the ONE decision about what it means (K-11)
         opened_units = self._position_units(res)
 
-        if status in FILL_BEARING_STATUSES and opened_units is None:
+        if outcome in FILL_OUTCOMES and opened_units is None:
             # **THE VENUE ACTED AND WE CANNOT SAY WHAT WE NOW HOLD. FAIL CLOSED.**
             #
             # Ruled: a partial whose size we cannot read HALTS the run with a named reason, because
@@ -2495,7 +2711,7 @@ class LiveCryptoLoop:
             await self._record_unsized_fill(pair, entry, sig, res)
             return
 
-        if status in FILL_BEARING_STATUSES:
+        if outcome in FILL_OUTCOMES:
             logger.info("Live paper entry", pair=pair, dir=sig.direction.value, fill=res.get("fill"),
                         status=status, opened_units=opened_units)
             # STAGE B. The plan EXIT-001 produces is now EXECUTED, not merely recorded.
@@ -2558,16 +2774,21 @@ class LiveCryptoLoop:
                 f"Entered {pair} {sig.direction.value} {_fmt_units(opened_units)} "
                 f"@ {res.get('fill', sig.entry):.0f} (SL {sig.sl:.0f}, {exit_clause})",
             )
-        else:
+        elif outcome == ORDER_REFUSED:
             # NEVER drop a generated signal silently. A rejection (non-positive
             # size, or a sim-mode prop-firm breach) is surfaced with its reason.
-            reason = res.get("reason") or res.get("status") or "rejected"
+            #
+            # **`T-0130`: ONLY AN AFFIRMATIVE REFUSAL REACHES THIS BRANCH.** It was the `else`, so
+            # an absent status, `None`, an acknowledgement and a `CANCELED` order carrying a fill
+            # were all recorded here as refusals — measured, each with `rejection_code` `None`.
+            reason = res.get("reason") or res.get("status") or outcome
             # `res.get("rejection_code")` is deliberately NOT defaulted here. A missing code means
             # the decision site did not set one, and `_record_rejected_signal` turns that into
             # `UNCLASSIFIED`, which alarms. Supplying a plausible code at this layer would be
-            # inventing a classification the decision never made — and this line already invents
-            # the PROSE fallback `"rejected"`, a literal no decision site produced, which is why
-            # the code must not follow it.
+            # inventing a classification the decision never made. The PROSE fallback used to be the
+            # literal `"rejected"`, which no decision site produced; it is now the class the
+            # classifier DID decide (`T-0130`) — and it is not a code, which is why the code must not
+            # follow it.
             code = res.get("rejection_code")
             logger.info("Live signal not filled", pair=pair, dir=sig.direction.value, reason=reason)
             # `B271`: the bar was previously observable only in a maxlen=80 deque that is
@@ -2577,6 +2798,9 @@ class LiveCryptoLoop:
                 "reject",
                 f"{pair} {sig.direction.value} setup NOT taken — {reason}",
             )
+        else:
+            # **`T-0130`. NEITHER A FILL NOR A REFUSAL — so neither recorder, and no position push.**
+            await self._on_unresolved_order(pair, entry, sig, res, trace)
 
     # ------------------------------------------------------------------
     # Lifecycle — Start, Pause, Stop

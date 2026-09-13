@@ -518,9 +518,13 @@ async def test_a_FILLED_order_reports_the_word_the_LOOP_reads():
     # because a PARTIALLY_FILLED order is also a real position — so the literal disappeared and
     # this arm failed rather than going quietly stale. Re-derived against the constant, which is
     # the concept rather than one of its spellings.
-    from app.services.live.crypto_loop import FILL_BEARING_STATUSES
+    #
+    # **`T-0130` MOVED IT ONCE MORE**: the loop no longer tests the status against a set in its
+    # branch; `classify_order_status` decides what a status means in one place, and the branch opens
+    # a position on the CLASS. So the arm asks the classifier the loop asks.
+    from app.services.live.crypto_loop import FILL_OUTCOMES, classify_order_status
 
-    assert "FILLED" in FILL_BEARING_STATUSES, (
+    assert classify_order_status(result["status"]) in FILL_OUTCOMES, (
         "the loop no longer opens a position on this status — re-derive what it reads"
     )
 

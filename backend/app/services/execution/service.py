@@ -363,7 +363,27 @@ class ExecutionService:
                     "pair": sig.symbol, "direction": sig.direction.value,
                     "venue": getattr(exc, "broker", None),
                     "sized_units": lot_size, "equity_at_entry": acct.equity}
-        res.setdefault("status", "FILLED")
+        # **`T-0130` (`B316`/`B317`). NO DEFAULT STATUS — ABSENT STAYS ABSENT.**
+        #
+        # This line was `res.setdefault("status", "FILLED")`, applied to whatever `place_order`
+        # returned. An adapter whose reply carried no status — an empty 200, which
+        # `CryptoFundTraderAdapter._handle_response` turns into `{}`, or any return site that forgot
+        # the key — was reported as a FILL. Measured at `34d4d03`: `{}` became `FILLED` with no
+        # size and halted the loop as a *partial fill we could not size* that never happened; a
+        # status-less reply that did carry `units` opened a position.
+        #
+        # A better default is not the fix: every value is one of the answers the caller exists to
+        # tell apart. So the key is left absent and `crypto_loop` classifies absence as UNRESOLVED
+        # — neither a fill nor a refusal — and halts on it (`_on_unresolved_order`).
+        #
+        # **AND A RESULT THAT IS NOT A DICT AT ALL IS THE SAME UNREADABLE REPLY** (review's K-4, ruled
+        # in scope). `_handle_response` returns `response.json()` for any parseable body, so a 200 of
+        # `null`, `[]` or `"ok"` comes back as `None`, a list or a str. The next line then raised
+        # TypeError outside the `try` above, and the loop's venue-raised backstop filed a REJECTED row
+        # for an order the venue may have taken — this task's defect by the exception route. No status
+        # is invented here; the bounded, redacted repr is the only raw text kept.
+        if not isinstance(res, dict):
+            res = {"unreadable_result": redact_for_storage(f"{type(res).__name__}: {res!r}")}
         res["mode"] = self.mode.value
         res["sized_units"] = round(units, 8)
         res["equity_at_entry"] = acct.equity

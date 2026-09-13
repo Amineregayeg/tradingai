@@ -1073,7 +1073,15 @@ class AlpacaAdapter(BrokerAdapter):
             "status": status,
             # What the VENUE says it filled, `None` when it did not say — never defaulted to the
             # submitted quantity, which would report a fill we have no evidence of.
-            "filled_units": float(filled_raw) if filled_raw is not None else None,
+            #
+            # **`T-0130` (review's K-4b): PARSED, NEVER RAISED.** This was `float(filled_raw)`, run
+            # AFTER the order was submitted and outside any `try`: a blank or unparseable quantity
+            # raised ValueError — not a `BrokerError` — out of `execute()` into the loop's venue-raised
+            # backstop, which filed a REFUSAL for an order that exists. And `float("nan")` does not
+            # raise at all, so catching ValueError alone would have stored NaN. The same three-state
+            # decision the stored refusal makes (`_readable_qty`): unreadable is `None`, and a FILLED
+            # result carrying the key with `None` takes the loop's unsized-fill halt.
+            "filled_units": self._readable_qty(filled_raw),
             "position_id": str(getattr(placed, "id", "")),
             "pair": request.pair,
             "direction": request.direction.value,
@@ -1255,20 +1263,36 @@ class AlpacaAdapter(BrokerAdapter):
           which keeps the token free of the space that terminates it); a float — which has no text of its
           own — is written positionally via Decimal.
         """
-        import math
         from decimal import Decimal
 
-        if raw is None or (isinstance(raw, str) and not raw.strip()):
-            return "?"
-        try:
-            value = float(raw)
-        except (TypeError, ValueError):
-            return "?"
-        if not math.isfinite(value):
+        value = AlpacaAdapter._readable_qty(raw)
+        if value is None:
             return "?"
         if isinstance(raw, str):
             return raw.strip()
         return format(Decimal(repr(value)), "f")
+
+    @staticmethod
+    def _readable_qty(raw) -> float | None:
+        """A venue quantity as a finite float, or `None` when it cannot be read. **Never raises.**
+
+        The ONE decision about whether a quantity is readable (`B426`: one rule, not a copy per
+        consumer) — `_qty_token` renders it for the stored refusal and `place_order` reports it as
+        `filled_units`. Absent, blank, unparseable and non-finite are all UNREADABLE; zero is a
+        reading. `float("nan")` and `float("inf")` parse without raising, which is why they are tested
+        for explicitly rather than left to an `except`.
+        """
+        import math
+
+        if raw is None or (isinstance(raw, str) and not raw.strip()):
+            return None
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(value):
+            return None
+        return value
 
     @staticmethod
     def _order_status(order) -> str:

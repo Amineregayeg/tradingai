@@ -312,11 +312,12 @@ async def test_the_fill_handler_makes_NO_FURTHER_VENUE_CALLS():
         n for n in ast.walk(ast.parse(inspect.getsource(mod)))
         if isinstance(n, ast.AsyncFunctionDef) and n.name == "_tick_symbol"
     )
-    # The branch that handles a fill-bearing status, located structurally.
+    # The branch that handles a fill-bearing status, located structurally — by `FILL_OUTCOMES` since
+    # `T-0130`, where the branch stopped testing the status and started testing its CLASS (K-11).
     forks = [
         n for n in ast.walk(fn)
         if isinstance(n, ast.If)
-        and any(isinstance(c, ast.Name) and c.id == "FILL_BEARING_STATUSES"
+        and any(isinstance(c, ast.Name) and c.id == "FILL_OUTCOMES"
                 for c in ast.walk(n.test))
     ]
     assert forks, "the fill-bearing branch is gone; this arm is pinning nothing"

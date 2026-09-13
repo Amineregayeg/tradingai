@@ -349,10 +349,15 @@ async def test_the_loop_ROUTES_a_non_filled_execution_into_the_rejection_recorde
     # of silently pinning a branch that no longer existed. **A locator keyed on a literal the
     # subject chose is the same blindness as a scan keyed on one**; keyed on the constant's NAME it
     # tracks the concept.
+    #
+    # **AND IT MOVED AGAIN WITH `T-0130`, FOR THE SAME REASON.** The branch no longer tests a status
+    # at all: `classify_order_status` decides what a status means in ONE place (review's K-11) and the
+    # branch tests the CLASS against `FILL_OUTCOMES`. Keyed on the old name this raised rather than
+    # pinning a branch that no longer tests it — the loud failure the paragraph above designed for.
     forks = [
         n for n in ast.walk(fn)
         if isinstance(n, ast.If)
-        and any(isinstance(c, ast.Name) and c.id == "FILL_BEARING_STATUSES"
+        and any(isinstance(c, ast.Name) and c.id == "FILL_OUTCOMES"
                 for c in ast.walk(n.test))
     ]
     assert forks, "the fill-bearing branch is gone; a refused signal now falls through"
