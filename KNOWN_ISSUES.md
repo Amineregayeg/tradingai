@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-13 (newest entry B439 — DEPLOYED: the Alpaca kill switch aborts after the first position. AlpacaAdapter.close_all_positions calls the SDK's per-symbol close_position, which returns an Order, and _classify_close reads it as the ClosePositionResponse that only close_all_positions returns — int() of the OrderStatus enum raises for every status, outside the per-position try, ending the close-all. At most one position is closed or submitted and the rest are reported NOT_ATTEMPTED: loud, not a false flat, but the kill switch cannot do its job. Present since T-0136; the suite is green because its double for close_position returns the other method's type. Also B438 corrected: it had described the kill switch as reporting CLOSED on acceptance; that misread belongs to the single-position close only. Fixes ruled into B427.)
+Last updated: 2026-09-13 (newest entry B442 — the kill switch does not stop an entry that already passed its gate: the loop checks kill_switch.is_armed, suspends in the bias fetch, then submits, and nothing re-checks, so a position can open after the switch reported the book closed. Also B440: an Alpaca submission failure that does not prove non-creation is filed as REJECTED/VENUE_TRANSPORT, and the SDK re-POSTs on 504. And B441: SDK requests carry no HTTP timeout. Found during B437's design.)
 
 ---
 
@@ -29191,6 +29191,23 @@ every adapter call and is wider than B427.
 thread must still reach `_call`'s existing classification, and any object the SDK shares between calls must be safe
 to use from a thread. Not a deploy-D blocker; its cost scales with how many Alpaca calls each tick makes.
 
+**AMENDMENT — execute's B437 design measurements (2026-09-13, loopback servers and doubles, no venue; the SDK facts
+verified by manager in alpaca-py 0.44.0):**
+- **Cancellation after `B427`.** `stop()` cancels the loop task, and the first real suspension inside `place_order` is
+  now the resolver's first sleep — AFTER submission. Driven by execute on the real adapter at `a451ec1`: `stop()`
+  during an entry leaves the order at the venue, `place_order` raises `CancelledError`, and **no log line anywhere
+  carries the order id.** The loop already had a window after `place_order` returned, at the record write's await.
+  `B427` added one inside the adapter, where the acknowledgement is still in hand and nothing records it.
+- **Concurrency.** 400 `get_order_by_id` calls from 8 threads on one `TradingClient`, against a loopback server:
+  no mismatched responses, 8 in flight at once. requests does not document `Session` as thread-safe, so this is
+  evidence, not a guarantee.
+- **Two clients per account** once the loop trades Alpaca: `manager.py:139` and `crypto_loop.py:1526` each build a
+  `TradingClient`. With the engine on Alpaca, the kill switch would close the account through both adapters; the
+  second close of an already-closed position raises "position does not exist", giving FAILED rows for positions
+  that did close. Loud, not a false flat. By reading, latent under `B430`; it belongs with `B428b`.
+- The SDK's own retry sleep is `time.sleep(3)`, inline, up to three times (`B441`).
+
+
 ---
 
 ### B438 — THE KILL SWITCH AND THE POSITIONS CLOSE RECORD AN ALPACA CLOSE AS CLOSED WHEN IT IS MERELY ACCEPTED — and on the DEPLOYED build they reach Alpaca through the saved connection, which B430 does not govern
@@ -29313,3 +29330,102 @@ no Alpaca position exists and nothing is exposed now. With **one** position — 
 close IS sent and then reported as never observed: loud, and the operator checks the venue. **Only with two or more
 positions do the rest stay open.** Review's B427 kill set carries the fix's arm (`B-12`): the kill switch must still
 SEND the second close after the first fails.
+
+---
+
+### B440 — AN ALPACA SUBMISSION THAT FAILS AFTER THE REQUEST WAS SENT IS FILED AS A REFUSAL — and the SDK makes the common case worse: it RE-POSTS the order on a 504, so the second attempt's "duplicate client_order_id" becomes the refusal's reason
+
+**Found by execute during B437's design (loopback server, no venue); verified by manager in alpaca-py 0.44.0's source
+and in `service.py` at `a451ec1`.**
+
+```
+alpaca/common/constants.py   DEFAULT_RETRY_EXCEPTION_CODES = [429, 504], ATTEMPTS 3, WAIT 3s
+alpaca/common/rest.py        _request: while retry >= 0: _one_request(...) / except RetryException: time.sleep(3)
+                             _one_request: status in _retry_codes and retry > 0 -> RetryException — EVERY method, POST included
+TradingClient.submit_order   self.post("/orders", data)        data carries our client_order_id
+AlpacaAdapter._call          any exception -> BrokerError
+ExecutionService.execute     except BrokerError -> REJECTED, rejection_code VENUE_TRANSPORT
+```
+
+**A 504 is a gateway timeout: the order may or may not exist.** The SDK sends the same POST again. Execute's loopback
+server answered the repeat the way Alpaca documents a duplicate — 422 "client_order_id must be unique" — and the SDK
+raised `APIError` after 3.02s of `time.sleep`. The adapter wraps it and the service files `REJECTED` /
+`VENUE_TRANSPORT`: **a row saying no position was taken, for an order the first POST may have opened.** That is
+`T-0130`'s K-4b false refusal, arriving through the SDK. The 422 is Alpaca's documented answer reproduced on loopback,
+not a venue measurement.
+
+**THE RETRY IS ONLY THE DISGUISE. THE CLASS IS WIDER.** Without it, a 504 on the last attempt, a read timeout, or a
+connection reset after the request went out reaches the same `except BrokerError` and is filed the same way. **A
+submission failure that does not prove the order was NOT created is not a refusal.** What a false refusal leaves: a
+venue position whose protection was never verified (`B429`'s re-read runs only after a successful submit), no row
+saying it opened, and nothing managing it. `_entry_block_reason` reads venue positions, so the next bar should not
+open a second one. That prevents a duplicate; the first position is still unmanaged.
+
+**A 429 retry is safe — a rate-limited request is not processed. A 504 retry of a POST is not.**
+
+**CORRECTION TO THE CANDIDATE FIX, from the SDK source:** `TradingClient.__init__` takes `api_key, secret_key,
+oauth_token, paper, raw_data, url_override` and calls `RESTClient.__init__` without the retry arguments, so
+`TradingClient(..., retry_exception_codes=[429])` raises `TypeError`. The codes live in the private `_retry_codes`.
+Changing them depends on a private attribute, so it needs an arm that fails if the SDK renames it.
+
+**Fix direction, not built:** no 504 retry on writes. A submission failure that does not prove non-creation — a 5xx,
+a read timeout, a connection error after sending, a duplicate `client_order_id` — looks the order up by
+`client_order_id` and resolves it through `B427`'s resolver. If that lookup also fails, the result is UNRESOLVED
+(a halt), never REJECTED. Only a failure that proves nothing was created stays a refusal. **It lands with `B441`**,
+because a timeout turns hangs into exactly these ambiguous failures.
+
+---
+
+### B441 — ALPACA SDK REQUESTS CARRY NO HTTP TIMEOUT. A hung connection blocks the event loop forever today, and would strand a thread under any threaded dispatch
+
+**Found by execute during B437's design; verified by manager in alpaca-py 0.44.0.**
+
+```
+rest.py _request       opts = {"headers": ..., "allow_redirects": False, "params" | "json": data}
+rest.py _one_request   response = self._session.request(method, url, **opts)       no timeout
+```
+
+requests has no default timeout, so a connection that is accepted and never answered waits indefinitely. Every
+Alpaca call runs inline today (`B437`), so that one call freezes the event loop: every symbol, the websocket, and the
+API — **including the HTTP request that pulls the kill switch.** Under `asyncio.to_thread` the loop would survive
+and the thread would not, and `asyncio.wait_for` cannot stop a thread.
+
+Blocking from the same source: the SDK's retry wait is `time.sleep(3)`, inline, so three 429s in a row freeze the
+event loop for about nine seconds.
+
+**Fix direction, not built:** a bounded connect and read timeout on every request, set once on the client rather
+than at each call site, with an arm that fails if any request goes out without one. **Not alone:** a read timeout on
+a POST is an ambiguous submission, so this lands with `B440`.
+
+---
+
+### B442 — THE KILL SWITCH DOES NOT STOP AN ENTRY THAT HAS ALREADY PASSED ITS GATE. The loop checks the switch, suspends to fetch data, then submits — and nothing checks again
+
+**Found by manager while verifying execute's B437 ordering analysis, by reading at `a451ec1`. Not driven.**
+Execute's version (D4) was narrower: an entry already SUBMITTED and still resolving can fill after
+`close_all_positions` enumerates, which `B427`'s resolver made possible. The window is older and wider:
+
+```
+crypto_loop._tick_symbol   block = await self._entry_block_reason(pair)     reads kill_switch.is_armed
+                           bias  = await self._fetch_bars(...)              asyncio.to_thread — a REAL suspension
+                           news  = await self._news_context()               await fetch_calendar_events()
+                           await self._act("signal", ...)                   ws_manager.broadcast
+                           res   = await self.execution.execute(sig)
+ExecutionService.execute   no kill-switch check        ('kill', 'armed', 'halt' absent from service.py)
+AlpacaAdapter.place_order  no kill-switch check
+prop_firm router           kill_switch.arm(), then await kill_switch.trigger(...) -> close_all_positions
+```
+
+**The sequence:** a bar passes the gate, and the loop suspends in the bias fetch. The operator pulls the switch: it
+arms, enumerates the open positions and closes them. The loop resumes and submits the entry. **A position opens after
+the kill switch reported the book closed**, and the report cannot mention it, because the position did not exist
+when the switch enumerated. Not Alpaca-specific: the gate and the suspension are both in the loop. `B427` widened the
+window by adding suspensions inside `place_order`; threaded dispatch (`B437`) would widen it again.
+
+**Latent while the engine is held.**
+
+**Fix direction, not built:** check the switch at the last moment before submission, with no suspension between
+the check and the send. For Alpaca, once calls can suspend, add an account-level lock. `place_order` holds it from
+that check through the verdict; `close_all_positions` takes it before enumerating. Then a switch armed first is seen
+by the entry, and an entry already in progress is seen by the switch. The switch's wait for the lock needs a bound:
+on expiry it enumerates anyway and says so in its report.
