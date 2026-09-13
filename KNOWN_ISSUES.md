@@ -29446,7 +29446,13 @@ a POST is an ambiguous submission, so this lands with `B440`.
 
 ### B442 — THE KILL SWITCH DOES NOT STOP AN ENTRY THAT HAS ALREADY PASSED ITS GATE. The loop checks the switch, suspends to fetch data, then submits — and nothing checks again
 
-**Found by manager while verifying execute's B437 ordering analysis, by reading at `a451ec1`. Not driven.**
+**Found by manager while verifying execute's B437 ordering analysis, by reading at `a451ec1`. DRIVEN by execute
+at `fb3dab6`, and the manager re-ran it on the same production code (`backend/app` identical to `fb3dab6`; only the
+arm uncommitted):** the real `LiveCryptoLoop._tick_symbol` -> real gate -> real `ExecutionService.execute` -> real
+`place_order`, with the switch armed inside the bias `_fetch_bars`. The arm asserts the switch was NOT armed when the
+gate ran, and proves the path: fetches == [entry_tf, bias_tf], execute called once, and the venue type checked.
+**Result on today's code: FILLED. A 5.55555556-unit position opened after the switch was armed, with `broker_mode`
+"paper" (`PaperBroker`) and with "sim" (`SimPropFirmBroker`, the loop's default venue).** No venue and no network.
 Execute's version (D4) was narrower: an entry already SUBMITTED and still resolving can fill after
 `close_all_positions` enumerates, which `B427`'s resolver made possible. The window is older and wider:
 
@@ -29467,9 +29473,9 @@ the kill switch reported the book closed**, and the report cannot mention it, be
 when the switch enumerated. Not Alpaca-specific: the gate and the suspension are both in the loop. `B427` widened the
 window by adding suspensions inside `place_order`; threaded dispatch (`B437`) would widen it again.
 
-**Latent while the engine is held.**
+**Latent while the engine is held; reproduced on the loop's default sim venue, so it is not waiting on Alpaca.**
 
-**Fix direction, not built:** check the switch at the last moment before submission, with no suspension between
+**Fix direction, ruled into commit (2):** check the switch at the last moment before submission, with no suspension between
 the check and the send. For Alpaca, once calls can suspend, add an account-level lock. `place_order` holds it from
 that check through the verdict; `close_all_positions` takes it before enumerating. Then a switch armed first is seen
 by the entry, and an entry already in progress is seen by the switch. The switch's wait for the lock needs a bound:
