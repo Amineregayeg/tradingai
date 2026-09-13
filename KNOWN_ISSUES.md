@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-13 (newest entry B431 — AN except BODY IS OUTSIDE ITS OWN PROTECTION. status()'s handler, commented "never let the panel 500", reads self.paper._closed unguarded; _closed is simulator-only, so with an incapable broker AND the database unreachable it raises AttributeError that the enclosing except does not catch, because the raise happens inside the handler rather than inside the try. The conjunction is the point: either condition alone is fine, and it is the both-at-once case — a degraded venue during a database outage — in which an operator most needs status() to answer. What it would have reported is the incapability itself, so the surface dies of the thing it exists to report. Fixed with B428a because a report that cannot be delivered is not loud; filed separately because it is independent of B428 and findable only under its own name. The generalisation: every except whose body can raise has this property, and the handler is where a second failure is MOST likely because it runs only when something has already gone wrong. Also B430's guarantee sharpened per execute — apply_config DOES assign broker_mode from a RunConfig, so the path is closed by nothing being able to SUPPLY one rather than by there being no setter, which is the weaker kind that breaks when someone adds a schema field.)
+Last updated: 2026-09-13 (newest entry B432 — TESTS THAT DRIVE THE TICK PATH MAKE A REAL NETWORK CALL TO BINANCE. _tick_symbol's first action is to_thread(_ticker_price), an urlopen to api.binance.com with an 8s timeout; test_t0141_partial_fill (16 drives), test_t0143_halt_records (1) and test_shadow_sees_blocked_bars (2) patch _fetch_bars and nothing else, while test_t0011_census patches it — so the authors stubbed the obvious fetch and missed the one on the first line. A blip makes halt-asserting arms fail visibly and absence-asserting arms PASS invisibly, because the tick never ran; the deploy-D gate and B429's suite both depended on Binance being reachable. B429's own arms are fixed; the three landed suites are not. Also B427 addendum from B429's build: AlpacaAdapter.get_orders(status) calls the SDK with no argument so its status filter is dead, and close_position stringifies the returned Order, discarding status and filled_qty — B429 depends on neither, every other caller does.)
 
 ---
 
@@ -28424,6 +28424,26 @@ same key holds the **symbol** at `:955`. One key, three meanings, one file.
 ruling, not a code question**, and it belongs with `B424`'s family: *we cannot establish whether we
 hold a position* is its own state and must alarm, not resolve to either affirmative.
 
+#### ADDENDUM (execute, found building `B429`; verified by manager at `7f0ee09`) — TWO MORE ADAPTER METHODS READ AN ANSWER THEY NEVER ASKED FOR
+
+```
+AlpacaAdapter.get_orders(self, status=None)   calls self._call("get_orders") with NO ARGUMENT
+                                              -> `status` is dead: every caller gets the server's
+                                                 default status, unpaginated, whatever it asked for
+AlpacaAdapter.close_position(...)             return {"position_id": ..., "result": str(result)}
+                                              -> the Order the SDK returns is STRINGIFIED; its status
+                                                 and filled_qty are discarded, so "the close was
+                                                 accepted" and "the close filled" cannot be told apart
+```
+
+**Both are this entry's defect.** `close_position` is the same acknowledgement-read-as-outcome shape
+one method over; `get_orders` accepts a filter and silently ignores it, so a caller asking for open
+orders cannot know it received something else. **`B429` does not depend on either** — its flat check
+calls the SDK directly with an explicit status, limit, direction and `nested`, precisely because
+`get_orders(status)` ignores its argument, and its remediation takes its verdict from observation
+rather than from `close_position`'s return. **Every OTHER caller still does**, and the first-order
+runbook's flat check pointed at `get_orders()` until this addendum.
+
 ---
 
 ### B428 — THE ALPACA TICK PATH CANNOT RUN AT ALL. Every tick raises before any signal is evaluated, the loop swallows it as a WARNING, and the engine reports HEALTHY forever
@@ -28671,3 +28691,52 @@ render rather than the name.
 > **The name being present is evidence that someone intended the feature, not that the feature
 > exists.** Same family as testing a candidate tree and reporting it as production: the artefact
 > that proves intent sits exactly where the artefact that proves behaviour would be.
+
+---
+
+### B432 — TESTS THAT DRIVE THE TICK PATH MAKE A REAL NETWORK CALL TO BINANCE. They stub the candle fetch and miss the price fetch that runs first — so a network blip makes halt-asserting arms FAIL and absence-asserting arms PASS FOR THE WRONG REASON
+
+**Found by execute while building `B429`: a mutation killed an arm that never reaches the adapter,
+and did not reproduce in sixteen runs. Every link verified by manager at `HEAD`.**
+
+```
+crypto_loop.py:2164   _tick_symbol's FIRST action:  price = await asyncio.to_thread(_ticker_price, bsym)
+_ticker_price         for base in ("https://api.binance.com", "https://data-api.binance.vision"):
+                          urllib.request.urlopen(url, timeout=8)
+```
+
+**Suites that drive `_tick_symbol`, and whether they patch it:**
+
+```
+test_t0141_partial_fill.py          16 drives   _ticker_price patched: NO
+test_t0143_halt_records.py           1 drive    _ticker_price patched: NO
+test_shadow_sees_blocked_bars.py     2 drives   _ticker_price patched: NO
+test_t0011_census.py                 2 drives   _ticker_price patched: YES   <- control
+```
+
+**Checked that the three do not stub the network some other way** — no patch of `urlopen`,
+`urllib`, `to_thread` or `socket`. **All three patch `_fetch_bars` and nothing else.** The authors
+clearly meant to isolate these tests from the network, stubbed the obvious fetch, and missed the one
+on the first line.
+
+**WHAT A BLIP DOES, and the second half is the entry.** The price fetch returns `None`, and the tick
+exits before the order path:
+
+```
+an arm asserting a HALT, a ROW or an ORDER   -> FAILS          flaky red, visible, annoying
+an arm asserting their ABSENCE               -> PASSES          for the wrong reason, invisibly
+```
+
+> **A network-dependent arm does not only flake. Every arm asserting that something did NOT happen
+> becomes satisfiable by the tick never running at all** — `B418`'s "an arm satisfied by something
+> weaker", with the network as the weaker thing.
+
+**And it reaches past these files:** the pre-deploy gate for deploy D (2491 passed) and `B429`'s
+suite (2608 passed) both included these suites, so **both results depended on Binance being reachable
+at the time they ran.** In a mutation table it is worse again: a blip hands out false kills and false
+survivals that look exactly like coverage.
+
+**`B429`'s own drive arms are already fixed** — they go through one helper that patches
+`_ticker_price`. **The three landed suites above are not.** Fix: the same helper, and a structural
+arm asserting that no test driving `_tick_symbol` leaves `_ticker_price` unpatched, so the next
+driver cannot reintroduce it. Not a production defect; a test-reliability defect that can hide one.
