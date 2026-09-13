@@ -28501,6 +28501,18 @@ comparing the two.
 name on `get_orders`' field that says it is the venue's raw value. Whichever, a caller must not be able to compare
 the two spellings and silently get False.
 
+**AMENDMENT — THE FIX AT `a451ec1` BOUNDS THE READ SCHEDULE, NOT WALL TIME (review's X-10; manager confirmed by
+reading).** In `_resolve_order`, each read computes `wait = start + offset - clock()`, sleeps only if `wait > 0`, and
+then reads — with nothing checking elapsed time before the read. Slow reads push every later offset into the past,
+so all six reads still run. Review measured it with a fake clock: reads of 3s give 6 reads over 18s against a 5s
+budget; reads of 9s give 54s. The SDK is synchronous (`B437`), so that is 54s of a blocked event loop. With
+`B441`'s timeout (3s connect, 10s read) and 429 retries, one read can take about 45s.
+**The manager's own drive of `a451ec1` used instant reads, so the schedule and wall time were the same and it could
+not show this.**
+**Fix ruled into commit (1) (`B440`/`B441`):** before every read, stop once `clock() - start >= budget`, in the
+resolver and in the `client_order_id` lookup loop. A read already running cannot be interrupted, so wall time is
+bounded by the budget plus one call's maximum, and that figure is stated beside the constants.
+
 ---
 
 ### B428 — THE ALPACA TICK PATH CANNOT RUN AT ALL. Every tick raises before any signal is evaluated, the loop swallows it as a WARNING, and the engine reports HEALTHY forever
