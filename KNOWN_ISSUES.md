@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-13 (B429 marked FIXED at 7f0ee09 with follow-ups a4b9a34, 34d4d03 and c3101f1, all passed review, NOT deployed. The adapter now attaches the stop, always re-reads the order nested, treats only a stop leg in a WORKING status as protection, and on refusal cancels the entry and its live legs, closes, and OBSERVES flat before filing a rejection — halting when flat cannot be observed. Residuals stated beside their constants: the {new, held} allow-list is unmeasured, a refusal after the re-read is not caught (B427), page fullness depends on an unmeasured server cap, symbol spelling is unmeasured, and the venue was never consulted — probe 3 is the evidence for four of them. Review caught, across four rounds, among other things an Alert built with a nonexistent AlertStatus member that could never have been written. B432 remains the newest numbered entry.)
+Last updated: 2026-09-13 (B429 marked FIXED at 7f0ee09 with follow-ups a4b9a34, 34d4d03 and c3101f1, the first REVIEW_FAIL on test coverage and the three follow-ups PASSED, NOT deployed. The adapter now attaches the stop, always re-reads the order nested, treats only a stop leg in a WORKING status as protection, and on refusal cancels the entry and its live legs, closes, and OBSERVES flat before filing a rejection — halting when flat cannot be observed. Residuals stated beside their constants: the {new, held} allow-list is unmeasured, a refusal after the re-read is not caught (B427), page fullness depends on an unmeasured server cap, symbol spelling is unmeasured, and the venue was never consulted — probe 3 is the evidence for four of them. Review caught, across four rounds, among other things an Alert built with a nonexistent AlertStatus member that could never have been written. B432 remains the newest numbered entry.)
 
 ---
 
@@ -28528,7 +28528,12 @@ at the venue.
 the exposure is seconds at roughly $1 of notional. That is a bound by **size and duration**, not by a
 stop, and the runbook now says so rather than implying the position is protected.
 
-#### FIXED — `7f0ee09`, with follow-ups `a4b9a34`, `34d4d03`, `c3101f1`. All four PASSED review. NOT DEPLOYED (production is still `6ae6aca`)
+#### FIXED — `7f0ee09`, with follow-ups `a4b9a34`, `34d4d03`, `c3101f1`. NOT DEPLOYED (production is still `6ae6aca`)
+
+**Review verdicts, stated exactly — an earlier version of this header said "All four PASSED review",
+which was false:** `7f0ee09` was **REVIEW_FAIL** (bus 0620) on test coverage — production behaviour
+passed, but the no-row arm could not see a writer inside the recorder. `a4b9a34` fixed that and
+**PASSED**; `34d4d03` **PASSED**; `c3101f1` **PASSED**. The fix is complete as of `c3101f1`.
 
 **What the adapter now does** (`AlpacaAdapter.place_order` → `_require_protection`):
 
