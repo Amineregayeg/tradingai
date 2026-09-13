@@ -172,6 +172,41 @@ HALT_PARTIAL_UNSIZED = "a partial fill left a position we could not size"
 #: defaults a status-less reply to `FILLED`, so absence never arrives here as absence.
 FILL_BEARING_STATUSES = ("FILLED", "PARTIALLY_FILLED")
 
+#: **`B428a`. WHAT THIS LOOP NEEDS FROM ITS BROKER THAT THE CONTRACT DOES NOT PROMISE.**
+#:
+#: `BrokerAdapter` guarantees order placement — `place_order`, `close_position`, `get_positions`
+#: and the rest. It says nothing about POSITION MANAGEMENT, and this loop requires three members
+#: that only the in-process simulators have:
+#:
+#: ```
+#: on_tick    EVERY tick, unguarded, on the path to the strategy evaluation   -> REQUIRED
+#: _closed    warm-up replay ledger only                                      -> not required
+#: balance    warm-up replay cash only                                        -> not required
+#: ```
+#:
+#: **ONLY `on_tick` IS REQUIRED, and the two that are not were nearly required by mistake.**
+#: Every `_closed`/`balance` use is inside `warmup()`, which returns at `if venue != "paper"`
+#: before reaching any of them — and `status()`'s fallback reads `_closed` through a guarded
+#: `getattr` **with a designed report for its absence**. Requiring them would have contradicted
+#: that report and refused a venue adapter that implements `on_tick` perfectly well, replacing a
+#: precise message with a blunt one. Caught by the review seat against the first version of this
+#: list, whose own author had written the guarded fallback an hour earlier.
+#:
+#: **`AlpacaAdapter` has none of them**, so on that venue `_tick_symbol` raised `AttributeError`
+#: at `:2051` — BEFORE the strategy evaluation at `:2062` — and `_loop`'s per-symbol handler
+#: turned it into a `logger.warning`, every symbol, every poll, forever. The engine reported
+#: `running=True`, `paused=False`, `halt_reason=None`. **Healthy, and unable to trade.** An
+#: operator watching a running engine take no trades reads a quiet market (`B179`).
+#:
+#: THE LIST IS DERIVED, NOT REMEMBERED: `test_b428_broker_capabilities.py` walks this module for
+#: every `self.paper.X` and fails if one is neither in the `BrokerAdapter` contract, nor declared
+#: here, nor explicitly exempt. **A missing method is a category, not one incident** — nothing
+#: required `on_tick` to be in the base class and nothing will require the next one either.
+REQUIRED_BROKER_CAPABILITIES: tuple[str, ...] = ("on_tick",)
+
+#: The block reason when they are absent. A named refusal, not a warning.
+BLOCK_BROKER_INCAPABLE = "broker cannot manage positions"
+
 
 class LiveCryptoLoop:
     def __init__(
@@ -255,6 +290,11 @@ class LiveCryptoLoop:
         #: next start would re-enter the hole it exists to stop us trading into. Reconciliation is
         #: what legitimately clears it, and reconciliation is the task after this one (`B413`).
         self._halt_reason: str | None = None
+        #: **`B428a`.** Names from `REQUIRED_BROKER_CAPABILITIES` the bound broker does not have.
+        #: Empty is the healthy state and it is EARNED — `_bind_broker` recomputes it on every
+        #: bind, so it cannot be stale from a previous broker. Read by `status()`, by
+        #: `_entry_block_reason` and by `start()`, which refuses rather than run blind.
+        self.broker_missing: tuple[str, ...] = ()
         #: **`M-6`. WHY THE DURABLE RECORD OF A HALT IS MISSING, when it is.**
         #:
         #: The halt writes two records — a `DecisionRecord` for the corpus and an `Alert` for the
@@ -364,7 +404,19 @@ class LiveCryptoLoop:
             # fallback matches the happy path — never fold replay into live counts,
             # and derive realized from the live closes only (not paper.balance,
             # which the warmup seeds with replay pnl).
-            closed = [c for c in self.paper._closed if c.get("reason") != "replay"]
+            # **`B428a`: THE REPORTING SURFACE MUST SURVIVE THE CONDITION IT REPORTS.**
+            #
+            # `_closed` is a simulator-only member (`REQUIRED_BROKER_CAPABILITIES`), so on an
+            # incapable broker this line raised — and `status()` is the one place that would have
+            # TOLD anyone the broker was incapable. The panel 500'd precisely when it had
+            # something to say, and the `except` above exists so it never does.
+            #
+            # The counts below are then 0, which does NOT mean "no trades": `broker_missing` on
+            # this same payload names `_closed` and is what discriminates *no trades* from
+            # *cannot count them*. Found by an arm failing for its own reason rather than the
+            # code's, which is the shape worth chasing rather than stubbing past.
+            closed = [c for c in getattr(self.paper, "_closed", None) or []
+                      if c.get("reason") != "replay"]
             closed_n = len(closed)
             wins = sum(1 for c in closed if c["pnl"] > 0)
             losses = sum(1 for c in closed if c["pnl"] <= 0)
@@ -380,6 +432,11 @@ class LiveCryptoLoop:
             # unnamed halt was indistinguishable from an operator pause, from the order-path gate
             # and from a prop-firm halt: three causes, one flag.
             "halt_reason": self.halt_reason,
+            # **`B428a`. THE CONDITION THAT PREVIOUSLY HAD NO READER AT ALL.** An incapable
+            # broker showed up nowhere on this payload — the engine read `running`, unpaused and
+            # unhalted while it could not complete a single tick. An empty tuple here is a
+            # positive statement that the bound broker has everything the loop needs.
+            "broker_missing": list(self.broker_missing),
             # `M-6`'s consumer. `None` when nothing failed; the reason when the halt's durable
             # record could not be written. A key that is always populated cannot report health.
             "halt_record_failed": self.halt_record_failed,
@@ -561,6 +618,16 @@ class LiveCryptoLoop:
         # on a position read or a venue call succeeding.
         if self.halt_reason:
             return BlockReason(f"HALTED ({self.halt_reason})", kind=BLOCK_HALT)
+        # **`B428a`, AND A HALT RATHER THAN A SKIP.** A broker that cannot sweep SL/TP cannot
+        # enforce a stop, and `AlpacaAdapter.place_order` sends none to the venue (`B429`) — so
+        # entering here would open a position with no stop from either side. Checked with no I/O,
+        # for the same reason the halt above is: a refusal this absolute must not depend on a
+        # venue call succeeding. `start()` refuses too; this covers a REBIND mid-run, which
+        # `start()` cannot see.
+        if self.broker_missing:
+            return BlockReason(
+                f"{BLOCK_BROKER_INCAPABLE} (missing {', '.join(self.broker_missing)})",
+                kind=BLOCK_HALT)
         if kill_switch.is_armed:
             return BlockReason(
                 f"KILL SWITCH ARMED ({kill_switch.reason or 'no reason given'})", kind=BLOCK_HALT)
@@ -978,6 +1045,17 @@ class LiveCryptoLoop:
     # ------------------------------------------------------------------
     # THE VENUE — one mapping, one binder, and both construction sites go through them
     # ------------------------------------------------------------------
+    @staticmethod
+    def _missing_capabilities(broker) -> tuple[str, ...]:
+        """Which of `REQUIRED_BROKER_CAPABILITIES` this broker does not have.
+
+        **Asked of the INSTANCE, not the class.** `balance` and `_closed` are assigned in the
+        simulators' `__init__`, so a class-level `hasattr` reports both simulators missing both —
+        a check that answers confidently and wrongly about the brokers we actually run. Measured:
+        the class form called `PaperBroker` incapable.
+        """
+        return tuple(name for name in REQUIRED_BROKER_CAPABILITIES if not hasattr(broker, name))
+
     def _select_venue(self) -> str:
         """`broker_mode` normalised to the venue actually being built (`T-0138`).
 
@@ -1039,6 +1117,20 @@ class LiveCryptoLoop:
         # hook — no close path can be silently lost from the DB or leave its DecisionRecord
         # stuck OPEN.
         self.paper._on_settle = self._on_settle_cb  # noqa: SLF001
+        # **`B428a`, AND RECOMPUTED ON EVERY BIND.** A value carried over from the previous
+        # broker would describe a broker that is no longer installed — which is the same class of
+        # lie this entry exists to remove, one object along.
+        self.broker_missing = self._missing_capabilities(self.paper)
+        if self.broker_missing:
+            logger.error(
+                "broker.incapable — the bound broker cannot manage positions, so the engine "
+                "cannot enforce a stop or sweep SL/TP. Entries are refused and start() will "
+                "refuse. This is NOT a per-symbol tick error.",
+                venue=self._select_venue(),
+                broker=getattr(self.paper, "broker_name", type(self.paper).__name__),
+                missing=list(self.broker_missing),
+                required=list(REQUIRED_BROKER_CAPABILITIES),
+            )
         self.execution = ExecutionService(self.paper, ExecMode.PAPER)
 
         # NAMED AT BIND TIME, and this is `B394`'s test applied to my own field rather than to
@@ -2373,6 +2465,20 @@ class LiveCryptoLoop:
         # BEFORE `reset_run`, deliberately. Refusing after it would have already ended the
         # previous run and opened a new one, so a rejected start would destroy the run it
         # refused to replace.
+        # **`B428a`, AND DELIBERATELY BESIDE `order_path_status`.** That refusal asks whether the
+        # venue can PLACE an order. This asks whether we can MANAGE what it places, which is the
+        # question nobody had asked — `AlpacaAdapter` answers the first affirmatively and has no
+        # answer to the second. Same shape, same place, so a reader meets both together.
+        if self.broker_missing:
+            reason = (f"{BLOCK_BROKER_INCAPABLE} — {type(self.paper).__name__} is missing "
+                      f"{', '.join(self.broker_missing)}, so SL/TP cannot be swept and no stop "
+                      f"can be enforced")
+            logger.error("Engine start REFUSED — broker cannot manage positions",
+                         broker=getattr(self.paper, "broker_name", "?"),
+                         missing=list(self.broker_missing))
+            await self._act("engine", f"Engine NOT started — {reason}")
+            return {"started": False, "reason": reason, "broker_missing": list(self.broker_missing)}
+
         blocked = self.paper.order_path_status()
         if blocked is not None:
             logger.warning("Engine start REFUSED — venue cannot place orders",
@@ -2572,7 +2678,27 @@ class LiveCryptoLoop:
                 try:
                     await self._tick_symbol(pair, bsym)
                 except Exception as exc:  # noqa: BLE001 - never let one symbol kill the loop
-                    logger.warning("Live loop symbol error", pair=pair, error=str(exc))
+                    # **`B428a`. THE SEVERITY DECISION, AND IT IS THE WHOLE ENTRY.**
+                    #
+                    # "Never let one symbol kill the loop" is right, and it was answering the
+                    # wrong question. A broker that lacks a method this loop calls is not one
+                    # symbol having a bad tick — it is true of EVERY symbol and EVERY poll, and
+                    # logging it per symbol at warning level is how a permanently broken engine
+                    # reported itself as running for as long as anyone cared to watch.
+                    #
+                    # Keyed on the CAPABILITY rather than on the exception type: catching
+                    # `AttributeError` would be a guess about how the next missing member fails,
+                    # and a broker missing `on_tick` fails this way only by accident of syntax.
+                    if self.broker_missing:
+                        logger.error(
+                            "Live loop symbol error — STRUCTURAL, not per-symbol. The bound "
+                            "broker is missing capabilities this loop requires, so every symbol "
+                            "and every poll will fail identically until it is replaced.",
+                            pair=pair, error=str(exc),
+                            missing=list(self.broker_missing),
+                        )
+                    else:
+                        logger.warning("Live loop symbol error", pair=pair, error=str(exc))
             try:
                 await self._push_state()
             except Exception as exc:  # noqa: BLE001
