@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-13 (newest entry B435 — the fill branch drops the decision row of a position that actually opened, on ANY exception before the commit, with only a warning: _record_signal_decision's blanket except leaves no row and no _open_decision entry, so the close path finds nothing in memory or the database and the trade's outcome and realized R are never recorded. B271's defect in the branch where the venue acted. Not closed by B433's fill-price normalisation, which removes only the garbage and NaN triggers. The fix is a ruling — halt and alert as for an unsized fill, or retry — and it is LIVE on the simulator path whenever the database write fails. Earlier today: B433 and B434.)
+Last updated: 2026-09-13 (B435 amended — it is FOUR recorders with the same warn-and-continue except: _record_signal_decision, _resolve_decision, _persist_live_close and _record_rejected_signal, none reporting failure, against _record_unsized_fill as the control that does. Verified as a mechanism, not observed: _resolve_decision pops the dict entry before its try, the close path's fallback picks the newest OPEN row for the symbol, and its 'at most one can match' rests on an entry block that reads venue positions rather than decision rows — so a failed resolve followed by a failed open lets a later trade's P&L be written into an earlier trade's decision. A lost record becomes a wrong one. The ruling covers all four sites, which are not equal: three guard a real position, one a refusal.)
 
 ---
 
@@ -28987,3 +28987,53 @@ as `B413`/`T-0143`'s halt record — a failure that must not vanish. The obvious
 unsized fill: halt with its own reason and write a CRITICAL Alert carrying enough to reconstruct the row. Whether
 to halt or to retry is a trading-behaviour decision. Latent behind `B430` for Alpaca; **live on the simulator path**
 whenever the database write fails.
+
+#### AMENDMENT (review; manager verified by AST at `d27a3f4`) — IT IS FOUR RECORDERS, NOT ONE, AND ONE OF THEM CAN WRITE A FALSE RECORD RATHER THAN LOSE ONE
+
+The same `except Exception -> logger.warning(...)`, with **no `halt_record_failed` and no `_declare_halt`**, in:
+
+```
+_record_signal_decision   the OPEN row, at entry         (the case above)
+_resolve_decision         the outcome and realized R, at close
+_persist_live_close       the trades row, per closed tranche
+_record_rejected_signal   B271's own row, for a refused signal
+control: _record_unsized_fill DOES report failure via halt_record_failed — the right pattern is detectable
+```
+
+They share the comment "never let bookkeeping kill the loop". **So the B435 ruling is a ruling on a four-site
+pattern**, and it must either cover all four or name the ones it leaves.
+
+**What each costs:**
+
+```
+_record_signal_decision  an opened position has no row; its outcome and R are never recorded
+_resolve_decision        `dec_id = self._open_decision.pop(pair)` runs BEFORE the try, so a failed resolve leaves
+                         the row at outcome=OPEN with NO dict entry — the trade's outcome and R are lost at close
+_persist_live_close      a lost tranche row truncates the P&L _resolve_decision reads from the trades rows —
+                         B223's truncation, reintroduced through a write failure (review's reading; not driven)
+_record_rejected_signal  a refused signal's row is lost; no exposure, but it is the row B271 exists to keep
+```
+
+**THE FALSE-RECORD PATH, verified as a mechanism and NOT observed as an event.** The close path's database fallback,
+`_open_decision_id_from_db(pair)`, selects the NEWEST `outcome == OPEN` row for the symbol (`created_at desc`,
+`limit 1`). Its docstring says *"At most one can match: `_entry_block_reason` refuses a second entry while the
+symbol..."* — but `_entry_block_reason` checks VENUE positions (`self.paper.get_positions()`), NOT decision rows.
+So:
+
+```
+1  trade A closes; _resolve_decision fails        -> A's row stays OPEN, dict entry already popped
+2  a new entry on the same symbol is NOT blocked  -> the block reads venue positions, and A is closed there
+3  trade B opens; _record_signal_decision fails   -> no row for B, no dict entry
+4  trade B closes; dict empty; fallback runs      -> the only OPEN row for the symbol is A's
+                                                  -> B's outcome and P&L are written INTO A's decision
+```
+
+**A lost record becomes a wrong one.** It needs two failures, but database failures cluster: one outage spanning
+a close and a later open is exactly this sequence. The docstring's "at most one can match" is a safety property held
+by something other than the code that relies on it — `B424`'s shape. (The same fact is the good news: a stale OPEN
+row does NOT block future entries on its symbol, because the block reads the venue.)
+
+**FOR THE RULING, the four sites are not equal.** Three guard the record of a REAL position; halting on their failure
+is the unsized-fill precedent. `_record_rejected_signal` guards a refusal with no exposure — halting the engine
+because a refusal row failed to write is a different trade-off, and may deserve an alert without a halt. **This is a
+trading-behaviour decision for Malek**, and it should be made for all four at once.
