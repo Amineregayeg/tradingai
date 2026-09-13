@@ -40,6 +40,8 @@ sends the protection and reacts correctly to what it is told — not that Alpaca
 """
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from app.core.exceptions import BrokerError
@@ -137,7 +139,7 @@ def _adapter(placed, *, reread=PROTECTED, reread_raises=False, reread_after=TERM
         if name == "get_order_by_id":
             reads["n"] += 1
             if reads["n"] == 1:
-                if reread_raises:
+                if reread_raises or reread is None:
                     raise RuntimeError("re-read timed out")
                 return reread
             if reread_after_raises:
@@ -409,27 +411,105 @@ async def test_BRANCH_2_close_THROWS_because_nothing_filled_and_flat_is_observed
     assert "close FAILED" in str(caught.value) and "flat OBSERVED" in str(caught.value)
 
 
-@pytest.mark.asyncio
-async def test_the_STORED_refusal_reason_leads_with_the_LEG_STATUSES_inside_the_storage_bound():
-    """**What probe 3's outcome exists to record — which status the venue parks a stop leg in — must
-    survive into the durable row.** The service stores `redact_for_storage(str(exc))`, bounded at
-    300 characters; with a long remediation detail, anything after the first ~300 is cut. So the
-    leg statuses lead, and the message makes no prediction about the venue."""
+REAL_ORDER_ID = "7f3c2a91-4b8e-4d1a-9c55-0e6b2f8d1a37"   # UUID length, as Alpaca issues them
+
+
+async def _stored_refusal(settled_status, settled_qty, *, before_status="new", **kw):
+    """The refusal as the service STORES it, at a REAL order-id length.
+
+    `before_status` is the parent on the PROTECTION re-read (before remediation); `settled_status` and
+    `settled_qty` are the parent on the POST-remediation read, which is what the `entry=` token must
+    be built from.
+    """
     from app.core.logging import redact_for_storage
 
-    a = _adapter(_placed(), reread=_parent(legs=[_stop("accepted"), _tp("new")]),
-                 cancel_raises_for=("order-1", "leg-stop", "leg-tp"), close_raises=True)
+    oid = REAL_ORDER_ID
+    before = _O(id=oid, status=before_status, legs=[_stop("rejected"), _tp("new")])
+    settled = _O(id=oid, status=settled_status, filled_qty=settled_qty,
+                 legs=[_stop("rejected"), _tp("canceled")])
+    a = _adapter(_O(id=oid, status=before_status, order_class="bracket"),
+                 reread=before, reread_after=settled, **kw)
     with pytest.raises(AlpacaProtectionNotAccepted) as caught:
         await a.place_order(_req())
+    return str(caught.value), redact_for_storage(str(caught.value))
 
-    full = str(caught.value)
-    stored = redact_for_storage(full)
-    assert len(full) > 300, "premise: the detail is long enough for the storage bound to cut"
-    assert "accepted/stop" in stored and "new/limit" in stored, (
-        f"the leg statuses did not survive the 300-character storage bound: {stored!r}"
+
+@pytest.mark.asyncio
+async def test_MSG1_the_STORED_row_distinguishes_a_FILLED_entry_from_an_UNFILLED_one_at_real_id_length():
+    """**The event B429 exists to prevent must be distinguishable in the durable row** — and
+    `rejection_reason` is the row's ONLY durable link to the venue order: none of `DecisionRecord`'s
+    29 columns holds an order id.
+
+    a4b9a34 certified this budget with the fixture id "order-1". At a real 36-character id,
+    "entry filled, a real unprotected position existed, remediation closed it" and "entry never
+    filled" stored BYTE-IDENTICAL rows. So every fact now has a compact token ahead of the prose.
+    """
+    filled_full, filled = await _stored_refusal("filled", "1", cancel_raises_for=(REAL_ORDER_ID,))
+    unfilled_full, unfilled = await _stored_refusal("canceled", "0", close_raises=True)
+
+    assert len(filled_full) > 300 and len(unfilled_full) > 300, "premise: the bound must actually cut"
+    assert filled != unfilled, (
+        "a filled entry whose unprotected position was closed stores the SAME row as an entry that "
+        "never filled"
     )
-    assert "every time" not in full, "the message still predicts the venue will always refuse"
-    assert "too narrow" in stored, "the allow-list caveat was cut from the stored reason"
+    assert "entry=filled/1" in filled and "entry=canceled/0" in unfilled
+    # The parent's cancel fails (it filled) and the resting take-profit leg's cancel succeeds.
+    assert "cancel=1ok/1failed" in filled and "close=submitted" in filled
+    assert "close=failed" in unfilled
+    for stored in (filled, unfilled):
+        assert f"order={REAL_ORDER_ID}" in stored, f"the full venue order id was cut: {stored!r}"
+        assert "rejected/stop" in stored and "new/limit" in stored, f"leg statuses cut: {stored!r}"
+        assert "too narrow" in stored, f"the allow-list pointer was cut: {stored!r}"
+
+
+@pytest.mark.asyncio
+async def test_ENTRY1_the_token_comes_from_the_POST_remediation_read_not_the_protection_re_read():
+    """**A market entry can read `new` on the protection re-read and fill before the cancel lands.**
+    A token taken from that earlier read says "unfilled" about a position that existed — the timing
+    false case, in the direction that understates the event."""
+    _full, stored = await _stored_refusal("filled", "1", before_status="new",
+                                          cancel_raises_for=(REAL_ORDER_ID,))
+    assert "entry=filled/1" in stored, f"the token reflects the pre-remediation read: {stored!r}"
+
+
+@pytest.mark.asyncio
+async def test_ENTRY2_a_PARTIAL_fill_with_the_remainder_cancelled_carries_its_NONZERO_quantity():
+    """`canceled` alone reads "never filled". A partial fill whose remainder was cancelled ends
+    `canceled` with a non-zero filled quantity — a real position existed."""
+    _full, stored = await _stored_refusal("canceled", "0.0005")
+    assert "entry=canceled/0.0005" in stored, f"the partial fill's quantity was dropped: {stored!r}"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("raw,token", [
+    (None, "?"), ("", "?"), ("nan", "?"), (float("nan"), "?"), ("inf", "?"), ("garbage", "?"),
+    ("0", "0"), ("0.000", "0.000"), (0.0, "0.0"),
+    ("0.00001294", "0.00001294"), (0.00001294, "0.00001294"),
+    # **BELOW 1e-6, where the two spellings DIVERGE** (manager). str(Decimal) switches to scientific
+    # notation once the adjusted exponent drops below -6, so at 0.00001294 `str(d)` and `format(d, "f")`
+    # agree and a later edit to `str(d)` survives. The venue's measured min_trade_increment is 1e-9,
+    # so sub-micro partial quantities are reachable.
+    (1.2e-07, "0.00000012"), (1e-09, "0.000000001"),
+])
+async def test_ENTRY3_the_filled_quantity_has_THREE_states_and_none_collapses(raw, token):
+    """**Absent, unparseable and non-finite are `?`; a number is recorded AS THE VENUE SENT IT.**
+
+    Rendering `None` as `0` stores "never filled" for a quantity nobody read (review). NaN compares
+    neither equal to zero nor greater than it, so any zero test files it on one side (manager). And
+    `str(float("0.00001294"))` is `1.294e-05` — a crypto fill quantity that no longer matches the venue."""
+    _full, stored = await _stored_refusal("canceled", raw)
+    assert f"entry=canceled/{token} " in stored, f"filled_qty {raw!r}: {stored!r}"
+    qty = stored.split("entry=", 1)[1].split(" ", 1)[0].split("/", 1)[1]
+    # EITHER CASE: float formatting gives `1.2e-07`, Decimal's str gives `1.2E-7`. The first version of
+    # this guard looked for lowercase "e-0" and could not see the uppercase form at all.
+    assert not re.search(r"[eE][+-]?\d", qty), f"the quantity {qty!r} was written in scientific notation"
+
+
+@pytest.mark.asyncio
+async def test_ENTRY3b_an_UNREADABLE_quantity_never_stores_the_same_row_as_a_confirmed_ZERO():
+    _z, zero_row = await _stored_refusal("canceled", "0.000")
+    _u, unknown_row = await _stored_refusal("canceled", None)
+    assert zero_row != unknown_row, "a confirmed zero and an unreadable quantity store the same row"
 
 
 @pytest.mark.asyncio

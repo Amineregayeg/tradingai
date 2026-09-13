@@ -294,13 +294,18 @@ class AlpacaProtectionNotAccepted(BrokerError):
     A venue that REFUSES a bracket raises, which is safe: no position, loud error. A venue that
     ACCEPTS the order and ignores the attachment leaves a position nobody is protecting, and
     nothing downstream would ever ask — so absence of the protection on the response is treated as
-    a failure: the entry is cancelled, any position is closed, and flat is OBSERVED — no position
-    and no open order for the symbol — before this is raised.
+    a failure: the entry is cancelled, any position is closed, and flat is OBSERVED before this is
+    raised — no position for the symbol, no open order or live leg for it ON THE OPEN-ORDER PAGE, and
+    this order and its legs terminal. Scoped to what was checked, as `_observe_flat`'s own line is.
 
     **ITS OWN TYPE BECAUSE IT MAPS TO ITS OWN CODE**, for `AlpacaBelowMinimumSize`'s reason: filed
     as `VENUE_TRANSPORT` it would read as a transient blip that clears on its own. It is not
-    transient: it recurs for as long as the observed condition holds — the venue created no working stop, OR it parked one in a status `WORKING_STOP_LEG_STATUSES` does not yet admit, in which case that unmeasured list is too narrow and the venue refused nothing. The message carries the re-read leg statuses FIRST so an operator — and
-    probe 3's saved artefact — can tell which.
+    transient: it recurs for as long as the observed condition holds — the venue created no working
+    stop, OR it parked one in a status `WORKING_STOP_LEG_STATUSES` does not yet admit, in which case
+    that unmeasured list is too narrow and the venue refused nothing. The message puts the re-read
+    leg statuses, the entry's settled status and filled quantity, the remediation counts and the
+    order id AHEAD of the prose, because only its first 300 characters are stored — so an operator,
+    and probe 3's saved artefact, can tell which, and can tell whether a position ever existed.
 
     **Raised ONLY on observed flat**, so it is an ordinary rejection — no position exists and the
     decision is correctly recorded as not taken. The first version raised this whenever the close
@@ -1153,11 +1158,14 @@ class AlpacaAdapter(BrokerAdapter):
             str(getattr(leg, "id", "")) for leg in legs
             if getattr(leg, "id", None) and self._order_status(leg) not in TERMINAL_ORDER_STATUSES
         ]
+        cancel_ok = cancel_failed = 0
         for oid in to_cancel:
             try:
                 await self._call("cancel_order_by_id", oid)
+                cancel_ok += 1
                 steps.append(f"cancel {oid} accepted")
             except Exception as exc:  # noqa: BLE001 - recorded; the observation decides
+                cancel_failed += 1
                 steps.append(f"cancel {oid} FAILED ({type(exc).__name__}: {exc})")
                 logger.error("alpaca.protection_remediation.cancel_failed", symbol=request.pair,
                              order_id=oid, error=f"{type(exc).__name__}: {exc}")
@@ -1167,13 +1175,15 @@ class AlpacaAdapter(BrokerAdapter):
             await self.close_position(request.pair)
             # **A SUBMISSION, not a fill** — named that way so an operator reading the halt can
             # tell a slow close from a failed one.
+            close_view = "submitted"
             steps.append("close SUBMITTED, not yet observed filled")
         except Exception as exc:  # noqa: BLE001 - recorded; the observation decides
+            close_view = "failed"
             steps.append(f"close FAILED ({type(exc).__name__}: {exc})")
             logger.error("alpaca.protection_remediation.close_failed", symbol=request.pair,
                          order_id=order_id, error=f"{type(exc).__name__}: {exc}")
 
-        flat, observed = await self._observe_flat(request.pair, order_id)
+        flat, observed, settled = await self._observe_flat(request.pair, order_id)
         detail = "; ".join(steps + [observed])
 
         if not flat:
@@ -1184,23 +1194,79 @@ class AlpacaAdapter(BrokerAdapter):
             raise AlpacaUnprotectedPositionOpen(symbol=request.pair, order_id=order_id,
                                                 detail=detail)
 
-        # **THE LEG STATUSES FIRST, AND NO PREDICTION** (review, manager). This string is stored as
-        # `redact_for_storage(str(exc))`, which bounds it at 300 characters, and a realistic message
-        # was already over 400 before any leg data — so anything appended was cut from the durable
-        # REJECTED row. And the (status, kind) pairs are THE datum probe 3's outcome exists to produce:
-        # which status the venue parks a stop leg in. The old ending, "this venue will refuse the
-        # same order every time", was false in exactly that case — if the venue parks a working stop
-        # in a status our list does not admit, the venue refused nothing and the list is too narrow.
+        # **FACTS FIRST, PROSE LAST** (manager's ruling, from review's REVIEW_PASS finding on a4b9a34).
+        #
+        # This string is stored as `redact_for_storage(str(exc))`, bounded at 300 characters, and
+        # `rejection_reason` is the ONLY durable link from the decision row to the venue order — none of
+        # the 29 `DecisionRecord` columns holds an order id. At a real 36-character id, a4b9a34's layout
+        # stored BYTE-IDENTICAL rows for "entry filled, a real unprotected position existed, remediation
+        # closed it" and "entry never filled": the steps that told them apart sat past the bound. So
+        # every fact gets a compact token ahead of the prose, and `{detail}` may truncate harmlessly.
+        #
+        #   entry=   the parent's TERMINAL status and filled quantity from the POST-remediation read,
+        #            once the state has settled. NOT the protection re-read, which happens BEFORE
+        #            remediation: a market entry can read `new` there and fill before the cancel lands.
+        #            And NOT status alone: a partial fill whose remainder is cancelled ends `canceled`
+        #            with a NON-ZERO filled quantity — a real position existed. `unknown` only if that
+        #            read is missing, which cannot happen on this path: a failed observation raises
+        #            AlpacaUnprotectedPositionOpen instead of reaching here.
+        #   cancel=  accepted/failed counts across the parent and every live leg
+        #   close=   submitted / failed
+        #   order=   the venue order id, so an operator can find it
+        #
+        # legs= stays FIRST because the (status, kind) pairs are the datum probe 3 exists to produce:
+        # which status the venue parks a stop leg in. And the message makes NO PREDICTION that the
+        # venue will refuse the same order again — that is false in exactly the case where a working
+        # stop sits in a status the allow-list does not admit, and then the venue refused nothing.
         leg_view = ("re-read FAILED" if reread_error is not None else
                     ",".join(f"{self._order_status(l) or '?'}/{self._leg_kind(l) or '?'}" for l in legs)
                     or "none")
+        if settled is None:
+            entry_view = "unknown"
+        else:
+            entry_view = (f"{self._order_status(settled) or '?'}/"
+                          f"{self._qty_token(getattr(settled, 'filled_qty', None))}")
         raise AlpacaProtectionNotAccepted(
-            f"no working stop leg on re-read of {request.pair} {order_id}: legs=[{leg_view}] "
-            f"(asked {wanted}, class={got!r}). Admitted working statuses: "
-            f"{sorted(WORKING_STOP_LEG_STATUSES)} - if a stop leg above is in another working status, "
-            f"that list is too narrow and the venue refused nothing. Remediation: {detail}",
+            f"{request.pair} legs=[{leg_view}] entry={entry_view} "
+            f"cancel={cancel_ok}ok/{cancel_failed}failed close={close_view} order={order_id} "
+            f"(no working stop leg; a stop in another working status means the allow-list is too "
+            f"narrow) Remediation: {detail}",
             broker="alpaca",
         )
+
+    @staticmethod
+    def _qty_token(raw) -> str:
+        """A filled quantity as it goes into the stored refusal: the VENUE'S OWN VALUE, or `?`.
+
+        `Order.filled_qty` is `str | float | None`, default `None`, and it has THREE states — every
+        collapse of two of them is a false fact in the one field that records whether exposure happened:
+
+            absent / unparseable / non-finite   -> "?"
+            present, numerically zero           -> the raw value as sent ("0", "0.000", ...)
+            present, numerically non-zero       -> the raw value as sent ("0.00001294", ...)
+
+        * **Absent is not zero** (review): rendering `None` as `0` stores `canceled/0`, "never filled",
+          for a quantity nobody read.
+        * **NaN is neither branch** (manager): `nan == 0` and `nan > 0` are both False, so any zero test
+          files it on one side or the other. It is tested for explicitly.
+        * **Parse to decide, store what came in** (manager): `str(float("0.00001294"))` is `1.294e-05`,
+          which no longer matches the venue and will not be found by anyone searching for it. A string
+          is kept verbatim; a float — which has no verbatim text — is written positionally via Decimal.
+        """
+        import math
+        from decimal import Decimal
+
+        if raw is None or (isinstance(raw, str) and not raw.strip()):
+            return "?"
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            return "?"
+        if not math.isfinite(value):
+            return "?"
+        if isinstance(raw, str):
+            return raw.strip()
+        return format(Decimal(repr(value)), "f")
 
     @staticmethod
     def _order_status(order) -> str:
@@ -1252,8 +1318,12 @@ class AlpacaAdapter(BrokerAdapter):
         norm = lambda v: str(v or "").replace("/", "").replace("-", "").upper()  # noqa: E731
         return norm(a) == norm(b)
 
-    async def _observe_flat(self, symbol: str, order_id: str) -> tuple[bool, str]:
-        """**Positive evidence of flat, or not flat.** Returns `(flat, what_was_observed)`.
+    async def _observe_flat(self, symbol: str, order_id: str) -> tuple[bool, str, object | None]:
+        """**Positive evidence of flat, or not flat.** Returns `(flat, what_was_observed, settled_parent)`.
+
+        `settled_parent` is this order as re-read AFTER remediation — returned as DATA, not only
+        printed, because the refusal's `entry=` token is built from its terminal status and filled
+        quantity. It is `None` whenever flat was not observed that far.
 
         THREE observations, because each alone reads a live state as flat:
 
@@ -1282,11 +1352,11 @@ class AlpacaAdapter(BrokerAdapter):
         try:
             positions = await self._raw_positions()
         except Exception as exc:  # noqa: BLE001 - an unmakeable observation is NOT flat
-            return False, f"flat NOT OBSERVED: position query failed ({type(exc).__name__}: {exc})"
+            return False, f"flat NOT OBSERVED: position query failed ({type(exc).__name__}: {exc})", None
 
         held = [p for p in positions if self._same_symbol(getattr(p, "symbol", None), symbol)]
         if held:
-            return False, f"flat NOT OBSERVED: {len(held)} position(s) still open for {symbol}"
+            return False, f"flat NOT OBSERVED: {len(held)} position(s) still open for {symbol}", None
 
         try:
             # EVERY FIELD STATED, none left to a server default: OPEN, an explicit limit (R-10),
@@ -1296,22 +1366,22 @@ class AlpacaAdapter(BrokerAdapter):
                 status=QueryOrderStatus.OPEN, limit=limit, direction=Sort.DESC, nested=True)) or []
             self._require_model(orders, "get_orders")
         except Exception as exc:  # noqa: BLE001 - an unmakeable observation is NOT flat
-            return False, f"flat NOT OBSERVED: open-order query failed ({type(exc).__name__}: {exc})"
+            return False, f"flat NOT OBSERVED: open-order query failed ({type(exc).__name__}: {exc})", None
 
         if len(orders) >= limit:
             return False, (f"flat NOT OBSERVED: open-order page returned {len(orders)} — full, so "
-                           f"an order for {symbol} may have been truncated")
+                           f"an order for {symbol} may have been truncated"), None
 
         resting = [o for o in orders if self._same_symbol(getattr(o, "symbol", None), symbol)]
         if resting:
-            return False, f"flat NOT OBSERVED: {len(resting)} open order(s) still resting for {symbol}"
+            return False, f"flat NOT OBSERVED: {len(resting)} open order(s) still resting for {symbol}", None
         live_legs = [
             leg for o in orders for leg in (getattr(o, "legs", None) or [])
             if self._same_symbol(getattr(leg, "symbol", None), symbol)
             and self._order_status(leg) not in TERMINAL_ORDER_STATUSES
         ]
         if live_legs:
-            return False, f"flat NOT OBSERVED: {len(live_legs)} child leg(s) still live for {symbol}"
+            return False, f"flat NOT OBSERVED: {len(live_legs)} child leg(s) still live for {symbol}", None
 
         try:
             mine = self._require_model(
@@ -1319,13 +1389,14 @@ class AlpacaAdapter(BrokerAdapter):
                 "get_order_by_id")
         except Exception as exc:  # noqa: BLE001 - an unmakeable observation is NOT flat
             return False, (f"flat NOT OBSERVED: re-read of order {order_id} failed "
-                           f"({type(exc).__name__}: {exc})")
+                           f"({type(exc).__name__}: {exc})"), None
 
         unfinished = [o for o in [mine] + list(getattr(mine, "legs", None) or [])
                       if self._order_status(o) not in TERMINAL_ORDER_STATUSES]
         if unfinished:
+            parts = ", ".join(self._order_status(o) or "?" for o in unfinished)
             return False, (f"flat NOT OBSERVED: order {order_id} still has {len(unfinished)} "
-                           f"non-terminal part(s) ({', '.join(self._order_status(o) or '?' for o in unfinished)})")
+                           f"non-terminal part(s) ({parts})"), None
 
         # **SCOPED TO WHAT WAS CHECKED** (review). The earlier "no position, no open order or live leg
         # for <symbol>" was false in exactly one tree: a DIFFERENT filled parent's take-profit still
@@ -1333,7 +1404,7 @@ class AlpacaAdapter(BrokerAdapter):
         # moment, so the scope goes in the line, not in a caveat after it. The "flat OBSERVED" prefix
         # is kept — four arms assert it, and it is not a substring of "flat NOT OBSERVED".
         return True, (f"flat OBSERVED: no position for {symbol}; no open order or live leg for it on "
-                      f"the open-order page; order {order_id} and its legs terminal")
+                      f"the open-order page; order {order_id} and its legs terminal"), mine
 
     @staticmethod
     def _protection_class(placed) -> str | None:
