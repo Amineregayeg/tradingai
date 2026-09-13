@@ -224,7 +224,13 @@ def test_the_factory_still_constructs_with_raw_data_FALSE():
 
     class _Recorder:
         def __init__(self, key, secret, paper=True, raw_data=False, **kw):
+            import requests
+
             captured.update(paper=paper, raw_data=raw_data)
+            # `B440`/`B441`: the builder sets these two SDK attributes and REFUSES a client without them.
+            self._retry_codes = [429, 504]
+            self._session = requests.Session()
+            captured["client"] = self
 
     import alpaca.trading.client as alpaca_client
     original = alpaca_client.TradingClient
@@ -235,6 +241,7 @@ def test_the_factory_still_constructs_with_raw_data_FALSE():
         alpaca_client.TradingClient = original
 
     assert captured.get("raw_data") is False and captured.get("paper") is True
+    assert captured["client"]._retry_codes == [429], "the factory's client still retries on 504 (B440)"
 
 
 def test_an_account_with_NO_cash_REFUSES_rather_than_substituting_equity():

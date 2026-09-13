@@ -1003,6 +1003,44 @@ def _status_literals(source: str, function_names: set[str]) -> dict[str, set[str
     return found
 
 
+#: **A BOUNDED, REASONED EXEMPTION, keyed by (literal, the SITES allowed to emit it)** — not a list of unresolved
+#: statuses (UNRESOLVED stays the complement), and not keyed by literal alone: review planted SUBMITTED in
+#: `paper.place_order` and a literal-keyed exemption passed it, though a simulator emitting it would halt a running
+#: engine. Each literal is allowed only where its reason applies.
+DELIBERATELY_UNRESOLVED: dict[str, tuple[frozenset, str]] = {
+    "SUBMITTED": (frozenset({"alpaca._order_result"}),
+                  "Alpaca's result for an order returned with no readable status — not a known outcome, so it halts"),
+    "SUBMISSION_UNCONFIRMED": (frozenset({"alpaca._unconfirmed_submission"}),
+                               "Alpaca's result when a failed submission's order could not be found or matched "
+                               "(B440/B441) — its existence is unknown, so it halts, never a refusal"),
+}
+
+
+def _unclassified_status_literals(emitted: dict[str, set[str]], known: set[str]) -> dict[str, list[str]]:
+    """Literals a producer emits that are neither classified nor exempt AT THAT SITE. Sites are
+    `module.function:line`; the exemption compares `module.function`."""
+    out: dict[str, list[str]] = {}
+    for literal, sites in emitted.items():
+        if literal in known:
+            continue
+        allowed = DELIBERATELY_UNRESOLVED.get(literal, (frozenset(), ""))[0]
+        stray = sorted(site for site in sites if site.rsplit(":", 1)[0] not in allowed)
+        if stray:
+            out[literal] = stray
+    return out
+
+
+def test_V2b_an_exemption_holds_ONLY_at_its_own_site():
+    """The plant review ran: SUBMITTED emitted from `paper.place_order` must FAIL, and the real site must pass."""
+    known = {"FILLED", "PARTIALLY_FILLED", "REJECTED", "rejected", "observed"}
+    assert _unclassified_status_literals({"SUBMITTED": {"alpaca._order_result:10"}}, known) == {}
+    assert _unclassified_status_literals({"SUBMITTED": {"paper.place_order:3"}}, known) == {
+        "SUBMITTED": ["paper.place_order:3"]}
+    assert _unclassified_status_literals(
+        {"SUBMISSION_UNCONFIRMED": {"alpaca._unconfirmed_submission:9", "cft_sim.place_order:4"}}, known) == {
+        "SUBMISSION_UNCONFIRMED": ["cft_sim.place_order:4"]}
+
+
 def test_V2_every_status_LITERAL_a_producer_can_emit_is_CLASSIFIED():
     """**A new literal forces a decision instead of landing in whichever branch is the complement.**
 
@@ -1037,7 +1075,7 @@ def test_V2_every_status_LITERAL_a_producer_can_emit_is_CLASSIFIED():
 
     emitted: dict[str, set[str]] = {}
     for module, names in ((service, {"execute"}), (paper, {"place_order"}),
-                          (cft_sim, {"place_order", "_reject"}), (alpaca, {"place_order", "_order_result"})):
+                          (cft_sim, {"place_order", "_reject"}), (alpaca, {"place_order", "_order_result", "_unconfirmed_submission"})):
         for value, sites in _status_literals(inspect.getsource(module), names).items():
             emitted.setdefault(value, set()).update(f"{module.__name__.rsplit('.', 1)[-1]}.{s}" for s in sites)
 
@@ -1049,12 +1087,7 @@ def test_V2_every_status_LITERAL_a_producer_can_emit_is_CLASSIFIED():
         )
     assert {"rejected", "REJECTED", "FILLED", "observed"} <= set(emitted), sorted(emitted)
 
-    # **A BOUNDED, REASONED EXEMPTION, not a list of unresolved statuses** (M-2's shape). UNRESOLVED stays the
-    # complement; this names the one literal a producer emits ON PURPOSE to land there.
-    deliberately_unresolved = {
-        "SUBMITTED": "Alpaca's result for an order returned with no readable status — not a known outcome, so it halts",
-    }
-    unclassified = {v: sorted(s) for v, s in emitted.items() if v not in known and v not in deliberately_unresolved}
+    unclassified = _unclassified_status_literals(emitted, known)
     assert not unclassified, (
         f"a producer emits a status the loop does not classify: {unclassified}. Decide whether it is a "
         f"fill, a refusal, or not reachable from the loop — do not let it fall into UNRESOLVED by accident."

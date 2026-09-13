@@ -55,7 +55,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Callable
 
 from app.core.exceptions import BrokerError, DirectionNotSupported
-from app.core.logging import logger
+from app.core.logging import logger, redact_for_storage
 from app.db.enums import DirectionType
 from app.models.decision_record import REJECTION_VENUE_ENDED_UNFILLED
 from app.schemas.broker import Position
@@ -308,6 +308,159 @@ ORDER_RESOLUTION_BUDGET_S: float = 5.0
 #: the schedule's final gap for as long as the budget allows — so a larger budget adds reads rather than
 #: leaving the tail unwatched, and a smaller one simply stops earlier.
 ORDER_RESOLUTION_READ_OFFSETS_S: tuple[float, ...] = (0.0, 0.25, 0.75, 1.75, 3.0, 4.5)
+
+#: **`B441`. EVERY ALPACA REQUEST HAS A TIMEOUT: 3s to connect, 10s to read.** The SDK passes none
+#: (`RESTClient._one_request` calls `self._session.request(method, url, **opts)`), so a hung connection
+#: blocked the event loop forever. Set ONCE, on the client's Session, by `build_trading_client` — never at
+#: a call site, where one would be forgotten.
+#:
+#: **HOW THIS BOUNDS THE BUDGET, stated (review's X-10):** no read STARTS after the budget is spent, but a read
+#: that has started cannot be interrupted — so a resolution's wall time is the budget plus ONE call's maximum:
+#: 5s + 13s ≈ 18s without a 429, ~5s + ~61s with three. A resolver read started at 4.5s can run to 14.5s; one call is
+#: bounded at connect + read = 13s per attempt, and a 429 adds up to three retries with the SDK's 3s sleep
+#: (~61s worst case for one call). A kill switch close per position is then ~13s + resolution (budget +
+#: last read, ~14.5s) ≈ 27.5s without 429s — and the closes run one after another, so ~27.5s × N for N
+#: positions. Bounded, and visible rather than assumed.
+#:
+#: **A timeout creates AMBIGUOUS submissions** — a read timeout after the order was sent — which is why it
+#: lands with `classify_submission_failure` and the client-order-id lookup, never alone.
+ALPACA_HTTP_CONNECT_TIMEOUT_S: float = 3.0
+ALPACA_HTTP_READ_TIMEOUT_S: float = 10.0
+
+#: **`B440`. THE ONLY STATUS THE SDK MAY RETRY ON.** Its default is `[429, 504]` for EVERY method. A 429 was
+#: refused before processing and is safe to re-send; a 504 is a gateway timeout after which the order MAY
+#: exist — measured on loopback, the SDK re-POSTed the same `client_order_id` (then got 422 "must be
+#: unique", filed as a transport refusal for an order that may exist) and re-sent a partial close with
+#: the same `qty` (the quantity sold twice). One setting for every method, not per-method logic.
+#:
+#: **ASSUMPTION, UNMEASURED (review's X-14):** a 429 means the venue did NOT process the request — Alpaca's
+#: documented rate-limit behaviour, not observed here. The retry still RE-SENDS and still SLEEPS INLINE
+#: (the SDK's `time.sleep`, 3s, up to three times), so a 429 costs event-loop time until `B437`'s executor.
+ALPACA_RETRY_STATUS_CODES: tuple[int, ...] = (429,)
+
+
+def _timeout_adapter():
+    """An `HTTPAdapter` whose `send` supplies the timeout whenever the caller gave none. `Session.request`
+    ALWAYS passes `timeout=None` explicitly, so a `setdefault` would never fire; `None` is replaced. The
+    constants are read at SEND time, where they are set."""
+    from requests.adapters import HTTPAdapter
+
+    class _AlpacaTimeoutAdapter(HTTPAdapter):
+        def send(self, request, **kwargs):
+            if kwargs.get("timeout") is None:
+                kwargs["timeout"] = (ALPACA_HTTP_CONNECT_TIMEOUT_S, ALPACA_HTTP_READ_TIMEOUT_S)
+            return super().send(request, **kwargs)
+
+    return _AlpacaTimeoutAdapter()
+
+
+def build_trading_client(api_key: str, api_secret: str, *, paper: bool, url_override: str | None = None):
+    """**The ONE way this codebase builds an Alpaca `TradingClient`** (`B440`/`B441`), used by the broker
+    manager and the live loop so the two cannot drift apart.
+
+    `raw_data=False` pinned (a model, not a dict — `B356`'s trap on our side). Retries only on 429, and a
+    timeout on every request. **The SDK takes neither as a constructor argument** — `TradingClient.__init__`
+    does not forward them — so they are set on its private `_retry_codes` and on its `_session`. If the SDK
+    no longer HAS those attributes this REFUSES rather than returning a client that would retry a POST on
+    504 and hang forever; an arm reads the SDK's source so a rename fails a test before it reaches here.
+    The SDK is imported inside (`B328`: this module must stay importable without it).
+    """
+    from alpaca.trading.client import TradingClient
+
+    kwargs: dict = {"paper": paper, "raw_data": False}
+    if url_override is not None:
+        kwargs["url_override"] = url_override
+    client = TradingClient(api_key, api_secret, **kwargs)
+    missing = [name for name in ("_retry_codes", "_session") if not hasattr(client, name)]
+    if missing:
+        raise BrokerError(
+            f"refusing to build an Alpaca client: the SDK no longer exposes {missing}, so its retry codes "
+            f"and request timeout cannot be set — the client it would return retries a POST on 504 and "
+            f"can hang forever (B440, B441). Re-derive build_trading_client against the installed SDK.",
+            broker="alpaca",
+        )
+    client._retry_codes = list(ALPACA_RETRY_STATUS_CODES)
+    adapter = _timeout_adapter()
+    client._session.mount("https://", adapter)
+    client._session.mount("http://", adapter)
+    return client
+
+
+SUBMISSION_NOT_CREATED = "not_created"
+#: The server ANSWERED this POST (a 422): a lookup's 404 then proves the order was not created.
+SUBMISSION_ANSWERED = "answered"
+#: SENT and NOT ANSWERED (5xx, a read timeout, a reset, anything unplaced): a 404 proves nothing — the backend
+#: may still be storing the order (manager's ruling), so the lookup repeats within the budget.
+SUBMISSION_UNANSWERED = "unanswered"
+
+
+def _exception_chain(exc: BaseException) -> list[BaseException]:
+    """`exc` and what it EXPLICITLY wraps: `__cause__` (our `_call` raises `from exc`), an exception in `args[0]`
+    (requests: `ConnectionError(MaxRetryError(...))`) and urllib3's `.reason` (`MaxRetryError.reason` is the
+    `NewConnectionError`). Measured on a real refused connection (review's X-8, manager). **Implicit
+    `__context__` is NOT followed** — it depends on where a raise happened, not on what the library built.
+    Bounded and cycle-safe."""
+    out: list[BaseException] = []
+    pending = [exc]
+    while pending and len(out) < 16:
+        current = pending.pop(0)
+        if current is None or any(current is seen for seen in out):
+            continue
+        out.append(current)
+        for nxt in (current.__cause__, getattr(current, "reason", None), current.args[0] if current.args else None):
+            if isinstance(nxt, BaseException):
+                pending.append(nxt)
+    return out
+
+
+def _http_status_of(exc: BaseException) -> int | None:
+    """The HTTP status an `APIError` in the chain carries, or None. **Only `.status_code` is read**: `.code`
+    and `.message` are properties that `json.loads` the body and RAISE on a non-JSON one (measured)."""
+    for link in _exception_chain(exc):
+        if type(link).__name__ == "APIError" and type(link).__module__.startswith("alpaca."):
+            try:
+                status = link.status_code
+            except Exception:  # noqa: BLE001 - unreadable is "no status", which is ambiguous
+                return None
+            return status if isinstance(status, int) else None
+    return None
+
+
+def classify_submission_failure(exc: BaseException) -> str:
+    """**`B440`/`B441`. Did a failed order submission CREATE an order? By exception TYPE, never by text.**
+
+    MEASURED on loopback (`requests` 2.34, urllib3 2.7): *connection refused* and *reset after the server
+    read the order* raise the SAME class, `requests.ConnectionError` — only the CHAIN separates them. So:
+
+    ```
+    NOT CREATED   a urllib3 ConnectTimeoutError in the chain — the connect phase failed; NewConnectionError
+                  (refused, DNS) subclasses it, and requests.ConnectTimeout wraps it. Nothing was sent.
+                  An APIError 429 — rate-limited, not processed.
+                  An APIError with any other 4xx EXCEPT 422 — the server read the order and refused it.
+    ANSWERED      an APIError 422. A duplicate client_order_id is a 422 and cannot be told from a validation
+                  refusal without reading text, so the venue is ASKED — once, because it answered this POST.
+    UNANSWERED    everything else: APIError 5xx; an APIError with no readable status; ReadTimeout; a
+                  ConnectionError whose chain is a ProtocolError / RemoteDisconnected / SSLError; any
+                  exception type not placed above.
+    ```
+    """
+    try:
+        from urllib3.exceptions import ConnectTimeoutError
+    except Exception:  # noqa: BLE001 - without urllib3 nothing can be proven unsent
+        ConnectTimeoutError = ()  # type: ignore[assignment]
+    chain = _exception_chain(exc)
+    # FIRST, before anything that could read as a timeout (review's X-9): `requests.ConnectTimeout` is BOTH a
+    # ConnectionError and a Timeout, and it is connect-phase — nothing was sent. There is deliberately no
+    # generic Timeout branch; a ReadTimeout (sent) falls through to UNANSWERED.
+    if ConnectTimeoutError and any(isinstance(link, ConnectTimeoutError) for link in chain):
+        return SUBMISSION_NOT_CREATED
+    status = _http_status_of(exc)
+    if status == 429 or (status is not None and 400 <= status < 500 and status != 422):
+        return SUBMISSION_NOT_CREATED
+    if status == 422:
+        return SUBMISSION_ANSWERED
+    return SUBMISSION_UNANSWERED
+
 
 #: The largest budget accepted. A tick is `POLL_INTERVAL` (10s); a minute of blocking the loop per order is
 #: already far past any trading intent, so a larger value is a units mistake (milliseconds typed as
@@ -1110,7 +1263,28 @@ class AlpacaAdapter(BrokerAdapter):
                 f"refusing to place an order: ORDER_RESOLUTION_BUDGET_S is {problem}, so its outcome could "
                 f"not be resolved. Nothing was sent.", broker=self.broker_name,
             )
-        placed = self._require_model(await self._call("submit_order", order), "submit_order")
+        try:
+            placed = self._require_model(await self._call("submit_order", order), "submit_order")
+        except BrokerError as exc:
+            # **`B440`/`B441`. A FAILED SUBMISSION IS NOT PROOF THAT NO ORDER EXISTS.** Only a failure raised
+            # before anything was sent, or a refusal the server read and answered, is (`classify_submission_
+            # failure`, by exception type). Anything else asks the venue by client_order_id, and an order it
+            # cannot find is UNRESOLVED — a halt — never a refusal that a filled order would contradict.
+            kind = classify_submission_failure(exc)
+            if kind == SUBMISSION_NOT_CREATED:
+                raise
+            try:
+                placed, why = await self._find_submitted_order(order, kind, exc)
+            except asyncio.CancelledError:
+                logger.error(
+                    "alpaca.submission_cancelled_while_unconfirmed — the submission FAILED ambiguously and this "
+                    "task was cancelled while looking for the order, which MAY EXIST at the venue",
+                    client_order_id=request.client_order_id, symbol=request.pair,
+                    failure=f"{type(exc).__name__}", kind=kind,
+                )
+                raise
+            if placed is None:
+                return self._unconfirmed_submission(request, quantity, requested, limits, exc, why)
 
         # ------------------------------------------------------------------
         # **AND VERIFY IT LANDED, because the dangerous failure is the SILENT one.**
@@ -1126,6 +1300,23 @@ class AlpacaAdapter(BrokerAdapter):
         # than invisible. **This turns the unknown into a loud failure instead of a quiet one**,
         # which is the only property available without placing a real order.
         # ------------------------------------------------------------------
+        # **D3 (`B437`).** From here the order EXISTS at the venue. A cancellation during the protection check
+        # or the resolution used to vanish with it — measured on a451ec1, no log line held the order id. It is
+        # logged with everything needed to find the order, and re-raised.
+        progress: dict = {"last_status": self._order_status(placed)}
+        try:
+            return await self._verdict_for_placed(placed, request, protection, quantity, requested, limits, progress)
+        except asyncio.CancelledError:
+            logger.error(
+                "alpaca.order_cancelled_after_submission — the order EXISTS at the venue and this task was "
+                "cancelled before its outcome was recorded. Find it by id before trading this symbol again.",
+                order_id=str(getattr(placed, "id", "") or ""), client_order_id=request.client_order_id,
+                symbol=request.pair, last_status=progress.get("last_status"),
+            )
+            raise
+
+    async def _verdict_for_placed(self, placed, request, protection, quantity, requested, limits, progress) -> dict:
+        """B429's protection check and B427's resolution for an order that EXISTS, mapped into the result."""
         first_read = None
         if protection:
             first_read = await self._require_protection(placed, request)
@@ -1145,7 +1336,7 @@ class AlpacaAdapter(BrokerAdapter):
         # method directly, so this is the only place the real venue will exercise it before the engine does.
         # The acknowledgement is kept beside the verdict (`resolution.ack_*`), never overwritten.
         # ------------------------------------------------------------------
-        resolved, resolution = await self._resolve_order(str(getattr(placed, "id", "") or ""), first_read)
+        resolved, resolution = await self._resolve_order(str(getattr(placed, "id", "") or ""), first_read, progress)
         verdict = self._order_result(resolved if resolved is not None else placed)
         ack = self._order_result(placed)
         status = verdict["status"]
@@ -1187,6 +1378,110 @@ class AlpacaAdapter(BrokerAdapter):
             result["rejection_code"] = verdict["rejection_code"]
             result["reason"] = verdict["reason"]
         return result
+
+    async def _find_submitted_order(self, order, kind: str, exc: BaseException) -> tuple[Any, str | None]:
+        """Ask the venue for the order a failed submission may have created, by its client_order_id.
+
+        ```
+        ANSWERED (422)   ONE lookup. The server answered this POST, so a 404 PROVES it was not created: the
+                         ORIGINAL refusal is re-raised. Any other lookup failure -> not found -> UNRESOLVED.
+        UNANSWERED       lookups on the resolver's schedule within ORDER_RESOLUTION_BUDGET_S. A 404 proves
+                         nothing — the backend may still be storing the order — so it is "not yet".
+        ```
+        A FOUND order is ours only if it MATCHES the request (`_submission_mismatch`); otherwise UNRESOLVED
+        with both orders named. Returns `(order, None)` or `(None, why)`. Raises only the original refusal.
+        """
+        client_id = getattr(order, "client_order_id", None)
+        failure = f"{type(exc).__name__}: {redact_for_storage(str(exc), limit=160)}"
+        if not client_id:
+            return None, f"the submission failed ({failure}) and carried no client_order_id to look it up by"
+        offsets = [0.0] if kind == SUBMISSION_ANSWERED else self._resolution_offsets(ORDER_RESOLUTION_BUDGET_S)
+        start = self._clock()
+        lookups = 0
+        seen: list[str] = []
+        budget = ORDER_RESOLUTION_BUDGET_S
+        for offset in offsets:
+            if lookups and self._clock() - start >= budget:
+                break                       # wall time, as in the resolver (X-10)
+            wait = start + offset - self._clock()
+            if wait > 0:
+                await self._sleep(wait)
+            lookups += 1
+            try:
+                found = self._require_model(
+                    await self._call("get_order_by_client_id", client_id), "get_order_by_client_id")
+            except BrokerError as lookup_exc:
+                if _http_status_of(lookup_exc) == 404:
+                    if kind == SUBMISSION_ANSWERED:
+                        raise exc
+                    seen.append("404")
+                else:
+                    seen.append(type(lookup_exc.__cause__ or lookup_exc).__name__)
+                continue
+            mismatch = self._submission_mismatch(found, order)
+            if mismatch:
+                return None, (f"an order with client_order_id {client_id!r} EXISTS at the venue but does not "
+                              f"match this request ({mismatch}) — not treated as ours; the submission failed "
+                              f"with {failure}")
+            logger.error(
+                "alpaca.submission_ambiguous_found — the submission FAILED but the venue HAS this order; "
+                "resolving it instead of recording a refusal",
+                client_order_id=client_id, order_id=str(getattr(found, "id", "") or ""), failure=failure,
+                lookups=lookups, kind=kind,
+            )
+            return found, None
+        return None, (f"not found at the venue after {lookups} lookup(s) over "
+                      f"{round(self._clock() - start, 3)}s — it may still appear (the submission failed with "
+                      f"{failure}; lookups answered {seen[:6]})")
+
+    def _submission_mismatch(self, found, order) -> str | None:
+        """Why a looked-up order is NOT the one this request sent, or None when symbol, side and qty all match.
+
+        **RESIDUAL, stated (manager):** `service.py` builds client_order_id as `sig-` + 8 hex characters — 32
+        bits — so across an account's history two orders sharing one is plausible (even odds at about 77,000
+        orders). Matching the request is what keeps a stranger's order from being adopted; widening the id is
+        not done here, because `service.py` serves every venue and OANDA's client extensions have limits.
+        """
+        problems = []
+        if not self._same_symbol(getattr(found, "symbol", None), str(getattr(order, "symbol", ""))):
+            problems.append(f"symbol venue={getattr(found, 'symbol', None)!r} sent={getattr(order, 'symbol', None)!r}")
+        venue_side = getattr(getattr(found, "side", None), "value", getattr(found, "side", None))
+        sent_side = getattr(getattr(order, "side", None), "value", getattr(order, "side", None))
+        if str(venue_side or "").lower() != str(sent_side or "").lower():
+            problems.append(f"side venue={venue_side!r} sent={sent_side!r}")
+        try:
+            same_qty = Decimal(str(getattr(found, "qty", None))) == Decimal(str(getattr(order, "qty", None)))
+        except (InvalidOperation, ValueError, TypeError):
+            same_qty = False
+        if not same_qty:
+            problems.append(f"qty venue={getattr(found, 'qty', None)!r} sent={getattr(order, 'qty', None)!r}")
+        return "; ".join(problems) or None
+
+    def _unconfirmed_submission(self, request, quantity, requested, limits, exc, why: str) -> dict:
+        """The result for a submission whose outcome cannot be established: UNRESOLVED, which halts."""
+        # The reason goes in a FIELD, never into the message: loguru formats the message with `str.format`,
+        # and a venue body quoted in `why` carries braces (`B414`'s class — measured here, as a KeyError).
+        logger.error("alpaca.submission_unconfirmed — HALT EXPECTED: the order's existence could not be established",
+                     reason=why, symbol=request.pair, client_order_id=request.client_order_id)
+        return {
+            "status": "SUBMISSION_UNCONFIRMED",
+            "reason": redact_for_storage(why),
+            "filled_units": None,
+            "position_id": None,
+            "pair": request.pair,
+            "direction": request.direction.value,
+            "units": float(quantity),
+            "requested_units": float(requested),
+            "quantise_increment": float(limits.min_trade_increment),
+            "min_order_size": float(limits.min_order_size),
+            "client_order_id": request.client_order_id,
+            "fill": None,
+            "venue_status": None,
+            "terminal": False,
+            "resolution": {"resolved": False, "reads": 0, "elapsed_s": 0.0, "budget_s": ORDER_RESOLUTION_BUDGET_S,
+                           "budget_problem": None, "read_errors": [], "ack_status": None,
+                           "ack_filled_units": None},
+        }
 
     async def _require_protection(self, placed, request):
         """**`B429`: the order stands only if a WORKING STOP LEG is observed. Otherwise remediate.**
@@ -1385,7 +1680,7 @@ class AlpacaAdapter(BrokerAdapter):
             nxt += gap
         return offsets
 
-    async def _resolve_order(self, order_id: str, first_read=None) -> tuple[Any, dict]:
+    async def _resolve_order(self, order_id: str, first_read=None, progress: dict | None = None) -> tuple[Any, dict]:
         """**`B427`. Re-read an order until it is TERMINAL or the budget is spent. NEVER raises.**
 
         Returns `(last_order_read_or_first_read, resolution)`. `first_read` is a re-read ALREADY made —
@@ -1410,6 +1705,9 @@ class AlpacaAdapter(BrokerAdapter):
         last = first_read
         reads = 1 if first_read is not None else 0
         errors: list[str] = []
+        progress = progress if progress is not None else {}
+        if first_read is not None:
+            progress["last_status"] = self._order_status(first_read)
 
         def _terminal(order) -> bool:
             return order is not None and self._order_status(order) in TERMINAL_ORDER_STATUSES
@@ -1418,6 +1716,10 @@ class AlpacaAdapter(BrokerAdapter):
             for offset in self._resolution_offsets(budget):
                 if offset == 0.0 and first_read is not None:
                     continue
+                # WALL TIME, not the schedule (review's X-10): a slow read pushes later offsets into the past,
+                # and without this every one of them would still read. No read STARTS once the budget is spent.
+                if reads and self._clock() - start >= budget:
+                    break
                 wait = start + offset - self._clock()
                 if wait > 0:
                     await self._sleep(wait)
@@ -1428,6 +1730,8 @@ class AlpacaAdapter(BrokerAdapter):
                         "get_order_by_id")
                 except Exception as exc:  # noqa: BLE001 - a failed read is "not yet", never a verdict
                     errors.append(f"{type(exc).__name__}: {str(exc)[:160]}")
+                if last is not None:
+                    progress["last_status"] = self._order_status(last)
                 if _terminal(last):
                     break
 
@@ -1674,7 +1978,17 @@ class AlpacaAdapter(BrokerAdapter):
         adapter never calls; reading an Order as one is `B439`.
         """
         order_id = str(getattr(order, "id", "") or "")
-        resolved, resolution = await self._resolve_order(order_id)
+        progress: dict = {"last_status": self._order_status(order)}
+        try:
+            resolved, resolution = await self._resolve_order(order_id, None, progress)
+        except asyncio.CancelledError:
+            logger.error(
+                "alpaca.close_cancelled_after_submission — the CLOSE order EXISTS at the venue and this task "
+                "was cancelled before its outcome was recorded. Check the position at the venue.",
+                order_id=order_id, symbol=str(getattr(order, "symbol", "") or ""),
+                last_status=progress.get("last_status"),
+            )
+            raise
         verdict = self._order_result(resolved if resolved is not None else order)
         ack = self._order_result(order)
         return {
@@ -1744,13 +2058,31 @@ class AlpacaAdapter(BrokerAdapter):
                 try:
                     order = await self._call("close_position", symbol)
                 except Exception as exc:  # noqa: BLE001 - ANY exception, loop CONTINUES
+                    # `B440`/`B441`: the SAME type-based question as a submission — did this close reach the venue?
+                    kind = classify_submission_failure(exc)
+                    if kind == SUBMISSION_UNANSWERED:
+                        prefix = ("the close MAY HAVE REACHED the venue and no answer came — the position may be "
+                                  "closed or still open and MUST be checked at the venue")
+                    else:
+                        prefix = "the venue did not take this close"
                     row.update(
                         disposition=self.FAILED, status="failed", _in_flight=False,
-                        reason=f"{type(exc).__name__}: {exc}",
+                        reason=f"{prefix}: {type(exc).__name__}: {exc}",
                     )
                     continue
-                outcome = await self._close_outcome(order)
-                row.update(**self._close_disposition(outcome), close=outcome, _in_flight=False)
+                # INSIDE the per-position guard (manager, after review's B-12 note): surviving a bad position must
+                # come from the loop's STRUCTURE, not from `_close_outcome` promising never to raise — `B439` was
+                # exactly a raise outside this guard. The close WAS SENT by this point, so the reason says so.
+                try:
+                    outcome = await self._close_outcome(order)
+                    row.update(**self._close_disposition(outcome), close=outcome, _in_flight=False)
+                except Exception as exc:  # noqa: BLE001 - ANY exception, loop CONTINUES
+                    row.update(
+                        disposition=self.FAILED, status="failed", _in_flight=False,
+                        reason=(f"the close was SENT (order {getattr(order, 'id', None)}) but its outcome could "
+                                f"not be read ({type(exc).__name__}: {exc}) — the position MUST be checked at "
+                                f"the venue"),
+                    )
         except BaseException as exc:  # noqa: BLE001 - CancelledError is not an Exception
             for _row in report.values():
                 if _row.pop("_in_flight", False):

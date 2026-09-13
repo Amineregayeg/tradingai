@@ -131,12 +131,12 @@ def _make_adapter(
             the adapter in silence. Importing at module scope here would defeat that through the
             factory instead of through the adapter.
             """
-            from alpaca.trading.client import TradingClient
+            from app.services.broker.alpaca import build_trading_client
 
-            # `raw_data=False` IS PINNED AND IS NOT A DEFAULT WE INHERIT. It switches every return
-            # between a pydantic model and a dict, so it is `B356`'s trap with the variable on OUR
-            # side: adapter and mock could agree wrongly and no venue fact would contradict them.
-            return TradingClient(api_key, api_secret, paper=paper, raw_data=False)
+            # `B440`/`B441`: THE ONE BUILDER, shared with the live loop so the two clients on one account
+            # cannot drift apart — `raw_data=False` pinned (`B356`), retries only on 429, and a timeout on
+            # every request. It imports the SDK itself, inside the call (`B328`).
+            return build_trading_client(api_key, api_secret, paper=paper)
 
         from app.services.broker.alpaca import AlpacaAdapter
 

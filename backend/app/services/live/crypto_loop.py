@@ -1517,13 +1517,13 @@ class LiveCryptoLoop:
                     broker="alpaca",
                 )
 
-            from alpaca.trading.client import TradingClient
+            from app.services.broker.alpaca import build_trading_client
 
-            # `raw_data=False` PINNED — it switches every return between a pydantic model and a
-            # dict, and `paper=True` because `ExecMode` has no LIVE member. The adapter checks
-            # that flag against the client's ACTUAL endpoint and refuses on a disagreement
+            # THE ONE BUILDER (`B440`/`B441`), shared with the broker manager: `raw_data=False` pinned, retries
+            # only on 429, a timeout on every request. `paper=True` because `ExecMode` has no LIVE member. The
+            # adapter checks that flag against the client's ACTUAL endpoint and refuses on a disagreement
             # (`B389`), so this is asserted rather than trusted.
-            client = TradingClient(api_key, api_secret, paper=True, raw_data=False)
+            client = build_trading_client(api_key, api_secret, paper=True)
             # CONSTRUCT FIRST, LABEL SECOND (`B407`). This is exactly where `B389` refuses, so
             # assigning `self.mode` on the line above — as it was — flipped the label to
             # `ALPACA_PAPER` over a broker that was never built.

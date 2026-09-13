@@ -865,20 +865,21 @@ async def test_WHICH_BROKERS_EMIT_THE_KEY_is_pinned_because_the_fix_depends_on_i
     if not broker.exists():                       # running from the repo root
         broker = pathlib.Path("backend/app/services/broker")
 
-    def emits(name: str) -> bool:
+    def emits(name: str, builders=("place_order",)) -> bool:
         tree = ast.parse((broker / name).read_text(encoding="utf-8"))
-        fn = next(n for n in ast.walk(tree)
-                  if isinstance(n, (ast.AsyncFunctionDef, ast.FunctionDef))
-                  and n.name == "place_order")
+        fns = [n for n in ast.walk(tree)
+               if isinstance(n, (ast.AsyncFunctionDef, ast.FunctionDef)) and n.name in builders]
+        assert fns, f"{name} has none of {builders}; this scan is reading nothing"
         return any(isinstance(k, ast.Constant) and k.value == "filled_units"
-                   for d in ast.walk(fn) if isinstance(d, ast.Dict) for k in d.keys)
+                   for fn in fns for d in ast.walk(fn) if isinstance(d, ast.Dict) for k in d.keys)
 
     assert not emits("paper.py"), (
         "paper.py now reports a filled quantity — the `FILLED` fallback is no longer for it, and "
         "the membership test's meaning has changed under it"
     )
     assert not emits("cft_sim.py"), "cft_sim.py now reports a filled quantity"
-    assert emits("alpaca.py"), (
+    # `B427`/`B440` moved Alpaca's result dict out of `place_order` into the two methods that build it.
+    assert emits("alpaca.py", ("_verdict_for_placed", "_unconfirmed_submission")), (
         "alpaca.py no longer emits `filled_units`, so an unreported venue fill is now "
         "indistinguishable from a paper fill and takes the submitted size"
     )
