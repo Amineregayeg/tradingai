@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-13 (newest entry B432 — TESTS THAT DRIVE THE TICK PATH MAKE A REAL NETWORK CALL TO BINANCE. _tick_symbol's first action is to_thread(_ticker_price), an urlopen to api.binance.com with an 8s timeout; test_t0141_partial_fill (16 drives), test_t0143_halt_records (1) and test_shadow_sees_blocked_bars (2) patch _fetch_bars and nothing else, while test_t0011_census patches it — so the authors stubbed the obvious fetch and missed the one on the first line. A blip makes halt-asserting arms fail visibly and absence-asserting arms PASS invisibly, because the tick never ran; the deploy-D gate and B429's suite both depended on Binance being reachable. B429's own arms are fixed; the three landed suites are not. Also B427 addendum from B429's build: AlpacaAdapter.get_orders(status) calls the SDK with no argument so its status filter is dead, and close_position stringifies the returned Order, discarding status and filled_qty — B429 depends on neither, every other caller does.)
+Last updated: 2026-09-13 (B432 amended — THE CONTROL WAS NOT CLEAN AND THE PROPOSED FIX WAS WRONG. test_t0011_census, cited as the suite that patches the network correctly, patches _ticker_price and still makes four connection attempts to fapi.binance.com through shadow.py's fetch_roster_panels. It was chosen as the control because it looked clean by the same name the scan was keyed on, so it shared the scan's blind spot, and the structural arm first proposed — keyed on _ticker_price — would have certified that second route as fixed. A route-agnostic socket-blocking autouse fixture found 29 connecting tests, not three; that fixture is the fix. B432 remains the newest entry; B429 landed at 7f0ee09 with a test-coverage follow-up in progress.)
 
 ---
 
@@ -28737,6 +28737,32 @@ at the time they ran.** In a mutation table it is worse again: a blip hands out 
 survivals that look exactly like coverage.
 
 **`B429`'s own drive arms are already fixed** — they go through one helper that patches
-`_ticker_price`. **The three landed suites above are not.** Fix: the same helper, and a structural
-arm asserting that no test driving `_tick_symbol` leaves `_ticker_price` unpatched, so the next
-driver cannot reintroduce it. Not a production defect; a test-reliability defect that can hide one.
+`_ticker_price`, and review measured them making zero connection attempts. **The three landed suites
+above are not.**
+
+#### AMENDMENT (review, measured; manager verified the mechanism) — THE CONTROL WAS NOT CLEAN, THE SCOPE IS NOT THREE, AND THE FIX PROPOSED ABOVE WOULD HAVE CERTIFIED A SECOND OPEN ROUTE
+
+**The entry as first filed recommended "a structural arm asserting that no test driving
+`_tick_symbol` leaves `_ticker_price` unpatched". That fix is WRONG, and it is struck.**
+
+`test_t0011_census` was cited above as the control — the suite that does it right. **It is not
+clean.** It patches `_ticker_price` and still makes **four connection attempts to
+`fapi.binance.com`**, through `shadow.py`'s `fetch_roster_panels`, which it does not patch.
+Verified: census patches `_ticker_price` twice and `fetch_roster_panels` zero times, and
+`shadow.py` documents that code path as the one calling `fapi.binance.com`.
+
+> **The control was chosen because it looked clean by the same name the scan was keyed on — so it
+> shared the scan's blind spot exactly.** A structural arm keyed on `_ticker_price` would have passed
+> census and certified its second open route as fixed.
+
+**The real scope is route-agnostic and much wider.** Review installed a socket-blocking autouse
+fixture — which does not care which function opens the connection — and found **29 tests that
+connect**. The three suites named above are the ones a `_ticker_price` search could see.
+
+**THE FIX IS THAT FIXTURE, not a name-keyed arm.** Block outbound sockets for the unit suite by
+default, fail loudly on an attempt, and let a test that genuinely needs the network opt out by name.
+Then the next route — a third fetch nobody has written yet — fails on its first run instead of joining
+a list someone has to maintain.
+
+Not a production defect; a test-reliability defect that can hide one, and at 29 tests it is the
+larger half of the suite's claim to be offline. Still unfixed.
