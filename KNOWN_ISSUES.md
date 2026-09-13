@@ -28645,6 +28645,18 @@ decision row exists, only the raised exception. The runbook's probe-3 branches a
 **Found while building it and filed separately:** `B432` (tests reaching the network, 29 not 3) and the
 `B427` addendum (two adapter methods ignoring what they are asked).
 
+**RULING, 2026-09-13, after `B427` (`a451ec1`): THE REMEDIATION CLOSE STAYS UNRESOLVED, with a trigger.**
+`B427` resolves entries and closes with a bounded re-read; this path's close still calls the SDK once, and
+its verdict is the flat observation. Execute asked whether to resolve it too; the answer is not yet:
+- **It fails safe today.** A slow close ends as "flat NOT OBSERVED", which raises
+  `AlpacaUnprotectedPositionOpen` and halts. It never produces a false flat.
+- **Whether the path runs at all on this venue is unmeasured.** If Alpaca honours an OTO on crypto,
+  remediation never runs. If it takes the order and drops the stop leg, remediation runs on EVERY order, and
+  needless halts would then matter.
+- **TRIGGER:** if runbook probe 3 ends in outcome (c) or (d), the remediation close is resolved with the same
+  resolver before the engine trades Alpaca. The verdict stays the flat observation, read AFTER resolution.
+  Until then, execute's row `RM` stays pinned by `R6b`.
+
 ---
 
 ### B430 — THE ENGINE CANNOT SELECT ALPACA AT ALL. `BROKER_MODE` is a `Final` `"sim"` with no override path — an INTERLOCK NOBODY DESIGNED, holding back every order-path defect we have filed
