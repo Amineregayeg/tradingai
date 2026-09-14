@@ -22,6 +22,42 @@ from app.schemas.propfirm import (
 
 router = APIRouter(prefix="/prop-firm", tags=["prop-firm"])
 
+#: How deep `_redact_nested` descends before it stops. Rows are built by adapters, which nest a few levels
+#: (`close.resolution.read_errors` is three); the bound is what keeps "the 409 always answers" true for a pathological
+#: row, not a limit any real row reaches.
+_REDACT_MAX_DEPTH = 32
+
+
+def _redact_nested(value, _depth: int = 0, _path: frozenset = frozenset()):
+    """EVERY string inside `value` through `redact_for_response` (`B404`), whatever its key and however deep: dicts, lists,
+    tuples and sets are recursed and keep their kind; every non-string value comes back as itself.
+
+    (2d), review's finding on `32a7610`: the 409 redacted a row's TOP-LEVEL strings only, and a planted token in
+    `close.resolution.read_errors` — venue exception text, three levels down — reached the response body.
+
+    BOUNDED (review's D-4): deeper than `_REDACT_MAX_DEPTH`, or a container already on the current path (a cycle), is
+    replaced by a marker string rather than recursed — a 200-deep or self-referential row still gets its 409. Dict KEYS
+    are left as they are: adapters write them in code, and redacting a key could merge two keys into one."""
+    from app.core.logging import redact_for_response
+
+    if isinstance(value, str):
+        return redact_for_response(value)
+    if not isinstance(value, (dict, list, tuple, set, frozenset)):
+        return value
+    if _depth >= _REDACT_MAX_DEPTH:
+        return f"[TRUNCATED: nested deeper than {_REDACT_MAX_DEPTH} levels]"
+    if id(value) in _path:
+        return "[CYCLE]"
+    path = _path | {id(value)}
+    if isinstance(value, dict):
+        return {k: _redact_nested(v, _depth + 1, path) for k, v in value.items()}
+    items = [_redact_nested(v, _depth + 1, path) for v in value]
+    if isinstance(value, tuple):
+        return tuple(items)
+    if isinstance(value, (set, frozenset)):
+        return type(value)(items) if all(isinstance(i, (str, int, float, bool, type(None), tuple)) for i in items) else items
+    return items
+
 
 @router.get("/profiles", response_model=list[PropFirmProfileRead])
 async def list_profiles(
@@ -223,17 +259,18 @@ async def trigger_kill_switch(
         #
         # RETURNED, not raised: the app's HTTPException handler renders `str(detail)`, so a dict of rows would reach
         # the operator as a Python repr. The body is the same problem+json the handler builds, with the rows as JSON
-        # and every string in them passed through the response redactor (`B404`) — a row's reason carries venue text.
+        # and EVERY string in them, at any depth, passed through the response redactor (`B404`, (2d)): a row carries
+        # venue text in its reason and in nested fields such as `close.resolution.read_errors`.
+        #
+        # TWO PASSES around the encoder. The first breaks cycles and bounds depth, which `jsonable_encoder` would
+        # recurse into for ever; the second catches strings the encoder produced from objects (a model, a dataclass).
+        # `detail` needs neither: `problem_response` redacts it.
         from fastapi.encoders import jsonable_encoder
         from fastapi.responses import JSONResponse
 
         from app.core.exceptions import problem_response
-        from app.core.logging import redact_for_response
 
-        rows = [
-            {k: (redact_for_response(v) if isinstance(v, str) else v) for k, v in row.items()}
-            for row in result_data.get("details", [])
-        ]
+        rows = _redact_nested(jsonable_encoder(_redact_nested(result_data.get("details", []))))
         return JSONResponse(  # type: ignore[return-value]
             status_code=409,
             media_type="application/problem+json",
