@@ -1,6 +1,6 @@
 # Malek — current state
 
-_Last updated: 2026-09-14 18:35 WAT, by Malek's manager session. Updated about every 2 hours._
+_Last updated: 2026-09-14 19:30 WAT, by Malek's manager session. Updated about every 2 hours._
 
 ## Goal right now
 
@@ -100,11 +100,9 @@ defect found goes into `KNOWN_ISSUES.md` with a B-number. A commit is only "done
 
 ## Open decisions (Malek's)
 
-- **What the engine may do by itself when the app restarts** with Alpaca positions open: stops only (the provisional
-  choice), stops plus the 70% take-profit, or nothing until someone presses Start. It reverses the rule, since
-  2026-08-08, that the engine never starts itself.
-
-- Part of the same decision: under "stops only", may the engine also close at a take-profit level? Provisionally no.
+- ~~What the engine may do by itself when the app restarts with Alpaca positions open~~ — **DECIDED by Malek,
+  2026-09-14: stops only.** At boot the engine enforces stop-losses and the blind close only: no 70% partial, no
+  take-profit, no new entries until someone presses Start.
 - Stops on Alpaca are enforced by the engine for now (no protection while it is down); a venue backup stop can be added later.
 - The wait before an order counts as unresolved (default 5 seconds).
 - Whether to cancel the unfilled rest of a partially filled order.
