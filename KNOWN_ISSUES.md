@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-14 (newest entry B452 — (2b)'s route 409 arm races the trigger it tests: under CPU load the second request arrives after the first sweep ends and gets 200, 9 of 10 contended runs; not a production defect, but kill-set deaths resting on it alone are untrustworthy until it is made deterministic in (2c).)
+Last updated: 2026-09-14 (newest entry B453 — deployed in ab64c03: a cancelled kill switch whose sweep then raises escapes as that exception instead of CancelledError, so B446's per-row log and fresh-session audit on the cancelled path never run; the same hole B437's new shield had. Fix routed as (2f).)
 
 ---
 
@@ -29963,3 +29963,36 @@ load was a concurrent harness (load average ~2), below execute's 16-loop content
 deterministically at that load, not that the arms are race-free under heavy load; (2e) establishes that. The (2) and
 (2b) verdicts stand without the caveat, except R01/R02, which are re-verified inside (2c)'s review.
 
+---
+
+### B453 — DEPLOYED (`ab64c03`): A CANCELLED KILL SWITCH WHOSE SWEEP THEN RAISES ESCAPES AS THAT EXCEPTION, not `CancelledError`. The per-row log and the fresh-session audit that `B446` put on the cancelled path never run
+
+**Found by execute while building `B437`, where its own shielded submit had the identical hole (fixed in the B437
+candidate). Driven by execute, and by the manager on `git archive ab64c03` (the release deployed at 04:05Z), no
+network.**
+
+```
+KillSwitch.trigger (32a7610, deployed in ab64c03)
+    sweep = create_task(self._run_trigger(...))
+    loop: try: await asyncio.shield(sweep)
+          except CancelledError: log "FINISHING the sweep, then re-raising", then keep awaiting the shield
+    when the sweep finishes WITH AN EXCEPTION after that cancel, the re-await raises THAT exception inside the try,
+    and it escapes the cancelled path before the rows are logged, the audit is written, and CancelledError is re-raised
+```
+
+**Manager's drive:** `_run_trigger` patched to wait on an event and then raise `RuntimeError("audit store failed after
+the closes")`, with the trigger task cancelled while the sweep waits, then released. The awaiting task saw
+**RuntimeError**, not `CancelledError`. Fresh-session audit writes: **none**. The in-progress mark cleared (the sweep's
+own `finally` works). The only line logged was "CANCELLED ... FINISHING the sweep, then re-raising".
+
+**Contradicts `B446`'s ruling** that the awaiter sees `CancelledError` with the full report logged. **Reach:**
+`_run_trigger` catches the manager's close-all exception, and guards its audit, websocket and SMTP steps separately. So
+this needs an exception outside those guards (row logging, result building) or the sweep task itself raising. That is
+rare, but it lands on exactly the path built to leave a record. **"The fix is where the class hides"**: the shield
+added for `B446` carries the same hole that `B437`'s new shield had. The two are the only `asyncio.shield` sites
+in `backend/app` (measured at `ab64c03` and in the B437 candidate).
+
+**Fix, routed as (2f):** after a cancellation, the sweep's own exception is caught in the loop, logged with the rows
+reported so far, and written into the fresh-session audit as the sweep's failure, and then `CancelledError` is
+re-raised. Arm: a sweep raising after the caller cancelled gives the awaiter `CancelledError`, one audit row naming
+the failure, and the rows logged. Deploys with the next release; the engine is held.
