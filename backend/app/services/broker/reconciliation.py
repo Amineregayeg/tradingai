@@ -46,6 +46,7 @@ from app.core.logging import logger
 from app.models.prop_firm_snapshot import PropFirmSnapshot
 from app.models.trade import Trade
 from app.services.broker.base import BrokerAdapter
+from app.services.broker.symbols import same_pair
 
 #: Ignore balance moves smaller than this. Financing, rounding and fee dust
 #: produce constant sub-cent noise; flagging it trains people to ignore the
@@ -177,7 +178,8 @@ async def reconcile_broker(
     # ---- CHECK 1: positions at the broker we did not open ---------------
     report.checks_run.append("positions")
     for pos in positions:
-        if pos.id in our_position_ids or pos.pair in our_pairs:
+        # `B461`: canonical comparison — `BTCUSD` at the venue is the `BTC/USD` this platform stored
+        if pos.id in our_position_ids or any(same_pair(pos.pair, ours) for ours in our_pairs):
             continue
         report.findings.append(
             Finding(
@@ -207,7 +209,7 @@ async def reconcile_broker(
     broker_ids = {p.id for p in positions}
     broker_pairs = {p.pair for p in positions}
     for trade in our_open:
-        if trade.broker_id in broker_ids or trade.pair in broker_pairs:
+        if trade.broker_id in broker_ids or any(same_pair(trade.pair, theirs) for theirs in broker_pairs):
             continue
         report.findings.append(
             Finding(

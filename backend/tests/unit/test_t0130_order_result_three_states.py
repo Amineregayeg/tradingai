@@ -49,6 +49,7 @@ import inspect
 import socket
 
 import pytest
+from types import SimpleNamespace
 
 from tests.unit.test_b429_stop_is_placed import _drive_tick
 
@@ -368,16 +369,18 @@ async def test_L1b_an_unreadable_200_END_TO_END_halts_and_files_NO_refusal(monke
 
 
 @pytest.mark.asyncio
-async def test_L2_the_unresolved_halt_CONSTRUCTS_NO_DECISION_ROW_and_its_recorder_RAN(monkeypatch):
-    """**No row, by ruling — so the arm watches the boundary every row must cross.** The recorder runs
-    with only its session stubbed, and its alert must be observed, or "no row" is satisfied by the
-    recorder never executing.
+async def test_L2_the_unresolved_halt_leaves_EXACTLY_ONE_row_the_PRE_SEND_one_SUBMITTING_and_NAMES_it(monkeypatch):
+    """**`T-0144` T-5 (revision 3 superseded "no row").** The entry's SUBMITTING record is written BEFORE the send
+    (R11'), and SUBMITTING is the engine's own pre-send state, not a claim about the venue — so on the unresolved path
+    that record is the ONE row, it is left exactly as it is, and the halt names its decision id. The recorder still
+    runs with only its session stubbed, and its alert must be observed.
 
-        CATCHES      any DecisionRecord construction EXECUTED on this drive, in any spelling, the
-                     seam and its recorder included
+        CATCHES      a second DecisionRecord constructed on this drive, in any spelling; the SUBMITTING row moved
+                     away (any transition attempted); a halt, activity line or alert that does not name the decision
         DOES NOT     a path this drive never executes; a row inserted without constructing the model
     """
     import app.models.decision_record as dr_mod
+    from app.services.live import crypto_loop as mod
 
     built: list[str] = []
     real = dr_mod.DecisionRecord
@@ -387,14 +390,41 @@ async def test_L2_the_unresolved_halt_CONSTRUCTS_NO_DECISION_ROW_and_its_recorde
         return real(*a, **k)
 
     monkeypatch.setattr(dr_mod, "DecisionRecord", _recording)
+    ids: list = []
 
-    loop, acts, seen = await _drive(monkeypatch, {"status": "NEW", "units": 1.0, "position_id": "oid-1"})
+    async def _execute(sig):
+        # the real service awaits the pre-send write immediately before `place_order`; this drive does the same
+        ids.append(sig.decision_id)
+        await sig.before_send(SimpleNamespace(client_order_id=f"tai-{sig.decision_id.hex}"),
+                              {"sized_units": 1.0, "sizing_price": 100.0, "equity_at_entry": 10_000.0})
+        return {"status": "NEW", "units": 1.0, "position_id": "oid-1"}
 
-    assert any(type(r).__name__ == "Alert" for r in seen["alerts"]), (
-        f"the recorder wrote no alert, so it may not have run: {seen['alerts']!r}"
-    )
-    assert built == [], f"a DecisionRecord was constructed on the unresolved-order path: {built}"
-    assert acts, "the tick never ran"
+    transitions: list = []
+    loop, acts, seen = None, None, None
+
+    async def _no_transition(*a, **k):
+        transitions.append((a, k))
+        return True
+
+    monkeypatch.setattr(mod.LiveCryptoLoop, "_transition_decision", _no_transition)
+    # driven by hand rather than `_drive`: `_instrument` stubs the recorders, and a SECOND row inserted through one of them
+    # (or the row moved away through one) would never be seen here. The recorders stay REAL; only the session is stubbed.
+    loop, acts = _drive_tick(monkeypatch, _execute)
+    seen = _instrument(monkeypatch, loop)
+    for recorder in ("_record_signal_decision", "_record_rejected_signal", "_record_unsized_fill"):
+        monkeypatch.setattr(loop, recorder, getattr(mod.LiveCryptoLoop, recorder).__get__(loop))
+    await loop._tick_symbol("BTC/USD", "BTCUSDT")
+
+    assert len(ids) == 1, f"the entry never reached the send: {acts}"
+    decision_id = str(ids[0])
+    assert built == [dr_mod.OUTCOME_SUBMITTING], (
+        f"expected exactly the pre-send SUBMITTING row on the unresolved-order path, constructed: {built}")
+    assert transitions == [], f"the SUBMITTING row was moved away on the unresolved path: {transitions}"
+    assert loop.halt_reason == mod.HALT_ORDER_UNRESOLVED
+    alerts = [r for r in seen["alerts"] if type(r).__name__ == "Alert"]
+    assert alerts and (alerts[0].context_json or {}).get("decision_id") == decision_id, (
+        f"the recorder's alert does not name the decision {decision_id}: {[getattr(r, 'context_json', None) for r in alerts]}")
+    assert any(decision_id in text for kind, text in acts if kind == "halt"), f"the halt line does not name it: {acts}"
 
 
 def _signal_row_kwargs() -> set[str]:

@@ -25,6 +25,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from app.models.decision_record import OUTCOME_OPEN, OUTCOME_SUBMITTING
 from app.services.monitoring import data_health as dh
 from app.services.monitoring.data_health import (
     BLOCKED_BY_POSITION,
@@ -530,12 +531,14 @@ async def bound(engine, monkeypatch):
 
 
 async def _seed(
-    maker, *, ended: bool, decision_minutes_ago: float | None, closed_fraction: float = 0.70
+    maker, *, ended: bool, decision_minutes_ago: float | None, closed_fraction: float = 0.70,
+    entry_outcome: str | None = None,
 ):
     """Seed a run, a last decision, and an ENTRY closed to `closed_fraction`.
 
     `0.70` reproduces `EXIT-001`'s tranche: the 70% partial banked, the 30% runner riding.
     `1.0` is the whole close that FREES the symbol, which is the must-not-fire case.
+    `entry_outcome` is the sized row's outcome; `None` (every arm before `T-0144`) leaves it unset.
     """
     from decimal import Decimal
 
@@ -566,6 +569,7 @@ async def _seed(
                 DecisionRecord(
                     created_at=opened, symbol="BTC/USD", timeframe="5m",
                     inputs_hash="e", code_path_hash="y", run_id=run.id, sized_units=units,
+                    outcome=entry_outcome,
                 )
             )
             db.add(
@@ -609,6 +613,50 @@ async def test_armE_a_STOPPED_engine_still_reports_a_withdrawn_symbol_separately
     assert health["withdrawn_symbols"] == ["BTC/USD"], "this signal's fact"
     assert health["status"] == "withdrawn"
     assert health["symbols"][0]["withdrawn_from_trading"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("closed_fraction", [0.70, 0.0], ids=["70pct-closed-beside-it", "nothing-closed"])
+@pytest.mark.parametrize("entry_outcome", [OUTCOME_OPEN, OUTCOME_SUBMITTING])
+async def test_a_SUBMITTING_row_is_NOT_counted_as_an_entry_although_it_carries_sized_units(
+    bound, entry_outcome, closed_fraction,
+):
+    """**`KILL_SET.md` M-5 (data_health).** `T-0144` writes the entry's `DecisionRecord` BEFORE the send,
+    as `SUBMITTING`, with `sized_units` = the ASKED size (S7). The entries query keys on
+    `sized_units IS NOT NULL`, so without an explicit exclusion that row is read as an entry the venue
+    filled — `B423`'s claim about the venue, made by a monitor.
+
+    Two effects, one per `closed_fraction`, both measured against the unexcluded query:
+    * nothing closed: the `0 < closed` term keeps it from firing, but the symbol's remainder reads `False`
+      — *"every lot of the blocking entry is closed"* — about an order that may never have landed;
+    * a lot closed beside it: it reads as an outstanding runner and WITHDRAWS the symbol.
+
+    `OPEN` is the control on the same seed: the path reads the row and judges it, so `None` for
+    `SUBMITTING` is the exclusion and not a query that saw nothing. (A row with NO outcome is still an
+    entry — `ARM E` and its neighbours seed exactly that — so the exclusion must not be `outcome != …`
+    alone, which drops NULLs.)
+    """
+    await _seed(bound, ended=False, decision_minutes_ago=600.0,
+                closed_fraction=closed_fraction, entry_outcome=entry_outcome)
+    loop = _FakeLoop(
+        symbols=["BTC/USD"],
+        positions=[_FakePosition("BTC/USD", None)],
+        block_reason=BLOCKED_BY_POSITION,
+    )
+
+    health = await dh.order_path_health(loop)
+    state = health["symbols"][0]
+
+    if entry_outcome == OUTCOME_SUBMITTING:
+        assert state["remainder_outstanding"] is None, (
+            f"a SUBMITTING row was judged as an entry: remainder_outstanding="
+            f"{state['remainder_outstanding']!r}"
+        )
+        assert state["withdrawn_from_trading"] is False
+        assert health["withdrawn_symbols"] == []
+    else:
+        assert state["remainder_outstanding"] is (closed_fraction > 0), state
+        assert state["withdrawn_from_trading"] is (closed_fraction > 0), state
 
 
 @pytest.mark.asyncio

@@ -13,7 +13,9 @@ by the is_simulation contract. Mode defaults to PAPER.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from enum import Enum
 
 from app.core.exceptions import BrokerError, DirectionNotSupported, KillSwitchArmed
@@ -39,6 +41,7 @@ from app.models.decision_record import (
     REJECTION_KILL_SWITCH_ARMED,
 )
 from app.services.broker.base import BrokerAdapter, OrderRequest, readable_price
+from app.services.execution.reference import ReferencePrice, choose_reference
 
 
 class ExecMode(str, Enum):
@@ -77,6 +80,28 @@ class Signal:
     #: the appearance of an additive one.
     partial_price: float | None = None
     partial_fraction: float | None = None
+    #: **`T-0144` R11': THE POSITION'S IDENTITY, CHOSEN BEFORE ANYTHING IS WRITTEN OR SENT.** The loop sets it; the
+    #: entry's `client_order_id` is derived from it (`client_order_id_for`), and the `DecisionRecord` carries it as its
+    #: id. Appended at the end for the reason the two fields above give.
+    decision_id: uuid.UUID | None = None
+    #: **The pre-send write** (R11', S5): awaited AFTER every refusal that sends nothing and immediately BEFORE
+    #: `place_order`, with the request and the sizing facts. It must COMMIT the SUBMITTING record and RAISE on failure;
+    #: if it raises, nothing is sent (`NOT_SENT`).
+    before_send: "Callable[[OrderRequest, dict], Awaitable[None]] | None" = None
+
+
+#: `T-0144` R11': the engine's client-order-id prefix. `tai-` + the decision id's full 32 hex = 36 characters, well inside
+#: the venue's limit; `B440`'s 32-bit collision residual (`sig-` + 8 hex) ends for the engine's own orders.
+ENGINE_CLIENT_ORDER_ID_PREFIX = "tai-"
+
+#: The status `execute` returns when the pre-send write failed and NOTHING was sent. **Not a venue status**: the loop
+#: branches on it BEFORE `classify_order_status` (manager's ruling G-5), so the classifier stays total over venue replies.
+STATUS_NOT_SENT = "NOT_SENT"
+
+
+def client_order_id_for(decision_id: uuid.UUID) -> str:
+    """The entry's client order id, derived from the decision id — the WHOLE hex, never a slice."""
+    return f"{ENGINE_CLIENT_ORDER_ID_PREFIX}{decision_id.hex}"
 
 
 def size_position(equity: float, risk_pct: float, entry: float, sl: float) -> float:
@@ -104,10 +129,35 @@ class ExecutionService:
         broker: BrokerAdapter,
         mode: ExecMode = ExecMode.PAPER,
         max_entry_drift_r: float = DEFAULT_MAX_ENTRY_DRIFT_R,
+        *,
+        binance_mark: "Callable[[str], ReferencePrice | None] | None" = None,
     ) -> None:
         self.broker = broker
         self.mode = mode
         self.max_entry_drift_r = max_entry_drift_r
+        #: `T-0144` R3': the loop's live Binance mark for a pair. When given, a market order's reference price is
+        #: `reference.choose_reference(mark, venue quote)`; when absent (arms and probes that build this service
+        #: directly), the broker's own `reference_price` is used as before.
+        self.binance_mark = binance_mark
+
+    async def _reference_price(self, symbol: str) -> ReferencePrice | None:
+        """R3': the Binance mark first; the venue's quote mid only when the mark is not usable (no venue call otherwise)."""
+        if self.binance_mark is None:
+            price = await self.broker.reference_price(symbol)
+            return None if price is None else ReferencePrice(price=price, source="broker_reference_price",
+                                                             at=datetime.now(timezone.utc))
+        mark = self.binance_mark(symbol)
+        chosen = choose_reference(mark, None)
+        if chosen is not None:
+            return chosen
+        reference_quote = getattr(self.broker, "reference_quote", None)
+        if reference_quote is not None:
+            # a VENUE declares its quote: the fallback is that quote's mid inside its age bound, and nothing else
+            return choose_reference(None, await reference_quote(symbol))
+        # a SIMULATOR declares no quote: its own `reference_price` is the mark it fills at, derived from the same feed
+        price = await self.broker.reference_price(symbol)
+        return None if price is None else ReferencePrice(price=price, source="broker_reference_price",
+                                                         at=datetime.now(timezone.utc))
 
     async def execute(self, sig: Signal) -> dict:
         # HARD SAFETY: this service only ever runs against a simulation broker.
@@ -138,8 +188,10 @@ class ExecutionService:
         sizing_price = sig.entry
         drift_r: float | None = None
 
+        reference: ReferencePrice | None = None
         if sig.order_type == OrderType.MARKET:
-            mark = await self.broker.reference_price(sig.symbol)
+            reference = await self._reference_price(sig.symbol)
+            mark = reference.price if reference is not None else None
             if mark is None or mark <= 0:
                 # Abstain rather than size off a price we know we will not get.
                 return {"status": "rejected",
@@ -220,13 +272,62 @@ class ExecutionService:
                         None if policy is None else policy.refusal(sig.direction)
                     )}
 
+        # ------------------------------------------------------------------
+        # `T-0144` R6': A VENUE'S MINIMUM ENTRY NOTIONAL, PRICED BY THE REFERENCE PRICE.
+        #
+        # Asked of the adapter (`min_entry_notional_usd`), never keyed on its name: Alpaca refuses an OPENING order under
+        # $10 of cost basis (403 "minimal amount of order 10", `B451`), and the engine requires $11 so a mark that moves
+        # between sizing and the fill does not cross it. The simulators declare none. Closes and partials never come
+        # through `execute`, so they are exempt by construction (measured: a $4.49 close filled).
+        # ------------------------------------------------------------------
+        min_notional = getattr(self.broker, "min_entry_notional_usd", None)
+        if isinstance(min_notional, (int, float)) and not isinstance(min_notional, bool) and reference is not None:
+            notional = lot_size * reference.price
+            if notional < min_notional:
+                return {"status": "rejected",
+                        "rejection_code": REJECTION_MIN_SIZE,
+                        "reason": (f"entry notional ${notional:.2f} ({lot_size} x {reference.price:.2f}, "
+                                   f"{reference.source}) is under the venue minimum the engine enforces, "
+                                   f"${float(min_notional):.2f} (venue: 'minimal amount of order 10', B451)"),
+                        "pair": sig.symbol, "direction": sig.direction.value,
+                        "sized_units": lot_size, "equity_at_entry": acct.equity,
+                        "reference_source": reference.source}
+
+        decision_id = getattr(sig, "decision_id", None)
         req = OrderRequest(
             pair=sig.symbol, direction=sig.direction, order_type=sig.order_type,
             lot_size=lot_size,
             price=None if sig.order_type == OrderType.MARKET else sig.entry,
             sl=sig.sl, tp=sig.tp,
-            client_order_id=sig.client_order_id or f"sig-{uuid.uuid4().hex[:8]}",
+            client_order_id=(client_order_id_for(decision_id) if decision_id is not None
+                             else sig.client_order_id or f"sig-{uuid.uuid4().hex[:8]}"),
         )
+        # ------------------------------------------------------------------
+        # `T-0144` R11' / S5: THE PRE-SEND WRITE, AFTER EVERY REFUSAL THAT SENDS NOTHING AND IMMEDIATELY BEFORE THE SEND.
+        #
+        # The identity must exist durably before the order can: a crash after the send leaves a SUBMITTING record the
+        # next boot resolves by its client id. **A write that fails means NOTHING IS SENT** — no identity, no send — and
+        # the result says so as `NOT_SENT`, which is not a venue status and never reaches the classifier.
+        # ------------------------------------------------------------------
+        before_send = getattr(sig, "before_send", None)
+        if before_send is not None:
+            sizing = {"sized_units": lot_size, "sizing_price": sizing_price, "equity_at_entry": acct.equity,
+                      "entry_drift_r": drift_r,
+                      "reference_source": reference.source if reference is not None else None}
+            try:
+                await before_send(req, sizing)
+            except Exception as exc:  # noqa: BLE001 - ANY failure of the pre-send write refuses the send
+                detail = redact_for_storage(f"{type(exc).__name__}: {exc}")
+                logger.error(
+                    "ExecutionService: the pre-send record could not be written, so NOTHING was sent",
+                    symbol=sig.symbol, direction=sig.direction.value, decision_id=str(decision_id),
+                    client_order_id=req.client_order_id, error=detail,
+                )
+                return {"status": STATUS_NOT_SENT,
+                        "reason": f"pre-send record failed: {detail}",
+                        "pair": sig.symbol, "direction": sig.direction.value,
+                        "decision_id": str(decision_id), "client_order_id": req.client_order_id,
+                        "sized_units": lot_size, "equity_at_entry": acct.equity}
         try:
             res = await self.broker.place_order(req)
         except KillSwitchArmed as exc:
@@ -425,6 +526,9 @@ class ExecutionService:
         # checking whether the value was persisted found a sentence saying it was.*
         res["sizing_price"] = sizing_price
         res["entry_drift_r"] = drift_r
+        # R3': what the size was computed against, BY NAME (a Binance mark, a venue quote mid, or the broker's own).
+        res["reference_source"] = reference.source if reference is not None else None
+        res["reference_at"] = reference.at.isoformat() if reference is not None else None
         # The broker reports the true fill. It should equal sizing_price for
         # these in-process sims, but trust the broker's number, not our estimate.
         fill = res.get("fill")          # a positive finite float or None — normalised above (B433)

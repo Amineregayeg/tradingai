@@ -486,9 +486,11 @@ def test_a_PARTIAL_close_is_HONOURED_and_carries_the_size():
     assert result["partial"] is True and result["qty"] == "0.3"
     symbol, options = mock.closed[-1]
     assert symbol == "BTC/USD"
-    assert options is not None and str(getattr(options, "qty", "")) == "0.3", (
-        "the size was dropped on the way to the venue"
-    )
+    from decimal import Decimal
+
+    sent = str(getattr(options, "qty", "")) if options is not None else ""
+    assert sent and Decimal(sent) == Decimal("0.3"), "the size was dropped on the way to the venue"
+    assert "e" not in sent.lower(), f"`B457`: the quantity went out in exponent form: {sent!r}"
 
 
 def test_a_WHOLE_close_sends_no_size():

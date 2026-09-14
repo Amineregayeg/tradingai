@@ -44,6 +44,7 @@ from app.models.decision_record import (
     OUTCOME_LOSS,
     OUTCOME_OPEN,
     OUTCOME_REJECTED,
+    OUTCOME_SUBMITTING,
     OUTCOME_UNSIZED_FILL,
     OUTCOME_WIN,
 )
@@ -145,6 +146,11 @@ _OUTCOME_BUCKETS: dict[str, str] = {
     #: A fill we could not size. The row exists precisely BECAUSE its numbers are not
     #: trustworthy, so it is the last row that should have its outcome inferred from them.
     OUTCOME_UNSIZED_FILL: "unsized_fill",
+    #: The engine's PRE-SEND record (`T-0144` R11'): the order was about to be sent and the verdict is
+    #: not in — or never came, if the process died. It says nothing about what the venue did (`B423`),
+    #: so it carries no realized R and is excluded; its own bucket, not `unrecognised`, because it is
+    #: a known state and a stranded one is a different investigation from a vocabulary gap.
+    OUTCOME_SUBMITTING: "submitting",
 }
 
 #: **THE REFUSAL, and it is a VALUE rather than an exception on purpose.** `_classify_outcome`
@@ -156,7 +162,7 @@ BUCKET_UNRECOGNISED = "unrecognised"
 #: Buckets carrying no realized information. Excluded from the evidence, each for its own
 #: reason, and each counted separately so "thin evidence" can say WHY it is thin.
 _NOT_CLOSED: tuple[str, ...] = (
-    "open", "abstained", "abandoned", "rejected", "unsized_fill", BUCKET_UNRECOGNISED,
+    "open", "abstained", "abandoned", "rejected", "unsized_fill", "submitting", BUCKET_UNRECOGNISED,
 )
 
 

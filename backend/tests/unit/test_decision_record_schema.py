@@ -57,6 +57,9 @@ _CHAIN = [
     ("0014", "0014_rejection_code_protection.py", "0013"),
     ("0015", "0015_rejection_code_venue_ended_unfilled.py", "0014"),
     ("0016", "0016_rejection_code_kill_switch_armed.py", "0015"),
+    # `T-0144`/`B428b` (i): `SUBMITTING`, `SUBMISSION_NOT_FOUND_AFTER_RESTART`, the 9-dp quantities
+    # and `close_attempt_hint`.
+    ("0017", "0017_outcome_submitting_quantity_scale.py", "0016"),
 ]
 
 
@@ -116,6 +119,10 @@ class _RecordingOp:
         col = self.columns.get(name)
         if col is not None and "nullable" in kw:
             col.nullable = kw["nullable"]
+        # `B458`/`0017`: a TYPE change is DDL intent too. Ignoring `type_` left the replayed
+        # `sized_units` at `0002`'s 6 dp while the model said 9, and no arm could see it.
+        if col is not None and kw.get("type_") is not None:
+            col.type = kw["type_"]
 
     def drop_column(self, table, name, **kw):
         if table == "decision_records":
@@ -243,6 +250,30 @@ def test_migration_columns_match_model():
     mig_cols = set(rec.columns)
     assert mig_cols == model_cols, (
         f"drift: migration-only={mig_cols - model_cols}, model-only={model_cols - mig_cols}"
+    )
+
+
+def test_migration_column_TYPES_match_model():
+    """**`KILL_SET.md` M-3 for `decision_records`: THE PRECISION IS WHERE THE COLUMN IS DECLARED.**
+
+    The arm above compares NAMES, so a model at `Numeric(18, 9)` over a chain that never widened (or
+    the reverse) passed it. The suite's database is SQLite, which ignores `Numeric` scale, so no
+    round-trip can see 6 dp against 9 dp — only the declared types can. Compared for EVERY column,
+    so `fill_price` widened in the model without a migration dies here too.
+    """
+    rec = _replay_chain()
+    drift = {
+        c.name: (repr(rec.columns[c.name].type), repr(c.type))
+        for c in DecisionRecord.__table__.columns
+        if c.name in rec.columns and repr(rec.columns[c.name].type) != repr(c.type)
+    }
+    assert not drift, f"(migration chain, model) types differ: {drift}"
+    # Positive shape, so a replay that recorded nothing cannot pass: the widened column reads 9 dp.
+    assert rec.columns["sized_units"].type.scale == 9
+    assert rec.columns["fill_price"].type.scale == 6, "fill_price is a USD price and stays 6 dp"
+    hint = rec.columns["close_attempt_hint"]
+    assert isinstance(hint.type, sa.JSON) and hint.nullable is True, (
+        "close_attempt_hint must be a nullable JSON column in the chain (ruling G-2)"
     )
 
 
@@ -718,7 +749,8 @@ def test_each_migration_FREEZES_the_vocabulary_that_was_live_when_it_RAN():
     0007   3  decided_by's vocabulary                  0012  18  + MIN_SIZE
     0008   7  + REJECTED                               0014  19  + PROTECTION_NOT_ACCEPTED
     0013   8  + UNSIZED_FILL                           0015  20  + VENUE_ENDED_UNFILLED
-                                                       0016  21  + KILL_SWITCH_ARMED
+    0017   9  + SUBMITTING                             0016  21  + KILL_SWITCH_ARMED
+                                                       0017  22  + SUBMISSION_NOT_FOUND_AFTER_RESTART
     ```
 
     Each revision's contents were recovered from the model as it stood at that migration's landing
@@ -735,7 +767,7 @@ def test_each_migration_FREEZES_the_vocabulary_that_was_live_when_it_RAN():
 
     m2, m6, m7, m8 = load("0002"), load("0006"), load("0007"), load("0008")
     m10, m11, m12, m13 = load("0010"), load("0011"), load("0012"), load("0013")
-    m14, m15, m16 = load("0014"), load("0015"), load("0016")
+    m14, m15, m16, m17 = load("0014"), load("0015"), load("0016"), load("0017")
 
     EXPECTED = {
         ("0002", "_OUTCOMES_AT_0002"): {"WIN", "LOSS", "BE", "OPEN", "ABSTAINED"},
@@ -777,9 +809,26 @@ def test_each_migration_FREEZES_the_vocabulary_that_was_live_when_it_RAN():
             "PROP_FIRM_HALTED", "PROP_FIRM_WOULD_BREACH_DAILY_LOSS",
             "PROP_FIRM_WOULD_BREACH_MAX_DRAWDOWN", "BROKER_UNAVAILABLE",
             "VENUE_TRANSPORT", "VENUE_RAISED", "UNCODED_LEGACY", "UNCLASSIFIED"},
+        # `T-0144`/`B428b` (i). Nine outcomes and twenty-two codes, and the two downgrade targets
+        # `0017` carries for them. Written out, as above.
+        ("0017", "_OUTCOMES_AT_0017"): {
+            "WIN", "LOSS", "BE", "OPEN", "ABSTAINED", "ABANDONED", "REJECTED", "UNSIZED_FILL",
+            "SUBMITTING"},
+        ("0017", "_OUTCOMES_AT_0013"): {
+            "WIN", "LOSS", "BE", "OPEN", "ABSTAINED", "ABANDONED", "REJECTED", "UNSIZED_FILL"},
+        ("0017", "_CODES_AT_0017"): {
+            "NO_REFERENCE_PRICE", "DEGENERATE_STOP", "ENTRY_DRIFT", "THROUGH_STOP",
+            "NON_POSITIVE_SIZE", "VENUE_DIRECTION_UNSUPPORTED", "MIN_SIZE",
+            "PROTECTION_NOT_ACCEPTED", "VENUE_ENDED_UNFILLED", "KILL_SWITCH_ARMED",
+            "PROP_FIRM_TARGET_REACHED",
+            "PROP_FIRM_HALTED_DAILY_LOSS", "PROP_FIRM_HALTED_MAX_DRAWDOWN",
+            "PROP_FIRM_HALTED", "PROP_FIRM_WOULD_BREACH_DAILY_LOSS",
+            "PROP_FIRM_WOULD_BREACH_MAX_DRAWDOWN", "BROKER_UNAVAILABLE",
+            "VENUE_TRANSPORT", "VENUE_RAISED", "UNCODED_LEGACY", "UNCLASSIFIED",
+            "SUBMISSION_NOT_FOUND_AFTER_RESTART"},
     }
     mods = {"0002": m2, "0006": m6, "0007": m7, "0008": m8, "0013": m13, "0014": m14, "0015": m15,
-            "0016": m16}
+            "0016": m16, "0017": m17}
     for (stem, name), expected in EXPECTED.items():
         actual = set(getattr(mods[stem], name))
         assert actual == expected, (
@@ -824,22 +873,48 @@ def test_each_migration_FREEZES_the_vocabulary_that_was_live_when_it_RAN():
         "0016's downgrade would restore a 0015 that never existed"
     )
     assert "KILL_SWITCH_ARMED" not in m16._CODES_AT_0015 and "KILL_SWITCH_ARMED" in m16._CODES_AT_0016
-
-    # The LIVE vocabularies belong to the NEWEST revision for each, and to no other.
-    from app.models.decision_record import DECISION_OUTCOMES, REJECTION_CODES
-
-    assert set(m16._CODES_AT_0016) == set(REJECTION_CODES), (
-        "HEAD's rejection vocabulary has moved past 0016 — a code the database's CHECK refuses, so "
-        "the rejection is LOST rather than recorded (B410). A new code needs a new migration."
-    )
     assert set(m13._OUTCOMES_AT_0008) == set(m8._OUTCOMES_AT_0008), (
         "0013's downgrade would restore an 0008 that never existed"
     )
-    assert set(m13._OUTCOMES_AT_0013) == set(DECISION_OUTCOMES), (
-        "HEAD's outcome vocabulary has moved past 0013 — a value the database's CHECK refuses, so "
-        "the row is LOST rather than recorded (B410). A new outcome needs a new migration, and the "
-        "frozen tuples must NOT be updated to match it."
+    # `0017` carries BOTH vocabularies' downgrade targets. Outcomes last moved at `0013` (0014-0016
+    # only touched codes), so its outcome target is `0013`'s eight, not `0016`'s.
+    assert set(m17._OUTCOMES_AT_0013) == set(m13._OUTCOMES_AT_0013), (
+        "0017's downgrade would restore a 0013 outcome CHECK that never existed"
     )
+    assert set(m17._CODES_AT_0016) == set(m16._CODES_AT_0016), (
+        "0017's downgrade would restore a 0016 rejection-code CHECK that never existed"
+    )
+
+
+def test_the_LIVE_vocabularies_EQUAL_the_newest_migrations_frozen_lists():
+    """**`KILL_SET.md` M-1 and M-4. The live vocabularies belong to the NEWEST revision for each, and to
+    no other** — moved here from `0013`/`0016` by `0017`.
+
+    Compared as TUPLES, element for element: `0017` appends, so the model and the frozen lists agree in
+    order too, and a tuple comparison kills everything a set comparison kills plus a duplicate. Both
+    directions die: a value dropped from `_OUTCOMES_AT_0017` (the CHECK refuses a row the model allows,
+    and the recorder loses it — `B410`), and a code added to the MODEL ONLY (the same loss, M-4).
+    """
+    from app.models.decision_record import DECISION_OUTCOMES, REJECTION_CODES
+
+    m17 = _load("0017_outcome_submitting_quantity_scale.py")
+    assert tuple(m17._OUTCOMES_AT_0017) == DECISION_OUTCOMES, (
+        "HEAD's outcome vocabulary differs from 0017's CHECK — a value the database refuses, so the "
+        "row is LOST rather than recorded (B410). A new outcome needs a new migration, and the frozen "
+        f"tuples must NOT be updated to match it. model-only "
+        f"{sorted(set(DECISION_OUTCOMES) - set(m17._OUTCOMES_AT_0017))}, migration-only "
+        f"{sorted(set(m17._OUTCOMES_AT_0017) - set(DECISION_OUTCOMES))}"
+    )
+    assert tuple(m17._CODES_AT_0017) == REJECTION_CODES, (
+        "HEAD's rejection vocabulary differs from 0017's CHECK — a code the database refuses, so the "
+        f"rejection is LOST rather than recorded (B410). model-only "
+        f"{sorted(set(REJECTION_CODES) - set(m17._CODES_AT_0017))}, migration-only "
+        f"{sorted(set(m17._CODES_AT_0017) - set(REJECTION_CODES))}"
+    )
+    # Positive shape: the two values this revision exists for are in both.
+    assert "SUBMITTING" in DECISION_OUTCOMES and "SUBMITTING" in m17._OUTCOMES_AT_0017
+    assert "SUBMISSION_NOT_FOUND_AFTER_RESTART" in REJECTION_CODES
+    assert "SUBMISSION_NOT_FOUND_AFTER_RESTART" in m17._CODES_AT_0017
 
 
 # =====================================================================================
@@ -960,8 +1035,8 @@ def test_0006_and_0008_IGNORE_a_new_OUTCOME_added_to_the_live_model():
     """The two that CAN move — and the arm is the same shape, so the four freezes are covered by
     one property rather than by two kinds of check."""
     mutated = tuple(["WIN", "LOSS", "BE", "OPEN", "ABSTAINED", "ABANDONED", "REJECTED",
-                     "UNSIZED_FILL", "A_NINTH_OUTCOME"])
-    for stem in ("0006", "0008", "0013"):
+                     "UNSIZED_FILL", "SUBMITTING", "A_NINTH_OUTCOME"])
+    for stem in ("0006", "0008", "0013", "0017"):
         emitted = _constraints_emitted_by(stem, {"DECISION_OUTCOMES": mutated})
         check = emitted.get("ck_decision_records_outcome")
         assert check, f"{stem} emitted no outcome CHECK; got {sorted(emitted)}"
@@ -987,12 +1062,14 @@ def test_every_DOWNGRADE_emits_the_PREVIOUS_revision_and_ignores_the_live_model(
     `REJECTED` and `UNSIZED_FILL`, where the real pre-`0006` constraint admitted five.
     """
     mutated = ("WIN", "LOSS", "BE", "OPEN", "ABSTAINED", "ABANDONED", "REJECTED",
-               "UNSIZED_FILL", "A_NINTH_OUTCOME")
+               "UNSIZED_FILL", "SUBMITTING", "A_NINTH_OUTCOME")
 
     EXPECTED_TARGET = {
         "0006": {"WIN", "LOSS", "BE", "OPEN", "ABSTAINED"},                       # 0002's five
         "0008": {"WIN", "LOSS", "BE", "OPEN", "ABSTAINED", "ABANDONED"},          # 0006's six
         "0013": {"WIN", "LOSS", "BE", "OPEN", "ABSTAINED", "ABANDONED", "REJECTED"},  # 0008's seven
+        "0017": {"WIN", "LOSS", "BE", "OPEN", "ABSTAINED", "ABANDONED", "REJECTED",
+                 "UNSIZED_FILL"},                                                  # 0013's eight
     }
     for stem, expected in EXPECTED_TARGET.items():
         emitted = _constraints_emitted_by(stem, {"DECISION_OUTCOMES": mutated}, "downgrade")
@@ -1067,3 +1144,154 @@ def test_0015_ONLY_WIDENS_the_rejection_code_CHECK(stem, added, previous):
     assert downgraded == set(getattr(prior_mod, f"_CODES_AT_{previous}")), (
         f"{stem}'s downgrade target is not {previous}'s upgrade vocabulary")
 
+
+
+# =====================================================================================
+# 0017 — TWO CHECK SWAPS, TWO QUANTITY WIDENINGS, ONE HINT COLUMN, NO ROWS (`T-0144` §4.6)
+# =====================================================================================
+
+def _record_0017(direction: str) -> list[tuple[str, tuple, dict]]:
+    """Run `0017`'s `upgrade()`/`downgrade()` against an op that records EVERY call, args and kwargs.
+
+    `__getattr__` rather than a list of known methods, so an operation nobody expected — an `execute`, a
+    `bulk_insert`, a `get_bind` for a data probe — is recorded and fails the exact-list assertions below
+    instead of raising `AttributeError` somewhere a reader would take for a harness defect.
+    """
+    import sys
+    import types
+    from unittest import mock
+
+    calls: list[tuple[str, tuple, dict]] = []
+
+    class _EveryCall:
+        def __getattr__(self, name):
+            def _record(*args, **kwargs):
+                calls.append((name, args, kwargs))
+            return _record
+
+    fake_op = _EveryCall()
+    path = _VERSIONS / "0017_outcome_submitting_quantity_scale.py"
+    with mock.patch.dict(sys.modules, {"alembic": types.SimpleNamespace(op=fake_op)}):
+        spec = importlib.util.spec_from_file_location(f"_mig_0017_{direction}", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        getattr(mod, direction)()
+    return calls
+
+
+def _quoted(condition) -> set[str]:
+    return set(re.findall(r"'([A-Z_]+)'", str(condition)))
+
+
+def test_0017_ONLY_WIDENS_two_CHECKs_two_QUANTITY_columns_and_ADDS_one_nullable_column():
+    """**`KILL_SET.md` M-1 (widen-only half) and M-2, as far as a recorder can take M-2.**
+
+    `test_0015_ONLY_WIDENS_the_rejection_code_CHECK` expects ONE swap; `0017` performs five kinds of work
+    and every one is pinned here — the rollback of the deploy stays CODE-ONLY only while all of it widens.
+    Upgrade and downgrade are each compared as the COMPLETE ordered operation list, so an added `execute`
+    (a row touched) or a third `alter_column` dies. Each CHECK is a strict superset of what it replaces by
+    exactly the one value, and each downgrade target equals the PREVIOUS revision's own frozen list — so a
+    value RENAMED in either frozen tuple dies (it shows up as an addition and a removal).
+
+    **NOT RUN AGAINST POSTGRES** — M-2's own condition. This reads intent, not an executed schema.
+    """
+    outcome_ck, code_ck = "ck_decision_records_outcome", "ck_decision_records_rejection_code"
+
+    emitted: dict[str, dict] = {}
+    for direction in ("upgrade", "downgrade"):
+        calls = _record_0017(direction)
+        shape = [(name, args[:2]) for name, args, _kw in calls]
+        checks = [("drop_constraint", (outcome_ck, "decision_records")),
+                  ("create_check_constraint", (outcome_ck, "decision_records")),
+                  ("drop_constraint", (code_ck, "decision_records")),
+                  ("create_check_constraint", (code_ck, "decision_records"))]
+        widen = [("alter_column", ("decision_records", "sized_units")),
+                 ("alter_column", ("trades", "lot_size"))]
+        expected = (checks + widen + [("add_column", ("decision_records",))]
+                    if direction == "upgrade" else
+                    [("drop_column", ("decision_records", "close_attempt_hint"))] + widen + checks)
+        # `add_column`'s second argument is a Column object, so it is compared by NAME below.
+        if direction == "upgrade":
+            shape = [s if s[0] != "add_column" else ("add_column", s[1][:1]) for s in shape]
+        assert shape == expected, f"0017.{direction} operations are not exactly the widen-only set: {shape}"
+
+        for name, args, kw in calls:
+            if name == "drop_constraint":
+                assert kw.get("type_") == "check", f"0017.{direction} drops a non-CHECK constraint: {args}"
+            if name == "alter_column":
+                assert set(kw) == {"type_", "existing_type", "existing_nullable"}, (
+                    f"0017.{direction} alters more than the type of {args[:2]}: {sorted(kw)}"
+                )
+        emitted[direction] = {
+            args[0]: _quoted(args[2]) for name, args, _kw in calls if name == "create_check_constraint"
+        }
+        emitted[direction]["_add"] = [args[1] for name, args, _kw in calls if name == "add_column"]
+        emitted[direction]["_alter"] = {args[:2]: kw for name, args, kw in calls if name == "alter_column"}
+
+    up, down = emitted["upgrade"], emitted["downgrade"]
+    assert up[outcome_ck] > down[outcome_ck] and up[outcome_ck] - down[outcome_ck] == {"SUBMITTING"}, (
+        f"outcome CHECK: added {sorted(up[outcome_ck] - down[outcome_ck])}, "
+        f"removed {sorted(down[outcome_ck] - up[outcome_ck])}"
+    )
+    assert up[code_ck] > down[code_ck] and up[code_ck] - down[code_ck] == {
+        "SUBMISSION_NOT_FOUND_AFTER_RESTART"}, (
+        f"rejection-code CHECK: added {sorted(up[code_ck] - down[code_ck])}, "
+        f"removed {sorted(down[code_ck] - up[code_ck])}"
+    )
+    # The downgrade targets are the PREVIOUS revisions' own lists, read from those files.
+    assert down[outcome_ck] == set(_load("0013_outcome_unsized_fill.py")._OUTCOMES_AT_0013)
+    assert down[code_ck] == set(_load("0016_rejection_code_kill_switch_armed.py")._CODES_AT_0016)
+
+    # The widenings go UP in scale and the downgrade is their exact mirror.
+    for key in (("decision_records", "sized_units"), ("trades", "lot_size")):
+        u, d = up["_alter"][key], down["_alter"][key]
+        assert (u["existing_type"].precision, u["existing_type"].scale) == (18, 6), key
+        assert (u["type_"].precision, u["type_"].scale) == (21, 9), key
+        assert (d["existing_type"].precision, d["existing_type"].scale) == (21, 9), key
+        assert (d["type_"].precision, d["type_"].scale) == (18, 6), key
+    assert up["_alter"][("decision_records", "sized_units")]["existing_nullable"] is True
+    assert up["_alter"][("trades", "lot_size")]["existing_nullable"] is False
+
+    # The one added column: nullable JSON, so no existing row needs a value (no backfill).
+    (hint,) = up["_add"]
+    assert hint.name == "close_attempt_hint" and isinstance(hint.type, sa.JSON) and hint.nullable is True, (
+        f"0017 adds {hint!r}; ruling G-2 is one NULLABLE JSON column"
+    )
+
+
+def test_the_QUANTITY_scale_is_the_same_in_the_MODEL_and_in_0017s_ALTER():
+    """**`KILL_SET.md` M-3. THE PRECISION IS WHERE THE COLUMN IS DECLARED.**
+
+    SQLite — the suite's database — ignores `Numeric` scale, so a round trip of `0.000058413` through it
+    comes back whole at 6 dp and at 9 dp alike and can see nothing. The arm reads the DECLARED types: the
+    MODEL column's scale and the scale `0017` ALTERs the column to, and requires both to be 9 (`B458`'s
+    `1e-9` grid). The model left at 6 while the migration widens dies; so does the reverse.
+
+    `trades` is not in `_CHAIN`'s replay (it is created by `0001`), so for `lot_size` this is the only arm
+    tying model and migration; `sized_units` also has `test_migration_column_TYPES_match_model`.
+    """
+    from app.models.trade import Trade
+
+    alters = {args[:2]: kw for name, args, kw in _record_0017("upgrade") if name == "alter_column"}
+    model = {
+        ("decision_records", "sized_units"): DecisionRecord.__table__.c.sized_units.type,
+        ("trades", "lot_size"): Trade.__table__.c.lot_size.type,
+    }
+    for key, model_type in model.items():
+        assert key in alters, f"0017 does not ALTER {key}"
+        migration_type = alters[key]["type_"]
+        assert model_type.scale == 9, f"model {key} is declared at scale {model_type.scale}, not 9"
+        assert migration_type.scale == 9, f"0017 ALTERs {key} to scale {migration_type.scale}, not 9"
+        assert (model_type.precision, model_type.scale) == (migration_type.precision, migration_type.scale)
+    # The ruling's other half: the USD price beside them is untouched in the model.
+    assert DecisionRecord.__table__.c.fill_price.type.scale == 6
+    assert Trade.__table__.c.entry_price.type.scale == 6
+
+
+def test_close_attempt_hint_is_a_NULLABLE_JSON_column_on_the_model():
+    """Ruling G-2. A HINT written before each close from commit (ii) and read by nothing in (i): nullable,
+    because every existing row and every row written before its first close has none, and a failed hint
+    write must never block the send. JSON, the type the model already uses for `reasons`."""
+    col = DecisionRecord.__table__.c.close_attempt_hint
+    assert isinstance(col.type, sa.JSON) and type(col.type) is type(DecisionRecord.__table__.c.reasons.type)
+    assert col.nullable is True

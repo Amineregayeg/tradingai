@@ -8,6 +8,7 @@ account over the existing WebSocket. No real broker is touched — paper only.
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import os
 import urllib.request
@@ -26,7 +27,9 @@ from app.services.broker.paper import PaperBroker
 _ALPACA_MODES = {"alpaca", "alpaca_paper", "alpaca-paper"}
 from app.services.broker.alpaca import AlpacaUnprotectedPositionOpen
 from app.services.broker.base import readable_quantity
-from app.services.execution.service import ExecMode, ExecutionService
+from app.services.broker.symbols import same_pair
+from app.services.execution.reference import SOURCE_BINANCE, ReferencePrice
+from app.services.execution.service import STATUS_NOT_SENT, ExecMode, ExecutionService
 from app.services.live import fixed_config as fixed
 from app.services.live import exit_shadow
 from app.services.live.entry_comparison import compare_entry
@@ -252,6 +255,19 @@ def classify_order_status(status: object) -> str:
 #: placing a stop (`HALT_UNPROTECTED_POSITION`) is.
 HALT_ORDER_UNRESOLVED = "an order's outcome is unresolved, so a position may exist that is not tracked"
 
+#: `T-0144` R5'': the venue position grew by a different amount than this entry's fill less the fee — another actor may
+#: hold part of it, so the engine cannot say what it owns (a halt, with both numbers).
+HALT_UNITS_DISAGREE = "the venue position changed by a different amount than this entry filled"
+
+#: `T-0144` (manager's rulings G-5, G-6): the two EDGE-TRIGGERED record alerts. Raised on the first failure and again
+#: on the first success after failures; never once per failing bar.
+ALERT_PRESEND_WRITE_FAILED = "PRESEND_WRITE_FAILED"
+ALERT_TRANSITION_WRITE_FAILED = "TRANSITION_WRITE_FAILED"
+
+#: Entries are refused while a decision record's transition is waiting to be retried (ruling G-6): gates that count
+#: exposure from records would undercount a live position.
+BLOCK_RECORD_PENDING = "a decision record is waiting to be written"
+
 #: **`B428a`. WHAT THIS LOOP NEEDS FROM ITS BROKER THAT THE CONTRACT DOES NOT PROMISE.**
 #:
 #: `BrokerAdapter` guarantees order placement — `place_order`, `close_position`, `get_positions`
@@ -317,6 +333,15 @@ class LiveCryptoLoop:
         # whole point of fixed_config is that there is only one.
         self.broker_mode = (broker_mode or fixed.BROKER_MODE).lower()
         self._marks: dict[str, float] = {}
+        #: `T-0144` R3': WHEN each mark was read, so the entry's reference price can refuse a mark from an older tick.
+        self._mark_at: dict[str, datetime] = {}
+        #: `T-0144` R11' / G-6: THE BOOK — the in-session truth about positions this engine opened, keyed by DECISION ID.
+        #: Each entry: {"pair", "record_pending": None | (to_outcome, fields)}. Commit (ii) extends it with the stop,
+        #: units and legs; here it carries what a failed transition write needs to be retried.
+        self._book: dict[str, dict] = {}
+        #: The edge-trigger state of the two record alerts (G-5, G-6).
+        self._presend_failing = False
+        self._transition_failing = False
         #: EXIT-001's plan per OPEN position id: {"price", "fraction", "direction", "pair"}.
         #: Removed when the partial fires or the position closes.
         #:
@@ -744,6 +769,12 @@ class LiveCryptoLoop:
         if kill_switch.is_armed:
             return BlockReason(
                 f"KILL SWITCH ARMED ({kill_switch.reason or 'no reason given'})", kind=BLOCK_HALT)
+        # **`T-0144` G-6: A TRANSITION WRITE STILL PENDING REFUSES ENTRIES.** A position exists whose record does not say
+        # OPEN yet; anything counting exposure from records would undercount it. A skip, not a halt: the retry at the
+        # top of every pass clears it by itself.
+        pending = [dec for dec, entry in self._book.items() if entry.get("record_pending") is not None]
+        if pending:
+            return BlockReason(f"{BLOCK_RECORD_PENDING} (decision {', '.join(pending)})", kind=BLOCK_SKIP)
         # `skip`, not `halt`, and unchanged: an operator pause is resolved by the operator, and
         # this preserves exactly the classification the prose prefix produced.
         if self.paused:
@@ -793,7 +824,9 @@ class LiveCryptoLoop:
         return len((await self.paper.get_positions()))
 
     async def _has_position(self, pair: str) -> bool:
-        return any(p.pair == pair for p in await self.paper.get_positions())
+        # `B449`: a venue position carries the VENUE's spelling (`BTCUSD`) and the loop's pair is `BTC/USD`; an exact
+        # `==` never matched, so the one-position-per-symbol gate never saw an Alpaca position (T-0144 R4).
+        return any(same_pair(p.pair, pair) for p in await self.paper.get_positions())
 
     async def _push_state(self) -> None:
         positions = await self.paper.get_positions()
@@ -929,6 +962,12 @@ class LiveCryptoLoop:
         directly, would never exercise it. What stays: anything still unresolved halts, because an order
         nobody can classify is not a refusal.
 
+        **`T-0144` R11' (manager's revision 3): THE SUBMITTING RECORD WRITTEN BEFORE THE SEND STAYS SUBMITTING, and this
+        halt names its decision id.** SUBMITTING is the engine's own pre-send state, not a claim about what the venue
+        did, so the reasoning below — that no outcome value is true here — is why the row is left exactly as it is; the
+        next boot resolves it by its client order id (DESIGN §4.4). What follows is the original ruling for rows this
+        seam would CREATE, and it still holds: nothing here writes one.
+
         **NO `DecisionRecord`, deliberately and PERMANENTLY for what reaches here** (manager's ruling,
         restated after `B427`). An order the adapter RESOLVED never reaches this seam: it goes through the
         FILL or REFUSAL branch and gets a true row there. What does reach it — the budget spent on a
@@ -945,10 +984,11 @@ class LiveCryptoLoop:
         """
         status = res.get("status")
         self._declare_halt(HALT_ORDER_UNRESOLVED)
+        decision_id = str(getattr(sig, "decision_id", None) or "UNREPORTED")
         logger.error(
             "live.order_unresolved — HALTING. place_order returned neither a fill nor a refusal, so "
             "a position may exist at the venue that this engine does not track",
-            pair=pair, direction=sig.direction.value,
+            pair=pair, direction=sig.direction.value, decision_id=decision_id,
             status=redact_for_storage(repr(status)),
             status_key_present="status" in res,
             position_id=res.get("position_id"),
@@ -958,7 +998,7 @@ class LiveCryptoLoop:
             BLOCK_HALT,
             f"{pair} {sig.direction.value} — HALTED: {HALT_ORDER_UNRESOLVED} "
             f"(status {redact_for_storage(repr(status), limit=40)}, "
-            f"order {res.get('position_id') or 'UNREPORTED'})",
+            f"order {res.get('position_id') or 'UNREPORTED'}, decision {decision_id} stays SUBMITTING)",
         )
         await self._record_unresolved_order(pair, entry_df, sig, res, trace)
 
@@ -1038,6 +1078,8 @@ class LiveCryptoLoop:
                     },
                     context_json={
                         "halt_reason": HALT_ORDER_UNRESOLVED,
+                        # `T-0144` R11': the pre-send record that stays SUBMITTING until the next boot resolves it
+                        "decision_id": str(getattr(sig, "decision_id", None) or "UNREPORTED"),
                         "status_repr": redact_for_storage(repr(res.get("status"))),
                         "status_key_present": "status" in res,
                         "result_keys": sorted(str(k) for k in res)[:40],
@@ -1060,7 +1102,7 @@ class LiveCryptoLoop:
             f"{HALT_ORDER_UNRESOLVED} — {', '.join(failures)}" if failures else None
         )
 
-    async def _record_unsized_fill(self, pair: str, entry_df, sig, res: dict) -> None:
+    async def _record_unsized_fill(self, pair: str, entry_df, sig, res: dict, halt: str = HALT_PARTIAL_UNSIZED) -> None:
         """The two DURABLE records of a halt: one for the corpus, one for the operator.
 
         **`B413`/`T-0143`. THE HALT ITSELF IS ALREADY DONE BY THE TIME THIS RUNS** — `halt_reason`
@@ -1099,28 +1141,39 @@ class LiveCryptoLoop:
             )
 
             entry = float(entry_df["close"].iloc[-1])
-            async with async_session_maker() as db:
-                db.add(DecisionRecord(
-                    symbol=pair, timeframe=self.entry_tf,
-                    inputs_hash=self._inputs_hash(entry_df), code_path_hash=self._code_path_hash(),
-                    score=None, abstained=False,
-                    signal_dir=sig.direction.value,
-                    signal_entry=Decimal(str(round(entry, 6))),
-                    signal_sl=Decimal(str(round(float(sig.sl), 6))),
-                    signal_tp=None,
-                    outcome=OUTCOME_UNSIZED_FILL,
-                    # NOT `sized_units`: that column is read by the partial-close accounting as the
-                    # size of the position, and not knowing it is the entire condition. Leaving it
-                    # NULL says so; a number here would be invented.
-                    rejection_reason=(
-                        f"{HALT_PARTIAL_UNSIZED} — status {res.get('status')!r}, venue reported "
-                        f"filled {res.get('filled_units')!r}, submitted {res.get('units')!r}, "
-                        f"venue position {res.get('position_id') or 'UNREPORTED'}"
-                    ),
-                    cohort=COHORT_PAPER, run_id=self.run_id,
-                    **Attribution.ict().as_columns(),
-                ))
-                await db.commit()
+            check = res.get("units_check") if isinstance(res.get("units_check"), dict) else None
+            reason = (
+                f"{halt} — status {res.get('status')!r}, venue reported "
+                f"filled {res.get('filled_units')!r}, submitted {res.get('units')!r}, "
+                f"venue position {res.get('position_id') or 'UNREPORTED'}"
+                # `T-0144` R5'': BOTH numbers of a position-delta disagreement, as the halt promises
+                + (f"; held {check.get('held')!r} vs filled less fee {check.get('expected_held')!r} "
+                   f"(disagreement {check.get('disagreement')!r}, window {check.get('window')!r})" if check else "")
+            )
+            if getattr(sig, "submitting_written", False):
+                # `T-0144` R11': the pre-send row MOVES to UNSIZED_FILL; its asked size is cleared (the size is the unknown).
+                if not await self._write_transition(str(sig.decision_id), OUTCOME_UNSIZED_FILL, {
+                        "rejection_reason": reason, "sized_units": None}):
+                    failures.append("decision_record: transition pending")
+            else:
+                async with async_session_maker() as db:
+                    db.add(DecisionRecord(
+                        symbol=pair, timeframe=self.entry_tf,
+                        inputs_hash=self._inputs_hash(entry_df), code_path_hash=self._code_path_hash(),
+                        score=None, abstained=False,
+                        signal_dir=sig.direction.value,
+                        signal_entry=Decimal(str(round(entry, 6))),
+                        signal_sl=Decimal(str(round(float(sig.sl), 6))),
+                        signal_tp=None,
+                        outcome=OUTCOME_UNSIZED_FILL,
+                        # NOT `sized_units`: that column is read by the partial-close accounting as the
+                        # size of the position, and not knowing it is the entire condition. Leaving it
+                        # NULL says so; a number here would be invented.
+                        rejection_reason=reason,
+                        cohort=COHORT_PAPER, run_id=self.run_id,
+                        **Attribution.ict().as_columns(),
+                    ))
+                    await db.commit()
         except Exception as exc:  # noqa: BLE001 — recorded on status(), never raised
             failures.append(f"decision_record: {type(exc).__name__}")
             logger.error("live.unsized_fill.decision_record_failed", error=str(exc), pair=pair)
@@ -1270,6 +1323,12 @@ class LiveCryptoLoop:
         # The kind of fill comes from the ONE classifier (`T-0130`, K-11); this method keeps its
         # signature — a plain dict — because the runbook's probe step calls it by name on a raw result.
         kind = classify_order_status(res.get("status"))
+        # **`T-0144` R5'. A VENUE ADAPTER THAT MEASURED THE POSITION REPORTS `held_units`: the position after the fill minus
+        # before it**, which is what the engine holds after a fee taken in kind (the order's `filled_qty` overstates it by
+        # 0.25%). Tested by MEMBERSHIP, as below: present-and-`None` means the after-read failed, which is "we cannot say
+        # what we hold" — unsizeable, never a fall back to the order's quantity.
+        if "held_units" in res:
+            return positive(res.get("held_units")) if kind in FILL_OUTCOMES else None
         # **`B419`. `.get()` CANNOT TELL "KEY ABSENT" FROM "KEY PRESENT AND `None`", and those are
         # the two cases this function exists to separate.** Membership can, so membership is what
         # is tested.
@@ -1305,6 +1364,203 @@ class LiveCryptoLoop:
 
         return None
 
+    # ------------------------------------------------------------------
+    # `T-0144` R3', R11', G-5, G-6 — the reference mark, the pre-send write, and record transitions
+    # ------------------------------------------------------------------
+    def _binance_mark(self, pair: str) -> ReferencePrice | None:
+        """The Binance mark THIS loop last read for `pair`, with the time it was read, or `None` (R3'). Freshness is
+        judged by `reference.choose_reference`, never here: a mark older than its bound is not the live mark."""
+        price, at = self._marks.get(pair), self._mark_at.get(pair)
+        if price is None or at is None:
+            return None
+        return ReferencePrice(price=float(price), source=SOURCE_BINANCE, at=at)
+
+    async def _write_submitting(self, decision_id, pair: str, entry_df, sig, trace, req, sizing: dict) -> None:
+        """**The pre-send record** (R11', S5): the entry's `DecisionRecord`, outcome SUBMITTING, COMMITTED before the order
+        can be sent. **It raises on every failure** — unlike every other writer in this file, whose rule is "never let
+        bookkeeping kill the loop" — because here a failure must stop the SEND, and `execute` turns the raise into
+        `NOT_SENT`. `sized_units` is the ASKED size (S7): the OPEN transition replaces it with the venue's.
+
+        Stated limit (G-5): an INSERT that commits and then raises leaves a SUBMITTING row with nothing sent; it stays
+        until the next boot resolves it (`SUBMISSION_NOT_FOUND_AFTER_RESTART`). No in-session cleanup write is tried."""
+        from decimal import Decimal
+
+        from app.db.session import async_session_maker
+        from app.models.decision_record import COHORT_PAPER, OUTCOME_SUBMITTING, Attribution, DecisionRecord
+
+        entry, sl = float(sig.entry), float(sig.sl)
+        tp = float(sig.tp) if sig.tp is not None else None
+        dec = lambda value, places: (Decimal(str(round(float(value), places)))  # noqa: E731
+                                     if value is not None else None)
+        rec = DecisionRecord(
+            id=decision_id,
+            symbol=pair, timeframe=self.entry_tf,
+            inputs_hash=self._inputs_hash(entry_df), code_path_hash=self._code_path_hash(),
+            score=None, abstained=False,
+            reasons=_with_exit_plan(trace.reasons if trace is not None else None),
+            signal_dir=sig.direction.value,
+            signal_entry=dec(entry, 6), signal_sl=dec(sl, 6), signal_tp=dec(tp, 6),
+            sized_units=dec(sizing.get("sized_units"), 9),
+            sizing_equity=dec(sizing.get("equity_at_entry"), 6),
+            sizing_risk_pct=dec(sig.risk_pct, 6),
+            sizing_price=dec(sizing.get("sizing_price"), 6),
+            outcome=OUTCOME_SUBMITTING, cohort=COHORT_PAPER,
+            run_id=self.run_id,
+            **Attribution.ict().as_columns(),
+        )
+        async with async_session_maker() as db:
+            db.add(rec)
+            await db.commit()
+        sig.submitting_written = True
+        if self._presend_failing:
+            # G-5's second edge: the first success after failures says the order path writes again.
+            self._presend_failing = False
+            await self._raise_record_alert(
+                ALERT_PRESEND_WRITE_FAILED, pair=pair, recovered=True,
+                message="Pre-send decision records are being written again; entries can be sent.",
+                context={"decision_id": str(decision_id)},
+            )
+
+    async def _transition_decision(self, decision_id: str, to: str, fields: dict) -> bool:
+        """**Move a SUBMITTING record to `to`, compare-and-set** (`B423`: a stored outcome is never rewritten).
+
+        `UPDATE … WHERE id = :id AND outcome = 'SUBMITTING'`. One row → `True`. Zero rows → the row is re-read: already at
+        `to` → `True` with no error (a first write that committed and then raised, G-6); anything else → ERROR
+        "was not SUBMITTING", nothing overwritten, `False`. A database failure RAISES; the caller decides what that means."""
+        from sqlalchemy import select, update
+
+        from app.db.session import async_session_maker
+        from app.models.decision_record import OUTCOME_SUBMITTING, DecisionRecord
+
+        key = uuid.UUID(str(decision_id))
+        async with async_session_maker() as db:
+            result = await db.execute(
+                update(DecisionRecord)
+                .where(DecisionRecord.id == key, DecisionRecord.outcome == OUTCOME_SUBMITTING)
+                .values(outcome=to, **fields)
+            )
+            await db.commit()
+            if result.rowcount == 1:
+                return True
+            current = (await db.execute(
+                select(DecisionRecord.outcome).where(DecisionRecord.id == key)
+            )).scalar_one_or_none()
+        if current == to:
+            return True
+        logger.error(
+            "live.decision_transition_refused — the decision record was not SUBMITTING, so nothing was overwritten",
+            decision_id=str(decision_id), to=to, current=current,
+        )
+        return False
+
+    async def _write_transition(self, decision_id: str, to: str, fields: dict, *, open_pair: str | None = None) -> bool:
+        """`_transition_decision`, with G-6's failure policy. A raise leaves `record_pending = (to, fields, open_pair)` on
+        the book entry, logs an ERROR, raises the edge-triggered `TRANSITION_WRITE_FAILED` alert, and returns `False`;
+        entries are refused until the retry at the top of a pass succeeds. `open_pair` is set for an OPEN transition, so
+        a close can resolve back to this decision once the record says OPEN."""
+        try:
+            done = await self._transition_decision(decision_id, to, fields)
+        except Exception as exc:  # noqa: BLE001 - a database failure is pending, never swallowed and never fatal
+            book_entry = self._book.setdefault(decision_id, {"pair": open_pair, "record_pending": None})
+            book_entry["record_pending"] = (to, fields, open_pair)
+            logger.error(
+                "live.transition_write_failed — the decision record still says SUBMITTING. It is retried at the top of "
+                "every pass, and entries are refused until it is written.",
+                decision_id=decision_id, to=to, error=f"{type(exc).__name__}: {redact_for_storage(str(exc))}",
+            )
+            if not self._transition_failing:
+                self._transition_failing = True
+                await self._raise_record_alert(
+                    ALERT_TRANSITION_WRITE_FAILED, pair=open_pair,
+                    message=(f"A decision record could not be moved from SUBMITTING to {to}. The engine's book holds the "
+                             f"truth and retries every pass; NO NEW ENTRIES until it is written."),
+                    context={"decision_id": decision_id, "to": to},
+                )
+            return False
+        if done and open_pair is not None:
+            self._open_decision[open_pair] = decision_id
+        return done
+
+    async def _retry_pending_records(self) -> None:
+        """G-6: retry every book entry's pending transition. Cleared on success, or when the row is found already at its
+        target; a retry that still raises stays pending. The recovery edge of the alert fires once none is left."""
+        from app.models.decision_record import OUTCOME_OPEN
+
+        for decision_id, book_entry in list(self._book.items()):
+            pending = book_entry.get("record_pending")
+            if pending is None:
+                continue
+            to, fields, open_pair = pending
+            try:
+                done = await self._transition_decision(decision_id, to, fields)
+            except Exception as exc:  # noqa: BLE001 - still pending
+                logger.error("live.transition_write_retry_failed", decision_id=decision_id, to=to,
+                             error=f"{type(exc).__name__}: {redact_for_storage(str(exc))}")
+                continue
+            book_entry["record_pending"] = None
+            if done and open_pair is not None:
+                self._open_decision[open_pair] = decision_id
+            if to != OUTCOME_OPEN:
+                self._book.pop(decision_id, None)
+        if self._transition_failing and not any(e.get("record_pending") for e in self._book.values()):
+            self._transition_failing = False
+            await self._raise_record_alert(
+                ALERT_TRANSITION_WRITE_FAILED, pair=None, recovered=True,
+                message="Every pending decision record has been written; entries are no longer refused for it.",
+                context={},
+            )
+
+    async def _on_presend_write_failed(self, pair: str, sig, res: dict) -> None:
+        """G-5: the pre-send record failed, so nothing was sent. An ERROR with the decision id, the edge-triggered alert,
+        and an activity line — and NO row, NO rejection recorder and NO halt."""
+        logger.error(
+            "live.presend_write_failed — the SUBMITTING record could not be written, so NOTHING was sent",
+            pair=pair, direction=sig.direction.value, decision_id=str(getattr(sig, "decision_id", None)),
+            client_order_id=res.get("client_order_id"), reason=res.get("reason"),
+        )
+        if not self._presend_failing:
+            self._presend_failing = True
+            await self._raise_record_alert(
+                ALERT_PRESEND_WRITE_FAILED, pair=pair,
+                message=("An entry's pre-send decision record could not be written, so the order was NOT sent. Every "
+                         "entry is refused the same way until the database accepts the write."),
+                context={"decision_id": str(getattr(sig, "decision_id", None)), "reason": res.get("reason")},
+            )
+        await self._act("reject", f"{pair} {sig.direction.value} setup NOT sent — the pre-send record could not be written")
+
+    async def _raise_record_alert(self, kind: str, *, pair: str | None, message: str, context: dict,
+                                  recovered: bool = False) -> None:
+        """One record alert: a CRITICAL `Alert` row (WARNING for the recovery edge) and the dashboard's alert push. The
+        row goes to the database that may be the thing failing, so a failure is logged and never raised. (T-0144 M9's
+        shared helper, with SMTP, is commit (iii); this is its first user.)"""
+        payload = {"kind": kind, "recovered": recovered, "pair": pair, "message": message, **context}
+        try:
+            from datetime import timedelta
+
+            from app.db.enums import AlertPriority, AlertStatus, AlertType
+            from app.db.session import async_session_maker
+            from app.models.alert import Alert
+
+            async with async_session_maker() as db:
+                db.add(Alert(
+                    type=AlertType.RISK_WARNING,   # an EXISTING enum member (0009's ALTER TYPE outage)
+                    priority=AlertPriority.WARNING if recovered else AlertPriority.CRITICAL,
+                    pair=pair,
+                    message=f"{kind}{' RECOVERED' if recovered else ''} — {message}",
+                    suggested_action={"action": "none" if recovered else "check_database"},
+                    context_json={k: (v if isinstance(v, (str, int, float, bool, type(None))) else repr(v))
+                                  for k, v in payload.items()},
+                    status=AlertStatus.PENDING,
+                    expires_at=datetime.now(timezone.utc) + timedelta(days=365),
+                ))
+                await db.commit()
+        except Exception as exc:  # noqa: BLE001 - the alert must not fail the path it reports on
+            logger.error("live.record_alert_write_failed", kind=kind, recovered=recovered, error=str(exc))
+        try:
+            await ws_manager.push_alert(payload)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("live.record_alert_push_failed", kind=kind, error=str(exc))
+
     async def _record_signal_decision(
         self, pair: str, entry_df, sig, sized_units: float, fill_price: float | None = None,
         trace=None, sizing_equity: float | None = None,
@@ -1333,6 +1589,18 @@ class LiveCryptoLoop:
             # have one, the signal price only as a fallback.
             basis = fill if fill is not None else entry
             expected_r = abs(tp - basis) / abs(basis - sl) if (tp is not None and basis != sl) else None
+            if getattr(sig, "submitting_written", False):
+                # **`T-0144` R11' / G-6. THE PRE-SEND ROW EXISTS: it MOVES to OPEN, it is never inserted twice.** The book
+                # learns of the position FIRST — it is the in-session truth, and the position is managed whatever this
+                # write returns; a failed write leaves `record_pending` for the retry at the top of every pass.
+                decision_id = str(sig.decision_id)
+                self._book.setdefault(decision_id, {"pair": pair, "record_pending": None})
+                await self._write_transition(decision_id, OUTCOME_OPEN, {
+                    "fill_price": Decimal(str(round(fill, 6))) if fill is not None else None,
+                    "sized_units": Decimal(str(round(float(sized_units), 9))),   # `B458`: the venue's 1e-9 grid
+                    "expected_r": Decimal(str(round(expected_r, 4))) if expected_r is not None else None,
+                }, open_pair=pair)
+                return
             rec = DecisionRecord(
                 symbol=pair, timeframe=self.entry_tf,
                 inputs_hash=self._inputs_hash(entry_df), code_path_hash=self._code_path_hash(),
@@ -1346,7 +1614,7 @@ class LiveCryptoLoop:
                 signal_sl=Decimal(str(round(sl, 6))),
                 signal_tp=Decimal(str(round(tp, 6))) if tp is not None else None,
                 fill_price=Decimal(str(round(fill, 6))) if fill is not None else None,
-                sized_units=Decimal(str(round(float(sized_units), 6))),
+                sized_units=Decimal(str(round(float(sized_units), 9))),   # `B458`: the venue's 1e-9 grid
                 # `B279`. SIX decimal places, not two: the finding this preserves lived in
                 # the fourth — 5000.9197 against 5000.00.
                 sizing_equity=(
@@ -1471,7 +1739,7 @@ class LiveCryptoLoop:
                 missing=list(self.broker_missing),
                 required=list(REQUIRED_BROKER_CAPABILITIES),
             )
-        self.execution = ExecutionService(self.paper, ExecMode.PAPER)
+        self.execution = ExecutionService(self.paper, ExecMode.PAPER, binance_mark=self._binance_mark)
 
         # NAMED AT BIND TIME, and this is `B394`'s test applied to my own field rather than to
         # someone else's. `simulation_source` records WHETHER the simulation claim was checked
@@ -2192,6 +2460,15 @@ class LiveCryptoLoop:
             )
 
             entry = float(sig.entry)
+            if getattr(sig, "submitting_written", False):
+                # `T-0144` R11': refused or raised AFTER the pre-send write — the SUBMITTING row moves to REJECTED with its
+                # code; the asked size it carried is cleared, because nothing was bought.
+                await self._write_transition(str(sig.decision_id), OUTCOME_REJECTED, {
+                    "rejection_reason": str(reason),
+                    "rejection_code": rejection_code or REJECTION_UNCLASSIFIED,
+                    "sized_units": None,
+                })
+                return
             rec = DecisionRecord(
                 symbol=pair, timeframe=self.entry_tf,
                 inputs_hash=self._inputs_hash(entry_df),
@@ -2366,6 +2643,8 @@ class LiveCryptoLoop:
             return
 
         dec_id = self._open_decision.pop(pair, None)
+        if dec_id and not (self._book.get(dec_id) or {}).get("record_pending"):
+            self._book.pop(dec_id, None)   # `T-0144`: the position is closed; its book entry is done
         if not dec_id:
             # THE DURABLE PATH, and it is what makes a restart survivable. `_open_decision`
             # is in-memory: a process that dies between the partial and the runner loses it,
@@ -2454,7 +2733,7 @@ class LiveCryptoLoop:
                 direction=DirectionType.LONG if is_long else DirectionType.SHORT,
                 entry_price=Decimal(str(round(float(ev.get("entry", 0) or 0), 6))),
                 exit_price=Decimal(str(round(float(ev.get("exit", 0) or 0), 6))),
-                lot_size=Decimal(str(round(float(ev.get("units", 0) or 0), 6))),
+                lot_size=Decimal(str(round(float(ev.get("units", 0) or 0), 9))),   # `B458`: the venue's 1e-9 grid
                 entry_time=ev.get("open_time"), exit_time=ev.get("close_time"),
                 outcome=OutcomeType.WIN if pnl > 0 else OutcomeType.LOSS,
                 status=TradeStatus.CLOSED, pnl_dollars=Decimal(str(round(pnl, 2))),
@@ -2472,6 +2751,7 @@ class LiveCryptoLoop:
         if price is None:
             return
         self._marks[pair] = price
+        self._mark_at[pair] = datetime.now(timezone.utc)
         # EXIT-001 STAGE B: bank 70% at the 2R partial, BEFORE the SL/TP sweep below.
         #
         # Ordering is deliberate. If a single tick reaches both the partial level and the stop,
@@ -2621,6 +2901,10 @@ class LiveCryptoLoop:
         # is that the abort was not RECORDED. `service.py:189` is the precedent: it already does
         # exactly this, for the one exception type it knew about.
         # ------------------------------------------------------------------
+        # `T-0144` R11': THE IDENTITY EXISTS BEFORE ANYTHING IS WRITTEN OR SENT. `execute` derives the client order id
+        # from it and awaits the pre-send write (`_write_submitting`) after its last refusal that sends nothing.
+        sig.decision_id = uuid.uuid4()
+        sig.before_send = functools.partial(self._write_submitting, sig.decision_id, pair, entry, sig, trace)
         try:
             res = await self.execution.execute(sig)
         except AlpacaUnprotectedPositionOpen as exc:
@@ -2644,6 +2928,8 @@ class LiveCryptoLoop:
                 pair=pair, direction=sig.direction.value,
                 order_id=getattr(exc, "order_id", None),
                 detail=getattr(exc, "detail", None),
+                # `T-0144` R11': its SUBMITTING record stays SUBMITTING (a position may exist; no outcome is true)
+                decision_id=str(getattr(sig, "decision_id", None) or "UNREPORTED"),
             )
             await self._act(
                 BLOCK_HALT,
@@ -2673,9 +2959,37 @@ class LiveCryptoLoop:
         # there stays exactly ONE call to `_record_signal_decision` — a second call site is a
         # second place the sizing inputs can be forgotten, which
         # `test_decision_record_schema.py` asserts against by AST.
+        # **`T-0144` G-5: `NOT_SENT` IS NOT A VENUE STATUS, SO IT NEVER REACHES THE CLASSIFIER.** The pre-send record could
+        # not be written and nothing was sent: no row (the database is what failed), no halt (no position can exist),
+        # an ERROR with the decision id and the edge-triggered alert. No entry latch: every entry is gated by its own
+        # pre-send write, so a database that stays down refuses every entry anyway.
+        if type(res.get("status")) is str and res.get("status") == STATUS_NOT_SENT:   # a hostile status never compared
+            await self._on_presend_write_failed(pair, sig, res)
+            return
         status = res.get("status")          # the RAW value, for logs and records only
         outcome = classify_order_status(status)   # the ONE decision about what it means (K-11)
         opened_units = self._position_units(res)
+
+        check = res.get("units_check") if isinstance(res.get("units_check"), dict) else None
+        if outcome in FILL_OUTCOMES and check is not None and check.get("within") is False:
+            # **`T-0144` R5''. THE POSITION MOVED BY A DIFFERENT AMOUNT THAN THIS FILL, LESS THE FEE.** Another actor may
+            # hold part of it, so the engine cannot say what it owns: the same fail-closed as an unsized partial, with
+            # BOTH numbers in the log, the record and the alert.
+            self._declare_halt(HALT_UNITS_DISAGREE)
+            logger.error(
+                "live.units_disagree — HALTING. the venue position changed by a different amount than this entry's "
+                "fill less the fee",
+                pair=pair, direction=sig.direction.value, decision_id=str(getattr(sig, "decision_id", None)),
+                filled=check.get("filled"), held=check.get("held"), expected_held=check.get("expected_held"),
+                disagreement=check.get("disagreement"), window=check.get("window"),
+            )
+            await self._act(
+                BLOCK_HALT,
+                f"{pair} {sig.direction.value} — HALTED: {HALT_UNITS_DISAGREE} (held {check.get('held')}, "
+                f"filled less fee {check.get('expected_held')})",
+            )
+            await self._record_unsized_fill(pair, entry, sig, res, halt=HALT_UNITS_DISAGREE)
+            return
 
         if outcome in FILL_OUTCOMES and opened_units is None:
             # **THE VENUE ACTED AND WE CANNOT SAY WHAT WE NOW HOLD. FAIL CLOSED.**
@@ -2986,23 +3300,30 @@ class LiveCryptoLoop:
 
             from app.db.session import async_session_maker
             from app.models.decision_record import (
-                OUTCOME_ABANDONED, OUTCOME_OPEN, DecisionRecord,
+                OUTCOME_ABANDONED, OUTCOME_OPEN, OUTCOME_SUBMITTING, DecisionRecord,
             )
 
-            live = {str(v) for v in self._open_decision.values()}
+            # the book holds this session's positions too, including one whose record is still SUBMITTING (G-6)
+            live = {str(v) for v in self._open_decision.values()} | set(self._book)
             async with async_session_maker() as db:
                 rows = (
                     await db.execute(
-                        select(DecisionRecord).where(DecisionRecord.outcome == OUTCOME_OPEN)
+                        # `T-0144` M-6: the simulators write SUBMITTING before every send from this commit on, so a crash
+                        # between that write and its verdict strands a SUBMITTING row exactly as it strands an OPEN one.
+                        select(DecisionRecord).where(DecisionRecord.outcome.in_((OUTCOME_OPEN, OUTCOME_SUBMITTING)))
                     )
                 ).scalars().all()
                 stranded = [r for r in rows if str(r.id) not in live]
                 for rec in stranded:
+                    was_submitting = rec.outcome == OUTCOME_SUBMITTING
                     rec.outcome = OUTCOME_ABANDONED
                     reasons = list(rec.reasons or [])
                     # Say it in the record itself. Someone reading this row later
                     # should not have to know that ABANDONED implies a restart.
                     reasons.append(
+                        "ABANDONED: the engine stopped while this entry's order was being submitted, so whether it "
+                        "filled was never observed. Not a loss — an absence."
+                        if was_submitting else
                         "ABANDONED: the engine stopped while this position was open, "
                         "so its result was never observed. Not a loss — an absence."
                     )
@@ -3063,6 +3384,12 @@ class LiveCryptoLoop:
 
     async def _loop(self) -> None:
         while self._running:
+            # `T-0144` G-6: a transition write that failed is retried FIRST, every pass, until the record says what the
+            # book already knows.
+            try:
+                await self._retry_pending_records()
+            except Exception as exc:  # noqa: BLE001 - the retry must never stop the loop
+                logger.error("live.record_pending_retry_failed", error=str(exc))
             for pair, bsym in self.symbols.items():
                 try:
                     await self._tick_symbol(pair, bsym)

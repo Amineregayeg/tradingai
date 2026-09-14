@@ -116,6 +116,12 @@ class Client:
             shorting_enabled = self.account_shorting_enabled
         return _Acct()
 
+    def get_all_positions(self):
+        """`T-0144` R5': `place_order` reads the account's positions before and after an entry. FLAT unless an arm sets
+        `positions`; counted apart from `calls`, so the arms that pin the venue calls PER ORDER keep pinning them."""
+        self.position_reads = getattr(self, "position_reads", 0) + 1
+        return list(getattr(self, "positions", []))
+
 
 async def _instant_sleep(_seconds):
     """`B427`: the resolver's sleep, replaced so no arm waits for real time."""

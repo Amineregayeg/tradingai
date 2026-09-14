@@ -135,12 +135,14 @@ def _adapter(placed, *, reread=PROTECTED, reread_raises=False, reread_after=TERM
 
     a._sleep = _instant_sleep
     reads = {"n": 0}
+    submitted = {"yes": False}
 
     async def _call(name, *args, **kwargs):
         a.sent.append((name, args, kwargs))
         if name == "get_asset":
             return _Asset()
         if name == "submit_order":
+            submitted["yes"] = True
             return placed
         if name == "get_order_by_id":
             reads["n"] += 1
@@ -160,7 +162,9 @@ def _adapter(placed, *, reread=PROTECTED, reread_raises=False, reread_after=TERM
                 raise RuntimeError("venue refused the close")
             return {"close_order": "accepted"}
         if name == "get_all_positions":
-            if positions_raise:
+            # the OBSERVATION after remediation fails; `T-0144` R5''s read BEFORE the send is flat (a failing one sends
+            # nothing, which is T-0144's own arm)
+            if positions_raise and submitted["yes"]:
                 raise RuntimeError("position query timed out")
             return [_O(symbol=x) for x in positions_after]
         if name == "get_orders":
@@ -1018,6 +1022,9 @@ def test_the_SET_of_DecisionRecord_CONSTRUCTION_SITES_is_pinned():
         "_record_rejected_signal",
         "_record_abstention",
         "_record_unsized_fill",
+        # `T-0144` R11': the pre-send SUBMITTING record, written before EVERY send — so on the unprotected path the one
+        # row that exists is that SUBMITTING row, which the halt leaves as it is (no outcome is true there)
+        "_write_submitting",
     }, (
         f"the set of functions constructing a DecisionRecord changed to "
         f"{sorted(set(where.values()))}. A new one must be added to the arm above's expectations "

@@ -347,11 +347,22 @@ async def test_M2_a_CANCELED_partial_is_sized_by_its_TERMINAL_filled_quantity_NE
     """**B-4.** The loop reads a PARTIALLY_FILLED size from `filled_units` only; `units` is what we SENT."""
     from app.services.live.crypto_loop import LiveCryptoLoop
 
+    from decimal import Decimal
+
+    from app.services.broker.alpaca import ALPACA_CRYPTO_FEE_RATE
+    from tests.unit.test_t0136_alpaca_adapter import _Position
+
     venue = _Venue(ack="accepted", rereads=(("canceled", "0.004"),))
+    held_after = Decimal("0.004") * (Decimal(1) - ALPACA_CRYPTO_FEE_RATE)   # `T-0144` R5': the fee is taken in kind
+    listings = iter([[], [_Position(symbol="BTCUSD", qty=str(held_after))]])   # before the send, then after the fill
+    venue.positions_read = lambda: next(listings)
+    venue.get_all_positions = venue.positions_read
     adapter, _clock = _adapter(venue)
     res = await adapter.place_order(_req(lot=0.01))
     assert (res["status"], res["venue_status"], res["terminal"]) == ("PARTIALLY_FILLED", "canceled", True), res
-    assert LiveCryptoLoop._position_units(res) == 0.004 and res["units"] != 0.004
+    # sized by what the TERMINAL fill left in the position — never by `units`, what we sent
+    assert res["units_check"]["filled"] == "0.004" and res["units_check"]["within"] is True, res["units_check"]
+    assert LiveCryptoLoop._position_units(res) == float(held_after) and res["units"] != float(held_after)
 
 
 @pytest.mark.asyncio

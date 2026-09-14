@@ -88,6 +88,10 @@ def cited_rules(record: dict, rule_ids: set[str]) -> set[str]:
 
 
 def audit(decisions: list[dict], rule_ids: set[str]) -> dict:
+    # "Acted on" = the engine did not abstain, whatever came after. That includes REJECTED (execution
+    # refused it) and, from `T-0144`, SUBMITTING — the pre-send record of an order whose verdict is
+    # not in, or never came (`B423`: not a claim about the venue). The rules that decided it are the
+    # same either way, so SUBMITTING is counted here deliberately, not by omission.
     acted = [d for d in decisions if not d.get("abstained")]
     abstained = [d for d in decisions if d.get("abstained")]
 

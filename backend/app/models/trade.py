@@ -61,7 +61,9 @@ class Trade(UserScopedMixin, TimestampMixin, Base):
     exit_price: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
     sl: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
     tp: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
-    lot_size: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
+    #: A QUANTITY, so 9 dp (`B458`, migration `0017`): the venue's quantity grid is `1e-9`, and 6 dp
+    #: rounded a crypto lot like `0.000058413` to `0.000058`. The prices around it stay at 6 dp.
+    lot_size: Mapped[Decimal] = mapped_column(Numeric(21, 9), nullable=False)
     entry_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     exit_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     r_multiple: Mapped[Decimal | None] = mapped_column(Numeric(8, 2), nullable=True)

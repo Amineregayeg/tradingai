@@ -60,6 +60,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Callable
 
 from app.core.exceptions import BrokerError, DirectionNotSupported
+from app.services.broker.symbols import same_pair
 from app.core.kill_switch_state import KILL_SWITCH_RESPONSE_DEADLINE_S, refuse_if_armed
 from app.core.logging import logger, redact_for_storage
 from app.db.enums import DirectionType
@@ -310,6 +311,39 @@ TERMINAL_ORDER_STATUSES: frozenset[str] = frozenset(
 #: state inside the budget. Cancelling the remainder would be a new trading action, and is not taken.
 ORDER_RESOLUTION_BUDGET_S: float = 5.0
 
+#: **`T-0144` R6'. THE MINIMUM ENTRY NOTIONAL THE ENGINE ENFORCES FOR ALPACA CRYPTO, in USD at the reference price.**
+#: Measured: an OPENING order under $10 of cost basis is refused with 403 "minimal amount of order 10" (`B451`); closes
+#: below it fill ($4.49, probe round 4). $11, not $10, so the mark moving between sizing and the fill does not cross it.
+ALPACA_MIN_ENTRY_NOTIONAL_USD: float = 11.0
+
+#: **`T-0144` R5''. Alpaca's crypto fee per leg**, taken IN KIND on a buy (the position holds `filled × (1 − rate)`).
+#: Pinned by probe round 5 on this paper account: buy 0.2500%, sell 0.2505%. The venue's schedule is volume-TIERED, so
+#: this is the rate for this account's tier, not a property of the venue.
+ALPACA_CRYPTO_FEE_RATE = Decimal("0.0025")
+
+#: **`T-0144` R5''. How far `filled × (1 − fee)` may sit from the measured position delta** before the entry HALTS as
+#: "another actor filled in between". Measured residues on real round-4 buys: 9.1e-10 and 8.95e-10 — the fee applied
+#: in kind on the venue's 1e-9 grid — so the window is twice the larger.
+OPENED_UNITS_WINDOW = Decimal("2e-9")
+
+
+def venue_quantity_text(quantity: Decimal) -> str:
+    """**`B457`. A venue quantity as FIXED-POINT text.** `str(Decimal)` switches to exponent form below 1e-6 even on a
+    quantised value (`str(Decimal("4.88E-7"))` is `'4.88E-7'`), and `str(float)` does it below 1e-4 (`'5.8413e-05'`, the
+    remainder probe round 3 measured). Refuses a non-finite or negative quantity rather than formatting it."""
+    if not isinstance(quantity, Decimal) or not quantity.is_finite() or quantity < 0:
+        raise ValueError(f"not a venue quantity: {quantity!r}")
+    return format(quantity, "f")
+
+
+def quantise_quantity_down(value: Any, increment: Decimal = Decimal("1e-9")) -> Decimal:
+    """A quantity as a `Decimal` floored (ROUND_DOWN, never HALF_EVEN) to `increment` — never more than was held or asked.
+    A float is read through its shortest `str`, so `0.1 * 0.7` does not bring its binary tail with it."""
+    quantity = Decimal(str(value))
+    if not quantity.is_finite():
+        raise ValueError(f"not a quantity: {value!r}")
+    return (quantity // increment) * increment
+
 #: The read schedule, in seconds from the start of resolution. Past the last offset, reads continue at
 #: the schedule's final gap for as long as the budget allows — so a larger budget adds reads rather than
 #: leaving the tail unwatched, and a smaller one simply stops earlier.
@@ -384,6 +418,31 @@ def build_trading_client(api_key: str, api_secret: str, *, paper: bool, url_over
             f"request timeout or account identity cannot be set or read — the client it would return retries a "
             f"POST on 504, can hang forever (B440, B441), or shares no order lock with another adapter on the "
             f"same account (B442). Re-derive build_trading_client against the installed SDK.",
+            broker="alpaca",
+        )
+    client._retry_codes = list(ALPACA_RETRY_STATUS_CODES)
+    adapter = _timeout_adapter()
+    client._session.mount("https://", adapter)
+    client._session.mount("http://", adapter)
+    return client
+
+
+def build_crypto_data_client(api_key: str | None, api_secret: str | None, *, url_override: str | None = None):
+    """**The Alpaca crypto MARKET-DATA client** (`T-0144` R3'), built like `build_trading_client`: `raw_data=False`, retries
+    only on 429 (the data API is GET-only, so a retry never repeats a write), and B441's timeout mounted on its OWN
+    session. It is a different object from the trading client, and `AlpacaAdapter` runs it on a different worker.
+    Refuses, as the trading builder does, when the SDK no longer exposes the attributes it sets."""
+    from alpaca.data.historical.crypto import CryptoHistoricalDataClient
+
+    kwargs: dict = {"raw_data": False}
+    if url_override is not None:
+        kwargs["url_override"] = url_override
+    client = CryptoHistoricalDataClient(api_key, api_secret, **kwargs)
+    missing = [name for name in ("_retry_codes", "_session") if not hasattr(client, name)]
+    if missing:
+        raise BrokerError(
+            f"refusing to build an Alpaca data client: the SDK no longer exposes {missing}, so its retry codes or "
+            f"request timeout cannot be set. Re-derive build_crypto_data_client against the installed SDK.",
             broker="alpaca",
         )
     client._retry_codes = list(ALPACA_RETRY_STATUS_CODES)
@@ -680,14 +739,16 @@ def _client_retry_settings(client: Any) -> tuple[int, float]:
 
 
 def entry_lock_normal_hold_bound_s(client: Any) -> float:
-    """**An ESTIMATE of how long an entry on the normal path holds its account's lock: 6C + B** — sweep (b)'s wait for it.
+    """**An ESTIMATE of how long an entry on the normal path holds its account's lock: 10C + B** — sweep (b)'s wait for it.
     The HARD bound is `KILL_SWITCH_RESPONSE_DEADLINE_S`, counted from the start of `close_all_positions`, and nothing
     else (manager's ruling on S-1, from review's arithmetic).
 
         C = one SDK call = (retry + 1) · (connect + read) + retry · retry_wait     retries and sleep read LIVE
         B = ORDER_RESOLUTION_BUDGET_S
-        calls on the normal path: submit, the protection re-read, one resolver read past the budget      3C + B
-        `B437`: each of those calls QUEUES on the account's single worker, and may start one C late      + 3C
+        calls on the normal path: the position before (T-0144 R5'), submit, the protection re-read,
+        one resolver read past the budget, the position after                                             5C + B
+        `B437`: each of those calls QUEUES on the account's single worker, and may start one C late      + 5C
+        (B429's protection re-read goes with R2's deletion in T-0144 commit (ii): 8C + B from then on.)
 
     ASSUMPTION, which is why this is an estimate and not a bound: ONE call ahead of each of the entry's calls. The queue
     is per CALL, and unlocked reads — `/api/positions`, `/api/brokers/accounts`, the loop's own reads once it trades
@@ -708,13 +769,12 @@ def entry_lock_normal_hold_bound_s(client: Any) -> float:
 
     Read from the live module constants and the client at call time, never a literal (review's K2-14). For
     `build_trading_client`'s client at alpaca-py 0.44.0 — retry 3, retry_wait 3s, connect 3s, read 10s, budget 5s —
-    C = 61s and **6C + B = 371s**; with no 429 retry C = 13s and it is 83s. Both exceed the 100s response deadline or
-    come close to it, which is why sweep (b)'s wait is capped by that deadline and its expiry row reports what it did
-    not wait for.
+    C = 61s and **10C + B = 615s**; with no 429 retry C = 13s and it is 135s. Both exceed the 100s response deadline,
+    which is why sweep (b)'s wait is capped by that deadline and its expiry row reports what it did not wait for.
     """
     retry, wait = _client_retry_settings(client)
     call = (retry + 1) * (ALPACA_HTTP_CONNECT_TIMEOUT_S + ALPACA_HTTP_READ_TIMEOUT_S) + retry * wait
-    return 6 * call + ORDER_RESOLUTION_BUDGET_S
+    return 10 * call + ORDER_RESOLUTION_BUDGET_S
 
 
 #: **The venue's code for "position does not exist"** — measured in probe round 3 (2026-09-14, paper account, flat):
@@ -1035,6 +1095,9 @@ class AlpacaAdapter(BrokerAdapter):
     measurement. Which exception Alpaca raises for an undersized order, or for a shorting attempt,
     is a could-not-ask (`D4b`) — the arms pin our mapping, not the venue's behaviour.
     """
+
+    #: `T-0144` R6': asked by `ExecutionService` before the pre-send write; the simulators declare none.
+    min_entry_notional_usd: float = ALPACA_MIN_ENTRY_NOTIONAL_USD
 
     broker_name = "alpaca"
 
@@ -1625,7 +1688,13 @@ class AlpacaAdapter(BrokerAdapter):
         # handing it a float would send `0.30000000000000004` for a third of a position.
         order = MarketOrderRequest(
             symbol=request.pair,
-            qty=str(quantity),
+            # `B457`: fixed-point text. NOTE, measured on alpaca-py 0.44: `MarketOrderRequest.qty` is typed `float`, so the
+            # SDK converts this back and the JSON body carries a NUMBER (exponent form below 1e-4, which the venue parses as a
+            # number). The text matters where the SDK field is a `str` — `ClosePositionRequest.qty` below. At the ENTRY
+            # the exponent appears only when the quantised qty is under 1e-4, i.e. when price > notional / 1e-4: $110,000 at
+            # the $11 minimum — and the venue accepted an exponent JSON number: probe round 4's remainder sells went out as
+            # 5.7828e-05 and filled at exactly 0.000057828 (B457, amended).
+            qty=venue_quantity_text(quantity),
             side=OrderSide.BUY if request.direction == DirectionType.LONG else OrderSide.SELL,
             time_in_force=TimeInForce.GTC,
             client_order_id=request.client_order_id,
@@ -1652,9 +1721,112 @@ class AlpacaAdapter(BrokerAdapter):
                               "what": "place_order", "since": time.monotonic()}
             try:
                 refuse_if_armed(venue="alpaca", pair=request.pair, client_order_id=request.client_order_id)
-                return await self._submit_and_resolve(order, request, protection, quantity, requested, limits)
+                # `T-0144` R5': the position BEFORE the send — under the account lock and after the switch check, so no
+                # other adapter on this account can fill between this read and the submission. A read that fails
+                # raises here and NOTHING is sent: an unknown "before" can never become a 0 (Q-6).
+                held_before = await self._position_quantity(request.pair)
+                result = await self._submit_and_resolve(order, request, protection, quantity, requested, limits)
+                return await self._with_opened_units(result, request.pair, held_before)
             finally:
                 account.holder = None
+
+    async def _position_quantity(self, pair: str) -> Decimal:
+        """**The venue position's quantity for `pair`, read through `get_all_positions` and the canonical pair** (`B449`:
+        a position is `BTCUSD`, the pair `BTC/USD`, and `get_open_position` with the slash form 404s).
+
+        No matching position is FLAT, and only that is 0: the listing answered and did not include it. Every failure to
+        READ raises — a transport error, a non-list answer, a matching position whose quantity is unreadable — because
+        "unknown" treated as 0 would count the whole existing position as this entry's fill (T-0144 Q-6)."""
+        positions = await self._call("get_all_positions")
+        if not isinstance(positions, list):
+            raise BrokerError(f"Alpaca get_all_positions returned {type(positions).__name__}, not a list; "
+                              f"the position before/after an entry cannot be read", broker=self.broker_name)
+        total = Decimal(0)
+        for position in positions:
+            if same_pair(getattr(position, "symbol", None), pair):
+                qty = _dec(getattr(position, "qty", None), "qty")
+                if qty is None:
+                    raise AlpacaFieldUnreadable("qty", None)
+                total += qty
+        return total
+
+    async def _with_opened_units(self, result: dict, pair: str, held_before: Decimal) -> dict:
+        """**`T-0144` R5' / R5''. What this entry ADDED to the position**, measured, cross-checked against the fill.
+
+        `held_units = after − before`. `buy_fee_units = filled − held`. The check: `|filled × (1 − fee) − held|` within
+        `OPENED_UNITS_WINDOW`, in `Decimal`. Outside it, `units_check.within` is `False` and the loop HALTS with both numbers.
+        Only a fill-bearing result is measured. An after-read that fails leaves `held_units` present and `None`: the
+        venue acted and we cannot say what we now hold, which the loop treats as unsizeable, never as the order's quantity.
+        """
+        status = result.get("status") if isinstance(result, dict) else None
+        if type(status) is not str or status not in ("FILLED", "PARTIALLY_FILLED"):
+            return result
+        try:
+            held_after = await self._position_quantity(pair)
+        except Exception as exc:  # noqa: BLE001 - reported on the result; the order already exists
+            result["held_units"] = None
+            result["units_check"] = {"error": f"{type(exc).__name__}: {exc}", "held_before": str(held_before)}
+            logger.error("alpaca.opened_units_unreadable — the position after the fill could not be read",
+                         symbol=pair, client_order_id=result.get("client_order_id"), error=f"{type(exc).__name__}")
+            return result
+        held = held_after - held_before
+        filled = _dec(result.get("filled_units"), "filled_units")
+        if filled is None:
+            result["held_units"] = float(held) if held > 0 else None
+            result["units_check"] = {"filled": None, "held": str(held), "within": None}
+            return result
+        expected = filled * (Decimal(1) - ALPACA_CRYPTO_FEE_RATE)
+        disagreement = abs(expected - held)
+        result["held_units"] = float(held) if held > 0 else None
+        result["buy_fee_units"] = float(filled - held)
+        result["units_check"] = {
+            "filled": str(filled), "held_before": str(held_before), "held_after": str(held_after), "held": str(held),
+            "expected_held": str(expected), "disagreement": str(disagreement), "window": str(OPENED_UNITS_WINDOW),
+            "fee": str(filled - held),
+            "within": disagreement <= OPENED_UNITS_WINDOW,
+        }
+        return result
+
+    async def reference_quote(self, symbol: str) -> "VenueQuote | None":
+        """**`T-0144` R3'. Alpaca's latest crypto quote for `symbol`, stamped with the venue's OWN timestamp**, or `None`.
+
+        The FALLBACK reference for an entry when the Binance mark is not usable (`execution.reference.choose_reference`
+        applies the 120 s bound from that timestamp and takes the mid). Read through a DATA client that is not the trading
+        client: its own timeout mount and its own single worker (review's F10d, R-6), so a held trading call on this account
+        cannot delay a quote and a quote cannot queue a trading call. Any failure is `None` — "no usable quote" — never a
+        raise into the entry path."""
+        from app.services.execution.reference import VenueQuote
+
+        try:
+            client = self._quote_client()
+            from alpaca.data.requests import CryptoLatestQuoteRequest
+
+            def _latest():
+                return client.get_crypto_latest_quote(CryptoLatestQuoteRequest(symbol_or_symbols=symbol))
+
+            quotes = await self._quote_worker().run(_latest, write=False, call="get_crypto_latest_quote")
+            quote = quotes.get(symbol) if isinstance(quotes, dict) else None
+            if quote is None:
+                return None
+            return VenueQuote(bid=getattr(quote, "bid_price", None), ask=getattr(quote, "ask_price", None),
+                              timestamp=getattr(quote, "timestamp", None))
+        except Exception as exc:  # noqa: BLE001 - a missing fallback is None, not a failed entry
+            logger.warning("alpaca.reference_quote_unavailable", symbol=symbol, error=f"{type(exc).__name__}")
+            return None
+
+    def _quote_client(self):
+        client = getattr(self, "_data_client", None)
+        if client is None:
+            client = self._data_client = build_crypto_data_client(
+                getattr(self._client, "_api_key", None), getattr(self._client, "_secret_key", None))
+        return client
+
+    def _quote_worker(self) -> AccountExecutor:
+        executor = getattr(self, "_data_executor", None)
+        if executor is None:
+            # NOT the trading worker: a separate key, so a separate single thread (B437's registry is per key).
+            executor = self._data_executor = account_executor(f"data:{self._account_key}")
+        return executor
 
     async def _submit_and_resolve(self, order, request, protection, quantity, requested, limits) -> dict:
         """Submission, the `B440` lookup, and the verdict — called ONLY by `place_order`, under the account lock."""
@@ -2230,17 +2402,14 @@ class AlpacaAdapter(BrokerAdapter):
         return getattr(leg, "stop_price", None) not in (None, "", 0, "0")
 
     @staticmethod
-    def _same_symbol(a: object, b: str) -> bool:
-        """Compare venue symbols with the separator removed.
+    def _same_symbol(a: object, b: object) -> bool:
+        """Whether two venue spellings name the same pair — `symbols.same_pair`, the ONE canonical comparison (`B461`).
 
-        Alpaca writes crypto ORDERS as `BTC/USD`; whether a POSITION comes back as `BTC/USD` or
-        `BTCUSD` has not been observed from this repository. An exact comparison would, under the
-        second form, report *no position for this symbol* and read as FLAT — a false flat on the
-        one check whose whole job is to refuse one. Normalising both sides is correct under either
-        form, so the question does not need answering to be safe.
+        Measured since this was written (`B449`, probe rounds 1–4): Alpaca writes crypto ORDERS as `BTC/USD` and returns
+        POSITIONS as `BTCUSD`. It used to strip `-` as well and turn a missing symbol into `""`, so two MISSING symbols
+        compared equal; a missing side is now never the same pair.
         """
-        norm = lambda v: str(v or "").replace("/", "").replace("-", "").upper()  # noqa: E731
-        return norm(a) == norm(b)
+        return same_pair(a, b)
 
     async def _observe_flat(self, symbol: str, order_id: str) -> tuple[bool, str, object | None]:
         """**Positive evidence of flat, or not flat.** Returns `(flat, what_was_observed, settled_parent)`.
@@ -2369,7 +2538,9 @@ class AlpacaAdapter(BrokerAdapter):
 
         # `qty` IS A STRING ON THIS VENUE. Passing a float would send `0.30000000000000004` for a
         # third of a position; the venue types it as a string and the SDK does not coerce.
-        options = ClosePositionRequest(qty=str(lot_size))
+        # `B457`: and a string of a FLOAT is exponent form below 1e-4 ('5.8413e-05'); floored to the venue's 1e-9 grid
+        # and written fixed-point, so a partial never sends more than was asked.
+        options = ClosePositionRequest(qty=venue_quantity_text(quantise_quantity_down(lot_size)))
         order = await self._call("close_position", position_id, options)
         return {"position_id": position_id, "partial": True, "qty": str(lot_size),
                 **(await self._close_outcome(order))}
@@ -2426,12 +2597,12 @@ class AlpacaAdapter(BrokerAdapter):
 
         **TWO SWEEPS (`B442`, manager's ruling 3).** An entry already SUBMITTED and still resolving when the switch
         is pulled can fill after the book is enumerated. Waiting for it BEFORE the first close would hold every
-        open position hostage to one entry — an estimated 6C + B, 371s for the builder's client — on the degraded venue
+        open position hostage to one entry — an estimated 10C + B, 615s for the builder's client — on the degraded venue
         where the switch is most likely pulled. So:
 
             (a) enumerate and close NOW, taking no lock;
             (b) then take this account's order lock — the entry holds it through its verdict — with a wait of
-                min(6C + B, KILL_SWITCH_RESPONSE_DEADLINE_S − elapsed since this method started), floored at 0;
+                min(10C + B, KILL_SWITCH_RESPONSE_DEADLINE_S − elapsed since this method started), floored at 0;
                 re-enumerate; close what (a) did not see, or confirmed CLOSED and is open again.
 
         (b) NEVER re-closes a position whose close in (a) FAILED or is unconfirmed: that close order may still be
@@ -2625,12 +2796,12 @@ class AlpacaAdapter(BrokerAdapter):
             why = ("this account's order lock belongs to a DIFFERENT live event loop, so no mutual exclusion was "
                    "possible and sweep (b) did not wait")
         elif deadline_bounded:
-            why = (f"sweep (b) waited {waited:.1f}s of the up to {derived:.1f}s (6C + B, an estimate) an in-flight entry may need, "
+            why = (f"sweep (b) waited {waited:.1f}s of the up to {derived:.1f}s (10C + B, an estimate) an in-flight entry may need, "
                    f"because the report must return before the proxy cuts the request "
                    f"(KILL_SWITCH_RESPONSE_DEADLINE_S = {KILL_SWITCH_RESPONSE_DEADLINE_S:.0f}s from the start of "
                    f"close_all_positions)")
         else:
-            why = (f"sweep (b)'s {waited:.1f}s wait for it expired — the up to {derived:.1f}s (6C + B, an estimate) an in-flight "
+            why = (f"sweep (b)'s {waited:.1f}s wait for it expired — the up to {derived:.1f}s (10C + B, an estimate) an in-flight "
                    f"entry may need")
         report["b#in_flight_entry"] = {
             "position_id": str(holder.get("symbol") or ""),

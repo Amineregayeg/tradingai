@@ -87,6 +87,19 @@ OUTCOME_REJECTED = "REJECTED"
 #: **Excluded from the realized-R population for `ABANDONED`'s reason** — there is no number anyone
 #: observed, and a fabricated zero in the feedback loop is worse than an absent row.
 OUTCOME_UNSIZED_FILL = "UNSIZED_FILL"
+#: The record an entry writes BEFORE its order is sent (`T-0144` R11', migration `0017`).
+#:
+#: The decision id is the position's identity and the entry's client order id derives from it, so
+#: the row must exist before `place_order`. Once the verdict is known it moves — one compare-and-set
+#: from `SUBMITTING`, never a rewrite of any other stored outcome — to exactly one of `OPEN`,
+#: `REJECTED` or `UNSIZED_FILL`. An UNRESOLVED verdict (the `T-0130` halt) leaves it `SUBMITTING`
+#: until reconciliation resolves it by the client order id; a crash can leave one too.
+#:
+#: **IT NEVER STANDS AS A CLAIM ABOUT WHAT THE VENUE DID (`B423`).** It says the engine decided to
+#: send and does not yet know the answer. So it is not an entry (`sized_units` holds the ASKED size,
+#: not a fill), not a position (`OPEN`), and not a result: every reader counting entries, positions
+#: or realized R must exclude it by name.
+OUTCOME_SUBMITTING = "SUBMITTING"
 DECISION_OUTCOMES: tuple[str, ...] = (
     OUTCOME_WIN,
     OUTCOME_LOSS,
@@ -96,6 +109,7 @@ DECISION_OUTCOMES: tuple[str, ...] = (
     OUTCOME_ABANDONED,
     OUTCOME_REJECTED,
     OUTCOME_UNSIZED_FILL,
+    OUTCOME_SUBMITTING,
 )
 
 # rejection_code ----------------------------------------------------------
@@ -211,6 +225,14 @@ REJECTION_VENUE_RAISED = "VENUE_RAISED"
 REJECTION_UNCODED_LEGACY = "UNCODED_LEGACY"
 REJECTION_UNCLASSIFIED = "UNCLASSIFIED"
 
+#: **`T-0144` S4. A `SUBMITTING` record left by a crash whose client order id TWO lookups at the venue,
+#: 5 s apart and no earlier than 43 s after the record was written (S2), did not find.** No order reached the book,
+#: so no position exists and REJECTED is true. **NOT a venue refusal** — nothing refused it, the send
+#: never landed — so not `VENUE_TRANSPORT` (no failure was observed) and not `VENUE_ENDED_UNFILLED`
+#: (the venue never acknowledged it). Its own code so the operator reading it knows the engine died
+#: between the pre-send write and the send (`B392`: a code, not prose).
+REJECTION_SUBMISSION_NOT_FOUND_AFTER_RESTART = "SUBMISSION_NOT_FOUND_AFTER_RESTART"
+
 REJECTION_CODES: tuple[str, ...] = (
     REJECTION_NO_REFERENCE_PRICE,
     REJECTION_DEGENERATE_STOP,
@@ -233,6 +255,7 @@ REJECTION_CODES: tuple[str, ...] = (
     REJECTION_VENUE_RAISED,
     REJECTION_UNCODED_LEGACY,
     REJECTION_UNCLASSIFIED,
+    REJECTION_SUBMISSION_NOT_FOUND_AFTER_RESTART,
 )
 
 #: Codes that mean **nobody classified this**, as opposed to a coded decision. `UNCLASSIFIED`
@@ -457,7 +480,11 @@ class DecisionRecord(Base):
     signal_entry: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
     signal_sl: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
     signal_tp: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
-    sized_units: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
+    #: A QUANTITY, so 9 dp (`B458`, migration `0017`): the venue's quantity grid is `1e-9`
+    #: (`min_trade_increment`), and at 6 dp `0.000058413` was stored as `0.000058`. The prices
+    #: beside it, and `fill_price` below, stay at 6 dp — USD prices, by the manager's ruling. On a
+    #: `SUBMITTING` row this is the ASKED size, not a fill (`T-0144` S7).
+    sized_units: Mapped[Decimal | None] = mapped_column(Numeric(21, 9), nullable=True)
 
     #: Which engine run produced this decision. See models/engine_run.py — a
     #: reset starts a new run rather than deleting the evidence of the old one.
@@ -478,6 +505,9 @@ class DecisionRecord(Base):
     #:
     #: Nullable: rows written before this column existed have no fill price, and
     #: readers fall back to `signal_entry` rather than discarding the row.
+    #:
+    #: **STAYS `Numeric(18, 6)` when `0017` widens the quantities (`B458`)** — a USD price, not a
+    #: quantity on the venue's `1e-9` grid (manager's ruling).
     fill_price: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
 
     # Expected vs realized (feedback loop inputs) --------------------------
@@ -587,6 +617,16 @@ class DecisionRecord(Base):
     #: shadow verdict has carried an attribution since M9 Stage A while the
     #: acted-on decision has never carried one.
     deciding_rule_id: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    #: The close-attempt HINT for this position (`T-0144` S6, ruling G-2, migration `0017`):
+    #: `{leg: last attempt number used}`, e.g. `{"s": 2, "p": 1}`.
+    #:
+    #: **A HINT, NEVER THE COUNTER.** The durable source of a leg's next attempt is the venue — the
+    #: client-id probe `…-{leg}1`, `…-{leg}2`, … until a 404. This only says where to START that probe
+    #: (hint + 1). It is written before each close from commit (ii) on, and a failed write never blocks
+    #: the send; a stale or missing hint only moves where the probe starts (`DESIGN.md` §4.5). Nothing
+    #: in this commit writes or reads it.
+    close_attempt_hint: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     __table_args__ = (
         CheckConstraint(

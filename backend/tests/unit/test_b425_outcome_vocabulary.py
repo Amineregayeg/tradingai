@@ -35,11 +35,13 @@ from app.models.decision_record import (
     OUTCOME_LOSS,
     OUTCOME_OPEN,
     OUTCOME_REJECTED,
+    OUTCOME_SUBMITTING,
     OUTCOME_UNSIZED_FILL,
     OUTCOME_WIN,
 )
 from app.services.evaluation.feedback import (
     BUCKET_UNRECOGNISED,
+    _NOT_CLOSED,
     _OUTCOME_BUCKETS,
     _classify_outcome,
     analyze,
@@ -101,7 +103,8 @@ def test_the_TWO_THAT_DRIFTED_are_named_rather_than_merely_counted():
     """
     assert _OUTCOME_BUCKETS[OUTCOME_REJECTED] == "rejected"
     assert _OUTCOME_BUCKETS[OUTCOME_UNSIZED_FILL] == "unsized_fill"
-    assert len(DECISION_OUTCOMES) == 8, (
+    # 8 -> 9 with `SUBMITTING` (`T-0144`, migration `0017`), which has its own arm below.
+    assert len(DECISION_OUTCOMES) == 9, (
         f"the database vocabulary changed size to {len(DECISION_OUTCOMES)} — that is not a "
         f"failure, but the two values this entry was written about are no longer the whole story"
     )
@@ -143,6 +146,7 @@ def test_an_unrecognised_token_is_INDEPENDENT_of_the_sign_of_R(realized_r):
     (OUTCOME_WIN, "win"), (OUTCOME_LOSS, "loss"), (OUTCOME_BREAKEVEN, "be"),
     (OUTCOME_OPEN, "open"), (OUTCOME_ABSTAINED, "abstained"), (OUTCOME_ABANDONED, "abandoned"),
     (OUTCOME_REJECTED, "rejected"), (OUTCOME_UNSIZED_FILL, "unsized_fill"),
+    (OUTCOME_SUBMITTING, "submitting"),
 ])
 def test_every_STORABLE_outcome_classifies_as_itself_regardless_of_R(token, expected):
     """Driven with `realized_r = +2.0`, which is the value the old fallback would have turned into
@@ -156,7 +160,7 @@ def test_an_EMPTY_STRING_is_absence_and_not_a_refusal():
     `""` means *nothing was written*, not *something unreadable*, so it takes the no-token path.
     This is a deliberate behaviour change from the old `_OPEN_TOKENS = {"open", ""}`, which
     answered `"open"` for an empty string even on a row carrying +2R — and it is unreachable
-    either way: the CHECK admits `NULL` or one of the eight, and NULL serialises to `None`.
+    either way: the CHECK admits `NULL` or one of the nine, and NULL serialises to `None`.
     """
     assert _classify_outcome(_row("", 2.0), 2.0) == "win"
     assert _classify_outcome(_row("   ", 2.0), 2.0) == "win", "whitespace is not a token either"
@@ -210,6 +214,25 @@ def test_the_counts_are_on_BOTH_return_paths_including_the_ABSTAIN_one():
         f"the reason says the evidence is thin without saying what it was spent on: "
         f"{result['abstain_reason']!r}"
     )
+
+
+def test_a_SUBMITTING_row_is_EXCLUDED_under_its_OWN_name_and_never_becomes_evidence():
+    """**`KILL_SET.md` M-5 (feedback). `SUBMITTING` is the engine's pre-send record (`T-0144` R11').**
+
+    It says an order was about to be sent and nothing about what the venue did (`B423`), so it carries no
+    realized information. Its bucket must be in `_NOT_CLOSED`: without that, a row with a bucket of its
+    own and a `realized_r` on it becomes CLOSED evidence — driven here with +2R, the loudest leak. And it
+    is counted as `submitting`, not `unrecognised`: a stranded pre-send row is a known state, and folding
+    it into the refusal count would make a vocabulary gap and a crash residue read the same.
+    """
+    corpus = [_row(OUTCOME_WIN, 3.0) for _ in range(31)]
+    corpus += [_row(OUTCOME_SUBMITTING, 2.0) for _ in range(5)]
+
+    result = analyze(corpus, {"risk_pct": 0.01}, min_evidence=30)
+
+    assert result["n"] == 31, f"a SUBMITTING row reached the evidence set: n={result['n']}"
+    assert result["excluded"] == {"submitting": 5}, result["excluded"]
+    assert "submitting" in _NOT_CLOSED
 
 
 def test_a_REJECTED_row_is_not_counted_as_a_WIN():

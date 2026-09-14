@@ -94,7 +94,7 @@ def _drive_tick(monkeypatch, loop, *, arm_in_bias_fetch):
     broker's `place_order`."""
     from app.services.compliance.kill_switch import kill_switch
 
-    seen: dict = {"fetches": [], "executed": [], "results": [], "rejected": [], "acts": []}
+    seen: dict = {"fetches": [], "executed": [], "results": [], "rejected": [], "acts": [], "presend": []}
     bars = _bars()
 
     async def _noop(*a, **k):
@@ -118,6 +118,11 @@ def _drive_tick(monkeypatch, loop, *, arm_in_bias_fetch):
     async def _rejected(pair, entry, sig, reason, trace, code=None):
         seen["rejected"].append((reason, code))
 
+    async def _presend(decision_id, pair, entry_df, sig, trace, req, sizing):
+        # `T-0144` R11': the pre-send write, recorded without a database. It does not mark the signal written, so the
+        # verdict goes to the (recorded) insert-path writers exactly as before this commit.
+        seen["presend"].append((str(decision_id), req.client_order_id))
+
     async def _act(kind, msg):
         seen["acts"].append((kind, msg))
 
@@ -134,6 +139,7 @@ def _drive_tick(monkeypatch, loop, *, arm_in_bias_fetch):
     monkeypatch.setattr(loop, "_maybe_emit_census", _noop)
     monkeypatch.setattr(loop, "_news_context", _noop)
     monkeypatch.setattr(loop, "_record_rejected_signal", _rejected)
+    monkeypatch.setattr(loop, "_write_submitting", _presend)
     monkeypatch.setattr(loop, "_record_signal_decision", _noop)
     monkeypatch.setattr(loop, "_record_abstention", _noop)
     monkeypatch.setattr(loop.execution, "execute", _execute)
@@ -527,12 +533,14 @@ async def test_L1_an_entry_RESOLVING_when_the_switch_is_pulled_is_CLOSED_by_swee
         entry = asyncio.create_task(adapter.place_order(_entry_req()))
         gated.add(entry)
         await _until(lambda: entry in adapter.parked, "the entry parked mid-resolution, holding the lock")
+        # counted from HERE: the entry's own position read before its send is an enumeration too (`T-0144` R5')
+        before = book.enumerations
         switch.arm(reason="L1")
         closing = asyncio.create_task(adapter.close_all_positions())
-        await _until(lambda: book.enumerations >= 1, "sweep (a) enumerated")
+        await _until(lambda: book.enumerations >= before + 1, "sweep (a) enumerated")
         for _ in range(5):
             await asyncio.sleep(0)
-        assert book.enumerations == 1, "sweep (b) enumerated while the entry still held the account lock"
+        assert book.enumerations == before + 1, "sweep (b) enumerated while the entry still held the account lock"
         book.fill_entries = True
         gate.set()
         placed = await entry
@@ -598,8 +606,12 @@ async def test_L2b_the_DEADLINE_is_measured_from_close_all_START_not_from_sweep_
     derived = alpaca.entry_lock_normal_hold_bound_s(book)
     assert derived > KILL_SWITCH_RESPONSE_DEADLINE_S, derived
 
+    first_sweep: dict = {}
+
     def _slow_sweep_a(n):
-        if n == 1:
+        # sweep (a)'s enumeration is the first one AFTER the entry parked (`T-0144` R5': the entry's own position read
+        # before its send is an enumeration too)
+        if n == first_sweep.get("n"):
             clock.now += KILL_SWITCH_RESPONSE_DEADLINE_S - 0.05
 
     book.on_enumerate = _slow_sweep_a
@@ -607,6 +619,7 @@ async def test_L2b_the_DEADLINE_is_measured_from_close_all_START_not_from_sweep_
         entry = asyncio.create_task(adapter.place_order(_entry_req()))
         gated.add(entry)
         await _until(lambda: entry in adapter.parked, "the entry parked mid-resolution, holding the lock")
+        first_sweep["n"] = book.enumerations + 1
         report = await adapter.close_all_positions()
         gate.set()
         await entry
@@ -1243,6 +1256,12 @@ def test_R1_a_connection_REFUSED_at_submit_order_raises_and_looks_nothing_up(mon
     free.close()
     adapter, _client = _built_adapter(f"http://127.0.0.1:{port}")
 
+    async def _flat(_pair):   # `T-0144` R5': the position read before the send is stubbed like the asset read, so the
+        from decimal import Decimal   # refusal still lands on the POST (a refused READ sends nothing: T-0144's Q-6 arm)
+
+        return Decimal(0)
+
+    adapter._position_quantity = _flat
     calls: list[str] = []
     real_call = adapter._call
 

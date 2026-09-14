@@ -67,7 +67,9 @@ class _Venue:
     """Scripted answers per route. Each script is a list of (status_code, body) or a callable; the last repeats."""
 
     def __init__(self):
-        self.scripts: dict[str, list] = {}
+        #: `T-0144` R5': `place_order` reads the account's positions before and after an entry. FLAT by default (the listing
+        #: answers `[]`); an arm about positions scripts this route like any other.
+        self.scripts: dict[str, list] = {"GET /v2/positions": [(200, [])]}
         self.hits: dict[str, int] = {}
         self.stall_s = 0.0
         venue = self

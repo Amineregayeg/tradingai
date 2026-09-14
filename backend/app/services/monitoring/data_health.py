@@ -1260,10 +1260,10 @@ async def order_path_health(loop=None) -> dict:
     function refuses to guess: it reports `unavailable`, which is this module's rule —
     a component we cannot see is not `ok`.
     """
-    from sqlalchemy import func, select
+    from sqlalchemy import func, or_, select
 
     from app.db.session import async_session_maker
-    from app.models.decision_record import DecisionRecord
+    from app.models.decision_record import OUTCOME_SUBMITTING, DecisionRecord
     from app.models.engine_run import EngineRun
     from app.models.trade import Trade
     from app.services.live.fixed_config import ENTRY_TF, SYMBOLS
@@ -1333,12 +1333,22 @@ async def order_path_health(loop=None) -> dict:
             # never touched. Not present in the corpus, structurally possible, cheap.
             # Keyed on `run_id` rather than a timestamp — a timestamp window is a second
             # way to say "this run" and the two can disagree.
+            #
+            # **`SUBMITTING` IS EXCLUDED BY NAME (`T-0144` S1).** The pre-send record carries the ASKED
+            # size in `sized_units` and says nothing about what the venue did (`B423`), so
+            # `sized_units IS NOT NULL` alone reads it as an entry: a remainder of `False` about an
+            # order that may never have landed, or, beside a closed lot, a withdrawn symbol. NULL
+            # outcomes stay IN — `outcome != 'SUBMITTING'` alone is NULL for them and would drop them.
             entries = [
                 (r.symbol, _as_utc(r.created_at), r.sized_units)
                 for r in (
                     await db.execute(
                         select(DecisionRecord).where(
                             DecisionRecord.sized_units.is_not(None),
+                            or_(
+                                DecisionRecord.outcome.is_(None),
+                                DecisionRecord.outcome != OUTCOME_SUBMITTING,
+                            ),
                             *([DecisionRecord.run_id == active.id] if active else []),
                         )
                     )

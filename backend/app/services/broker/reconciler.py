@@ -11,6 +11,7 @@ from app.core.logging import logger
 from app.db.enums import OutcomeType, TradeStatus
 from app.models.trade import Trade
 from app.services.broker.base import BrokerAdapter
+from app.services.broker.symbols import same_pair
 
 
 async def reconcile_positions(
@@ -78,9 +79,8 @@ async def reconcile_positions(
     # 2. Positions in broker but not in DB → external trades
     # ------------------------------------------------------------------
     for pos in live_positions:
-        if pos.id not in db_by_broker_id and pos.pair not in {
-            t.pair for t in open_db_trades
-        }:
+        # `B461`: the venue's spelling (`BTCUSD`) against the one the engine stored (`BTC/USD`) — never an exact `in`.
+        if pos.id not in db_by_broker_id and not any(same_pair(pos.pair, t.pair) for t in open_db_trades):
             logger.warning(
                 "Live position not tracked in DB — opened outside app",
                 broker=adapter.broker_name,
@@ -97,7 +97,8 @@ async def reconcile_positions(
         # Check if the trade's pair / position_id still appears in live positions
         still_live = (
             broker_id in live_position_ids
-            or trade.pair in live_pairs
+            # `B461`: an exact `in` missed every venue spelling and marked a live trade CLOSED
+            or any(same_pair(trade.pair, live) for live in live_pairs)
         )
 
         if not still_live:
