@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-14 (newest entry B456 — three B428b blockers from review's attack on the brief, confirmed by reading ab64c03: on a venue broker every deploy would close the whole account at shutdown (B454); start() abandons the records a restart should adopt (B455); every Alpaca BTC position shares one Position.id, so a P&L sum by it adds every BTC trade (B456). Latent until B430; engine held.)
+Last updated: 2026-09-14 (newest entry B456. Probe round 4 amended B447: Alpaca's paper quote is often stale (BTC up to 29s, ETH minutes) and fills track it only loosely; B444: no listing lag, and closes as ordinary sell orders with a client_order_id are accepted, filled and findable, even below $10; there is no fee record anywhere; B451: the floor binds opening orders only.)
 
 ---
 
@@ -29644,6 +29644,17 @@ price, symbol "BTC/USD" and transaction_time, newest first. That is what a venue
 kill switch) can be recorded from. A partial close through `close_position(symbol, qty)` filled and left the exact
 remainder (0.000194707 − 0.000136294 = 0.000058413).
 
+**LISTING LAG NOT OBSERVED, AND CLOSES CAN BE ATTRIBUTED, MEASURED (probe round 4, 2026-09-14 05:11–05:18Z, paper account, production at `ab64c03`; `agents/tasks/_runs/probes_20260914/probe_copy4*/`; ended flat, secret scan clean):**
+- **No listing lag:** after an entry resolved FILLED, the position was listed at 0 / 100 / 250 / 500 / 1000 / 2000 ms; after
+  the final close filled, it was absent at every one of those reads. Three samples: two BTC, one ETH entry.
+- **Closes as ORDINARY market sell orders with a `client_order_id`** (70%, then the remainder) were accepted, filled, and
+  found by `get_order_by_client_id`. That includes a $4.49 remainder, below the $10 opening floor.
+  **So the loop's own closes can carry an id the engine chose, and an ambiguous close can be attributed** (review's F6).
+- **`GET /v2/account/activities` with no type filter returned only two types: FILL and JNLC (the $100,000 deposit).**
+  There is no fee record. FILL rows carry `id, activity_type, cum_qty, leaves_qty, order_id, order_status, price, qty, side,
+  swap_rate, symbol, transaction_time, type`: no fee and no `client_order_id`. **The fee exists only as the difference in
+  cash** (buy −15.00 / −15.01; 70% sells +10.43–10.44; remainders +4.47).
+
 ---
 
 ### B445 — `B366`'s FIX IS UNREACHABLE. `broker_manager.close_all_positions` catches each adapter's exception and flattens it to one error row, so the kill switch never sees the `partial_report` it was changed to read — and a confirmed CLOSED position is reported as a failure
@@ -29783,6 +29794,23 @@ the same moment, and the buy that followed filled at 76850.22. Alpaca's own quot
 mark is another feed. `get_open_position("BTCUSD")` works while a position is open (current_price 76777.22, the last
 trade); flat, it answers 404 "position does not exist".
 
+**ALPACA'S PAPER QUOTE IS OFTEN STALE, MEASURED (probe round 4, 2026-09-14 05:11–05:18Z, paper account, production at `ab64c03`; `agents/tasks/_runs/probes_20260914/probe_copy4*/`; ended flat, secret scan clean).**
+- **Six paired samples, 20s apart:**
+  - BTC/USD quote age 0.2–22.9s; last trade 237–342s old.
+  - ETH/USD quote AND last trade 81–187s old: it did not update for three minutes.
+  - Binance minus Alpaca's mid: BTC +27 to +34, ETH +0.5 to +1.6.
+  - Spread: BTC $11.6–27.2; ETH $0.50. Top of book ~0.001 BTC / 0.033 ETH.
+- **BTC/USD polled every 0.5s for 20s:** 6 distinct quote timestamps, gaps up to 29s, median age 6.9s, max 29s.
+- **Fills against the references:**
+  - Both BTC buys filled at 77608.52, the exact mid of a quote then 35–46s old.
+  - The ETH buy filled +1.58 over a 30s-old ask.
+  - Sells filled 7–44 below the pre-order bid.
+  - Round 3's buy had filled +35.6 over Alpaca's ask.
+  - **So the paper fill tracks Alpaca's own quote more closely than Binance, but not exactly, and that quote can be minutes stale.**
+
+**What that changes for the fix:** a price read ONLY from Alpaca's quote needs a staleness bound of minutes for ETH, which
+is no bound at all. The engine's Binance mark is live. See T-0144's revised R3.
+
 ---
 
 ### B448 — ALPACA REFUSES STOP PROTECTION ATTACHED TO A CRYPTO ORDER, so `B429`'s design cannot work on this venue: every protected entry is refused. And a SEPARATE stop, the one form it accepts, locks the whole position so that no close can go through while it rests
@@ -29901,6 +29929,10 @@ venue's message, measured). Measure how a close below $10 behaves before designi
 filled, and `close_position` on the $4.48 remainder filled too (resolved on the first read). So a runner's last exit
 below $10 works through `close_position`. The floor binds on opening orders; whether it binds on a `qty` sell sent
 as an ordinary order is not measured.
+
+**A SELL AS AN ORDINARY ORDER IS NOT HELD TO THE FLOOR EITHER, MEASURED (probe round 4, 2026-09-14 05:11–05:18Z, paper account, production at `ab64c03`; `agents/tasks/_runs/probes_20260914/probe_copy4*/`; ended flat, secret scan clean):** a $4.49 qty sell sent as a plain
+market order with a `client_order_id` was accepted and filled (BTC twice, ETH once). The $10 floor binds opening orders
+only, as far as three samples show.
 
 ---
 
