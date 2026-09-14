@@ -30012,6 +30012,19 @@ deterministically at that load, not that the arms are race-free under heavy load
 
 ---
 
+**FIXED at `45161a6` ((2e), test-only), PASSED review (2026-09-14):**
+- every hold releases itself on a bound
+- the seven arms are deterministic
+- the two formerly hanging mutants fail by name (K03 16 arms in 57s, K06 5 arms in 62s; both were `<HUNG 420 s>`)
+
+Review, 91 rows: 87 death sets are identical, and K18's extra deaths were the host suspend (its quiet re-run matched).
+A watchdog check found 0 of 91 rows passing after 5s or more (the control flagged at 6.01s), so no kill rests on the
+self-release. A single-core race check (3 busy loops) passed clean 10/10, and each of the 10 converted-arm-only rows
+died 10/10 with one death set. Non-blocking, for the next test commit:
+- L2b's `asyncio.timeout(5)` is shorter than `_bounded_event`'s 6s
+- `_until` polls every 1ms, which is fine for today's monotonic predicates
+
+
 ### B453 — DEPLOYED (`ab64c03`): A CANCELLED KILL SWITCH WHOSE SWEEP THEN RAISES ESCAPES AS THAT EXCEPTION, not `CancelledError`. The per-row log and the fresh-session audit that `B446` put on the cancelled path never run
 
 **Found by execute while building `B437`, where its own shielded submit had the identical hole (fixed in the B437
