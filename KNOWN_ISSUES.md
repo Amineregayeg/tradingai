@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-14 (newest entry B463; B457 amended — on orders alpaca-py sends qty as a float, and probe round 4 shows Alpaca accepting 5.7828e-05 and filling it exactly; only the string qty of close_position remains, which B428b (ii) deletes)
+Last updated: 2026-09-14 (newest entry B463; B437 fixed at e7d7c81, passed review and DEPLOYED with B453 at 12:52Z)
 
 ---
 
@@ -29265,6 +29265,31 @@ re-raises. The event-loop blocking itself is NOT fixed; that is commit (3), the 
 
 ---
 
+#### FIXED at `e7d7c81`, PASSED review, DEPLOYED 2026-09-14 12:52Z (manager)
+
+**Fix:**
+- Every Alpaca SDK call runs on ONE worker thread per account (`AccountExecutor`).
+- Writes are shielded once started. A write cancelled while still queued is withdrawn, and nothing is sent.
+- The kill switch is re-read on the worker at the send.
+
+**Record 2:**
+- Own rows: 42/42, each on its registered arm.
+- Contended: 10/10.
+- Suite: 2993 tests, a 153-file union. Two chunks were re-run after the `B432` network window.
+
+**Review (`_runs/437r/REVIEW.md`):**
+- 95 prior `alpaca.py` rows lost nothing.
+- 34 independent E rows each died on their registered arm; ES1x survives, as registered.
+- One-core race check: 10/10.
+- No external connections.
+
+**Deployed** with `B453` (2f) and no migration. Verified by content: the deployed `alpaca.py` hashes `32998a06`.
+
+**Left open, filed separately and not blocking:**
+- `B462`: a weak registry lets two calls on one account overlap for up to one call.
+- `B463`: the write list is hand-kept.
+- Both are fixed in `B437b`, after `B428b` commit (i).
+
 ### B438 — THE KILL SWITCH AND THE POSITIONS CLOSE RECORD AN ALPACA CLOSE AS CLOSED WHEN IT IS MERELY ACCEPTED — and on the DEPLOYED build they reach Alpaca through the saved connection, which B430 does not govern
 
 **Found from execute's B427 measurement M4; the reach traced by manager at `0485b0f` and `6ae6aca`.** Latent today
@@ -30104,7 +30129,7 @@ set: `_runs/2f/KILL_SET.md`, F-1..F-10.
 - Routed as a test-only commit right after `B437` lands, because `test_b453` is in B437's running record, together with
   review's N1/N2 on `test_b442`.
 
-**FIXED at `c1589e2` ((2f)), PASSED review (2026-09-14). Not yet deployed; it ships with the B437 release.**
+**FIXED at `c1589e2` ((2f)), PASSED review (2026-09-14). DEPLOYED 2026-09-14 12:52Z in release `e7d7c81`.**
 - The one helper `_leave_cancelled_record` serves all three cancelled paths.
 - Its audit write is shielded, with a deadline fixed at the write's start.
 - The sweep's exception is kept as `__cause__`, and the in-progress mark clears on every exit.
