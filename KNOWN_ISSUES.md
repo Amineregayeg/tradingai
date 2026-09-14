@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-14 (newest entry B463 — ALPACA_WRITE_CALLS is a hand-kept list, so a future write routed through _call would be unshielded silently; B462 — B437's weak executor registry lets an abandoned read outlive its executor, so two calls on one account can overlap)
+Last updated: 2026-09-14 (newest entry B463; B457 amended — on orders alpaca-py sends qty as a float, and probe round 4 shows Alpaca accepting 5.7828e-05 and filling it exactly; only the string qty of close_position remains, which B428b (ii) deletes)
 
 ---
 
@@ -30200,6 +30200,26 @@ Whether Alpaca accepts `5.8413e-05` as a quantity is unmeasured. Either way, the
 computed. The same file already avoids this on entries (`qty=str(quantity)` from a `Decimal`). **Fix (in `B428b`, R7' makes
 every close an ordinary order):** every venue quantity is formatted from a `Decimal`, quantised to the asset increment,
 with fixed-point formatting. An arm plants a quantity below 1e-4 and asserts no `e` in the request.
+
+#### AMENDMENT (manager, 2026-09-14) — ON AN ORDER THE SDK SENDS A FLOAT ANYWAY, AND THE VENUE ALREADY ACCEPTED ITS EXPONENT FORM
+
+**Execute measured it while building `B428b` commit (i); the manager confirmed it on alpaca-py 0.44.0 and in the probe records.**
+- `MarketOrderRequest.qty` is typed `Optional[float]` and `ClosePositionRequest.qty` is `Optional[str]`.
+- An order's fixed-point text becomes a float in the request model, and the body is encoded through `requests`'
+  `json=`. The text `"0.000057828"` goes on the wire as `"qty": 5.7828e-05`.
+- Formatting with `str()` or with `format(q, "f")` at an ORDER site is therefore an equivalent mutant, and "no `e` in
+  the body" cannot hold there.
+
+**The venue question is ANSWERED, and no probe is needed.** Probe round 4 (`probe_copy4b/records.jsonl`, `p4:ordinary_sell`)
+sent the remainder legs as `MarketOrderRequest(qty=str(Decimal))`: `0.000057828`, twice. Both were accepted
+(`pending_new`), and both were found by client id as `filled` with `filled_qty` `0.000057828`, exactly. **Alpaca paper
+accepts an exponent JSON number, and the float carries the 9-dp value exactly** (a float's repr round-trips a
+9-dp decimal below 1).
+
+**What is left of `B457`:** only where the SDK field is a STRING, `ClosePositionRequest(qty=str(lot_size))`. An
+exponent inside a JSON string is unmeasured, and `B428b` (ii) deletes that call (R7'). The kill switch's
+`close_position` sends no qty. Commit (i)'s fixed-point arms kill at the string site, and the entry arm pins the exact
+quantised value.
 
 ---
 
