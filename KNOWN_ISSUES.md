@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-14 (newest entry B464 — the broker manager defaults a NULL connection environment to practice at load but to live at reconnect, masked only by ALLOW_LIVE_TRADING)
+Last updated: 2026-09-14 (newest entry B466 — dashboard polling queues account reads on the account worker; B465 — feedback corrections target knobs the live engine does not read, from default current values)
 
 ---
 
@@ -30405,4 +30405,44 @@ LATENT: no connection has a NULL environment.
 **Fix:** one derivation. A NULL or unknown environment is refused at every path (never defaulted), with an arm driving
 all three paths against a NULL environment. T-0145 (B430) already refuses to select such a connection (revision 3,
 T-2).
+
+### B465 — THE FEEDBACK LOOP PROPOSES CORRECTIONS TO KNOBS THE LIVE ENGINE DOES NOT READ, FROM "CURRENT" VALUES NO RUN USED
+
+**Found by review's attack on T-0146 (E8, E9); the manager confirmed it at `1086104`.**
+
+```
+engine.py:329        params = {"risk_pct": loop.risk_pct}             <- the only knob passed
+feedback.py:72-80    _KNOB_DEFAULTS mirror backtest Params            <- every other "current" value comes from here
+feedback.py:57-64    INDEPENDENT_KNOBS includes max_hold_bars, runner_trail_atr
+crypto_loop.py       max_hold_bars: not read; runner_trail_atr: named only in a docstring (the passive runner)
+```
+
+A correction such as "`min_fvg_atr` from 0.05 to 0.0625" is proposed against the backtest's default, not against a value
+any live run used. Corrections to `max_hold_bars` or `runner_trail_atr` are advice about the backtest presented as advice
+about the engine.
+
+**Fix (in Part E, T-0146 revision 2):** `current` comes from the analysed group's config. A knob that the config does not
+record, or that the configuration does not use, has its correction WITHHELD and named.
+
+### B466 — DASHBOARD POLLING QUEUES ACCOUNT READS ON THE ACCOUNT WORKER, AHEAD OF ORDERS AND KILL-SWITCH CLOSES
+
+**Stated as a residual in `B437`'s estimate docstring and in B428b's J-3. Filed so that it has an owner.**
+
+```
+BrokerAccountsPanel.tsx   setInterval(load, 30_000)  per open dashboard  -> /api/brokers/accounts -> get_account
+positions route           -> get_positions
+B437                      every call on an account runs on ONE worker; B428b (iv) coalesces only reads whose flights OVERLAP
+```
+
+N open dashboards add N account reads every 30 s to the queue that orders and the kill switch's closes also wait in.
+Under 429 retries, one call is up to 61 s.
+
+**Fix direction (review, T-0146 E13):** a cache at the ROUTE layer only.
+- A short TTL per connection.
+- `as_of` on every response.
+- Invalidated by the close route and the kill switch.
+- NEVER read by the engine, the kill switch, reconciliation, or §5.1's reads.
+- Arms: N requests within the TTL cause 1 venue read, and a spy on the tick path counts 0 cache reads.
+
+Scheduled after Part E.
 
