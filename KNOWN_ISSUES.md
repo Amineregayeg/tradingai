@@ -30459,11 +30459,19 @@ agents/tools/mutation_harness.py:83   ^FAILED \S+::(\S+)            id with a sp
 count vs parsed-list mismatches: 437r E07a E07b E17 X03a X03c; 2fr F10 K10 X03a X03c; 2er/b452r K10 X03a X03c
 ```
 
-**What it did not do:** no record has a count above zero with an EMPTY death list, so no must-miss row and no "0 deaths"
-verdict was faked. A row that lost its only kill would still show as a survivor.
+**Which claims are exposed (review's correction of the manager's first statement).** Dropping an id can only REMOVE deaths
+from a record:
+- "row died on arm X" claims stand.
+- A survivor claim could be a false survivor, which errs the safe way.
+- **A zero-death MUST-MISS is the dangerous direction.** "Died on nothing" is its success, so an only-kill on a
+  space-containing id would read as the must-miss passing. The zeros stand ONLY BY MEASUREMENT, not by argument: across
+  b428b_ir, 437r, 2fr, 2er, b452rA and b452r, no record has pytest's summary count above 0 with an empty death list.
+- Death-set COMPARISONS ("identical death sets", "0 lost"), and per-test "arm B did not die" claims inside a row that died
+  elsewhere, were blind to those 23 tests. They can only be wrong in the rows whose counts disagree, and those rows are
+  re-run with the fixed parser.
 
-**What it did:** every death-set COMPARISON ("identical death sets", "0 lost") was blind to those 23 tests. A kill lost on
-one of them read as SAME.
+(The manager first wrote that a lost only-kill "would still show as a survivor", which made the must-miss zeros look safe
+by argument. That reasoning is wrong for must-miss rows. The conclusion holds only because of the measurement above.)
 
 **Fix:**
 - Every parser reads the node id up to `" - "` or the end of the line. None of the 23 ids contains `" - "`.
