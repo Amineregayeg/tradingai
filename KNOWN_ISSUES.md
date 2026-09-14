@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-14 (newest entry B470; B428b commit (i) passed review conditionally, deploying inside a087b59; B468 amended with pre-existing survivor K2-8a)
+Last updated: 2026-09-14 (newest entry B473 — the venue stop's blindness clock starts blind after a Start; B472 — a venue stop() closes the whole account; B471 — sweep (b) labels a close as an entry)
 
 ---
 
@@ -30625,3 +30625,45 @@ Registered: iR7, iR8, iM6b and iQ6c each die over the full population.
   then LAST. The collected count must equal 8fa3ef1's plus the new file's, and every pre-existing id must pass in both
   runs. A state leak from an added file into existing arms is how an additions-only commit weakens them.
 
+### B471 — THE KILL SWITCH'S SWEEP (b) LABELS WHATEVER HOLDS THE ACCOUNT LOCK AS AN ENTRY, AND SINCE B428b (ii) A CLOSE HOLDS IT
+
+**Found by execute while building B428b (ii) at `58f73b9`; the manager confirmed the label site.**
+
+```
+alpaca.py:2582/2599   _in_flight_entry_row(...) -> report["b#in_flight_entry"] = {...holder...}
+alpaca.py:1849        place_close(pair, qty, client_order_id)   takes the same account lock (R7')
+```
+
+A kill-switch report taken while an engine CLOSE holds the lock names it as an in-flight ENTRY. An operator reading the
+report during a trigger would believe an order was being opened when one was being closed. LATENT: the engine does not
+trade Alpaca until `B430`. **Fix (B428b (iii)):** the lock holder records its kind (entry or close, with the leg), and the
+report row names the kind. Arm: a close holding the lock during close-all → the row names a close with its leg.
+
+### B472 — ON A VENUE BROKER, `stop()` STILL CLOSES THE WHOLE ACCOUNT, AND THE SESSION FLATTEN SILENTLY DOES NOTHING
+
+**Found by execute while building B428b (ii); the manager read `crypto_loop.py` ~:3391 at `58f73b9`.**
+
+```
+crypto_loop.py:3366  async def stop(self)
+crypto_loop.py:3391      closed = await self.paper.close_all_positions()     <- every position on the account, not the engine's
+session flatten on a venue: logs and returns (DECLARED_SESSION_FLATTEN is false today)
+```
+
+DESIGN §3.5 (R12', M8) rules that a venue Stop closes ENGINE positions only (book, identity-bearing, leg `x`), and never
+foreign holdings. That is the same promise GX-4 and GX-6 keep. LATENT until `B430`. **Fix (B428b (iii)):**
+- the venue Stop goes through §3.5 and closes engine positions only
+- Start REFUSES with `DECLARED_SESSION_FLATTEN` true on a venue broker, as a `_start_refusals` entry
+
+Arms: a Stop with 2 engine positions and 1 foreign position → 2 `x` sells and 0 orders for the foreign one; flatten true
+plus a venue → Start refused.
+
+### B473 — THE VENUE STOP'S BLINDNESS CLOCK STARTS BLIND: after a Start, the first Binance failure closes "blind" with no 180 s grace
+
+**Found by execute while building B428b (ii) at `58f73b9`.**
+
+R1''' makes a symbol blind only when there has been no Binance mark for 180 s AND no Alpaca quote younger than 600 s.
+With no mark ever recorded for a pair, "no mark for 180 s" is already true. So after a Start, or (iii)'s adoption at
+boot, the first Binance failure plus a stale paper quote triggers a `STOP_BLIND` market close at once, although no mark
+had yet had the chance to go stale. LATENT until `B430`. **Fix (B428b (iii)):** seed `_mark_at[pair]` at Start and at
+adoption, so the 180 s window runs from then. Arm: Start, then the first Binance read fails with a stale quote → no blind
+close before 180 s; still failing at 180 s → a blind close.
