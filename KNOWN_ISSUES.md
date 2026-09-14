@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-14 (newest entry B451 — the first real orders on the Alpaca paper account, run at fb3dab6: Alpaca refuses bracket and OTO stop protection on crypto (B448), and a separate stop locks the position against every close; positions are spelled BTCUSD against orders' BTC/USD, so the engine's one-position gate is blind (B449); the fee is taken in kind (B450); the real minimum is a $10 cost basis (B451). B447 measured, B444 item 3 answered, B427 validated on the venue.)
+Last updated: 2026-09-14 (newest entry B451. Probe round 3 amended B447: Alpaca's crypto data API gives a price while flat, with or without keys; B450: fees are 0.25% per leg, in BTC on the buy and in USD on the sell; B451: closes below $10 fill; B444: the account's FILL activities are the source for recording venue-side exits.)
 
 ---
 
@@ -29606,6 +29606,12 @@ bracket and OTO orders. A SEPARATE resting stop-limit, however, reserves the ent
 while it rests Alpaca refuses a 70% partial close AND a full close with 403 "insufficient balance for BTC ... available:
 0". The close only succeeded after the stop was cancelled.
 
+**THE RECORDING SOURCE EXISTS, MEASURED (probe round 3, 2026-09-14 00:03Z, paper account, `fb3dab6`; records in `agents/tasks/_runs/probes_20260914/probe_copy3/`):** the account's FILL activities (`GET /v2/account/activities/FILL`,
+with no `alpaca-py` 0.44 method, so read through the client's REST `get`) list every fill with order_id, side, qty,
+price, symbol "BTC/USD" and transaction_time, newest first. That is what a venue-side exit (a stop, a manual close, the
+kill switch) can be recorded from. A partial close through `close_position(symbol, qty)` filled and left the exact
+remainder (0.000194707 − 0.000136294 = 0.000058413).
+
 ---
 
 ### B445 — `B366`'s FIX IS UNREACHABLE. `broker_manager.close_all_positions` catches each adapter's exception and flattens it to one error row, so the kill switch never sees the `partial_report` it was changed to read — and a confirmed CLOSED position is reported as a failure
@@ -29701,6 +29707,13 @@ The source is named in the result, because the sizing price and the fill come fr
 it also returned None**, because the position is spelled `BTCUSD` and the slash form 404s (`B449`). On Alpaca this
 method never returns a price.
 
+**A PRICE THAT EXISTS WHILE FLAT, MEASURED (probe round 3, 2026-09-14 00:03Z, paper account, `fb3dab6`; records in `agents/tasks/_runs/probes_20260914/probe_copy3/`):** Alpaca's crypto data API,
+`CryptoHistoricalDataClient.get_crypto_latest_quote` / `get_crypto_latest_trade` for "BTC/USD", answered from FLAT,
+**with keys and without them** (bid 76800.4 / ask 76814.603, last trade 76777.22). Binance's ticker read 76846.01 at
+the same moment, and the buy that followed filled at 76850.22. Alpaca's own quote is the venue's price; the Binance
+mark is another feed. `get_open_position("BTCUSD")` works while a position is open (current_price 76777.22, the last
+trade); flat, it answers 404 "position does not exist".
+
 ---
 
 ### B448 — ALPACA REFUSES STOP PROTECTION ATTACHED TO A CRYPTO ORDER, so `B429`'s design cannot work on this venue: every protected entry is refused. And a SEPARATE stop, the one form it accepts, locks the whole position so that no close can go through while it rests
@@ -29785,6 +29798,13 @@ The sizing risk is also slightly off: the stop's loss applies to the smaller qua
 `filled_qty`. Keep the fee, measured as the difference, beside the fill. Size every close from the venue position at
 the moment of closing.
 
+**BOTH LEGS MEASURED (probe round 3, 2026-09-14 00:03Z, paper account, `fb3dab6`; records in `agents/tasks/_runs/probes_20260914/probe_copy3/`).** Buy $15.00 of notional: the fill history shows 0.000195195 BTC
+bought, the position holds 0.000194707, so the fee (0.25%) is taken in BTC. Sell 0.000136294 at 76766.43
+(notional $10.4627): cash rose $10.43, so the sell fee is taken in USD (~0.25%). Sell the remaining 0.000058413 at
+76783.6 ($4.4852): cash +$4.47. **Round trip on $15: −$0.10 of cash**, i.e. fees on both legs plus the price moved
+against the entry. The position's `avg_entry_price` is the fill price and `cost_basis` is qty × that price, so
+neither carries the fee. **Realised P&L must come from cash deltas or fills plus fees, not from position fields.**
+
 ---
 
 ### B451 — ALPACA'S REAL ORDER MINIMUM IS $10 OF COST BASIS, while the adapter's MIN_SIZE check uses the asset's `min_order_size` (about $1). An order between $1 and $10 passes our check, is refused by the venue, and is filed as a transient `VENUE_TRANSPORT`
@@ -29807,3 +29827,8 @@ checked.
 
 **Fix direction:** the adapter refuses below the $10 cost basis as `MIN_SIZE` before sending, stating the source (the
 venue's message, measured). Measure how a close below $10 behaves before designing the runner's last exit.
+
+**CLOSES ARE NOT HELD TO THE $10 FLOOR, MEASURED (probe round 3, 2026-09-14 00:03Z, paper account, `fb3dab6`; records in `agents/tasks/_runs/probes_20260914/probe_copy3/`):** with no resting order, a 70% partial close of $10.46
+filled, and `close_position` on the $4.48 remainder filled too (resolved on the first read). So a runner's last exit
+below $10 works through `close_position`. The floor binds on opening orders; whether it binds on a `qty` sell sent
+as an ordinary order is not measured.
