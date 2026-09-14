@@ -30071,6 +30071,17 @@ set: `_runs/2f/KILL_SET.md`, F-1..F-10.
 
 ---
 
+**ARM GAP IN (2f) `c1589e2`, found by execute (review suspected it); production is correct:**
+- The mutant: `_leave_cancelled_record` RETURNS on a second cancel instead of continuing. The shielded audit write then
+  finishes in the background, and a real shutdown would lose it, which is what S-F1 exists to prevent.
+- F11 and F15 PASS it on all three paths: they read `committed` after the scenario's 0.4s sleep, when the background write
+  has already landed. It dies only on F12's missing expiry log line.
+- Fix, probed: a done-callback snapshots `committed` at the moment the trigger TASK ends, and F11/F15 assert 1. Clean
+  code passes 22/22; the mutant dies on F11 ×3 and F15 ×3 by name.
+- Routed as a test-only commit right after `B437` lands, because `test_b453` is in B437's running record, together with
+  review's N1/N2 on `test_b442`.
+
+
 ### B454 — ON A VENUE BROKER, EVERY DEPLOY WOULD CLOSE THE WHOLE ACCOUNT AT MARKET. The app's shutdown stops the loop, and the loop's `stop()` closes every position, which on Alpaca means every position in the account, with no trade rows and no time to finish
 
 **Found by review attacking the `B428b` brief (`agents/tasks/_runs/t0144_attack/FINDINGS.md`), read at `ab64c03`; the manager confirmed the code by reading. Latent: `B430` keeps the engine off Alpaca, and the engine is held.**
