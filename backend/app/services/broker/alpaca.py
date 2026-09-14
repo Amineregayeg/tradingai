@@ -50,7 +50,10 @@ import asyncio
 import contextlib
 import hashlib
 import math
+import threading
 import time
+import weakref
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
@@ -481,6 +484,177 @@ async def _holding_with_bounded_wait(lock: asyncio.Lock, wait_s: float):
             lock.release()
 
 
+# ---------------------------------------------------------------------------------------------------
+# `B437` — ONE WORKER THREAD PER ACCOUNT
+# ---------------------------------------------------------------------------------------------------
+#
+# `TradingClient` is synchronous (`requests`), and `_call` used to invoke it INLINE: every Alpaca round trip blocked the
+# event loop — the other symbols' ticks, the websocket, the API, all waited on it (measured with a ticker, B437). Now
+# every call runs on ONE worker thread for its ACCOUNT (manager's ruling, option (c)):
+#
+#   * the loop is free while the venue answers;
+#   * calls on one account are SERIALISED, across every client and adapter on it — so no `requests.Session` is ever used
+#     by two threads at once (the property B437's concurrency measurement could show evidence for but not guarantee),
+#     and the kill switch waits behind at most ONE in-flight call per queued job, never a whole resolution;
+#   * a WRITE is SHIELDED: a cancellation that arrives while the request is on the wire waits for the answer, logs the
+#     order's ids, and re-raises. A cancelled READ is abandoned at once; nothing changed at the venue.
+#
+# Keyed by `account_key_of` (a hash, never logged). The registry holds executors WEAKLY: an adapter holds its executor,
+# so the thread lives as long as some adapter on the account does, and exits when the last one is gone. B428b's quote
+# client authenticates with the same key and must go through the SAME executor: `account_executor(key).run(...)` takes
+# any callable, not only a TradingClient method. B441's timeouts bound every call, which is what keeps one hung call
+# from stalling the account for ever.
+
+#: SDK members that CHANGE something at the venue. Their calls are shielded from cancellation.
+ALPACA_WRITE_CALLS: frozenset[str] = frozenset({
+    "submit_order", "close_position", "close_all_positions", "cancel_order_by_id", "cancel_orders",
+    "replace_order_by_id",
+})
+
+
+class AccountExecutor:
+    """ONE worker thread for one Alpaca account. `run` dispatches any callable to it."""
+
+    #: A constant, never the key: a thread name reaches thread dumps and log records.
+    THREAD_NAME_PREFIX = "alpaca-account"
+
+    def __init__(self) -> None:
+        self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix=self.THREAD_NAME_PREFIX)
+
+    async def run(self, fn: Callable, args: tuple = (), kwargs: dict | None = None, *, write: bool = False,
+                  call: str = "", describe: Callable[[Any], dict] | None = None,
+                  guard: Callable[[], None] | None = None) -> Any:
+        """`fn(*args, **kwargs)` on this account's worker, in submission order (FIFO).
+
+        `guard`, when given, runs ON THE WORKER immediately before `fn` — the kill switch's check at the send, for a
+        submission that may have waited in the queue (review's E-11). A `NotSent` it returns is returned INSTEAD of
+        calling `fn`: nothing is sent.
+
+        `write=True` SHIELDS the call, in two cases (review's E-8, E-10):
+          * cancelled while still QUEUED — nothing has been sent, so the job is withdrawn and NOTHING is sent;
+          * cancelled once STARTED — the request is on the wire, so it is awaited to completion (a repeated cancel does
+            not cut that short; the call is bounded by B441's timeouts and the SDK's retries), an ERROR naming what
+            reached the venue is logged (`describe(result)` supplies the order's ids), and `CancelledError` is re-raised.
+            It never returns normally after a cancellation.
+        A READ is not shielded (S-2): a cancelled read is abandoned at once, and a queued one never runs."""
+        def _job():
+            if guard is not None:
+                declined = guard()
+                if declined is not None:
+                    return declined      # NOT sent: the marker goes back as the result, never as an exception
+            return fn(*args, **(kwargs or {}))
+
+        job = self._pool.submit(_job)
+        future = asyncio.wrap_future(job)
+        if not write:
+            return await future
+        caller_cancelled = False
+        while not future.done():
+            try:
+                await asyncio.shield(future)
+            except asyncio.CancelledError:
+                if not caller_cancelled and job.cancel():
+                    facts = _safe_describe(describe, None)
+                    logger.warning(
+                        "alpaca.write_cancelled_before_sending — this task was cancelled while the call was still "
+                        "QUEUED on the account's worker; it was withdrawn and NOTHING was sent.",
+                        call=call, **facts,
+                    )
+                    raise
+                if future.cancelled():
+                    raise
+                caller_cancelled = True
+            except BaseException:
+                # THE WRITE RAISED. Without a cancellation that is the call's own failure, and it propagates as such.
+                # AFTER one, it must NOT escape from here: the caller was cancelled and must see `CancelledError`, with
+                # the failure logged below (review's E-9 — measured: it escaped, was classified, looked up six times,
+                # and the cancelled task RETURNED normally).
+                if not caller_cancelled:
+                    raise
+        if not caller_cancelled:
+            return future.result()
+        failure = future.exception()   # RETRIEVED here, so the loop never reports it as unretrieved (E-9)
+        facts = _safe_describe(describe, None if failure is not None else future.result())
+        logger.error(
+            "alpaca.write_cancelled_in_flight — this task was cancelled while the call was ON THE WIRE; it was awaited "
+            "to completion. What it did at the venue is below. Check the venue before trading this symbol again.",
+            call=call, outcome="raised" if failure is not None else "returned",
+            error=f"{type(failure).__name__}: {failure}" if failure is not None else None, **facts,
+        )
+        raise asyncio.CancelledError(f"cancelled while {call} was in flight")
+
+
+def _safe_describe(describe: Callable[[Any], dict] | None, result: Any) -> dict:
+    """A log line's facts, which must never fail the cancellation they accompany."""
+    if describe is None:
+        return {}
+    try:
+        return describe(result)
+    except Exception as exc:  # noqa: BLE001
+        return {"describe_error": f"{type(exc).__name__}: {exc}"}
+
+
+_ACCOUNT_EXECUTORS: "weakref.WeakValueDictionary[str, AccountExecutor]" = weakref.WeakValueDictionary()
+_ACCOUNT_EXECUTORS_GUARD = threading.Lock()
+
+
+def account_executor(account_key: str) -> AccountExecutor:
+    """The executor for this account — the SAME object for every client and adapter on it while any holds it."""
+    with _ACCOUNT_EXECUTORS_GUARD:
+        executor = _ACCOUNT_EXECUTORS.get(account_key)
+        if executor is None:
+            executor = AccountExecutor()
+            _ACCOUNT_EXECUTORS[account_key] = executor
+        return executor
+
+
+def _describe_write(call: str, args: tuple, kwargs: dict) -> Callable[[Any], dict]:
+    """The ids a cancelled write's log line carries: the order the venue returned, and what was sent."""
+    sent_client_id = getattr(args[0], "client_order_id", None) if args and call == "submit_order" else None
+    sent_target = args[0] if args and call in ("close_position", "cancel_order_by_id", "replace_order_by_id") else None
+
+    def _describe(result: Any) -> dict:   # `result` is None when nothing came back (queued, or the call raised)
+        return {
+            "order_id": str(getattr(result, "id", "") or "") or None,
+            # the id WE SENT is what finds the order again; the venue's echo is kept beside it
+            "client_order_id": sent_client_id or getattr(result, "client_order_id", None),
+            "venue_client_order_id": getattr(result, "client_order_id", None),
+            "symbol": getattr(result, "symbol", None) or (sent_target if call == "close_position" else None),
+            "status": str(getattr(getattr(result, "status", None), "value", getattr(result, "status", None)) or "") or None,
+            "target": sent_target,
+        }
+    return _describe
+
+
+class NotSent:
+    """**A submission the WORKER declined to send**, returned — never raised — so nothing reaches `_call`'s wrapping or
+    B440's classifier (manager's ruling on E-11; K2-8's trap: a `KillSwitchArmed` wrapped by `_call` becomes a
+    `BrokerError`, is classified UNANSWERED, is looked up, and halts). `place_order` turns it into the refusal OUTSIDE
+    the submission `try`."""
+
+    __slots__ = ("refusal",)
+
+    def __init__(self, refusal: BaseException) -> None:
+        self.refusal = refusal
+
+
+def _switch_check_at_the_send(args: tuple) -> Callable[[], "NotSent | None"]:
+    """**B442's check, repeated ON THE WORKER right before `submit_order` runs** (review's E-11, manager's ruling 2).
+    `place_order` checks the switch before queueing; behind one worker the send can start up to one call's C later, and
+    a switch armed in that wait must still refuse it. SUBMISSION ONLY (K2-9): closes never read the switch. The flag is
+    a single bool written on the event loop's thread and read here; its read is atomic."""
+    order = args[0] if args else None
+    pair, client_order_id = getattr(order, "symbol", None), getattr(order, "client_order_id", None)
+
+    def _check() -> "NotSent | None":
+        try:
+            refuse_if_armed(venue="alpaca", pair=str(pair), client_order_id=client_order_id)
+        except Exception as refusal:  # noqa: BLE001 - only KillSwitchArmed is raised; it is carried, not raised
+            return NotSent(refusal)
+        return None
+    return _check
+
+
 def _describe_holder(holder: dict | None) -> str:
     if not holder:
         return "nothing recorded"
@@ -506,24 +680,41 @@ def _client_retry_settings(client: Any) -> tuple[int, float]:
 
 
 def entry_lock_normal_hold_bound_s(client: Any) -> float:
-    """**How long an entry on the NORMAL path may hold its account's lock: 3C + B** (manager's ruling 3c).
+    """**An ESTIMATE of how long an entry on the normal path holds its account's lock: 6C + B** — sweep (b)'s wait for it.
+    The HARD bound is `KILL_SWITCH_RESPONSE_DEADLINE_S`, counted from the start of `close_all_positions`, and nothing
+    else (manager's ruling on S-1, from review's arithmetic).
 
         C = one SDK call = (retry + 1) · (connect + read) + retry · retry_wait     retries and sleep read LIVE
         B = ORDER_RESOLUTION_BUDGET_S
-        normal path = submit (C) + protection re-read (C) + resolution (B + C)
+        calls on the normal path: submit, the protection re-read, one resolver read past the budget      3C + B
+        `B437`: each of those calls QUEUES on the account's single worker, and may start one C late      + 3C
+
+    ASSUMPTION, which is why this is an estimate and not a bound: ONE call ahead of each of the entry's calls. The queue
+    is per CALL, and unlocked reads — `/api/positions`, `/api/brokers/accounts`, the loop's own reads once it trades
+    Alpaca — can be ahead of any of them in NUMBERS NOTHING LIMITS.
+
+    **RESIDUALS, stated (manager's rulings on S-1, with review's reading):**
+      * The ONLY hard bound here is on SWEEP (b)'s WAIT FOR THE LOCK: `KILL_SWITCH_RESPONSE_DEADLINE_S` from the start of
+        `close_all_positions`. It is NOT a bound on the close-all response. The KILL SWITCH'S OWN CLOSES — sweep (a)'s
+        closes, and (b)'s re-listing and closes — also run on the account's worker and queue behind unlocked reads;
+        before `B437` a close ran inline, so this cost is new.
+      * The measured polling source: `frontend/src/components/dashboard/BrokerAccountsPanel.tsx:128` polls
+        `/api/brokers/accounts` (-> `get_account`) every 30s PER OPEN DASHBOARD.
+      * Under 429s (C = 61s), UI polling can delay an order, or a kill-switch close, by several calls.
+      * MEASURED (E-S1r, doubles, 0.2s per queued read, deadline patched to 0.6s, one entry holding the lock):
+        close-all took 0.80s with 0 queued reads and 1.40s with 5, the extra 0.6s being the reads its own calls waited
+        behind; (b)'s lock wait was capped both times.
+      * THE FIX is `B428b`'s R10 (single-flight positions/account reads), recorded in T-0144's brief; not built here.
 
     Read from the live module constants and the client at call time, never a literal (review's K2-14). For
-    `build_trading_client`'s client at alpaca-py 0.44.0 — retry 3, retry_wait 3s, connect 3s, read 10s, budget
-    5s — C = 61s and **3C + B = 188s**; with no 429 retry C = 13s and it is 44s.
-
-    **NOT THE WORST CASE, deliberately.** An ambiguous submission adds a lookup (4C + 2B) and a protection
-    failure's remediation reaches 9C + B; the latter closes its own position, and the kill switch's expiry row
-    reports whatever was not waited for. `close_all_positions` also caps the wait at
-    `KILL_SWITCH_RESPONSE_DEADLINE_S` from its own start, because 188s is past the proxy's cut (`B443`).
+    `build_trading_client`'s client at alpaca-py 0.44.0 — retry 3, retry_wait 3s, connect 3s, read 10s, budget 5s —
+    C = 61s and **6C + B = 371s**; with no 429 retry C = 13s and it is 83s. Both exceed the 100s response deadline or
+    come close to it, which is why sweep (b)'s wait is capped by that deadline and its expiry row reports what it did
+    not wait for.
     """
     retry, wait = _client_retry_settings(client)
     call = (retry + 1) * (ALPACA_HTTP_CONNECT_TIMEOUT_S + ALPACA_HTTP_READ_TIMEOUT_S) + retry * wait
-    return 3 * call + ORDER_RESOLUTION_BUDGET_S
+    return 6 * call + ORDER_RESOLUTION_BUDGET_S
 
 
 #: **The venue's code for "position does not exist"** — measured in probe round 3 (2026-09-14, paper account, flat):
@@ -873,6 +1064,8 @@ class AlpacaAdapter(BrokerAdapter):
         #: `B442`: the key this adapter's ORDER LOCK is registered under — shared with every adapter on the same
         #: account. Never logged.
         self._account_key: str = account_key_of(client)
+        #: `B437`: this account's worker — held here, so the thread lives while any adapter on the account does.
+        self._executor: AccountExecutor = account_executor(self._account_key)
         if self._account_key.startswith("client:"):
             logger.warning(
                 "alpaca.order_lock_per_client — this client carries no readable API key id, so its order lock "
@@ -1008,8 +1201,14 @@ class AlpacaAdapter(BrokerAdapter):
                 f"TradingClient — see {SHAPES}.", broker=self.broker_name,
             )
         try:
-            result = method(*args, **kwargs)
-            if asyncio.iscoroutine(result):
+            # `B437`: on this ACCOUNT's worker thread, never inline on the event loop. Writes are shielded.
+            write = name in ALPACA_WRITE_CALLS
+            result = await self._account_worker().run(
+                method, args, kwargs, write=write, call=name,
+                describe=_describe_write(name, args, kwargs) if write else None,
+                guard=_switch_check_at_the_send(args) if name == "submit_order" else None,
+            )
+            if asyncio.iscoroutine(result):   # a test double's async member: its coroutine is awaited here
                 result = await result
             return result
         except BrokerError:
@@ -1018,6 +1217,12 @@ class AlpacaAdapter(BrokerAdapter):
             raise BrokerError(
                 f"Alpaca {name} failed: {type(exc).__name__}: {exc}", broker=self.broker_name,
             ) from exc
+
+    def _account_worker(self) -> AccountExecutor:
+        executor = getattr(self, "_executor", None)
+        if executor is None:   # an adapter built without __init__ (a test double); production always has one
+            executor = self._executor = account_executor(self._account_key)
+        return executor
 
     async def get_account(self) -> Account:
         acct = self._require_model(await self._call("get_account"), "get_account")
@@ -1453,8 +1658,13 @@ class AlpacaAdapter(BrokerAdapter):
 
     async def _submit_and_resolve(self, order, request, protection, quantity, requested, limits) -> dict:
         """Submission, the `B440` lookup, and the verdict — called ONLY by `place_order`, under the account lock."""
+        declined = None
         try:
-            placed = self._require_model(await self._call("submit_order", order), "submit_order")
+            sent = await self._call("submit_order", order)
+            if isinstance(sent, NotSent):
+                declined = sent          # the worker's check at the send refused it; raised OUTSIDE this try, below
+            else:
+                placed = self._require_model(sent, "submit_order")
         except BrokerError as exc:
             # **`B440`/`B441`. A FAILED SUBMISSION IS NOT PROOF THAT NO ORDER EXISTS.** Only a failure raised
             # before anything was sent, or a refusal the server read and answered, is (`classify_submission_
@@ -1475,6 +1685,11 @@ class AlpacaAdapter(BrokerAdapter):
                 raise
             if placed is None:
                 return self._unconfirmed_submission(request, quantity, requested, limits, exc, why)
+
+        if declined is not None:
+            # `B437` / E-11: the switch was armed while this submission waited on the account's worker. NOTHING was
+            # sent. Raised here, outside the submission `try`, so it is a refusal and never a classified failure.
+            raise declined.refusal
 
         # ------------------------------------------------------------------
         # **AND VERIFY IT LANDED, because the dangerous failure is the SILENT one.**
@@ -2211,12 +2426,12 @@ class AlpacaAdapter(BrokerAdapter):
 
         **TWO SWEEPS (`B442`, manager's ruling 3).** An entry already SUBMITTED and still resolving when the switch
         is pulled can fill after the book is enumerated. Waiting for it BEFORE the first close would hold every
-        open position hostage to one entry — up to 3C + B, 188s for the builder's client — on the degraded venue
+        open position hostage to one entry — an estimated 6C + B, 371s for the builder's client — on the degraded venue
         where the switch is most likely pulled. So:
 
             (a) enumerate and close NOW, taking no lock;
             (b) then take this account's order lock — the entry holds it through its verdict — with a wait of
-                min(3C + B, KILL_SWITCH_RESPONSE_DEADLINE_S − elapsed since this method started), floored at 0;
+                min(6C + B, KILL_SWITCH_RESPONSE_DEADLINE_S − elapsed since this method started), floored at 0;
                 re-enumerate; close what (a) did not see, or confirmed CLOSED and is open again.
 
         (b) NEVER re-closes a position whose close in (a) FAILED or is unconfirmed: that close order may still be
@@ -2410,12 +2625,12 @@ class AlpacaAdapter(BrokerAdapter):
             why = ("this account's order lock belongs to a DIFFERENT live event loop, so no mutual exclusion was "
                    "possible and sweep (b) did not wait")
         elif deadline_bounded:
-            why = (f"sweep (b) waited {waited:.1f}s of the up to {derived:.1f}s (3C + B) an in-flight entry may need, "
+            why = (f"sweep (b) waited {waited:.1f}s of the up to {derived:.1f}s (6C + B, an estimate) an in-flight entry may need, "
                    f"because the report must return before the proxy cuts the request "
                    f"(KILL_SWITCH_RESPONSE_DEADLINE_S = {KILL_SWITCH_RESPONSE_DEADLINE_S:.0f}s from the start of "
                    f"close_all_positions)")
         else:
-            why = (f"sweep (b)'s {waited:.1f}s wait for it expired — the up to {derived:.1f}s (3C + B) an in-flight "
+            why = (f"sweep (b)'s {waited:.1f}s wait for it expired — the up to {derived:.1f}s (6C + B, an estimate) an in-flight "
                    f"entry may need")
         report["b#in_flight_entry"] = {
             "position_id": str(holder.get("symbol") or ""),
