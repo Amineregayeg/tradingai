@@ -1,6 +1,6 @@
 # Malek — current state
 
-_Last updated: 2026-09-14 20:50 WAT, by Malek's manager session. Updated about every 2 hours._
+_Last updated: 2026-09-14 22:50 WAT, by Malek's manager session. Updated about every 2 hours._
 
 ## Goal right now
 
@@ -48,8 +48,8 @@ defect found goes into `KNOWN_ISSUES.md` with a B-number. A commit is only "done
   - the minimum
   - quantities
   - migration 0017
-  **Commit (i) is COMMITTED as `f3250ad`** (15:56 WAT). The manager verified it, and review's independent check is
-  finishing: 304 mutation rows, plus a replay of 231 of execute's older rows that no review had ever run (`B468`).
+  **Commit (i) is COMMITTED as `f3250ad`** (15:56 WAT). **It PASSED REVIEW at 22:31 WAT, on conditions** (below). The
+  check covered 304 mutation rows, plus a replay of 231 of execute's older rows that no review had ever run (`B468`).
   - Review found SEVEN production lines in (i) that are correct but that no test would notice breaking (`B470`, plus
     `B469` for two Kill Switch safety tests).
   - These are fixed by a test-only commit, `a087b59` (one new test file, 14 tests), committed 20:23 WAT and verified by
@@ -82,9 +82,18 @@ defect found goes into `KNOWN_ISSUES.md` with a B-number. A commit is only "done
   blocks the network in every test (`B432`). It found 27 tests that reach the internet; 16 of them failed offline and had
   passed only because Binance answered. All are patched. The full suite at `8fa3ef1` is green: 3,108 tests, network
   blocked.
-- **Commit (ii) is being built** in a private tree. Migration 0018 adds five trade columns: the closing order's id, how
-  the exit was decided, and the Binance mark at detection with its source and the check interval, so the Binance-vs-Alpaca
-  price gap is measured durably.
+- **Commit (ii) is COMMITTED as `58f73b9`** (22:33 WAT) and verified by the manager: 179 of 179 mutants killed, suite
+  3,138 green. It holds:
+  - closes as ordinary sell orders
+  - position events
+  - blindness handling
+  - settle rows
+  - removal of the old stop-order code
+  - migration 0018, five trade columns
+  Migration 0018 passed a run on a real Postgres copy of production: no row changed, and the app's query fails as expected
+  against a database missing the migration, which the deploy ordering prevents. Waiting for review.
+- **Commit (iii) is being built:** start-up and stop modes, reconciliation, the "stops only" boot policy, and the fixes
+  for `B471`–`B473`. It will add migration 0019 (a new rejection code for an entry refused because Stop was pressed).
 - **Interruption:** the machine was suspended from about 15:52 to 18:31 WAT. Both mutation runs resumed afterwards, and
   any row that straddled the gap is re-run before it counts.
 - **Tooling defects found and fixed today:**
