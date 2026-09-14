@@ -29664,6 +29664,13 @@ consumer against a manager that does not exist. A double kinder than the real ca
 when the adapter raises, and adds one error row only for positions the report does not cover. The arm drives
 `KillSwitch.trigger` through the REAL `BrokerManager` with a raising adapter.
 
+**FIXED at `32a7610`, PASSED review (2026-09-14). Not yet deployed.** `BrokerManager` keeps an adapter's
+`partial_report` rows, each tagged with broker and connection id. A report of None yields an error row; a list, even
+an empty one, yields its rows. Manager's drive through the real kill switch and manager, with real AlpacaAdapters: an
+abnormal exit mid-loop kept BTC CLOSED / ETH SENT-never-observed / SOL NOT_ATTEMPTED beside the other adapter's rows.
+Review killed every behaviour row on a named arm. No kill set was pre-registered for this commit; review designed the
+rows at review time.
+
 ---
 
 ### B446 — A CANCELLED KILL-SWITCH TRIGGER IS SWALLOWED. The adapter turns `CancelledError` into `BrokerError`, the manager catches it, `trigger` returns normally, and the next adapter's closes still go out
@@ -29695,6 +29702,18 @@ disconnect (not measured).
 as a shielded task, awaits it on cancellation, records the result, then re-raises. Arms: a cancelled trigger still
 closes every position, returns no normal result, and the awaiting task sees `CancelledError` with the full report
 logged.
+
+**FIXED at `32a7610`, PASSED review (2026-09-14). Not yet deployed.**
+- The adapters re-raise a cancellation as itself (`BrokerAdapter._abnormal_exit`).
+- `trigger()` runs the sweep shielded: after a caller cancels, it logs every row, writes the audit row in a fresh
+  session, and re-raises.
+- The in-progress mark clears in the sweep's own `finally`.
+- The in-progress answer carries no counters, and the route answers 409.
+
+Manager's drive: a cancel during a resolving close closed all three positions, the awaiter saw `CancelledError`, and
+the audit committed. **Non-blocking finding (review, measured): the 409 redacts TOP-LEVEL strings only.** A token
+planted in a row's nested `close.resolution.read_errors` reaches the response. Fix: redact recursively. Unarmed and
+stated: the pre-sweep mark clear if `arm()` raised (practically unreachable), and the "no rows reported" log.
 
 ---
 
