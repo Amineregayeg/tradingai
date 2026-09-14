@@ -36,18 +36,24 @@ from __future__ import annotations
 
 import ast
 import inspect
+import textwrap
 from pathlib import Path
 
 import pytest
 
 from app.services.broker.base import Account, BrokerAdapter
 from app.services.live import crypto_loop as mod
+from app.services.live import position_events as events_mod
 from app.services.live.crypto_loop import (
     BLOCK_HALT,
     BLOCK_SKIP,
     REQUIRED_BROKER_CAPABILITIES,
+    REQUIRED_BROKER_CAPABILITIES_BY_KIND,
     LiveCryptoLoop,
 )
+
+#: `T-0144` §2.1: an adapter that declares no kind and has no `on_tick` is held to the VENUE list (the alarming default).
+VENUE = set(REQUIRED_BROKER_CAPABILITIES_BY_KIND["venue"])
 
 #: Touched on `self.paper` but NOT required, each for a stated reason. `_IMPORT_EXEMPT`'s shape:
 #: an exemption nobody can see the size of is an unbounded hole, so it is pinned and an arm below
@@ -67,16 +73,26 @@ _EXEMPT = {
 }
 
 
-def _paper_uses() -> set[str]:
-    """Every `self.paper.X` in the loop's source, derived rather than listed."""
-    tree = ast.parse(inspect.getsource(mod))
+def _uses_of(module, holder: str) -> set[str]:
+    tree = ast.parse(inspect.getsource(module))
     out: set[str] = set()
     for n in ast.walk(tree):
         if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Attribute):
-            if n.value.attr == "paper" and isinstance(n.value.value, ast.Name):
+            if n.value.attr == holder and isinstance(n.value.value, ast.Name):
                 if n.value.value.id == "self":
                     out.add(n.attr)
     return out
+
+
+def _paper_uses() -> set[str]:
+    """Every `self.paper.X` in the loop's source AND in the position-event source that receives the broker (`T-0144`
+    §2.1: `SimulatorEvents` is where `on_tick` is called now), derived rather than listed."""
+    return _uses_of(mod, "paper") | _uses_of(events_mod, "paper")
+
+
+def _venue_adapter_uses() -> set[str]:
+    """Every `self.adapter.X` in `VenueEvents` — what a VENUE broker is asked for."""
+    return _uses_of(events_mod, "adapter")
 
 
 def _contract() -> set[str]:
@@ -179,9 +195,35 @@ def test_the_EXEMPTION_is_bounded_and_does_not_silently_GROW():
 
 def test_the_check_DISCRIMINATES_between_a_capable_and_an_incapable_broker():
     """Both directions. A check that answers "incapable" to everything refuses the simulators
-    too, and a check that answers "capable" to everything is the defect."""
+    too, and a check that answers "capable" to everything is the defect. `T-0144` §2.1: a broker with no `on_tick` and no
+    declared kind is held to the VENUE list, and one that declares the simulator kind without `on_tick` misses exactly it."""
     assert LiveCryptoLoop._missing_capabilities(_Capable()) == ()
-    assert set(LiveCryptoLoop._missing_capabilities(_Incapable())) == set(REQUIRED_BROKER_CAPABILITIES)
+    assert set(LiveCryptoLoop._missing_capabilities(_Incapable())) == VENUE
+
+    class _DeclaredSimulator(_Incapable):
+        position_events_kind = "simulator"
+
+    assert LiveCryptoLoop._missing_capabilities(_DeclaredSimulator()) == ("on_tick",)
+
+
+def test_CAP_the_VENUE_kind_requires_every_member_VenueEvents_calls_and_one_dropped_is_REFUSED():
+    """Review's CAP row. The venue list is DERIVED against `VenueEvents`' own `self.adapter.X` uses (anything the contract
+    already promises need not be listed), and each member dropped from an otherwise complete venue double is reported."""
+    uses = _venue_adapter_uses()
+    assert {"place_close", "cancel_open_orders_for", "fill_activities"} <= uses, f"the scan is not reading VenueEvents: {uses}"
+    unlisted = uses - VENUE - _contract()
+    assert not unlisted, f"VenueEvents calls {sorted(unlisted)} on the adapter and the venue kind does not require them"
+
+    class _Venue(_ContractOnly):
+        position_events_kind = "venue"
+
+    for name in VENUE:
+        setattr(_Venue, name, lambda *a, **k: None)
+    assert LiveCryptoLoop._missing_capabilities(_Venue()) == ()
+    for name in sorted(VENUE):
+        members = {m: (lambda *a, **k: None) for m in VENUE if m != name}
+        short = type(f"_Lacks_{name}", (_ContractOnly,), {"position_events_kind": "venue", **members})()
+        assert LiveCryptoLoop._missing_capabilities(short) == (name,), name
 
 
 def test_the_check_asks_the_INSTANCE_and_not_the_CLASS():
@@ -222,15 +264,22 @@ def test_the_REAL_simulators_satisfy_the_requirement():
     )
 
 
-def test_AlpacaAdapter_is_MISSING_on_tick_which_is_the_whole_finding():
-    """Asserted against the real class, not a double. If Alpaca ever grows position management
-    this arm fails and the entry gets re-read, which is the right outcome."""
+def test_AlpacaAdapter_is_a_VENUE_whose_positions_the_LOOP_manages_and_it_has_every_venue_member():
+    """Asserted against the real class, not a double. `B428`'s finding was that Alpaca has no `on_tick`; `T-0144` §2.1's
+    answer is that it declares the VENUE kind and the loop's `VenueEvents` manages its positions, so it must carry every
+    member that kind requires — and still no `on_tick` (the simulators' SL/TP is not how a venue is managed)."""
     from app.services.broker.alpaca import AlpacaAdapter
+    from app.services.live.crypto_loop import broker_position_kind
 
-    assert not hasattr(AlpacaAdapter, "on_tick"), (
-        "AlpacaAdapter now has on_tick — B428's mechanism has changed and B429 (no stop is sent "
-        "to the venue and none is enforced in process) must be re-read before this is relaxed"
-    )
+    assert not hasattr(AlpacaAdapter, "on_tick")
+    assert getattr(AlpacaAdapter, "position_events_kind", None) == "venue"
+    missing = sorted(name for name in VENUE if not hasattr(AlpacaAdapter, name))
+    assert not missing, f"AlpacaAdapter lacks venue members {missing}"
+
+    class _Bare:
+        position_events_kind = "venue"
+
+    assert broker_position_kind(_Bare()) == "venue" and broker_position_kind(AlpacaAdapter.__new__(AlpacaAdapter)) == "venue"
 
 
 # =====================================================================================
@@ -248,7 +297,7 @@ async def test_status_REPORTS_an_incapable_broker():
 
     loop.paper = _Incapable()
     loop.broker_missing = LiveCryptoLoop._missing_capabilities(loop.paper)
-    assert set((await loop.status())["broker_missing"]) == set(REQUIRED_BROKER_CAPABILITIES)
+    assert set((await loop.status())["broker_missing"]) == VENUE
 
 
 async def test_the_ENTRY_GATE_refuses_and_classifies_it_as_a_HALT_not_a_SKIP():
@@ -300,7 +349,7 @@ async def test_START_refuses_rather_than_running_blind():
     result = await loop.start()
 
     assert result.get("started") is False, f"start did not refuse: {result}"
-    assert "on_tick" in str(result.get("broker_missing")), result
+    assert "place_close" in str(result.get("broker_missing")), result
     assert loop._running is False, "the loop started anyway"
     assert any("NOT started" in m for _, m in acts), (
         f"the refusal never reached the operator's activity feed: {acts}"
@@ -340,7 +389,7 @@ async def test_STATUS_SURVIVES_the_condition_it_exists_to_REPORT():
 
     payload = await loop.status()                  # must not raise
 
-    assert set(payload["broker_missing"]) == set(REQUIRED_BROKER_CAPABILITIES), (
+    assert set(payload["broker_missing"]) == VENUE, (
         "status() returned without naming what is missing, so it survived and said nothing"
     )
     # AND THE ZERO IS EXPLAINED. `closed_trades == 0` here means "cannot count", not "no trades" —
@@ -404,13 +453,13 @@ def test_REQUIRED_and_EXEMPT_are_DISJOINT():
 
 #: Callees that take `self.paper` WITHOUT retaining it: they read one member or the type and
 #: return. Passing the broker to these hands nothing over.
-_NON_RETAINING = {"getattr", "type", "_missing_capabilities", "isinstance"}
+_NON_RETAINING = {"getattr", "type", "_missing_capabilities", "isinstance", "broker_position_kind"}
 
 #: Everything that genuinely receives the broker object. **Pinned, because a subset check on a
 #: known receiver says nothing about a receiver nobody has looked at** — review's correction, and
 #: it is `assert sites` one level up: half one is *what I found is clean*, half two is *what I
 #: found is everything*, and only the pair is a check.
-_HANDOFF_RECEIVERS = {"ExecutionService"}
+_HANDOFF_RECEIVERS = {"ExecutionService", "_build_events"}
 
 
 def _handoff_callees() -> list[tuple[int, str]]:
@@ -467,6 +516,30 @@ def test_the_ONE_RECEIVER_only_uses_what_the_CONTRACT_promises():
         f"not promise — a requirement of this engine that the capability guard cannot see, "
         f"because the object was handed over rather than accessed through self.paper"
     )
+
+
+def test_the_EVENTS_RECEIVER_hands_the_broker_only_to_the_two_EVENT_SOURCES_and_each_is_scanned():
+    """Half one for `_build_events` (`T-0144` §2.1). It passes the broker to `SimulatorEvents` (whose `self.paper.X` uses
+    `_paper_uses` walks) and to `VenueEvents` (whose `self.adapter.X` uses the CAP arm walks) — and to nothing else, and
+    neither source hands it further."""
+    fn = ast.parse(textwrap.dedent(inspect.getsource(LiveCryptoLoop._build_events)))
+    callees = {
+        getattr(n.func, "id", None) or getattr(n.func, "attr", "?")
+        for n in ast.walk(fn) if isinstance(n, ast.Call)
+        and any(isinstance(a, ast.Name) and a.id == "broker" for a in list(n.args) + [k.value for k in n.keywords])
+    }
+    assert callees == {"broker_position_kind", "SimulatorEvents", "VenueEvents"}, callees
+    tree = ast.parse(inspect.getsource(events_mod))
+    onward = [
+        (n.lineno, getattr(n.func, "id", None) or getattr(n.func, "attr", "?"))
+        for n in ast.walk(tree) if isinstance(n, ast.Call)
+        for a in list(n.args) + [k.value for k in n.keywords]
+        if isinstance(a, ast.Attribute) and a.attr in {"paper", "adapter"}
+        and isinstance(a.value, ast.Name) and a.value.id == "self"
+        and (getattr(n.func, "id", None) or getattr(n.func, "attr", "?")) not in _NON_RETAINING
+    ]
+    assert onward == [], f"an event source hands the broker further: {onward}"
+    assert _uses_of(events_mod, "paper") == {"on_tick"} and "place_close" in _venue_adapter_uses()
 
 
 def test_the_HANDOFF_CHECK_can_actually_FLAG_something():

@@ -11,6 +11,7 @@ import asyncio
 import functools
 import json
 import os
+import time
 import urllib.request
 import uuid
 from collections import deque
@@ -25,14 +26,17 @@ from app.services.broker.paper import PaperBroker
 #: A set rather than a literal so the spelling lives in ONE place (`B184`); `manager.py`
 #: keeps its own aliases for the CONNECT path, which is a different entry point.
 _ALPACA_MODES = {"alpaca", "alpaca_paper", "alpaca-paper"}
-from app.services.broker.alpaca import AlpacaUnprotectedPositionOpen
-from app.services.broker.base import readable_quantity
+from app.services.broker.base import readable_price, readable_quantity
 from app.services.broker.symbols import same_pair
-from app.services.execution.reference import SOURCE_BINANCE, ReferencePrice
+from app.services.execution.reference import SOURCE_ALPACA_QUOTE_MID, SOURCE_BINANCE, ReferencePrice
 from app.services.execution.service import STATUS_NOT_SENT, ExecMode, ExecutionService
 from app.services.live import fixed_config as fixed
 from app.services.live import exit_shadow
 from app.services.live.entry_comparison import compare_entry
+from app.services.live.position_events import (
+    ALPACA_QUOTE_STOP_MAX_AGE_S, BINANCE_MARK_BLIND_AFTER_S, BLOCK_KEY_POSITIONS_UNREADABLE, EnginePosition, Mark,
+    SimulatorEvents, VenueEvents, VenueHooks, blind_block_key, unsettled_block_key,
+)
 from app.services.live.news_context import (
     NewsContext,
     build_news_context,
@@ -173,14 +177,6 @@ class BlockReason(str):
 #: stop* the same event to every count and every panel.
 HALT_PARTIAL_UNSIZED = "a partial fill left a position we could not size"
 
-#: **`B429`.** The venue would not accept the stop AND flat was not observed after cancelling
-#: the entry and closing the position — a close still resting counts, so a
-#: live position may exist with no stop at the venue and none in process. **Its own value,
-#: per `M-7`** — sharing `HALT_PARTIAL_UNSIZED` would make *a partial we could not size* and
-#: *a position we could not protect* the same event to every count and every panel, when the
-#: operator action differs: one is reconcile the SIZE, this one is place a stop or flatten.
-HALT_UNPROTECTED_POSITION = "a position may be open at the venue with no stop"
-
 #: **`T-0130`. AN ORDER RESULT IS ONE OF THREE THINGS, AND ONLY TWO ARE ENUMERATED.**
 #:
 #: ```
@@ -251,8 +247,7 @@ def classify_order_status(status: object) -> str:
 
 #: **`T-0130`.** `place_order` returned something that is neither a fill nor a refusal, so the
 #: engine cannot say whether it holds a position. Its own value, per `M-7`: the operator action is
-#: FIND THE ORDER AT THE VENUE, which neither reconciling a size (`HALT_PARTIAL_UNSIZED`) nor
-#: placing a stop (`HALT_UNPROTECTED_POSITION`) is.
+#: FIND THE ORDER AT THE VENUE, which reconciling a size (`HALT_PARTIAL_UNSIZED`) is not.
 HALT_ORDER_UNRESOLVED = "an order's outcome is unresolved, so a position may exist that is not tracked"
 
 #: `T-0144` R5'': the venue position grew by a different amount than this entry's fill less the fee — another actor may
@@ -298,7 +293,28 @@ BLOCK_RECORD_PENDING = "a decision record is waiting to be written"
 #: every `self.paper.X` and fails if one is neither in the `BrokerAdapter` contract, nor declared
 #: here, nor explicitly exempt. **A missing method is a category, not one incident** — nothing
 #: required `on_tick` to be in the base class and nothing will require the next one either.
-REQUIRED_BROKER_CAPABILITIES: tuple[str, ...] = ("on_tick",)
+#:
+#: **`T-0144` §2.1: BY KIND, ASKED OF THE ADAPTER, NEVER KEYED ON THE VENUE'S NAME.** A simulator enforces its own SL/TP and
+#: needs `on_tick`; a VENUE's positions are managed by the loop's `VenueEvents`, which needs the members below (those the
+#: `BrokerAdapter` contract already guarantees, `get_positions` and `place_order`, are not repeated). An adapter declares
+#: its kind with `position_events_kind`; one that declares nothing and has no `on_tick` is held to the VENUE list, so a
+#: broker that can do neither is refused with every missing member named.
+REQUIRED_BROKER_CAPABILITIES_BY_KIND: dict[str, tuple[str, ...]] = {
+    "simulator": ("on_tick",),
+    "venue": ("position_quantity", "asset_limits", "cancel_open_orders_for", "place_close", "find_order_by_client_id",
+              "fill_activities", "order_client_id", "reference_quote"),
+}
+#: Every member either kind may require — what `test_b428_broker_capabilities.py`'s scan checks `self.paper.X` against.
+REQUIRED_BROKER_CAPABILITIES: tuple[str, ...] = tuple(
+    dict.fromkeys(name for names in REQUIRED_BROKER_CAPABILITIES_BY_KIND.values() for name in names))
+
+
+def broker_position_kind(broker) -> str:
+    """`venue` or `simulator`: the adapter's declared `position_events_kind`, else `simulator` if it has `on_tick`, else `venue`."""
+    declared = getattr(broker, "position_events_kind", None)
+    if isinstance(declared, str) and declared in REQUIRED_BROKER_CAPABILITIES_BY_KIND:
+        return declared
+    return "simulator" if hasattr(broker, "on_tick") else "venue"
 
 #: The block reason when they are absent. A named refusal, not a warning.
 BLOCK_BROKER_INCAPABLE = "broker cannot manage positions"
@@ -339,6 +355,14 @@ class LiveCryptoLoop:
         #: Each entry: {"pair", "record_pending": None | (to_outcome, fields)}. Commit (ii) extends it with the stop,
         #: units and legs; here it carries what a failed transition write needs to be retried.
         self._book: dict[str, dict] = {}
+        #: `T-0144` §2.3: named ENTRY blocks set and cleared by the venue position manager — `blind:<pair>` and
+        #: `unsettled:<pair>` for one symbol, `positions_unreadable` for the engine. Not `_declare_halt`: they clear when
+        #: their condition does.
+        self._entry_blocks: dict[str, str] = {}
+        #: `B460`: every scheduled settle task, kept until it finishes (and its exception retrieved).
+        self._settle_tasks: set[asyncio.Task] = set()
+        #: R1': the measured wall time of the last complete pass over all symbols, recorded on every venue exit.
+        self._last_pass_s: float | None = None
         #: The edge-trigger state of the two record alerts (G-5, G-6).
         self._presend_failing = False
         self._transition_failing = False
@@ -769,6 +793,12 @@ class LiveCryptoLoop:
         if kill_switch.is_armed:
             return BlockReason(
                 f"KILL SWITCH ARMED ({kill_switch.reason or 'no reason given'})", kind=BLOCK_HALT)
+        # `T-0144` §2.3 / the (ii) rulings: a BLIND symbol, a symbol with an unsettled price-pending close, and an unreadable
+        # venue block entries; the blocks lift when their condition does.
+        blocked = [reason for key, reason in self._entry_blocks.items()
+                   if key in (BLOCK_KEY_POSITIONS_UNREADABLE, blind_block_key(pair), unsettled_block_key(pair))]
+        if blocked:
+            return BlockReason(f"ENTRIES BLOCKED ({'; '.join(blocked)})", kind=BLOCK_HALT)
         # **`T-0144` G-6: A TRANSITION WRITE STILL PENDING REFUSES ENTRIES.** A position exists whose record does not say
         # OPEN yet; anything counting exposure from records would undercount it. A skip, not a halt: the retry at the
         # top of every pass clears it by itself.
@@ -865,85 +895,6 @@ class LiveCryptoLoop:
             raw = str(len(entry_df))
         return hashlib.sha1(raw.encode()).hexdigest()[:16]
 
-    async def _record_unprotected_position(self, pair: str, sig, exc) -> None:
-        """Record a halt declared because a position may be open with no stop (`B429`).
-
-        **AN ALERT ONLY, AND THE ABSENCE OF A `DecisionRecord` IS DELIBERATE.** Its sibling
-        `_record_unsized_fill` writes one because `UNSIZED_FILL` says exactly what happened there.
-        No value in the vocabulary says *the venue took the order, refused the stop, and the close
-        failed*: `REJECTED` asserts no position (false), `OPEN` asserts one of known size that we
-        are managing (false — nothing is managing it), `UNSIZED_FILL` asserts we could not size it
-        (we could; we could not PROTECT it). **A row is worse than no row when every available
-        value is affirmatively wrong** — `B399`, and the reason `UNSIZED_FILL` had to be added
-        rather than borrowed. Neither `T-0130` nor `B427`, which own that vocabulary, added a ninth
-        outcome — both ruled no row where every value is false — and this does not smuggle one in.
-
-        **AND NO ROW EXISTS YET — "no NEW row" and "no row" are different states, and the argument
-        above needs the second.** Traced and then DRIVEN (`test_the_unprotected_halt_leaves_NO_
-        DECISION_ROW_AT_ALL`): `_record_signal_decision` has one call site, inside the fill branch,
-        after `execution.execute()` returns, and this halt fires in the `except` around that call —
-        so nothing has been written for this signal. Were a row already claiming `OUTCOME_OPEN`,
-        declining to write would LEAVE it asserting a managed position of known size, which is the
-        thing this docstring rejects and worse for being on disk already. The manager asked for the
-        trace rather than accepting the claim, which is why it is stated here and not in a message.
-
-        Mirrors the writer contract `_declare_halt` depends on: every failure is appended rather
-        than raised, and the LAST statement clears the alarm unconditionally so a success cannot
-        leave it standing.
-        """
-        failures: list[str] = []
-        order_id = getattr(exc, "order_id", None)
-
-        try:
-            from datetime import timedelta
-
-            from app.db.enums import AlertPriority, AlertStatus, AlertType
-            from app.db.session import async_session_maker
-            from app.models.alert import Alert
-
-            async with async_session_maker() as db:
-                db.add(Alert(
-                    type=AlertType.RISK_WARNING,
-                    priority=AlertPriority.CRITICAL,
-                    pair=pair,
-                    message=(
-                        f"ENGINE HALTED — {HALT_UNPROTECTED_POSITION}. The venue accepted the "
-                        f"order, refused the stop, and flat was NOT observed after cancel and close "
-                        f"(a slow fill and a failed close both land here — see the detail). There is "
-                        f"NO STOP at the venue and none in this process. No new entries."
-                    ),
-                    suggested_action={
-                        "action": "flatten_or_place_stop_at_venue",
-                        "pair": pair,
-                        "order_id": order_id,
-                    },
-                    context_json={
-                        "halt_reason": HALT_UNPROTECTED_POSITION,
-                        "order_id": order_id,
-                        "detail": getattr(exc, "detail", None),
-                        "signal_sl": float(sig.sl) if sig.sl is not None else None,
-                        "signal_tp": float(sig.tp) if sig.tp is not None else None,
-                        "run_id": str(self.run_id) if self.run_id else None,
-                    },
-                    # `PENDING`, as its sibling `_record_unsized_fill` writes. The first version said
-                    # `ACTIVE`, a member `AlertStatus` does not have: the AttributeError landed in the
-                    # `except` below and became one log line, so the CRITICAL alert for an unprotected
-                    # position would NEVER have been written. Found by the L-4 arm the kill set demanded.
-                    status=AlertStatus.PENDING,
-                    expires_at=datetime.now(timezone.utc) + timedelta(days=365),
-                ))
-                await db.commit()
-        except Exception as exc2:  # noqa: BLE001 - a failed write must not un-halt the engine
-            failures.append(f"alert: {type(exc2).__name__}")
-            logger.error("live.unprotected_position.alert_failed", error=str(exc2), pair=pair)
-
-        # UNCONDITIONAL, so a success CLEARS the alarm `_declare_halt` armed. A conditional
-        # assignment here would leave "NOT YET WRITTEN" standing after a successful write, which
-        # is the alarm that cries wolf and then gets ignored.
-        self.halt_record_failed = (
-            f"{HALT_UNPROTECTED_POSITION} — {', '.join(failures)}" if failures else None
-        )
-
     async def _on_unresolved_order(self, pair: str, entry_df, sig, res: dict, trace=None) -> None:
         """`place_order` returned neither a fill nor a refusal, AFTER resolution. **The halt for exposure unknown.**
 
@@ -1005,7 +956,7 @@ class LiveCryptoLoop:
     async def _record_unresolved_order(self, pair: str, entry_df, sig, res: dict, trace=None) -> None:
         """The durable record of `HALT_ORDER_UNRESOLVED`: one CRITICAL alert, never a row.
 
-        The writer contract `_declare_halt` depends on, as in `_record_unprotected_position`: every
+        The writer contract `_declare_halt` depends on, as in `_record_unsized_fill`: every
         failure is appended rather than raised, and the LAST statement clears the alarm
         unconditionally so a success cannot leave it standing.
 
@@ -1529,7 +1480,7 @@ class LiveCryptoLoop:
         await self._act("reject", f"{pair} {sig.direction.value} setup NOT sent — the pre-send record could not be written")
 
     async def _raise_record_alert(self, kind: str, *, pair: str | None, message: str, context: dict,
-                                  recovered: bool = False) -> None:
+                                  recovered: bool = False, critical: bool = True) -> None:
         """One record alert: a CRITICAL `Alert` row (WARNING for the recovery edge) and the dashboard's alert push. The
         row goes to the database that may be the thing failing, so a failure is logged and never raised. (T-0144 M9's
         shared helper, with SMTP, is commit (iii); this is its first user.)"""
@@ -1544,7 +1495,7 @@ class LiveCryptoLoop:
             async with async_session_maker() as db:
                 db.add(Alert(
                     type=AlertType.RISK_WARNING,   # an EXISTING enum member (0009's ALTER TYPE outage)
-                    priority=AlertPriority.WARNING if recovered else AlertPriority.CRITICAL,
+                    priority=AlertPriority.WARNING if (recovered or not critical) else AlertPriority.CRITICAL,
                     pair=pair,
                     message=f"{kind}{' RECOVERED' if recovered else ''} — {message}",
                     suggested_action={"action": "none" if recovered else "check_database"},
@@ -1662,7 +1613,115 @@ class LiveCryptoLoop:
         a check that answers confidently and wrongly about the brokers we actually run. Measured:
         the class form called `PaperBroker` incapable.
         """
-        return tuple(name for name in REQUIRED_BROKER_CAPABILITIES if not hasattr(broker, name))
+        kind = broker_position_kind(broker)
+        return tuple(name for name in REQUIRED_BROKER_CAPABILITIES_BY_KIND[kind] if not hasattr(broker, name))
+
+    def _build_events(self, broker):
+        """`T-0144` §2.1: the position-event source for the bound broker's KIND."""
+        if broker_position_kind(broker) != "venue":
+            return SimulatorEvents(broker)
+        from app.models.trade import EXIT_MODE_RUNNING
+
+        return VenueEvents(broker, self._book, VenueHooks(
+            on_settle=self._on_settle_cb,
+            alert=self._venue_alert,
+            declare_halt=self._declare_halt,
+            block_entries=self._set_entry_block,
+            write_hint=self._write_close_hint,
+            read_hint=self._read_close_hint,
+            decided_mode=lambda: EXIT_MODE_RUNNING,          # MANAGE_ONLY and STOPPING are decided from commit (iii)
+            last_pass_s=lambda: self._last_pass_s,
+        ))
+
+    def _set_entry_block(self, key: str, reason: str | None) -> None:
+        if reason is None:
+            if self._entry_blocks.pop(key, None) is not None:
+                logger.warning("live.entry_block_lifted", key=key)
+        elif self._entry_blocks.get(key) != reason:
+            self._entry_blocks[key] = reason
+            logger.error("live.entry_block_set", key=key, reason=reason)
+
+    async def _venue_alert(self, kind: str, message: str, context: dict, critical: bool) -> None:
+        await self._raise_record_alert(kind, pair=context.get("pair"), message=message, context=context, critical=critical)
+
+    async def _write_close_hint(self, decision_id: str, leg: str, attempt: int, mode: str) -> None:
+        """G-2 / T-0146 revision 4: `close_attempt_hint[leg] = {"n": attempt, "mode": decided mode}`, BEFORE a close. RAISES on
+        failure (the caller logs it and sends anyway)."""
+        from sqlalchemy import select
+
+        from app.db.session import async_session_maker
+        from app.models.decision_record import DecisionRecord
+
+        async with async_session_maker() as db:
+            rec = (await db.execute(select(DecisionRecord).where(
+                DecisionRecord.id == _as_decision_id(decision_id)))).scalar_one_or_none()
+            if rec is None:
+                raise LookupError(f"decision {decision_id} not found for its close hint")
+            hint = dict(rec.close_attempt_hint or {})
+            hint[leg] = {"n": int(attempt), "mode": str(mode)}
+            rec.close_attempt_hint = hint
+            await db.commit()
+
+    async def _read_close_hint(self, decision_id: str) -> dict | None:
+        from sqlalchemy import select
+
+        from app.db.session import async_session_maker
+        from app.models.decision_record import DecisionRecord
+
+        async with async_session_maker() as db:
+            hint = (await db.execute(select(DecisionRecord.close_attempt_hint).where(
+                DecisionRecord.id == _as_decision_id(decision_id)))).scalar_one_or_none()
+        return hint if isinstance(hint, dict) else None
+
+    async def _mark_for(self, pair: str, bsym: str) -> Mark:
+        """`T-0144` R1''' — the price a pass manages with. The Binance mark when it reads (recorded with its read time,
+        R3'). Otherwise, for a VENUE: the venue quote's mid when younger than `ALPACA_QUOTE_STOP_MAX_AGE_S` by its OWN
+        timestamp; else BLIND when no Binance mark has been read for `BINANCE_MARK_BLIND_AFTER_S`, and "no price, not
+        blind" before that. A simulator without a Binance price has no price, as before."""
+        price = await asyncio.to_thread(_ticker_price, bsym)
+        now = datetime.now(timezone.utc)
+        if price is not None:
+            self._marks[pair] = price
+            self._mark_at[pair] = now
+            return Mark(price=float(price), source=SOURCE_BINANCE, at=now)
+        if self.events.kind != "venue":
+            return Mark(price=None, source=None, at=None, blind=False)
+        quote = None
+        try:
+            quote = await self.paper.reference_quote(pair)
+        except Exception as exc:  # noqa: BLE001 - no fallback price is a price read that failed, never a raise
+            logger.warning("live.stop_quote_unavailable", pair=pair, error=f"{type(exc).__name__}")
+        if quote is not None:
+            bid, ask, stamped = readable_price(quote.bid), readable_price(quote.ask), quote.timestamp
+            if bid and ask and bid > 0 and ask > 0 and isinstance(stamped, datetime):
+                stamped = stamped if stamped.tzinfo is not None else stamped.replace(tzinfo=timezone.utc)
+                age = (now - stamped).total_seconds()
+                if 0 <= age <= ALPACA_QUOTE_STOP_MAX_AGE_S:
+                    return Mark(price=(bid + ask) / 2, source=SOURCE_ALPACA_QUOTE_MID, at=stamped)
+        last = self._mark_at.get(pair)
+        blind = last is None or (now - last).total_seconds() >= BINANCE_MARK_BLIND_AFTER_S
+        return Mark(price=None, source=None, at=None, blind=blind)
+
+    def _book_venue_position(self, pair: str, sig, res: dict, opened_units) -> None:
+        from decimal import Decimal
+
+        decision_id = str(sig.decision_id)
+        fill = res.get("fill")
+        filled_at = res.get("filled_at")
+        entry = self._book.setdefault(decision_id, {"pair": pair, "record_pending": None})
+        entry["position"] = EnginePosition(
+            decision_id=decision_id, pair=pair, direction=sig.direction.value,
+            units=Decimal(str(opened_units)), stop=float(sig.sl),
+            entry_price=float(fill) if isinstance(fill, (int, float)) and not isinstance(fill, bool) else None,
+            tp=float(sig.tp) if sig.tp is not None else None,
+            partial_price=float(sig.partial_price) if getattr(sig, "partial_price", None) is not None else None,
+            partial_fraction=float(sig.partial_fraction) if getattr(sig, "partial_fraction", None) is not None else None,
+            entry_order_id=str(res.get("position_id")) if res.get("position_id") else None,
+            entry_client_order_id=res.get("client_order_id"),
+            entry_filled_at=filled_at if isinstance(filled_at, datetime) else None,
+            opened_at=datetime.now(timezone.utc),
+            run_id=str(self.run_id) if self.run_id else None,
+        )
 
     def _select_venue(self) -> str:
         """`broker_mode` normalised to the venue actually being built (`T-0138`).
@@ -1737,8 +1796,10 @@ class LiveCryptoLoop:
                 venue=self._select_venue(),
                 broker=getattr(self.paper, "broker_name", type(self.paper).__name__),
                 missing=list(self.broker_missing),
-                required=list(REQUIRED_BROKER_CAPABILITIES),
+                required=list(REQUIRED_BROKER_CAPABILITIES_BY_KIND[broker_position_kind(self.paper)]),
             )
+        # `T-0144` §2.1: ONE awaited position-event source per bound broker, rebuilt with it.
+        self.events = self._build_events(self.paper)
         self.execution = ExecutionService(self.paper, ExecMode.PAPER, binance_mark=self._binance_mark)
 
         # NAMED AT BIND TIME, and this is `B394`'s test applied to my own field rather than to
@@ -2414,6 +2475,12 @@ class LiveCryptoLoop:
 
         if not positions:
             return
+        if getattr(self, "events", None) is not None and self.events.kind == "venue":
+            # `T-0144` (ii), decision (d): a venue's positions are closed only as engine SELL orders, and the session close
+            # has no leg. Reachable only with DECLARED_SESSION_FLATTEN enabled; (iii) makes Start refuse that combination.
+            logger.error("GATE-022 session flatten NOT PERFORMED on a venue broker — not implemented for venues",
+                         would_have_closed=len(positions))
+            return
         for position in positions:
             pid = str(position.id)
             event = await self.paper.close_position(pid)
@@ -2585,7 +2652,7 @@ class LiveCryptoLoop:
         did rather than to zero — *a bookkeeping path that can report 0.0 profit is worse than
         one that reports too little.*
         """
-        own = float(ev.get("pnl", 0) or 0)
+        own = ev.get("pnl") if ev.get("venue") else float(ev.get("pnl", 0) or 0)   # `B415`: a venue's unknown is None
         position_id = ev.get("position_id")
         if not position_id:
             return own
@@ -2634,7 +2701,9 @@ class LiveCryptoLoop:
         # roundings that do not commute — and this task inherits it MIRRORED, as a finished
         # trade that never resolves. `remaining > 0` is computed once at 10dp by the broker
         # and handed over; no arithmetic here can disagree with it.
-        if ev.get("partial"):
+        if ev.get("partial") and not ev.get("venue"):
+            # A VENUE event's resolution is decided by its caller (`VenueEvents.settle_persisted`, P-5): the write that
+            # completes a position may be an EARLIER tranche's, whose event still says `partial`.
             # `realized_r` stays NULL. Nothing honest exists for a 70%-closed, 30%-open
             # position: the closed leg has a realized R, the open leg has an unrealised one
             # that moves every tick, and no weighting of them is a fact about the trade.
@@ -2642,10 +2711,18 @@ class LiveCryptoLoop:
             # `is not None`; none divides by it or defaults it to zero.
             return
 
-        dec_id = self._open_decision.pop(pair, None)
+        if ev.get("venue"):
+            # `T-0144` §4: a venue event names its decision; the pair is not the key. Called only when every engine unit
+            # is closed and every closing fill is written (P-5).
+            dec_id = str(ev.get("decision_id") or "") or None
+            for open_pair, open_id in list(self._open_decision.items()):
+                if dec_id and open_id == dec_id:          # by the DECISION, so no pair spelling is compared
+                    self._open_decision.pop(open_pair, None)
+        else:
+            dec_id = self._open_decision.pop(pair, None)
         if dec_id and not (self._book.get(dec_id) or {}).get("record_pending"):
             self._book.pop(dec_id, None)   # `T-0144`: the position is closed; its book entry is done
-        if not dec_id:
+        if not dec_id and not ev.get("venue"):
             # THE DURABLE PATH, and it is what makes a restart survivable. `_open_decision`
             # is in-memory: a process that dies between the partial and the runner loses it,
             # and this method would then return early on the close that matters most.
@@ -2661,6 +2738,10 @@ class LiveCryptoLoop:
                 OUTCOME_BREAKEVEN, OUTCOME_LOSS, OUTCOME_WIN, DecisionRecord,
             )
             pnl = await self._realised_pnl_for_position(ev)
+            if pnl is None:
+                logger.error("live.resolve_without_pnl — the decision is left unresolved rather than given a P&L",
+                             decision_id=dec_id)
+                return
             async with async_session_maker() as db:
                 rec = (await db.execute(
                     select(DecisionRecord).where(
@@ -2701,17 +2782,44 @@ class LiveCryptoLoop:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             return
-        loop.create_task(self._persist_and_resolve(dict(ev)))
+        # `B460`: the task is KEPT until it finishes — a task nothing references can be collected while pending — and its
+        # exception is RETRIEVED, so a failed settle is logged here and never reported as "never retrieved".
+        task = loop.create_task(self._persist_and_resolve(dict(ev)))
+        self._settle_tasks.add(task)
+        task.add_done_callback(self._settle_task_done)
+
+    def _settle_task_done(self, task: "asyncio.Task") -> None:
+        self._settle_tasks.discard(task)
+        if task.cancelled():
+            logger.warning("live.settle_task_cancelled — a close's persistence did not finish")
+            return
+        exc = task.exception()
+        if exc is not None:
+            logger.error("live.settle_task_failed — a close's persistence raised", error=f"{type(exc).__name__}: {exc}")
 
     async def _persist_and_resolve(self, ev: dict) -> None:
-        await self._persist_live_close(ev)
+        ok = await self._persist_live_close(ev)
+        events = getattr(self, "events", None)
+        if ev.get("venue") and isinstance(events, VenueEvents):
+            # GX-2 / P-5: the marker clears only on a committed write, and the decision resolves only when every engine
+            # unit is closed and every closing fill is written.
+            if events.settle_persisted(ev, ok):
+                await self._resolve_decision(ev)
+            return
         await self._resolve_decision(ev)
 
-    async def _persist_live_close(self, ev: dict) -> None:
-        """F3: persist a LIVE paper close to the DB so live trades are durable
+    async def _persist_live_close(self, ev: dict) -> bool:
+        """F3: persist a LIVE close to the DB so live trades are durable
         across restarts and separable from the warm-up replay (source tag
-        'ICT (live)' vs 'Backtest replay'). The close-event carries no sl/tp/r,
-        which are nullable columns, so this is a clean closed-trade insert."""
+        'ICT (live)' vs 'Backtest replay'). Returns True when the row COMMITTED (GX-2's marker waits for it); never raises.
+
+        A SIMULATOR close is written as it always was. A VENUE close (`T-0144` §2.4, R13, M3) is written from the settle
+        event with nothing defaulted: `broker` is the venue, `run_id` is the DECISION's, the P&L is the event's (no `or 0`,
+        `B415` — an event without one is not written), the outcome is WIN / LOSS / BE to the cent, and the stop level, the
+        close's client id, the decided exit mode, the mark at detection with its source and the measured pass interval go
+        to their `0018` columns. Both slippages and the PAPER label are derived from those columns, not stored."""
+        if ev.get("venue"):
+            return await self._persist_venue_close(ev)
         try:
             from decimal import Decimal
 
@@ -2743,28 +2851,84 @@ class LiveCryptoLoop:
             async with async_session_maker() as db:
                 db.add(row)
                 await db.commit()
+            return True
         except Exception as exc:  # noqa: BLE001 - never let persistence kill the loop
             logger.warning("persist live close failed", error=str(exc))
+            return False
+
+    async def _persist_venue_close(self, ev: dict) -> bool:
+        try:
+            from decimal import Decimal
+
+            from sqlalchemy import select
+
+            from app.db.enums import DirectionType, OutcomeType, TradeStatus
+            from app.db.session import async_session_maker
+            from app.models.decision_record import DecisionRecord
+            from app.models.trade import SETUP_TAG_LIVE, Trade
+
+            pnl, entry, exit_price = ev.get("pnl"), ev.get("entry"), ev.get("exit")
+            if pnl is None or entry is None or exit_price is None or ev.get("open_time") is None:
+                logger.error("live.venue_close_not_written — the settle event lacks a P&L, an entry, an exit or an open "
+                             "time, and none is invented", decision_id=ev.get("decision_id"),
+                             close_client_order_id=ev.get("close_client_order_id"))
+                return False
+
+            def _num(value, places):
+                return Decimal(str(round(float(value), places))) if value is not None else None
+
+            cents = _num(pnl, 2)
+            outcome = OutcomeType.WIN if cents > 0 else OutcomeType.LOSS if cents < 0 else OutcomeType.BE
+            async with async_session_maker() as db:
+                run_id = (await db.execute(select(DecisionRecord.run_id).where(
+                    DecisionRecord.id == _as_decision_id(ev.get("decision_id"))))).scalar_one_or_none()
+                db.add(Trade(
+                    user_id="system",
+                    broker_id=str(ev.get("position_id")),                 # the decision id: one key for every tranche
+                    broker=str(ev.get("venue")),
+                    pair=str(ev.get("pair")),
+                    direction=DirectionType.LONG if str(ev.get("direction")).upper() == "LONG" else DirectionType.SHORT,
+                    entry_price=_num(entry, 6), exit_price=_num(exit_price, 6), sl=_num(ev.get("stop_level"), 6),
+                    lot_size=_num(ev.get("units"), 9),
+                    entry_time=ev.get("open_time"), exit_time=ev.get("close_time"),
+                    outcome=outcome, status=TradeStatus.CLOSED, pnl_dollars=cents,
+                    setup_tag=SETUP_TAG_LIVE,
+                    run_id=run_id,                                          # M3: the DECISION's run, never self.run_id
+                    close_client_order_id=ev.get("close_client_order_id"),
+                    exit_mode=ev.get("exit_mode"),
+                    mark_at_detection=_num(ev.get("mark_at_detection"), 6),
+                    mark_source=ev.get("mark_source"),
+                    detection_interval_s=_num(ev.get("detection_interval_s"), 3),
+                ))
+                await db.commit()
+            logger.info("live.exit_recorded", **{k: (v.isoformat() if isinstance(v, datetime) else v)
+                                                 for k, v in ev.items()})
+            return True
+        except Exception as exc:  # noqa: BLE001 - never let persistence kill the loop; the marker keeps it retried
+            logger.error("live.venue_close_write_failed — retried at the next pass", decision_id=ev.get("decision_id"),
+                         close_client_order_id=ev.get("close_client_order_id"), error=f"{type(exc).__name__}: {exc}")
+            return False
 
     async def _tick_symbol(self, pair: str, bsym: str) -> None:
-        price = await asyncio.to_thread(_ticker_price, bsym)
-        if price is None:
-            return
-        self._marks[pair] = price
-        self._mark_at[pair] = datetime.now(timezone.utc)
-        # EXIT-001 STAGE B: bank 70% at the 2R partial, BEFORE the SL/TP sweep below.
-        #
-        # Ordering is deliberate. If a single tick reaches both the partial level and the stop,
-        # the partial is the earlier event in price terms on the way up (long) and taking it
-        # first is what EXIT-001 describes. Running the sweep first would close the whole
-        # position and the partial could never fire.
-        await self._take_partials(pair, price)
-        # mark-to-market + auto-close SL/TP
-        for ev in self.paper.on_tick(pair, price):
-            # Persistence + decision resolution happen via the broker's settle
-            # hook (_on_settle_cb) for ALL close paths; here we only push UI.
+        # `T-0144` R1'': THE POSITIONS ARE MANAGED BEFORE ANYTHING CAN RETURN. The mark comes from `_mark_for` (Binance, else
+        # a fresh venue quote, else a blind or a not-yet-blind "no price"), and `events.tick` runs on every pass whatever it
+        # is; only then does a pass without a price stop short of the strategy.
+        mark = await self._mark_for(pair, bsym)
+        events = self.events
+        if mark.price is not None and events.kind == "simulator":
+            # EXIT-001 STAGE B for the SIMULATORS, before their SL/TP sweep, as before. A venue's partial is decided
+            # inside `VenueEvents`, after its stop.
+            await self._take_partials(pair, mark.price)
+        for ev in await events.tick(pair, mark):
+            # Persistence + decision resolution happen through `_on_settle_cb` for ALL close paths; here we only push UI.
             await ws_manager.push_position_close(ev)
-            await self._act("exit", f"Closed {pair} {ev.get('reason')} {ev.get('pnl', 0):+.0f} USDT")
+            pnl = ev.get("pnl")
+            pnl_text = (f"{pnl:+.0f} USDT" if isinstance(pnl, (int, float)) and not isinstance(pnl, bool)
+                        else "P&L unknown")
+            await self._act("exit", f"Closed {pair} {ev.get('reason')} {pnl_text}")
+        if mark.price is None:
+            return
+        price = mark.price
         await ws_manager.push_tick(pair, price, price, 0.0)
 
         # EXIT-001's THIRD terminal reason. Checked on the tick path because that is the only
@@ -2907,39 +3071,6 @@ class LiveCryptoLoop:
         sig.before_send = functools.partial(self._write_submitting, sig.decision_id, pair, entry, sig, trace)
         try:
             res = await self.execution.execute(sig)
-        except AlpacaUnprotectedPositionOpen as exc:
-            # ------------------------------------------------------------------
-            # **`B429`. A POSITION MAY BE OPEN AND UNPROTECTED — SO NO REJECTION ROW.**
-            #
-            # The handler below records `REJECTION_VENUE_RAISED` for anything the broker raises:
-            # a row asserting the engine did not trade. Here the venue TOOK the order, would not
-            # take the stop, and flat was NOT observed after remediation — a live position with no stop at
-            # the venue and none in process (`B428`). That row would be false in the direction
-            # that hides the danger, which is the `PARTIALLY_FILLED`-recorded-as-refused defect
-            # this file already documents forty lines down.
-            #
-            # Halting and arming the alarm are ONE act (`B424`) — see `_declare_halt`.
-            # ------------------------------------------------------------------
-            self._declare_halt(HALT_UNPROTECTED_POSITION)
-            logger.error(
-                "live.unprotected_position — HALTING. The venue accepted the order, refused the "
-                "stop, and flat was not observed after cancel and close. Reconcile AT THE VENUE before "
-                "restarting: there is no stop there and none in this process.",
-                pair=pair, direction=sig.direction.value,
-                order_id=getattr(exc, "order_id", None),
-                detail=getattr(exc, "detail", None),
-                # `T-0144` R11': its SUBMITTING record stays SUBMITTING (a position may exist; no outcome is true)
-                decision_id=str(getattr(sig, "decision_id", None) or "UNREPORTED"),
-            )
-            await self._act(
-                BLOCK_HALT,
-                f"{pair} {sig.direction.value} — HALTED: {HALT_UNPROTECTED_POSITION} "
-                f"(order {getattr(exc, 'order_id', 'UNREPORTED')})",
-            )
-            # LAST, and after the halt is already in force (`M-7`): this records the halt, it does
-            # not perform it. A failure here cannot un-halt.
-            await self._record_unprotected_position(pair, sig, exc)
-            raise
         except Exception as exc:  # noqa: BLE001 - recorded, then re-raised to the loop's handler
             await self._record_rejected_signal(
                 pair, entry, sig,
@@ -3034,7 +3165,11 @@ class LiveCryptoLoop:
                         status=status, opened_units=opened_units)
             # STAGE B. The plan EXIT-001 produces is now EXECUTED, not merely recorded.
             pid = res.get("position_id")
-            if pid and sig.partial_price is not None and sig.partial_fraction is not None:
+            if self.events.kind == "venue":
+                # `T-0144` §4.3 / G-6: the VENUE position enters the book BEFORE its record is written, so its stop is managed
+                # whatever that write returns. Its plan lives on the book entry, never in `_tranche_plans`.
+                self._book_venue_position(pair, sig, res, opened_units)
+            elif pid and sig.partial_price is not None and sig.partial_fraction is not None:
                 self._tranche_plans[str(pid)] = {
                     "price": float(sig.partial_price),
                     "fraction": float(sig.partial_fraction),
@@ -3390,6 +3525,7 @@ class LiveCryptoLoop:
                 await self._retry_pending_records()
             except Exception as exc:  # noqa: BLE001 - the retry must never stop the loop
                 logger.error("live.record_pending_retry_failed", error=str(exc))
+            pass_started = time.monotonic()
             for pair, bsym in self.symbols.items():
                 try:
                     await self._tick_symbol(pair, bsym)
@@ -3415,6 +3551,7 @@ class LiveCryptoLoop:
                         )
                     else:
                         logger.warning("Live loop symbol error", pair=pair, error=str(exc))
+            self._last_pass_s = time.monotonic() - pass_started      # R1': the real stop-check interval, measured
             try:
                 await self._push_state()
             except Exception as exc:  # noqa: BLE001

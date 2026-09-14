@@ -627,38 +627,6 @@ def test_W2_the_client_order_id_lookup_STOPS_at_the_budget_when_each_lookup_is_S
     assert "after 2 lookup(s)" in res["reason"]
 
 
-def test_W3_a_cancellation_during_the_PROTECTION_re_read_is_LOGGED_with_the_order_id():
-    """**X-12.** D3 covers every await after submission, not only the resolver's sleep. The protection re-read
-    does not suspend today; under B437's executor it will — so it is made to suspend here."""
-    from tests.unit.test_b429_stop_is_placed import PROTECTED, _adapter as b429_adapter, _placed
-    from tests.unit.test_b429_stop_is_placed import _req as b429_req
-
-    adapter = b429_adapter(_placed(status="accepted"), reread=PROTECTED)
-    scripted_call = adapter._call
-
-    async def _suspending_call(name, *args, **kwargs):
-        if name == "get_order_by_id":
-            await asyncio.sleep(1.0)
-        return await scripted_call(name, *args, **kwargs)
-
-    adapter._call = _suspending_call
-    lines, stop = _capture_logs()
-
-    async def _go():
-        task = asyncio.create_task(adapter.place_order(b429_req()))
-        await asyncio.sleep(0.05)
-        task.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await task
-
-    try:
-        _run(_go())
-    finally:
-        stop()
-    hits = [l for l in lines if "order_cancelled_after_submission" in l["message"]]
-    assert hits and hits[0].get("order_id") == "order-1", lines
-
-
 def test_K2_a_close_whose_OUTCOME_raises_does_not_stop_the_kill_switch_reaching_the_next_position(monkeypatch):
     """**Structural survival** (manager): `_close_outcome` raising on the first position is caught INSIDE the
     per-position guard, the row says the close was SENT, and the second close is still sent."""

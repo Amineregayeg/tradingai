@@ -167,13 +167,15 @@ def test_W1_every_call_the_adapter_makes_is_CLASSIFIED_and_the_writes_it_makes_a
 
     client = TradingClient("PK-B463", "s", paper=True)
     names = _adapter_call_names()
-    assert len(names) >= 10, f"the source scan found only {sorted(names)}: the instrument is broken"
+    # `T-0144` R2 deleted B429's remediation (one `cancel_order_by_id` site); (ii)'s R14 cancel-first is the site now, and
+    # (ii) adds `get_orders` and the registered read seam `get`: 11 names.
+    assert len(names) >= 11, f"the source scan found only {sorted(names)}: the instrument is broken"
     unclassified = sorted(n for n in names if classify_call(client, n) not in (CALL_WRITE, CALL_READ))
     assert not unclassified, f"these _call names are in neither class and would be refused: {unclassified}"
     for write in ("submit_order", "close_position", "cancel_order_by_id"):
         assert write in names and classify_call(client, write) == CALL_WRITE, write
-    for read in ("get_all_positions", "get_order_by_id", "get_account"):
-        assert classify_call(client, read) == CALL_READ, read
+    for read in ("get_all_positions", "get_order_by_id", "get_account", "get_orders", "get"):
+        assert read in names and classify_call(client, read) == CALL_READ, read
 
 
 @pytest.mark.parametrize("member", ["flatten_via_post", "flatten_everything", "flatten_via_patch", "flatten_via_put"])

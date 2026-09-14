@@ -699,6 +699,23 @@ def test_K2_14_the_bound_is_DERIVED_from_the_live_constants_and_the_client(monke
     book._retry, book._retry_wait = 3, 30
     assert alpaca.entry_lock_normal_hold_bound_s(book) > base, "the bound ignores the client's retry sleep"
 
+    # `T-0144` R2 / review's Q-9(ii): THE MULTIPLIER IS 8 — 4 calls on the normal path (the position before, submit,
+    # one resolver read past the budget, the position after), each able to queue one call late — since B429's
+    # protection re-read was deleted. Read from the LIVE function under PATCHED constants and client, so leaving 10
+    # dies and so does any literal (a number copied from the docstring does not move with the patches). Two value
+    # sets, so the C and B coefficients cannot trade off against each other.
+    for retry, wait, connect, read, budget in ((2, 0.7, 0.3, 1.1, 0.9), (0, 0.0, 2.5, 0.25, 7.0)):
+        with monkeypatch.context() as m:
+            m.setattr(alpaca, "ALPACA_HTTP_CONNECT_TIMEOUT_S", connect)
+            m.setattr(alpaca, "ALPACA_HTTP_READ_TIMEOUT_S", read)
+            m.setattr(alpaca, "ORDER_RESOLUTION_BUDGET_S", budget)
+            book._retry, book._retry_wait = retry, wait
+            call = (retry + 1) * (connect + read) + retry * wait
+            got = alpaca.entry_lock_normal_hold_bound_s(book)
+            assert got == pytest.approx(8 * call + budget, rel=1e-12, abs=0.0), (
+                f"the estimate is {got} for C={call}, B={budget}: expected 8C + B = {8 * call + budget} "
+                f"(10C + B would be {10 * call + budget})")
+
 
 def test_L3a_a_lock_whose_event_loop_is_CLOSED_is_REPLACED():
     import app.services.broker.alpaca as alpaca

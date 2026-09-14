@@ -571,7 +571,8 @@ EXEMPT: tuple[Exempt, ...] = (
 #: Sites DESIGN §1.2 #13 states as loop-internal keys (L vs L). Each must match exactly one site and must NOT be a
 #: violation: an entry here never excuses anything, so a key that becomes venue-sourced fails instead of being absorbed.
 LOOP_INTERNAL: tuple[Exempt, ...] = (
-    Exempt(LOOP, "_tick_symbol", "self._marks[pair]", "the tick stores its mark under the loop's own pair"),
+    Exempt(LOOP, "_mark_for", "self._marks[pair]",
+           "the pass stores its Binance mark under the loop's own pair (moved from _tick_symbol by B428b (ii)'s mark chain)"),
     Exempt(LOOP, "_mark", "self._marks.get(pair, 0.0)", "read back under the same loop pair"),
     Exempt(LOOP, "_price_source", "self._marks.get(pair, 0.0)", "the prop-rules price source reads the loop pair's mark"),
 )

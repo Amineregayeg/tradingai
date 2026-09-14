@@ -477,20 +477,16 @@ def test_place_order_REFUSES_A_SHORT_WITH_THE_VENUE_REASON_and_a_LONG_AS_UNIMPLE
     )
 
 
-def test_a_PARTIAL_close_is_HONOURED_and_carries_the_size():
-    """`T-0038`: honour it or refuse loudly. **Ignoring it is not theoretical here** — the ladder is
-    70%-at-2R plus a 30% runner and `crypto_loop.py:1006` passes a size on every partial exit, so
-    silently closing everything would liquidate the runner and make the ladder unobservable."""
+def test_a_PARTIAL_close_is_REFUSED_loudly_and_sends_nothing():
+    """`T-0038`: honour it or refuse loudly. **Ignoring it is not theoretical** — silently closing everything
+    would liquidate the runner under a partial's name. Since `T-0144` R2-4 this adapter REFUSES (engine partials are
+    sell orders, DESIGN §2.5); before, it honoured the size with a qty-bearing close request. The refusal and its
+    no-SDK-call property are pinned in `test_b428b_ii_r2_deletion.py` (R2-4); this is the T-0038 half."""
     adapter, mock = _adapter()
-    result = asyncio.run(adapter.close_position("BTC/USD", lot_size=0.3))
-    assert result["partial"] is True and result["qty"] == "0.3"
-    symbol, options = mock.closed[-1]
-    assert symbol == "BTC/USD"
-    from decimal import Decimal
-
-    sent = str(getattr(options, "qty", "")) if options is not None else ""
-    assert sent and Decimal(sent) == Decimal("0.3"), "the size was dropped on the way to the venue"
-    assert "e" not in sent.lower(), f"`B457`: the quantity went out in exponent form: {sent!r}"
+    with pytest.raises(BrokerError, match="partial closes are engine sell orders") as refused:
+        asyncio.run(adapter.close_position("BTC/USD", lot_size=0.3))
+    assert "0.3" in str(refused.value), "the refusal does not say WHICH request it refused"
+    assert mock.closed == [], f"a refused partial close still reached the venue: {mock.closed!r}"
 
 
 def test_a_WHOLE_close_sends_no_size():

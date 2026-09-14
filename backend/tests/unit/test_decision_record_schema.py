@@ -60,6 +60,11 @@ _CHAIN = [
     # `T-0144`/`B428b` (i): `SUBMITTING`, `SUBMISSION_NOT_FOUND_AFTER_RESTART`, the 9-dp quantities
     # and `close_attempt_hint`.
     ("0017", "0017_outcome_submitting_quantity_scale.py", "0016"),
+    # `T-0144`/`B428b` (ii): five nullable `trades` columns — `close_client_order_id` (I-1), `exit_mode`
+    # (`T-0146` E5), and P-4's `mark_at_detection`, `mark_source`, `detection_interval_s`. It touches no
+    # `decision_records` column, so the replay records nothing for it; it is here so the chain, the linearity
+    # arm and the single-head arm see it. Its own arms are at the end of this file.
+    ("0018", "0018_trades_close_client_order_id_exit_mode.py", "0017"),
 ]
 
 
@@ -241,6 +246,23 @@ def test_revision_chain_is_linear_and_complete():
         mod = _load(filename)
         assert mod.revision == rev, f"{filename} declares revision {mod.revision}"
         assert mod.down_revision == down, f"{filename} declares down_revision {mod.down_revision}"
+
+
+def test_ALEMBIC_itself_resolves_ONE_head_and_walks_the_chain_in_this_order():
+    """**`B428b` (ii).** The two arms above read `_CHAIN`, which is hand-written; this asks alembic's own
+    `ScriptDirectory` — what `alembic upgrade head` resolves — so a second file claiming `down_revision =
+    "0017"` (two heads: `upgrade head` refuses) or a revision id alembic parses differently dies here even
+    if `_CHAIN` was edited to agree with it. Offline: it reads the version files, no database."""
+    from alembic.script import ScriptDirectory
+
+    script = ScriptDirectory(str(_VERSIONS.parent))
+    heads = script.get_heads()
+    assert heads == [_CHAIN[-1][0]], f"alembic resolves heads {heads}; the chain ends at {_CHAIN[-1][0]}"
+    walked = [s.revision for s in script.walk_revisions()]  # head first, down to base
+    expected = [rev for rev, _f, _d in reversed(_CHAIN)] + ["0001"]
+    assert walked == expected, f"alembic walks {walked}, the chain lists {expected}"
+    # Positive shape for THIS commit: 0018 is the head and sits directly on 0017.
+    assert heads == ["0018"] and script.get_revision("0018").down_revision == "0017"
 
 
 def test_migration_columns_match_model():
@@ -826,9 +848,11 @@ def test_each_migration_FREEZES_the_vocabulary_that_was_live_when_it_RAN():
             "PROP_FIRM_WOULD_BREACH_MAX_DRAWDOWN", "BROKER_UNAVAILABLE",
             "VENUE_TRANSPORT", "VENUE_RAISED", "UNCODED_LEGACY", "UNCLASSIFIED",
             "SUBMISSION_NOT_FOUND_AFTER_RESTART"},
+        # `T-0146` REVISIONS 3-4. The five exit modes `trades.exit_mode` carries (no CHECK; enforced in code).
+        ("0018", "_EXIT_MODES_AT_0018"): {"RUNNING", "MANAGE_ONLY", "STOPPING", "EXTERNAL", "UNRECORDED"},
     }
     mods = {"0002": m2, "0006": m6, "0007": m7, "0008": m8, "0013": m13, "0014": m14, "0015": m15,
-            "0016": m16, "0017": m17}
+            "0016": m16, "0017": m17, "0018": load("0018")}
     for (stem, name), expected in EXPECTED.items():
         actual = set(getattr(mods[stem], name))
         assert actual == expected, (
@@ -1295,3 +1319,270 @@ def test_close_attempt_hint_is_a_NULLABLE_JSON_column_on_the_model():
     col = DecisionRecord.__table__.c.close_attempt_hint
     assert isinstance(col.type, sa.JSON) and type(col.type) is type(DecisionRecord.__table__.c.reasons.type)
     assert col.nullable is True
+
+
+# =====================================================================================
+# 0018 — FIVE NULLABLE `trades` COLUMNS, NOTHING ELSE (`T-0144` REVS 7 I-1 + 9 P-4, `T-0146` REVS 2-4; M18-1)
+# =====================================================================================
+
+_M18 = "0018_trades_close_client_order_id_exit_mode.py"
+
+#: `(type class, length, precision, scale)` per column, from the rulings (`None` where the attribute does not
+#: apply): I-1's `String(64)`, `exit_mode`'s `String(16)`, and P-4's `Numeric(18, 6)`, `String(32)`,
+#: `Numeric(10, 3)` (`KILL_SET.md` M18-1 AMENDED 2).
+_M18_COLUMNS: dict[str, tuple[type, int | None, int | None, int | None]] = {
+    "close_client_order_id": (sa.String, 64, None, None),
+    "exit_mode": (sa.String, 16, None, None),
+    "mark_at_detection": (sa.Numeric, None, 18, 6),
+    "mark_source": (sa.String, 32, None, None),
+    "detection_interval_s": (sa.Numeric, None, 10, 3),
+}
+
+
+def _type_shape(col_type) -> tuple:
+    """What a DDL type declares: its class, and length / precision / scale where the class has them."""
+    return (type(col_type), getattr(col_type, "length", None),
+            getattr(col_type, "precision", None), getattr(col_type, "scale", None))
+
+
+def _record_every_op(filename: str, direction: str) -> list[tuple[str, tuple, dict]]:
+    """`_record_0017`'s recorder for any revision: EVERY `op.<name>(...)` call, args and kwargs, in order.
+
+    `__getattr__`, so an `execute`, `alter_column`, `create_check_constraint`, `bulk_insert` or `get_bind`
+    nobody expected is RECORDED and fails an exact-list assertion rather than raising somewhere else.
+    """
+    import sys
+    import types
+    from unittest import mock
+
+    calls: list[tuple[str, tuple, dict]] = []
+
+    class _EveryCall:
+        def __getattr__(self, name):
+            def _record(*args, **kwargs):
+                calls.append((name, args, kwargs))
+            return _record
+
+    fake_op = _EveryCall()
+    path = _VERSIONS / filename
+    with mock.patch.dict(sys.modules, {"alembic": types.SimpleNamespace(op=fake_op)}):
+        spec = importlib.util.spec_from_file_location(f"_mig_{path.stem}_{direction}_every", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        getattr(mod, direction)()
+    return calls
+
+
+def _offline_postgres_sql(filename: str, direction: str) -> list[str]:
+    """The SQL alembic ITSELF renders for a revision on the Postgres dialect, offline (`as_sql`).
+
+    A second instrument, not a rebuild of the recorder: this is alembic's real `Operations` and SQLAlchemy's
+    DDL compiler — what `deploy_migrate.py`'s fresh-database bootstrap (`alembic upgrade head --sql`) emits.
+    A recorder can only say which calls were made; this says what `NOT NULL` / `DEFAULT` / `NUMERIC(p, s)` the
+    server would receive. Still NOT executed against a server.
+    """
+    import io
+
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+
+    mod = _load(filename)
+    buf = io.StringIO()
+    ctx = MigrationContext.configure(
+        dialect_name="postgresql", opts={"as_sql": True, "output_buffer": buf})
+    with Operations.context(ctx):
+        getattr(mod, direction)()
+    return [s.strip() for s in buf.getvalue().split(";") if s.strip()]
+
+
+def test_0018_ADDS_exactly_FIVE_nullable_trades_columns_and_its_DOWNGRADE_drops_ALL_FIVE():
+    """**`KILL_SET.md` M18-1 (AMENDED 2).** Widen-only: the upgrade is EXACTLY five `add_column("trades", …)`, each
+    nullable with no server default and no Python default, and nothing else — no `alter_column`, `execute`,
+    CHECK or `bulk_insert` (the recorder records any of them and the exact list dies). The downgrade is
+    EXACTLY five `drop_column("trades", …)` of those same names, in REVERSE add order.
+
+    KILLS: any column `nullable=False` (the upgrade fails on existing rows); a `server_default` (every existing
+    row is given a value); four columns added, or a sixth (P-4: a stored slippage moves the count off five); the
+    downgrade dropping four (a rollback leaves a column behind).
+    """
+    up = _record_every_op(_M18, "upgrade")
+    assert [name for name, _a, _k in up] == ["add_column"] * 5, (
+        f"0018.upgrade is not exactly five add_columns: {[(n, a[:1]) for n, a, _k in up]}"
+    )
+    added: dict[str, sa.Column] = {}
+    for _name, args, kw in up:
+        assert len(args) == 2 and not kw, f"add_column called with extra arguments: {args!r} {kw!r}"
+        table, col = args
+        assert table == "trades", f"0018 adds {col!r} to {table!r}, not trades"
+        assert isinstance(col, sa.Column), f"0018 adds {col!r}, not a Column"
+        assert col.nullable is True, f"0018 adds {col.name} NOT NULL — the upgrade fails on existing rows"
+        assert col.server_default is None, (
+            f"0018 adds {col.name} with server_default {col.server_default!r} — every existing row gets it")
+        assert col.default is None, f"0018 adds {col.name} with a default {col.default!r}"
+        assert not col.primary_key and not col.unique and not col.index and not col.foreign_keys, (
+            f"0018 adds {col.name} with a constraint or index — another operation in all but name")
+        assert col.name not in added, f"0018 adds {col.name} twice"
+        added[col.name] = col
+    assert set(added) == set(_M18_COLUMNS) and len(added) == 5, f"0018 adds {sorted(added)}"
+    for name, shape in _M18_COLUMNS.items():
+        assert _type_shape(added[name].type) == shape, (
+            f"0018 adds {name} as {added[name].type!r}; the ruling is {shape}")
+
+    down = _record_every_op(_M18, "downgrade")
+    assert [name for name, _a, _k in down] == ["drop_column"] * 5, (
+        f"0018.downgrade is not exactly five drop_columns: {[(n, a) for n, a, _k in down]}"
+    )
+    dropped = [args for _name, args, _kw in down]
+    assert all(len(a) == 2 and a[0] == "trades" for a in dropped), f"0018.downgrade drops {dropped}"
+    assert [a[1] for a in dropped] == list(reversed(added)), (
+        f"0018.downgrade drops {[a[1] for a in dropped]}; the upgrade added {list(added)} (reverse expected)")
+
+
+def test_0018s_DDL_and_the_Trade_MODEL_agree_on_each_columns_type_precision_length_and_nullability():
+    """**M18-1's model-vs-migration rows, one per column (five), through two instruments.**
+
+    1. The `Column` objects: the model's and the migration's type CLASS, `length`, `precision`, `scale` and
+       `nullable` are equal, and the model carries no default either — a model default would write a value on a
+       row whose ruling is NULL ("a row from before `0018` or a simulator trade").
+    2. The Postgres DDL: alembic's own offline rendering of `0018` must be EXACTLY
+       `ALTER TABLE trades ADD COLUMN <spec>` for each column, where `<spec>` is what SQLAlchemy renders for the
+       MODEL's column on the same dialect. A `NOT NULL`, a `DEFAULT` or a different `NUMERIC(p, s)` / `VARCHAR(n)`
+       on either side makes the texts differ. The downgrade renders the five DROPs in reverse order.
+
+    `trades` is created by `0001`, which `_replay_chain` does not replay, so — as for `lot_size` in `0017` — this
+    is the arm tying these five columns' model to their migration. SQLite, the suite's database, ignores `Numeric`
+    scale and `VARCHAR` length, so only the DECLARED types can be compared here; Postgres executes them.
+    """
+    from sqlalchemy.dialects import postgresql
+    from sqlalchemy.schema import CreateColumn
+
+    from app.models.trade import EXIT_MODES, Trade
+
+    added = {args[1].name: args[1] for name, args, _kw in _record_every_op(_M18, "upgrade")
+             if name == "add_column"}
+    assert set(added) == set(_M18_COLUMNS), f"0018 adds {sorted(added)}"
+    for name, mig in added.items():
+        model = Trade.__table__.c[name]
+        assert _type_shape(model.type) == _type_shape(mig.type), (
+            f"{name}: model {model.type!r} {_type_shape(model.type)}, 0018 {mig.type!r} {_type_shape(mig.type)}")
+        assert model.nullable is mig.nullable is True, (
+            f"{name}: model nullable {model.nullable}, 0018 nullable {mig.nullable}")
+        assert model.server_default is None and model.default is None, (
+            f"{name}: the model defaults it ({model.server_default!r} / {model.default!r}); NULL is the ruling")
+        # Positive shape from the rulings, so two sides wrong the same way cannot pass.
+        assert _type_shape(model.type) == _M18_COLUMNS[name], f"{name}: model {model.type!r}"
+
+    # What the lengths must hold, read from code-owned values: every exit mode fits its column.
+    assert max(len(m) for m in EXIT_MODES) <= Trade.__table__.c.exit_mode.type.length
+
+    dialect = postgresql.dialect()
+    upgrade_sql = _offline_postgres_sql(_M18, "upgrade")
+    expected_sql = [
+        f"ALTER TABLE trades ADD COLUMN {CreateColumn(Trade.__table__.c[name]).compile(dialect=dialect)}"
+        for name in added  # the migration's own add order
+    ]
+    assert upgrade_sql == expected_sql, (
+        f"0018's Postgres DDL differs from the model's columns:\n  0018:  {upgrade_sql}\n  model: {expected_sql}")
+    # And the rendered text is the right SHAPE, not merely equal: no NOT NULL, no DEFAULT on any column.
+    assert upgrade_sql == ["ALTER TABLE trades ADD COLUMN close_client_order_id VARCHAR(64)",
+                           "ALTER TABLE trades ADD COLUMN exit_mode VARCHAR(16)",
+                           "ALTER TABLE trades ADD COLUMN mark_at_detection NUMERIC(18, 6)",
+                           "ALTER TABLE trades ADD COLUMN mark_source VARCHAR(32)",
+                           "ALTER TABLE trades ADD COLUMN detection_interval_s NUMERIC(10, 3)"], upgrade_sql
+    downgrade_sql = _offline_postgres_sql(_M18, "downgrade")
+    assert downgrade_sql == [f"ALTER TABLE trades DROP COLUMN {name}" for name in reversed(added)], downgrade_sql
+
+
+def test_the_close_client_order_id_column_holds_an_engine_close_id_WHOLE():
+    """I-1 / M18-2's "truncated past 64": the id `tai-<32 hex>-<leg><2-digit attempt>` is 40 characters (G-1).
+    Built from the prefix the code owns (`ENGINE_CLIENT_ORDER_ID_PREFIX`) + a decision id's full hex + the widest
+    close suffix, so a column narrowed below the id's length dies here and not at a Postgres insert.
+
+    The prefix is read from `service.py`'s SOURCE (AST), not imported: importing it pulls in the broker adapters,
+    and a schema arm must not go red because an unrelated module is mid-edit (measured: it did)."""
+    import uuid
+
+    from app.models.trade import Trade
+
+    service = Path(__file__).resolve().parents[2] / "app" / "services" / "execution" / "service.py"
+    prefixes = [
+        node.value.value
+        for node in ast.parse(service.read_text(encoding="utf-8")).body
+        if isinstance(node, ast.Assign | ast.AnnAssign)
+        and any(getattr(t, "id", None) == "ENGINE_CLIENT_ORDER_ID_PREFIX"
+                for t in (node.targets if isinstance(node, ast.Assign) else [node.target]))
+        and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)
+    ]
+    assert len(prefixes) == 1, f"ENGINE_CLIENT_ORDER_ID_PREFIX is assigned {len(prefixes)} times in {service}"
+    widest = f"{prefixes[0]}{uuid.UUID(int=(1 << 128) - 1).hex}-s99"
+    assert len(widest) == 40, f"the close id is {len(widest)} characters: {widest!r}"
+    assert len(widest) <= Trade.__table__.c.close_client_order_id.type.length
+
+
+def test_the_LIVE_exit_modes_EQUAL_0018s_frozen_tuple():
+    """**`T-0146` REVISIONS 3-4.** `0018` creates no CHECK, so the vocabulary lives in code — and the frozen
+    tuple is what the revision documents. Compared as TUPLES, element for element (the ruling's order): a
+    mode added to the model only, dropped from either, renamed, or reordered dies."""
+    from app.models import trade
+
+    m18 = _load(_M18)
+    assert tuple(m18._EXIT_MODES_AT_0018) == trade.EXIT_MODES, (
+        f"live {trade.EXIT_MODES} != 0018's frozen {m18._EXIT_MODES_AT_0018}")
+    # Positive shape: the five named constants, in the ruling's order, each its own name.
+    assert trade.EXIT_MODES == (trade.EXIT_MODE_RUNNING, trade.EXIT_MODE_MANAGE_ONLY,
+                                trade.EXIT_MODE_STOPPING, trade.EXIT_MODE_EXTERNAL,
+                                trade.EXIT_MODE_UNRECORDED)
+    assert [c for c in dir(trade) if c.startswith("EXIT_MODE_")] == sorted(
+        f"EXIT_MODE_{m}" for m in trade.EXIT_MODES), "an EXIT_MODE_* constant outside EXIT_MODES"
+    assert all(getattr(trade, f"EXIT_MODE_{m}") == m for m in trade.EXIT_MODES)
+    assert len(set(trade.EXIT_MODES)) == 5
+
+
+def test_the_close_attempt_HINTs_comment_describes_the_ii_SHAPE():
+    """**`T-0146` REVISION 4.** The hint's JSON shape changed at (ii) to `{leg: {"n": attempt, "mode": …}}` with
+    no schema change, so the model's comment is the only place the shape is declared. A light READING arm:
+    the `#:` block directly above the ONE `close_attempt_hint:` mapping names `"n"` and `"mode"`, and no
+    longer states (i)'s flat `{leg: last attempt number used}`."""
+    from app.models import decision_record
+
+    lines = Path(decision_record.__file__).read_text(encoding="utf-8").splitlines()
+    at = [i for i, line in enumerate(lines) if line.strip().startswith("close_attempt_hint:")]
+    assert len(at) == 1, f"close_attempt_hint is mapped on lines {at}"
+    block = []
+    i = at[0] - 1
+    while i >= 0 and lines[i].strip().startswith("#:"):
+        block.append(lines[i])
+        i -= 1
+    comment = "\n".join(reversed(block))
+    assert comment, "no #: comment block sits directly above close_attempt_hint"
+    assert '{leg: {"n": attempt, "mode": decided mode}}' in comment, comment
+    assert '"n"' in comment and '"mode"' in comment
+    assert "{leg: last attempt number used}" not in comment, "the comment still states (i)'s flat shape"
+
+
+def test_MG1_the_DEPLOY_MIGRATES_before_the_app_starts_and_a_FAILED_migration_REFUSES_the_start():
+    """Review's MG-1. With (ii)'s model, `select(Trade)` fails against a database still at `0017`, so the start must migrate
+    first or refuse — never start and fail inside a tick. The deploy's api command runs `deploy_migrate.py` BEFORE uvicorn
+    under `set -e`, and an existing database's branch runs `alembic upgrade head` through `check_call` (a failure raises)."""
+    import ast
+    import re
+    from pathlib import Path
+
+    backend = Path(__file__).resolve().parents[2]
+    compose = (backend.parent / "deploy" / "compose.vps.yaml").read_text()
+    lines = [line.strip() for line in compose.splitlines()]
+    assert lines.count("python deploy_migrate.py") == 1, "the migration command is not run exactly once"
+    migrate = lines.index("python deploy_migrate.py")
+    block = max(i for i in range(migrate) if lines[i] == "- |")          # the start of the api's OWN command script
+    start = next(i for i in range(migrate, len(lines)) if re.match(r"exec uvicorn app\.main:app\b", lines[i]))
+    assert "set -e" in lines[block:migrate], "the api's start script does not stop on a failed command"
+    assert not [l for l in lines[block:migrate] if "uvicorn" in l], "the app is started before the migration"
+    assert block < migrate < start, "the migration does not run before the app starts"
+
+    tree = ast.parse((backend / "deploy_migrate.py").read_text())
+    calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+             and n.func.attr in {"check_call", "call", "run", "Popen", "check_output"}]
+    upgrades = [c for c in calls if c.args and isinstance(c.args[0], ast.List)
+                and [getattr(e, "value", None) for e in c.args[0].elts] == ["alembic", "upgrade", "head"]]
+    assert upgrades and all(c.func.attr == "check_call" for c in upgrades), (
+        "an existing database's upgrade is not run through check_call, so a failed migration would not refuse the start")

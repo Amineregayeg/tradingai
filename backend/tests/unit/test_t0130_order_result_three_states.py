@@ -51,7 +51,74 @@ import socket
 import pytest
 from types import SimpleNamespace
 
-from tests.unit.test_b429_stop_is_placed import _drive_tick
+
+def _drive_tick(monkeypatch, execute):
+    """Drive `_tick_symbol` to the order path with every venue and I/O dependency replaced.
+
+    **MOVED HERE from `test_b429_stop_is_placed.py`** when `T-0144` R2 deleted that file with B429's venue-protection
+    code; this file was its main importer. Unchanged, including the trace's `reasons = ["b429"]` — a carried VALUE
+    that `test_L3_the_alert_carries_EVERYTHING_a_truthful_row_needs` asserts reaches the alert, not a reference to the
+    deleted code.
+
+    **INCLUDING THE PRICE FETCH, which the first version of these arms did not replace.**
+    `_tick_symbol`'s mark (`_mark_for`, since B428b (ii)) begins with `asyncio.to_thread(_ticker_price, bsym)` — a real call to
+    the Binance API over two mirrors with 8-second timeouts. When it returns `None` the tick exits
+    before the order path, nothing halts, and the arm fails. In one kill-set run an arm driven this
+    way failed under a mutation it has no connection to, and did not reproduce in sixteen runs
+    after; a network failure is the MECHANISM that explains it, not an observed OCCURRENCE (the
+    harness keeps no traceback). Either way a network-dependent arm hands a mutation table false
+    kills and false passes, so the fetch is replaced here.
+    """
+    from app.db.enums import DirectionType
+    from app.services.live import crypto_loop as mod
+
+    import pandas as pd
+
+    loop = mod.LiveCryptoLoop()
+    acts: list[tuple[str, str]] = []
+
+    class _S:
+        symbol, direction = "BTC/USD", DirectionType.LONG
+        entry, sl, tp = 100.0, 99.0, None
+        risk_pct, approved, client_order_id = 0.01, True, "sig-x"
+        partial_price = partial_fraction = None
+
+    class _T:
+        reasons = ["b429"]
+
+        def __getattr__(self, _):
+            return None
+
+    base = [100.0 + i for i in range(60)]
+    bars = pd.DataFrame({"open": base, "high": [b + 1 for b in base],
+                         "low": [b - 1 for b in base], "close": base, "volume": [10.0] * 60})
+
+    async def _noop(*a, **k):
+        return None
+
+    async def _fetch(*a, **k):
+        return bars
+
+    async def _false(*a, **k):
+        return False
+
+    async def _zero(*a, **k):
+        return 0
+
+    async def _act(kind, msg):
+        acts.append((kind, msg))
+
+    monkeypatch.setattr(mod, "_ticker_price", lambda _bsym: 100.0)
+    monkeypatch.setattr(mod, "evaluate_latest_bar_traced", lambda *a, **k: (_S(), _T()))
+    monkeypatch.setattr(loop, "_fetch_bars", _fetch)
+    monkeypatch.setattr(loop, "_act", _act)
+    monkeypatch.setattr(loop, "_shadow_evaluate", _noop)
+    monkeypatch.setattr(loop, "_maybe_emit_census", _noop)
+    monkeypatch.setattr(loop, "_news_context", _noop)
+    monkeypatch.setattr(loop, "_has_position", _false)
+    monkeypatch.setattr(loop, "_open_count", _zero)
+    monkeypatch.setattr(loop.execution, "execute", execute)
+    return loop, acts
 
 
 @pytest.fixture(autouse=True)

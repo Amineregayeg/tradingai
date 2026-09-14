@@ -42,6 +42,33 @@ def is_live_cohort(setup_tag: str | None) -> bool:
     return setup_tag != SETUP_TAG_REPLAY
 
 
+# --------------------------------------------------------------------------
+# EXIT MODES — the loop's mode when an exit was DECIDED (`T-0146` REVISIONS 3–4)
+#
+# Written to `trades.exit_mode` (migration `0018`). It is the mode at the
+# DECISION, never re-read by a retried settle write. NULL means a row from
+# before `0018` or a simulator trade. `UNRECORDED` is a settle from FILLs of an
+# engine close whose hint is missing or has no mode — never `RUNNING`. `0018`
+# freezes these five as `_EXIT_MODES_AT_0018`; an arm holds the two equal.
+# --------------------------------------------------------------------------
+
+EXIT_MODE_RUNNING = "RUNNING"
+EXIT_MODE_MANAGE_ONLY = "MANAGE_ONLY"
+#: A person's Stop-button close (leg `x`).
+EXIT_MODE_STOPPING = "STOPPING"
+#: An exit the engine did not send (the kill switch, a manual close), settled from FILLs.
+EXIT_MODE_EXTERNAL = "EXTERNAL"
+EXIT_MODE_UNRECORDED = "UNRECORDED"
+
+EXIT_MODES: tuple[str, ...] = (
+    EXIT_MODE_RUNNING,
+    EXIT_MODE_MANAGE_ONLY,
+    EXIT_MODE_STOPPING,
+    EXIT_MODE_EXTERNAL,
+    EXIT_MODE_UNRECORDED,
+)
+
+
 class Trade(UserScopedMixin, TimestampMixin, Base):
     __tablename__ = "trades"
 
@@ -87,6 +114,23 @@ class Trade(UserScopedMixin, TimestampMixin, Base):
         SAUUID(as_uuid=True), nullable=True, index=True
     )
     setup_tag: Mapped[str | None] = mapped_column(String, nullable=True)
+    #: The ENGINE close order's client id (`T-0144` I-1, migration `0018`): `tai-<32 hex>-<leg><2-digit
+    #: attempt>`, 40 characters. "Partial taken" is read from this identity (leg `p`), never from a size.
+    #: NULL for simulator trades and external exits — no engine close id exists, and none is fabricated.
+    close_client_order_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    #: One of `EXIT_MODES`, the mode when the exit was DECIDED (migration `0018`). NULL = a row from before
+    #: `0018` or a simulator trade. No default: a forgotten write must read as unknown, not as `RUNNING`.
+    exit_mode: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    #: P-4 / R3' (migration `0018`): the mark the pass compared with the level when it DECIDED the exit, from the
+    #: `SettleEvent` — never re-read at persist time. A USD price, so 6 dp like the prices above. Slippages are
+    #: DERIVED, not stored: detection = mark − the triggering level (`sl` for a stop exit), execution =
+    #: `exit_price` − mark. NULL for simulator trades.
+    mark_at_detection: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
+    #: The feed that mark came from (e.g. `binance_mark`). NULL for simulator trades.
+    mark_source: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    #: R1': the MEASURED wall time of the pass that detected the exit (`_last_pass_s`), not `POLL_INTERVAL`.
+    #: NULL for simulator trades.
+    detection_interval_s: Mapped[Decimal | None] = mapped_column(Numeric(10, 3), nullable=True)
 
     # Relationships
     screenshots: Mapped[list["Screenshot"]] = relationship(  # noqa: F821

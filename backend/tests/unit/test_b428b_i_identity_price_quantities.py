@@ -263,16 +263,6 @@ async def test_P4_18_reconciliation_raises_NO_false_CRITICAL_for_the_venue_spell
     assert "untracked_position" not in kinds and "missing_position" not in kinds, kinds
 
 
-def test_P6_NOT_APPLICABLE_this_commit_writes_no_settle_event_field():
-    """Stated (review's P-6): (i) builds no venue settle event; the loop-pair-in-the-event rule lands with commit (ii)'s
-    `VenueEvents`. The arm pins the precondition, so it fails when (ii) starts writing one."""
-    import inspect
-
-    from app.services.live import crypto_loop as mod
-
-    assert "VenueEvents" not in inspect.getsource(mod)
-
-
 # ---------------------------------------------------------------------------------------------------
 # D — identity and the pre-send write
 # ---------------------------------------------------------------------------------------------------
@@ -737,14 +727,6 @@ async def test_S2_priced_by_the_REFERENCE_price_not_the_signal_entry():
     assert sent == [] and res.get("rejection_code") == "MIN_SIZE", res
 
 
-def test_S3_CLOSES_are_exempt_a_4_49_dollar_partial_close_is_SENT():
-    from tests.unit.test_t0136_alpaca_adapter import _adapter as adapter_for
-
-    adapter, mock = adapter_for()
-    result = asyncio.run(adapter.close_position("BTC/USD", lot_size=0.000057828))   # $4.49 at ~77,600
-    assert result["partial"] is True and mock.closed, "a sub-minimum CLOSE was refused"
-
-
 # ---------------------------------------------------------------------------------------------------
 # Q — opened units as a position delta; B — fixed-point quantities
 # ---------------------------------------------------------------------------------------------------
@@ -929,17 +911,6 @@ async def test_B3_the_ENTRY_quantity_reaches_the_SDK_as_the_quantised_value_EXAC
         await adapter.place_order(_q_req(lot))
     sent = [qty for name, qty in venue.calls if name == "submit_order"]
     assert sent and Decimal(repr(sent[0])) == quantise_quantity_down(lot), (sent, quantise_quantity_down(lot))
-
-
-@pytest.mark.parametrize("lot,expected", [(5.8413e-05, "0.000058413"), (0.0001947075, "0.000194707"),
-                                          (4.88e-07, "0.000000488")])
-def test_B2_B3_the_PARTIAL_close_quantity_is_fixed_point_and_never_above_the_ask(lot, expected):
-    from tests.unit.test_t0136_alpaca_adapter import _adapter as adapter_for
-
-    adapter, mock = adapter_for()
-    asyncio.run(adapter.close_position("BTC/USD", lot_size=lot))
-    _symbol, options = mock.closed[-1]
-    assert str(options.qty) == expected, options.qty
 
 
 async def test_T6c_the_pending_retry_runs_at_the_TOP_of_every_pass_before_any_symbol():

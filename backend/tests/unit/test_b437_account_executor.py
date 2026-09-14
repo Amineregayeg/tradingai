@@ -27,7 +27,6 @@ from types import SimpleNamespace
 import pytest
 
 from app.db.enums import DirectionType, OrderType
-from app.services.broker.base import OrderRequest
 from tests.unit.test_b442_kill_switch_at_send import (
     _Book, _alpaca, _bounded_event, _capture_logs, _entry_req, _until, _venue_api_error,
 )
@@ -54,7 +53,7 @@ def _loopback_only(monkeypatch):
 # ---------------------------------------------------------------------------------------------------
 
 TRACED = ("get_asset", "submit_order", "get_order_by_client_id", "get_order_by_id", "get_all_positions",
-          "close_position", "get_orders", "get_account", "get_open_position", "cancel_order_by_id")
+          "close_position", "get_orders", "get_account", "get_open_position", "cancel_order_by_id", "get")
 
 
 class _Traced(_Book):
@@ -91,6 +90,11 @@ class _Traced(_Book):
         self.calls.append(("cancel_order_by_id", str(order_id)))
         return None
 
+    def get(self, path, data=None, **kwargs):
+        """`RESTClient.get` (`T-0144` §2.6's FILL activities read): one empty page."""
+        self.calls.append(("get", str(path)))
+        return []
+
     def threads_of(self, name):
         return {t for n, t in self.log if n == name}
 
@@ -118,11 +122,6 @@ class _Heartbeat:
         self._stop.set()
         await self._task
         return False
-
-
-def _bracket_req(client_order_id="sig-b437-bracket"):
-    return OrderRequest(pair="BTC/USD", direction=DirectionType.LONG, order_type=OrderType.MARKET, lot_size=0.01,
-                        sl=90.0, tp=120.0, client_order_id=client_order_id)
 
 
 async def _hold_worker(adapter, gate: threading.Event, what="a held read"):
@@ -191,9 +190,6 @@ async def test_E2_EVERY_SDK_member_the_adapter_calls_RUNS_OFF_the_event_loop_thr
             if isinstance(exc, TimeoutError):
                 raise AssertionError(f"a drive timed out: {coro_factory.__name__}") from exc
 
-    async def _bracket_remediation(adapter, book):          # get_asset, submit, re-read, cancel, close, flat reads
-        await adapter.place_order(_bracket_req())
-
     async def _ambiguous_submission(adapter, book):         # the client_order_id lookup
         def _timeout(order_data):
             book.calls.append(("submit_order", order_data.symbol))
@@ -214,7 +210,25 @@ async def test_E2_EVERY_SDK_member_the_adapter_calls_RUNS_OFF_the_event_loop_thr
         await adapter.close_position("BTCUSD")
         await adapter.close_all_positions()
 
-    for flow in (_bracket_remediation, _ambiguous_submission, _reads, _closes):
+    async def _venue_management(adapter, book):             # `T-0144` (ii): what the loop's `VenueEvents` calls
+        from alpaca.trading.enums import OrderStatus, TimeInForce
+        from alpaca.trading.models import Order
+
+        from datetime import datetime, timezone
+        from decimal import Decimal
+
+        now = datetime.now(timezone.utc)
+        resting = Order(id=uuid.uuid4(), client_order_id="rest", created_at=now, updated_at=now, submitted_at=now,
+                        status=OrderStatus.NEW, time_in_force=TimeInForce.GTC, extended_hours=False, symbol="BTC/USD",
+                        qty="0.01", filled_qty="0")
+        book.get_orders = book._wrap("get_orders", lambda filter=None: [resting])
+        await adapter.cancel_open_orders_for("BTC/USD")                          # get_orders, cancel_order_by_id
+        await adapter.fill_activities("BTC/USD", after=now)                      # get (the registered read seam)
+        await adapter.place_close("BTC/USD", Decimal("0.001"), f"tai-{uuid.uuid4().hex}-s01")
+
+    # `T-0144` R2: the `_bracket_remediation` flow (a bracket entry driven into B429's cancel/close/flat-observation
+    # remediation) went with that code; `cancel_order_by_id`'s `_call` site is now R14's cancel-first (`_venue_management`).
+    for flow in (_ambiguous_submission, _reads, _closes, _venue_management):
         await _flow(flow)
 
     seen: dict[str, set[int]] = {}
@@ -493,18 +507,31 @@ async def test_E8a_a_STARTED_submit_is_awaited_LOGGED_with_its_ids_and_RE_RAISED
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("site", ["public_close", "sweep_close", "remediation_cancel", "remediation_close"])
+@pytest.mark.parametrize("site", ["public_close", "sweep_close", "venue_cancel", "venue_close"])
 async def test_E8bcd_every_WRITE_site_is_shielded_once_started(site, switch_off):
+    # `T-0144` R2: the `remediation_cancel` and `remediation_close` sites went with B429's remediation (DESIGN §7); (ii)'s
+    # R14 cancel-first (`cancel_open_orders_for`) and the engine's close order (`place_close`) are the write sites now.
+    from datetime import datetime, timezone
+    from decimal import Decimal
+
+    from alpaca.trading.enums import OrderStatus, TimeInForce
+    from alpaca.trading.models import Order
+
     book = _Traced()
     book.positions = [_Position(symbol="BTCUSD")]
-    member = "cancel_order_by_id" if site == "remediation_cancel" else "close_position"
+    now = datetime.now(timezone.utc)
+    resting = Order(id=uuid.uuid4(), client_order_id="rest", created_at=now, updated_at=now, submitted_at=now,
+                    status=OrderStatus.NEW, time_in_force=TimeInForce.GTC, extended_hours=False, symbol="BTC/USD",
+                    qty="0.01", filled_qty="0")
+    book.get_orders = book._wrap("get_orders", lambda filter=None: [resting])
+    member = {"venue_cancel": "cancel_order_by_id", "venue_close": "submit_order"}.get(site, "close_position")
     release = threading.Event()
     book.holds[member] = release
     adapter, _ = _alpaca(book)
     drive = {"public_close": lambda: adapter.close_position("BTCUSD"),
              "sweep_close": lambda: adapter.close_all_positions(),
-             "remediation_cancel": lambda: adapter.place_order(_bracket_req("sig-e8d-cancel")),
-             "remediation_close": lambda: adapter.place_order(_bracket_req("sig-e8d-close"))}[site]
+             "venue_cancel": lambda: adapter.cancel_open_orders_for("BTC/USD"),
+             "venue_close": lambda: adapter.place_close("BTC/USD", Decimal("0.001"), f"tai-{uuid.uuid4().hex}-s01")}[site]
     lines, stop = _capture_logs()
     try:
         async with asyncio.timeout(10):

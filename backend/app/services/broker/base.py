@@ -37,7 +37,7 @@ def readable_quantity(raw) -> float | None:
                     raised — which is why an arm feeding strings could never have found it.
 
     Lives here, in the broker contract, because two layers need it and neither should import the
-    other: `AlpacaAdapter.place_order` (`filled_units`, and the stored refusal's `_qty_token`) and
+    other: `AlpacaAdapter.place_order` (`filled_units`) and
     `ExecutionService`, which normalises what ANY producer returns (`B433`).
     """
     if raw is None or isinstance(raw, bool) or (isinstance(raw, str) and not raw.strip()):

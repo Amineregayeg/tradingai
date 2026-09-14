@@ -127,9 +127,9 @@ def test_there_are_adapters_to_check():
         # identical message, which is the ambiguity this contract exists to prevent.
         "MetaTrader5Adapter",
         # `T-0136`. THE VENUE MALEK RULED ON 2026-09-10, named deliberately — which is what this
-        # pin is for. Its `close_position` HONOURS `lot_size` via `ClosePositionRequest(qty=)`
-        # rather than refusing, because the exit ladder is 70%-at-2R plus a 30% runner and
-        # `crypto_loop.py:1006` passes a size on every partial exit.
+        # pin is for. Its `close_position` honoured `lot_size` with a qty-bearing close request until
+        # `T-0144` R2-4; it now REFUSES a `lot_size` loudly (engine partials are sell orders,
+        # DESIGN §2.5) and still READS it to say which request it refused, as MT5's does.
         "AlpacaAdapter",
     }, (
         f"the production adapter set changed: {sorted(names)}. A new adapter must be added here "

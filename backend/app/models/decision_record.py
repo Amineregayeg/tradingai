@@ -156,15 +156,11 @@ REJECTION_VENUE_DIRECTION_UNSUPPORTED = "VENUE_DIRECTION_UNSUPPORTED"
 #: `0.000397984` — both $1.00 of notional, so the minimum MOVES WITH PRICE while
 #: `min_trade_increment` (`1e-9` on both) does not. The two fields have different natures.
 REJECTION_MIN_SIZE = "MIN_SIZE"
-#: **`B429`.** The venue took the order and did NOT report the stop, so the position was closed
-#: again and the decision is correctly recorded as not taken.
-#:
-#: **ITS OWN CODE, for `MIN_SIZE`'s reason.** Filed as `VENUE_TRANSPORT` it would read as a
-#: transient blip that clears on its own; filed as `VENUE_DIRECTION_UNSUPPORTED` it would name the
-#: wrong capability. It is not transient: it recurs while the observed condition holds — the venue
-#: created no working stop, OR parked one in a status `WORKING_STOP_LEG_STATUSES` does not yet admit
-#: (that list is unmeasured, and then too narrow). Telling an operator which world they are in is the
-#: whole value of the code — `B375`'s confusion is what sharing one would rebuild.
+#: **`B429`, RETIRED WITH ITS WRITER (`T-0144` §7, R2).** It was written when the venue took an order and did not report
+#: the stop, so the position was closed again and the decision recorded as not taken. That protection code is deleted: a
+#: crypto stop is the ENGINE's, managed by `VenueEvents` every pass. Nothing writes this value any more; it STAYS because
+#: `0014`'s frozen CHECK admits it and rows written before the deletion may carry it (R2-2) — removing it would make those
+#: rows fail the live vocabulary.
 REJECTION_PROTECTION_NOT_ACCEPTED = "PROTECTION_NOT_ACCEPTED"
 #: **`B427`. The venue ACKNOWLEDGED the order and then ENDED it — cancelled, expired or rejected — with a
 #: READABLE filled quantity of exactly ZERO.** No position exists, so REJECTED is true (manager's
@@ -618,14 +614,18 @@ class DecisionRecord(Base):
     #: acted-on decision has never carried one.
     deciding_rule_id: Mapped[str | None] = mapped_column(String, nullable=True)
 
-    #: The close-attempt HINT for this position (`T-0144` S6, ruling G-2, migration `0017`):
-    #: `{leg: last attempt number used}`, e.g. `{"s": 2, "p": 1}`.
+    #: The close-attempt HINT for this position (`T-0144` S6, ruling G-2, column from migration `0017`).
+    #: SHAPE FROM COMMIT (ii) (`T-0146` REVISION 4): `{leg: {"n": attempt, "mode": decided mode}}`, e.g.
+    #: `{"s": {"n": 2, "mode": "RUNNING"}, "p": {"n": 1, "mode": "RUNNING"}}` — leg one of `s`, `t`, `p`,
+    #: `b`, `x`, `e`; `n` the last attempt number used; `mode` the loop's mode when that close was DECIDED
+    #: (one of `app.models.trade.EXIT_MODES`), not at the hint write. (i)'s flat `{leg: attempt}` is gone;
+    #: JSON, so the shape changed with no schema change.
     #:
     #: **A HINT, NEVER THE COUNTER.** The durable source of a leg's next attempt is the venue — the
-    #: client-id probe `…-{leg}1`, `…-{leg}2`, … until a 404. This only says where to START that probe
-    #: (hint + 1). It is written before each close from commit (ii) on, and a failed write never blocks
-    #: the send; a stale or missing hint only moves where the probe starts (`DESIGN.md` §4.5). Nothing
-    #: in this commit writes or reads it.
+    #: client-id probe `…-{leg}01`, `…-{leg}02`, … until a 404. This only says where to START that probe
+    #: (`hint[leg]["n"]` + 1). It is written best-effort before each close, and a failed write never
+    #: blocks the send; a stale or missing hint only moves where the probe starts (`DESIGN.md` §4.5). A
+    #: settle from FILLs of an engine close reads `mode` from it; no hint or no mode → `UNRECORDED`.
     close_attempt_hint: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     __table_args__ = (

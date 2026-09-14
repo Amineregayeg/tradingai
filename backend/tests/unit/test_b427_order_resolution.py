@@ -243,23 +243,6 @@ async def test_R4_a_re_read_that_RAISES_is_NOT_terminal_and_nothing_raises_out_o
 
 
 @pytest.mark.asyncio
-async def test_R5_B429s_protection_read_is_the_FIRST_read_so_a_fast_fill_costs_nothing_more():
-    """Ruling A's saving, measured: a protected order whose parent is already filled at the protection read
-    makes no further request; one still `new` there is resolved by the reads that follow."""
-    from tests.unit.test_b429_stop_is_placed import PROTECTED, _adapter as b429_adapter, _called, _parent, _placed, _stop, _tp
-    from tests.unit.test_b429_stop_is_placed import _req as b429_req
-
-    fast = b429_adapter(_placed(status="accepted"), reread=PROTECTED)
-    res = await fast.place_order(b429_req())
-    assert res["status"] == "FILLED" and len(_called(fast, "get_order_by_id")) == 1, (
-        "the resolver re-read an order the protection read had already seen filled")
-
-    slow = b429_adapter(_placed(status="accepted"), reread=_parent(status="new", legs=[_stop("held"), _tp("held")]))
-    res = await slow.place_order(b429_req())
-    assert res["status"] == "FILLED" and len(_called(slow, "get_order_by_id")) == 2, res["resolution"]
-
-
-@pytest.mark.asyncio
 async def test_R5b_the_resolver_stops_ONLY_on_TERMINAL_ORDER_STATUSES(monkeypatch):
     """**B-6. One terminal set, B429's.** `pending_cancel` and `done_for_day` can still fill, so reading goes on
     through them; stopping there would report a still-live order as its last word."""
@@ -368,7 +351,7 @@ async def test_M2_a_CANCELED_partial_is_sized_by_its_TERMINAL_filled_quantity_NE
 @pytest.mark.asyncio
 async def test_M3_an_order_ENDED_UNFILLED_is_recorded_as_a_REFUSAL_with_its_OWN_CODE(monkeypatch):
     """**Ruling C, through the loop.** A true row, not a halt: no position exists."""
-    from tests.unit.test_b429_stop_is_placed import _drive_tick
+    from tests.unit.test_t0130_order_result_three_states import _drive_tick
 
     venue = _Venue(ack="accepted", rereads=(("canceled", "0"),))
     adapter, _clock = _adapter(venue)
@@ -401,11 +384,12 @@ async def test_M3_an_order_ENDED_UNFILLED_is_recorded_as_a_REFUSAL_with_its_OWN_
     ((("canceled", "0"),), False, "REJECTED"),
     ((("canceled", "0.004"),), False, "PARTIALLY_FILLED"),
 ], ids=["filled", "fills_later", "never_fills", "ended_unfilled", "partially_closed"])
-@pytest.mark.parametrize("lot_size", [None, 0.3], ids=["whole", "partial"])
-async def test_C1_close_position_is_CONFIRMED_only_by_a_terminal_FILL(rereads, confirmed, status, lot_size):
+async def test_C1_close_position_is_CONFIRMED_only_by_a_terminal_FILL(rereads, confirmed, status):
+    # `T-0144` R2-4: the `lot_size` "partial" parametrisation is gone — the adapter REFUSES a partial close by position
+    # (engine partials are sell orders), pinned in `test_b428b_ii_r2_deletion.py`. The whole close is unchanged.
     venue = _Venue(close_ack="accepted", close_rereads=rereads)
     adapter, _clock = _adapter(venue)
-    out = await adapter.close_position("BTC/USD", lot_size=lot_size)
+    out = await adapter.close_position("BTC/USD")
     assert (out["close_confirmed"], out["status"]) == (confirmed, status), out
     assert "result" not in out, "the close order is still being stringified"
     assert out["resolution"]["ack_status"] == "accepted"
