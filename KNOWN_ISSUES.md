@@ -29996,3 +29996,16 @@ in `backend/app` (measured at `ab64c03` and in the B437 candidate).
 reported so far, and written into the fresh-session audit as the sweep's failure, and then `CancelledError` is
 re-raised. Arm: a sweep raising after the caller cancelled gives the awaiter `CancelledError`, one audit row naming
 the failure, and the rows logged. Deploys with the next release; the engine is held.
+
+**AMENDMENT (review, driven on `ab64c03`): THERE ARE TWO EXITS, and a fix at the loop's catch alone leaves the second
+one.**
+- **In-loop** (the repro above): the cancel lands while the sweep runs, the sweep then raises, and that exception
+  escapes.
+- **Post-loop**: the sweep has ALREADY raised when the cancel lands. The existing catch after the loop re-raises
+  `CancelledError` correctly, and its log line appears, but it too writes NO audit and NO row log.
+
+(2f) must leave the record on both. **Ruling S-F1 (manager):** the fresh-session audit write is itself shielded against
+a second cancel, with a time bound (5s), so repeated cancellations during shutdown cannot erase the record. If the
+bound expires or the write fails, the rows are logged at ERROR, and `CancelledError` is still re-raised. Review's kill
+set: `_runs/2f/KILL_SET.md`, F-1..F-10.
+
