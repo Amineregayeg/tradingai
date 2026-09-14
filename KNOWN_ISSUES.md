@@ -29687,6 +29687,17 @@ was ruled as the normal-path bound 3C + B, with C derived live from the client. 
 
 ---
 
+#### AMENDMENT (manager, from execute's P-E measurement, 2026-09-14) — THE HANDLER KEEPS RUNNING AFTER ITS CLIENT GOES
+
+Execute measured it locally on uvicorn 0.44 with FastAPI and the production middleware stack
+(`agents/tasks/_runs/b428b_iii/exec/PE_REPORT.md`). **A client disconnect does NOT cancel the request handler.** Across 16
+disconnect shapes (close, reset, half-close, HTTP/1.0, client timeout; httptools and h11), the handler ran to its end and
+only the response was dropped. So when the proxy gives up at 120 s, the kill switch's closes carry on to completion; only
+the answer is lost. That matches this entry's "the closes carry on unseen". **Not measured:** nginx itself (not installed
+locally) and uvloop under a proxy. **Still Malek's decision:** how the operator should learn the result, for example a
+status the page polls, instead of waiting on the request.
+
+
 ### B444 — ON ALPACA THE ENGINE COULD PLACE A TRADE BUT NOT MANAGE OR RECORD IT: the 70% partial never fires, and an exit at the venue never becomes a trade row or resolves its decision. `B428b` is named in six entries and scoped in none
 
 **Found by manager while answering Malek's question "what is still missing to run the simulation on Alpaca and track
