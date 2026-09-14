@@ -29726,6 +29726,20 @@ the audit committed. **Non-blocking finding (review, measured): the 409 redacts 
 planted in a row's nested `close.resolution.read_errors` reaches the response. Fix: redact recursively. Unarmed and
 stated: the pre-sweep mark clear if `arm()` raised (practically unreachable), and the "no rows reported" log.
 
+**THE NESTED-REDACTION GAP IS FIXED at `ab64c03` ((2d)), PASSED review (2026-09-14):**
+- every string in the 409's rows goes through `redact_for_response`, at any depth, through dicts, lists and tuples,
+  whatever its key
+- a second pass runs after `jsonable_encoder`, for strings the encoder makes from objects
+- the recursion is bounded, and a self-reference answers 409 without a `RecursionError`
+- non-string values keep their types
+
+All 13 rows died on named arms. Manager's drive on `git archive ab64c03`: a token placed in `read_errors`, in a tuple
+leg and in a dataclass never leaked, and a 250-deep row and a cyclic row both answered. **A correction from review,
+recorded as asked:** review predicted the depth-bound mutant would SURVIVE a 200-deep plant. It died, on `test_D4`'s
+last line, `assert "TRUNCATED" in resp.text`, because the bound (32) is below 200. The prediction came from the arm's
+name and its first lines, not its last line. (The manager's suggestion of a plant past the recursion limit rested on
+that prediction, so it is not needed for killability; it still exercises the encoder shield.)
+
 ---
 
 ### B447 — ON ALPACA THE ENGINE CAN NEVER ENTER FROM FLAT. `AlpacaAdapter.reference_price` reads the current price of an OPEN POSITION, so with no position it returns None, and `ExecutionService` rejects every market entry as `NO_REFERENCE_PRICE`
