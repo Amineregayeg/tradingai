@@ -30480,6 +30480,20 @@ by argument. That reasoning is wrong for must-miss rows. The conclusion holds on
 - Rows with a mismatch in the current reviews (B428b (i), B437b) are re-run with the corrected parser before
   attribution. Review states in REVIEW.md how far the defect reaches.
 
+#### AMENDMENT (review measured it, and the manager fixed the shared tool, 2026-09-14) — THE FIX'S OWN FALSE POSITIVE
+
+The fixed reader `^(FAILED|ERROR) (.+?)(?: - .*)?$` also matched a CAPTURED-LOG line in pytest's output. In review's B468
+replay, row e139 printed `ERROR    concurrent.futures:_base.py:342 exception calling callback …`, and the reader
+recorded it as a death. The count check caught it (summary 1, parsed 2). A spurious log line in the same run as a
+dropped id would cancel out and pass that check.
+
+**Fix:** a node id must begin with a path ending `.py` (optionally `::test…`), or be the harness's own `HUNG::<HUNG>`.
+- The shared tool's self-test plants padded and single-space log lines, plus a module-level collection ERROR.
+- A control copy with the previous regex REFUSES that plant.
+- Review applied an equivalent anchor to its harnesses.
+- No recorded result changes: e139's real deaths equal its summary once filtered.
+
+
 ### B468 — REVIEWS HAVE REPLAYED ONLY REVIEW'S OWN KILL ROWS: EXECUTE'S KILL FILES WERE NEVER LOADED, AND SOME OF THEIR ROWS HAVE ROTTED UNRUN
 
 **Found by review during B428b (i)'s review, prompted by execute's reanchor precheck; the manager confirmed the scope.**
