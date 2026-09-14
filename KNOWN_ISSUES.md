@@ -30557,3 +30557,18 @@ iQ6c  alpaca.py:1807       non-list get_all_positions -> raise BrokerError      
 
 Registered: iR7, iR8, iM6b and iQ6c each die over the full population.
 
+#### AMENDMENT (review, 2026-09-14) — A FIFTH LINE, AND THE ARMS MUST ASSERT IDENTITY AND TIME
+
+- **iQ6d SURVIVES too:** a MATCHING position whose qty is unreadable counts as 0 (`raise AlpacaFieldUnreadable("qty",
+  None)` → `qty = Decimal(0)`). It is the same "unknown read as flat" class. (i)t's arm:
+  - a matching position with qty None or garbage on the BEFORE read → refused, with zero submits
+  - on the AFTER read → `held_units` None and the unsized path
+  - must-miss: a NON-matching unreadable position is ignored
+- Extra rows (i)t must kill BY ID on the new file's arm:
+  - iR8b: `at` stamped with the call time, not the read time. Killed only by an equality on `reference_at`.
+  - iR8s: the stale bound widened from 60 s to 600 s at the loop.
+  - iM6c: the live set keyed by the book's pairs instead of its decision ids.
+- **Release gate for the deploy sha `(i)t`:** the FULL suite at `(i)t`, run twice, with the new file collected FIRST and
+  then LAST. The collected count must equal 8fa3ef1's plus the new file's, and every pre-existing id must pass in both
+  runs. A state leak from an added file into existing arms is how an additions-only commit weakens them.
+
