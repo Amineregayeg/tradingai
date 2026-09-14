@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-14 (newest entry B451. Probe round 3 amended B447: Alpaca's crypto data API gives a price while flat, with or without keys; B450: fees are 0.25% per leg, in BTC on the buy and in USD on the sell; B451: closes below $10 fill; B444: the account's FILL activities are the source for recording venue-side exits.)
+Last updated: 2026-09-14 (newest entry B452 — (2b)'s route 409 arm races the trigger it tests: under CPU load the second request arrives after the first sweep ends and gets 200, 9 of 10 contended runs; not a production defect, but kill-set deaths resting on it alone are untrustworthy until it is made deterministic in (2c).)
 
 ---
 
@@ -29851,3 +29851,30 @@ venue's message, measured). Measure how a close below $10 behaves before designi
 filled, and `close_position` on the $4.48 remainder filled too (resolved on the first read). So a runner's last exit
 below $10 works through `close_position`. The floor binds on opening orders; whether it binds on a `qty` sell sent
 as an ordinary order is not measured.
+
+---
+
+### B452 — (2b)'s ROUTE ARM RACES THE TRIGGER IT TESTS. Under CPU load the "second" request arrives after the first sweep has finished, so it runs a full trigger and gets 200. Every kill-set death that rests on that arm alone is untrustworthy until it is deterministic
+
+**Found by execute's bounded flake hunt and, independently, by review at `32a7610`. The mechanism is review's; execute's
+data fits it.**
+
+```
+test   tests/unit/test_b445_b446_kill_switch_report.py::test_E1_a_second_trigger_through_the_ROUTE_is_409_with_the_rows_so_far_and_NO_COUNTERS
+fails  AssertionError: (200, '{"profile_id":...,"armed":true,"positions_closed":0,"state":"HALTED","message":"Kill switch triggered: ...')
+rate   plain: 0 of 10 runs.  With 16 busy loops, one per core: 9 of 10 runs (review: 2 of 3 under load). Always this test.
+```
+
+**The race:** the arm waits until two closes have been SENT, then posts the second request. ETH's close then resolves on
+its second read after a 0.01s sleep. Under load, the second request's route (ASGI, profile lookup, arm, trigger) misses
+that 10–20ms window. The first sweep ends and clears the in-progress mark, so the second request is a fresh, complete
+trigger and correctly answers 200. **Not a production defect:** the 409 path is right whenever a trigger is actually in
+progress.
+
+**Why it matters beyond one flake:** `R-a` and `R-b` in (2b)'s kill set died ONLY on this arm, and under load it fails
+whatever the mutant, so those deaths prove nothing. The earlier unexplained failure in the mt5 group's post-restore run
+is very likely this test too (inferred, not measured).
+
+**Fix, in (2c):** ETH's close resolution waits on an event the test sets only AFTER the second POST returns, so 409
+is the only possible answer. The "each position closed exactly once" assertion stays. Then `R-a`/`R-b` are re-run, and
+E1 is run 10 times under the same contention.
