@@ -174,7 +174,11 @@ async def test_the_minimum_is_read_from_the_venue_on_EVERY_order():
     await adapter.place_order(_req(lot=0.01))
     # Price doubles: the $1 floor halves. Same symbol, different answer.
     assets["BTC/USD"] = _asset("BTC/USD", min_order_size=BTC_MIN / 2)
-    await adapter.place_order(_req(lot=0.01))
+    # BOUNDED (review, on `B442`'s K2-13): a second order on the SAME adapter waits for its account's order lock, so a
+    # lock that is never released must fail HERE, by name — not hang the whole run.
+    import asyncio
+
+    await asyncio.wait_for(adapter.place_order(_req(lot=0.01)), 10)
 
     reads = [c for c in client.calls if c[0] == "get_asset"]
     assert len(reads) == 2, (

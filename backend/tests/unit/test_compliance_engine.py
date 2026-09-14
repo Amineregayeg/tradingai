@@ -149,8 +149,11 @@ async def test_kill_switch_armed_and_triggered_on_halted(db_session):
     with patch("app.services.compliance.kill_switch.kill_switch.arm") as mock_arm, \
          patch("app.services.compliance.kill_switch.kill_switch.trigger", new=AsyncMock(return_value={})) as mock_trigger:
         await _evaluate(db_session, profile, equity=4750.0, balance=5000.0, daily_pnl=-250.0)
-    assert mock_arm.called, "kill_switch.arm should be called on HALTED"
+    # `B442` (g), manager's ruling: the engine no longer arms separately — trigger() arms itself (K2-11) and receives
+    # the breach's reason, which is what reaches the audit row.
+    assert not mock_arm.called, "the engine armed the switch separately; trigger() arms itself"
     assert mock_trigger.called, "kill_switch.trigger should be called on HALTED"
+    assert str(mock_trigger.call_args.kwargs.get("reason", "")).startswith("Compliance rule breached"), mock_trigger.call_args
 
 
 @pytest.mark.asyncio

@@ -526,6 +526,27 @@ def entry_lock_normal_hold_bound_s(client: Any) -> float:
     return 3 * call + ORDER_RESOLUTION_BUDGET_S
 
 
+#: **The venue's code for "position does not exist"** — measured in probe round 3 (2026-09-14, paper account, flat):
+#: `get_open_position("BTCUSD")` -> `APIError 404 {"code":40410000,"message":"position does not exist"}`. The SAME code
+#: answers "order not found" on the order endpoints, so it is read ONLY on a `close_position` refusal, where the only
+#: resource is the position. `B449`'s 404 (a `BTC/USD` path) carries `Not Found` and NO JSON code, and is not this.
+ALPACA_POSITION_DOES_NOT_EXIST_CODE = 40410000
+
+
+def _venue_says_position_does_not_exist(exc: BaseException) -> bool:
+    """A 404 whose body carries `ALPACA_POSITION_DOES_NOT_EXIST_CODE` — read from the typed field, never from text.
+    A body that is not JSON (`.code` json-decodes it and raises) is NOT this answer."""
+    if _http_status_of(exc) != 404:
+        return False
+    for link in _exception_chain(exc):
+        if type(link).__name__ == "APIError" and type(link).__module__.startswith("alpaca."):
+            try:
+                return link.code == ALPACA_POSITION_DOES_NOT_EXIST_CODE
+            except Exception:  # noqa: BLE001 - an unreadable body is not the venue saying the position is gone
+                return False
+    return False
+
+
 SUBMISSION_NOT_CREATED = "not_created"
 #: The server ANSWERED this POST (a 422): a lookup's 404 then proves the order was not created.
 SUBMISSION_ANSWERED = "answered"
@@ -2238,10 +2259,17 @@ class AlpacaAdapter(BrokerAdapter):
             row.pop("_in_flight", None)
         return list(report.values())
 
-    async def _close_sweep(self, report: dict[str, dict], sweep: str, positions: list, **fields) -> None:
+    async def _close_sweep(self, report: dict[str, dict], sweep: str, positions: list, *,
+                           confirmed_in_a: dict[str, dict] | None = None, **fields) -> None:
         """Publish a NOT_ATTEMPTED row for every position FIRST (`B303`), then close them one by one. ANY exception
         on one position is that position's FAILED row and the loop CONTINUES; only a `BaseException` ends it,
-        and `close_all_positions` turns that into a partial report."""
+        and `close_all_positions` turns that into a partial report.
+
+        `confirmed_in_a` (sweep b only) maps a symbol sweep (a) CONFIRMED CLOSED to that row. **VENUE LISTING LAG**
+        (manager's ruling, from probe round 3): the venue can still list a position for a read after its close has
+        filled. Sweep (b) then sees it "open again" and sends a second close, which the venue refuses with
+        `position does not exist`. That position IS closed — sweep (a) confirmed the fill — so the refusal is
+        recorded on (a)'s row, naming the lag, and (b)'s row is removed: CLOSED, once. Any other refusal stays FAILED."""
         keys = []
         for index, raw in enumerate(positions):
             key = f"{sweep}#{index}"
@@ -2274,6 +2302,14 @@ class AlpacaAdapter(BrokerAdapter):
             try:
                 order = await self._call("close_position", symbol)
             except Exception as exc:  # noqa: BLE001 - ANY exception, loop CONTINUES
+                earlier = self._confirmed_row_for(confirmed_in_a, symbol)
+                if earlier is not None and _venue_says_position_does_not_exist(exc):
+                    earlier["reason"] = (
+                        f"{earlier['reason']}; [sweep b] the venue still LISTED this position after that close "
+                        f"filled (listing lag), and refused the re-close: position does not exist "
+                        f"(404, code {ALPACA_POSITION_DOES_NOT_EXIST_CODE})")
+                    del report[key]
+                    continue
                 # `B440`: a close that failed ambiguously may have reached the venue — the operator is told which.
                 kind = classify_submission_failure(exc)
                 if kind == SUBMISSION_UNANSWERED:
@@ -2354,7 +2390,15 @@ class AlpacaAdapter(BrokerAdapter):
                 "unconfirmed; NOT closed again (a second close is a second sell). Sweep (a)'s rows report them.",
                 symbols=left,
             )
-        await self._close_sweep(report, "b", to_close, lock_wait_bound_s=derived)
+        confirmed = {r["position_id"]: r for r in swept if r["disposition"] == self.CLOSED}
+        await self._close_sweep(report, "b", to_close, confirmed_in_a=confirmed, lock_wait_bound_s=derived)
+
+    def _confirmed_row_for(self, confirmed_in_a: dict[str, dict] | None, symbol: str) -> dict | None:
+        """The row in which sweep (a) CONFIRMED this symbol CLOSED, or None."""
+        for position_id, row in (confirmed_in_a or {}).items():
+            if self._same_symbol(position_id, symbol):
+                return row
+        return None
 
     def _in_flight_entry_row(self, report, holder, waited, derived, deadline_bounded, *, conflict: bool) -> None:
         """**The expiry row** (manager's ruling 5, review's K2-15): NOT_ATTEMPTED, naming the entry's symbol AND

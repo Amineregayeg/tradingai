@@ -817,6 +817,149 @@ async def test_K2_5_a_symbol_CLOSED_in_a_and_OPEN_AGAIN_is_closed_in_b_and_NO_RO
     assert len(book.called("close_position")) == 2 and not book.positions
 
 
+def _venue_api_error(status: int, body: str):
+    """A REAL `alpaca.common.exceptions.APIError` as the SDK raises it: the body string plus an http error whose
+    response carries the status."""
+    from alpaca.common.exceptions import APIError
+
+    return APIError(body, SimpleNamespace(response=SimpleNamespace(status_code=status), request=None))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("refusal,expect_closed_once", [
+    ((404, '{"code":40410000,"message":"position does not exist"}'), True),
+    # must-miss: B449's 404 carries no JSON code, and a 403 is a different answer — both stay FAILED
+    ((404, "Not Found"), False),
+    ((403, '{"code":40310000,"message":"insufficient balance"}'), False),
+], ids=["404_position_does_not_exist", "404_without_code", "403"])
+async def test_LAG_a_position_still_LISTED_after_its_close_filled_is_CLOSED_once_not_FAILED(
+        refusal, expect_closed_once):
+    """**Manager's ruling on review's note 3 (probe round 3).** The venue lists the position for one more read after its
+    close fills; sweep (b) re-closes it and the venue answers `position does not exist`. It is CLOSED — sweep (a)
+    confirmed the fill — once, with the lag named; any other refusal stays FAILED."""
+    from tests.unit.test_t0136_alpaca_adapter import _Position
+
+    book = _Book()
+    book.positions = [_Position(symbol="BTCUSD")]
+    closes = {"n": 0}
+    real_close = book.close_position
+
+    def _close(symbol_or_asset_id, close_options=None):
+        closes["n"] += 1
+        if closes["n"] == 1:
+            return real_close(symbol_or_asset_id, close_options)
+        book.calls.append(("close_position", symbol_or_asset_id))
+        raise _venue_api_error(*refusal)
+
+    def _lagging_listing(n):
+        if n == 2 and not book.positions:
+            book.positions.append(_Position(symbol="BTCUSD"))   # still listed after the fill
+
+    book.close_position = _close
+    book.on_enumerate = _lagging_listing
+    adapter, _clock = _alpaca(book)
+
+    report = await adapter.close_all_positions()
+
+    assert book.enumerations == 2 and closes["n"] == 2, "sweep (b) never re-closed the lagging listing"
+    if expect_closed_once:
+        assert [(r["pair"], r["disposition"], r["sweep"]) for r in report] == [("BTCUSD", "CLOSED", "a")], report
+        assert "listing lag" in report[0]["reason"] and "40410000" in report[0]["reason"], report[0]["reason"]
+    else:
+        assert [(r["pair"], r["disposition"], r["sweep"]) for r in report] == [
+            ("BTCUSD", "CLOSED", "a"), ("BTCUSD", "FAILED", "b")], report
+
+
+@pytest.mark.asyncio
+async def test_ZW_a_ZERO_wait_still_acquires_a_FREE_lock_so_no_in_flight_row_is_invented():
+    """Review's note 2: with the deadline spent (wait = 0) and NO entry in flight, sweep (b) must take the free lock and
+    report nothing extra. A zero wait that never acquires would over-alarm with a "nothing recorded" row."""
+    from app.core.kill_switch_state import KILL_SWITCH_RESPONSE_DEADLINE_S
+    from tests.unit.test_t0136_alpaca_adapter import _Position
+
+    book = _Book()
+    book.positions = [_Position(symbol="BTCUSD")]
+    adapter, clock = _alpaca(book)
+
+    def _deadline_spent_in_sweep_a(n):
+        if n == 1:
+            clock.now += KILL_SWITCH_RESPONSE_DEADLINE_S + 1
+
+    book.on_enumerate = _deadline_spent_in_sweep_a
+    async with asyncio.timeout(10):
+        report = await adapter.close_all_positions()
+
+    assert book.enumerations == 2, "sweep (b) never ran"
+    assert [(r["pair"], r["disposition"], r["sweep"]) for r in report] == [("BTCUSD", "CLOSED", "a")], report
+
+
+def test_G1_neither_CALLER_arms_the_switch_separately():
+    """(g), AST: the route and the compliance engine pass their reason to trigger(), which arms itself and keeps an
+    existing reason. A separate arm() before trigger() replaced the reason of a trigger already running."""
+    import ast
+
+    backend = Path(__file__).resolve().parents[2]
+    files = [backend / "app" / "api" / "routers" / "prop_firm.py", backend / "app" / "services" / "compliance" / "engine.py"]
+
+    def _arm_calls(source: str) -> list[int]:
+        return [n.lineno for n in ast.walk(ast.parse(source))
+                if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == "arm"]
+
+    assert _arm_calls("from x import kill_switch\nkill_switch.arm(reason='r')\n") == [2], "the scanner cannot see a call"
+    triggers = 0
+    for f in files:
+        source = f.read_text()
+        assert not _arm_calls(source), f"{f.name} arms the kill switch separately at lines {_arm_calls(source)}"
+        triggers += source.count("kill_switch.trigger(")
+    assert triggers == 2, f"expected one trigger() call in each caller, found {triggers}: the scan read the wrong files"
+
+
+@pytest.mark.asyncio
+async def test_G2_a_second_ROUTE_request_during_a_running_trigger_leaves_the_FIRST_reason(client, monkeypatch,
+                                                                                        quiet_trigger, switch):
+    from app.services.broker.manager import broker_manager
+    from app.services.compliance.kill_switch import KillSwitch
+
+    created = await client.post("/api/prop-firm/profiles", json={"firm_name": "FTMO", "rules_json": {}})
+    profile_id = created.json()["id"]
+    book = _book_with_two_positions()
+    adapter, _clock = _alpaca(book)
+    gate = asyncio.Event()
+
+    async def _held(_seconds):
+        await gate.wait()
+
+    adapter._sleep = _held
+    monkeypatch.setattr(broker_manager, "_adapters", {"alpaca": adapter})
+    async with asyncio.timeout(10):
+        first = asyncio.create_task(KillSwitch().trigger(_Db(), "user-1", reason="the FIRST reason"))
+        await _until(lambda: book.called("close_position"), "the first trigger is closing")
+        resp = await client.post("/api/prop-firm/kill-switch", json={"profile_id": profile_id, "reason": "SECOND"})
+        reason_during = switch.reason
+        gate.set()
+        await first
+    assert resp.status_code == 409, resp.text
+    assert reason_during == "the FIRST reason" and switch.reason == "the FIRST reason", (reason_during, switch.reason)
+
+
+@pytest.mark.asyncio
+async def test_G3_a_compliance_BREACH_reason_still_reaches_the_AUDIT_row(db_session, monkeypatch, quiet_trigger):
+    """(g): the engine no longer arms first, so the breach's detail must travel through trigger()'s own reason."""
+    from app.models.audit_log import AuditLog
+    from app.services.broker.manager import broker_manager
+    from tests.unit.test_compliance_engine import _evaluate, _make_profile
+
+    monkeypatch.setattr(broker_manager, "_adapters", {})
+    profile = await _make_profile(db_session)
+    state = await _evaluate(db_session, profile, equity=4750.0, balance=5000.0, daily_pnl=-250.0)
+    assert state == "HALTED", state
+    audits = [o for o in db_session.new if isinstance(o, AuditLog)] or (
+        await db_session.execute(__import__("sqlalchemy").select(AuditLog))).scalars().all()
+    reasons = [a.new_value.get("reason") for a in audits if a.event_type == "KILL_SWITCH_TRIGGERED"]
+    assert len(reasons) == 1 and reasons[0].startswith("Compliance rule breached for profile"), reasons
+    assert "daily_loss=" in reasons[0] and "limit=" in reasons[0], reasons[0]
+
+
 def test_K2_18_the_response_deadline_is_below_the_proxy_EFFECTIVE_api_read_timeout():
     """Read `deploy/nginx-web.conf` at test time: the directive inside `location /api/`, else one inherited from
     the enclosing `server`, else nginx's default of 60s — never "not found, so skip". Controls, each a modified

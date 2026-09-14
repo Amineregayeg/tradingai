@@ -208,8 +208,8 @@ async def trigger_kill_switch(
     if profile is None:
         raise HTTPException(status_code=404, detail="PropFirmProfile not found")
 
-    kill_switch.arm(reason=payload.reason)
-
+    # `B442` (g), manager's ruling: NO separate arm() here. `trigger()` arms itself and KEEPS an existing reason
+    # (K2-11), so a second request while a trigger runs no longer replaces the reason the switch was pulled for.
     result_data = await kill_switch.trigger(
         db=db,
         user_id=user_id,

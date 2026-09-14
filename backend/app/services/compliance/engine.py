@@ -104,15 +104,15 @@ class ComplianceEngine:
             )
             from app.services.compliance.kill_switch import kill_switch
 
-            kill_switch.arm(
-                reason=f"Compliance rule breached for profile {profile.firm_name}: "
-                f"daily_loss={daily_loss:.2f} limit={daily_limit:.2f} "
-                f"total_loss={total_loss:.2f} max_limit={max_limit:.2f}"
-            )
+            # `B442` (g), manager's ruling: the reason goes to trigger(), which arms itself if the switch is not armed
+            # and keeps an existing reason. The breach's detail still reaches the audit row: trigger() records the
+            # reason it was GIVEN.
             await kill_switch.trigger(
                 db=db,
                 user_id=user_id,
-                reason=kill_switch._reason,
+                reason=(f"Compliance rule breached for profile {profile.firm_name}: "
+                        f"daily_loss={daily_loss:.2f} limit={daily_limit:.2f} "
+                        f"total_loss={total_loss:.2f} max_limit={max_limit:.2f}"),
             )
 
         return state.value

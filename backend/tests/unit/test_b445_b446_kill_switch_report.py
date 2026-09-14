@@ -375,13 +375,22 @@ async def test_E1_a_second_trigger_through_the_ROUTE_is_409_with_the_rows_so_far
 
     book.close_position = _btc_fails_with_a_credential_in_its_text
     adapter, _ = _alpaca(book)
-    _slow(adapter)
+    # `B452`: DETERMINISTIC. This arm waited only for ETH's close to be SENT, and ETH resolved ~10-20ms later; under
+    # load the whole route missed that window, the first trigger finished, and the "second" request ran a full
+    # trigger (200). ETH's resolution now waits on an event set only AFTER the POST returns, so 409 is the only answer.
+    held = asyncio.Event()
+
+    async def _held_until_the_post_returns(_seconds):
+        await held.wait()
+
+    adapter._sleep = _held_until_the_post_returns
     manager({"conn-1": adapter})
 
     async with asyncio.timeout(10):
         first = asyncio.create_task(KillSwitch().trigger(_Db(), "user-1", reason="first"))
         await _until(lambda: len(book.called("close_position")) == 2, "BTC's close failed and ETH's is resolving")
         resp = await client.post("/api/prop-firm/kill-switch", json={"profile_id": profile_id, "reason": "second"})
+        held.set()
         await first
 
     assert resp.status_code == 409, (resp.status_code, resp.text)
