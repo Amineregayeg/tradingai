@@ -1,6 +1,6 @@
 # Malek — current state
 
-_Last updated: 2026-09-14 19:30 WAT, by Malek's manager session. Updated about every 2 hours._
+_Last updated: 2026-09-14 20:50 WAT, by Malek's manager session. Updated about every 2 hours._
 
 ## Goal right now
 
@@ -48,9 +48,15 @@ defect found goes into `KNOWN_ISSUES.md` with a B-number. A commit is only "done
   - the minimum
   - quantities
   - migration 0017
-  **Commit (i) is COMMITTED as `f3250ad`** (15:56 WAT). It passed its own mutation record (113 of 113) and the whole suite
-  (3,069 tests). The manager verified it, and review's independent check (304 mutation rows) is running. It is not
-  deployed. Migration 0017 already passed a run on a real Postgres copy of production (rows unchanged, and a refused
+  **Commit (i) is COMMITTED as `f3250ad`** (15:56 WAT). The manager verified it, and review's independent check is
+  finishing: 304 mutation rows, plus a replay of 231 of execute's older rows that no review had ever run (`B468`).
+  - Review found SEVEN production lines in (i) that are correct but that no test would notice breaking (`B470`, plus
+    `B469` for two Kill Switch safety tests).
+  - These are fixed by a test-only commit, `a087b59` (one new test file, 14 tests), committed 20:23 WAT and verified by
+    the manager.
+  - **The release candidate is `a087b59`:** (i) + `B437b` (`8fa3ef1`) + the test file.
+  - It deploys after review's three verdicts and a release gate that runs the full suite twice, with the new file first
+    and then last. Migration 0017 already passed a run on a real Postgres copy of production (rows unchanged, and a refused
   downgrade rolls back completely), and its file is unchanged in the commit.
   Probe round 6 confirmed that a cancelled resting order frees the position at once. New issues folded in: `B457`–`B461`.
 - **Commits (ii), (iii) and (iv) already have their mutation checks registered in advance** by review (in
@@ -72,11 +78,18 @@ defect found goes into `KNOWN_ISSUES.md` with a B-number. A commit is only "done
   - runs are grouped by venue, execution class and engine version
   - exits are labelled by how they were decided
   Review has pre-registered its mutation checks.
-- **`B437b` is being built on top of `f3250ad`:** the `B462` and `B463` fixes, plus a guard that blocks the network in
-  tests (`B432`). It found 27 tests that reach the internet; 16 of them FAIL offline and passed only because Binance
-  answered. All are patched.
+- **`B437b` is COMMITTED as `8fa3ef1`** (19:33 WAT): the `B462` and `B463` fixes, the `B469` test fix, and a guard that
+  blocks the network in every test (`B432`). It found 27 tests that reach the internet; 16 of them failed offline and had
+  passed only because Binance answered. All are patched. The full suite at `8fa3ef1` is green: 3,108 tests, network
+  blocked.
+- **Commit (ii) is being built** in a private tree. Migration 0018 adds five trade columns: the closing order's id, how
+  the exit was decided, and the Binance mark at detection with its source and the check interval, so the Binance-vs-Alpaca
+  price gap is measured durably.
 - **Interruption:** the machine was suspended from about 15:52 to 18:31 WAT. Both mutation runs resumed afterwards, and
   any row that straddled the gap is re-run before it counts.
+- **Tooling defects found and fixed today:**
+  - `B467`: the mutation harness dropped test names containing spaces
+  - `B468`: reviews only ever replayed one seat's rows
 - **Process change (Malek: "too slow"):** test runs are now parallel, re-runs are limited to what a change can affect,
   and only review re-runs earlier checks.
 
@@ -125,4 +138,5 @@ defect found goes into `KNOWN_ISSUES.md` with a B-number. A commit is only "done
   - `B464` (the broker manager defaults a blank connection environment two different ways)
   - `B465` (feedback corrections aimed at knobs the live engine does not read)
   - `B466` (dashboard polling queues behind orders)
+  - `B467`–`B470` (test-harness and test-coverage findings; no live defect)
   `B430` and `B457` were amended with measurements.
