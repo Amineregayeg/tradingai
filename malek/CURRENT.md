@@ -1,6 +1,6 @@
 # Malek — current state
 
-_Last updated: 2026-09-14 00:45 WAT, by Malek's manager session. Updated about every 2 hours._
+_Last updated: 2026-09-14 01:15 WAT, by Malek's manager session. Updated about every 2 hours._
 
 ## Goal right now
 
@@ -12,8 +12,10 @@ The plan is `ALPACA_PROGRAMME.md` on `main`.
 ## State
 
 - **The trading engine is held (stopped on purpose) and has been since 2026-09-01.** Do not start it.
-- **Production runs commit `6ae6aca`** (deployed 2026-09-12, database migration 0013). `main` is ahead of it.
-- **No order has ever been placed on Alpaca.** Every Alpaca test so far runs against fakes or a local HTTP server.
+- **Production runs commit `fb3dab6`** (deployed 2026-09-14, database migration 0015). `main` is ahead of it. Production is
+  pinned to a reviewed commit with a compose override file; never deploy with a plain `docker compose up`.
+- **The first real orders were placed on the Alpaca PAPER account on 2026-09-14** (three probe rounds, about $15 each,
+  ending flat). They showed the order path as built cannot trade Alpaca crypto yet: see `B447`–`B451` in `KNOWN_ISSUES.md`.
 - **The engine cannot select Alpaca today.** A hard-coded setting (`BROKER_MODE = "sim"`, register `B430`) keeps it
   on the simulator. That is a safety lock, and it is switched last, deliberately.
 
@@ -35,28 +37,31 @@ defect found goes into `KNOWN_ISSUES.md` with a B-number. A commit is only "done
 
 ## In progress
 
-- **`B442`: the kill switch does not stop an entry already under way.** Reproduced on the simulator: a position can
-  open after the switch is pulled. Being built by the execute seat (uncommitted on Malek's machine). It adds
-  migration 0016.
+- `B442` (the kill switch vs an order under way) landed as `56a1294` and is in review.
+- `B445` + `B446` (the kill switch's report losing rows, and a cancelled kill switch being swallowed) are being built.
+- `T-0144` / `B428b`: the brief is written. Design starts after `B437`.
 
-## Next tasks, in order
+## Next tasks, in order (Malek's list, 2026-09-14)
 
-1. Test migrations 0014–0016 on a scratch copy of the production database, then deploy (Malek decides which build).
-2. **The first real orders ("probes" 1–4)**, run by hand on the paper account, following Malek's runbook. They answer
-   questions only Alpaca can: does it accept a stop-loss attached to a crypto order, does it acknowledge before
-   filling, how it spells symbols, and whether an attached stop blocks a partial close.
-3. `B445` + `B446`: the kill switch's report can lose rows (a confirmed close shown as a failure), and a cancelled
-   kill switch is silently swallowed. Queued right after `B442`.
-4. `B437`: Alpaca calls currently block the app while they wait — move them to one worker queue per account.
-5. **`B428b`, the largest remaining piece: manage and record positions on Alpaca** (register `B444`). Today the 70%
-   take-profit would silently never happen on Alpaca, and a stop or target filling at Alpaca would write no trade
-   and leave the decision open.
-6. Part E.
-7. Switch the engine to Alpaca (`B430`), last.
+1. ~~Deploy the current fixes~~ — done: `fb3dab6`.
+2. ~~The first real orders~~ — done. Findings:
+   - Alpaca refuses a stop-loss attached to a crypto order (`B448`).
+   - A separate stop locks the position against every close (`B448`).
+   - Positions are spelled `BTCUSD` while orders use `BTC/USD` (`B449`).
+   - The fee is 0.25% per leg (`B450`).
+   - The minimum is $10 to open (`B451`).
+   - The order-confirmation fix works on the real venue (`B427`).
+3. `B442` — in review; then deploy it with `B445`/`B446`.
+4. `B437` — Alpaca calls stop blocking the app (one worker per account).
+5. `B428b` — manage and record positions on Alpaca: stops enforced by the engine, prices from Alpaca's quote,
+   one pair spelling, quantities from the venue position, trade rows from Alpaca's fill history, and start-up
+   reconciliation.
+6. `B430` — make the engine able to select Alpaca, deliberately, last.
+7. Part E — the feedback analysis refuses to mix long-only runs with older two-direction runs.
 
 ## Open decisions (Malek's)
 
-- Deploy `fb3dab6` now for the probes, or wait for `B442` and deploy once.
+- Stops on Alpaca are enforced by the engine for now (no protection while it is down); a venue backup stop can be added later.
 - The wait before an order counts as unresolved (default 5 seconds).
 - Whether to cancel the unfilled rest of a partially filled order.
 - `B435`: halt or only alert when saving a trade record fails.
