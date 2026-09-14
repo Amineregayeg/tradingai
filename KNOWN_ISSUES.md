@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-14 (newest entry B461; B432 amended: the Binance fetch in _tick_symbol failed 16 tests in B437's record-2 suite run during a TLS-interception window, and the socket-blocking fixture is scheduled for the test-only commit after B437)
+Last updated: 2026-09-14 (newest entry B463 — ALPACA_WRITE_CALLS is a hand-kept list, so a future write routed through _call would be unshielded silently; B462 — B437's weak executor registry lets an abandoned read outlive its executor, so two calls on one account can overlap)
 
 ---
 
@@ -30263,3 +30263,51 @@ Alpaca position pair       "BTCUSD"      database pair   "BTC/USD"          (B44
 `B225` covers the reconciler's blindness to paper ids, not this. **Fix (in `B428b` commit (i)):** these sites join the
 canonical-pair population (R4/R15). Each gets a plant, so a venue-spelled position matches its database trade. The
 day a non-simulation venue is reconciled, a spelling difference must never read as "closed".
+
+### B462 — `B437`'s EXECUTOR REGISTRY IS WEAK, SO AN ABANDONED READ OUTLIVES ITS EXECUTOR: a new adapter on the same account gets a SECOND worker thread, and two calls on one account run at once
+
+**Found by review, reading `e7d7c81` during `B437`'s review, and DRIVEN (`agents/tasks/_runs/437r/NOTE_B_DRIVE.md`, both
+scripts). The manager reproduced it with a different instrument, measuring overlapping calls rather than thread count, and ran a control.**
+
+```
+review   cancel held read, del adapter in the SAME frame   -> same executor, 1 thread   (traceback kept it alive)
+review   cancel inside a helper (frames released)          -> old executor collected while its job ran; 2 threads
+manager  first call holds 2.0 s, cancelled at 0.3 s, adapter dropped, gc; second adapter, same account, call holds 0.5 s
+         drop old adapter:  peak concurrent calls on the account = 2, second call took 0.50 s   (twice)
+         keep old adapter:  peak concurrent calls on the account = 1, second call took 2.06 s   (control: serialised)
+```
+
+**Precondition:** nothing strong references the old `AccountExecutor` while an abandoned READ still runs on its thread
+(the adapter is dropped, and the cancelled caller's frames and traceback are released). **Bound:** the abandoned call's
+own duration. One attempt under `B441` is 13 s (3 s connect + 10 s read). With the SDK's 429 retries sleeping on the
+worker it is C = 61 s. It is unbounded only if `B441`'s mount is removed (E-12 pins it).
+
+**What breaks:** per-account serialisation, the property `B437` exists to give, for that window. **What holds:** Session
+safety in production, since every path that builds an adapter builds its own client (`manager._client_factory`,
+`crypto_loop._build_broker`). An adapter re-wrapping an existing client would share a Session across the two threads;
+no path does that (review, reading).
+
+Not blocking `B437`'s release: a strict improvement over no serialisation. **Fix:** the queued job holds a strong
+reference to its executor until the job ends (the job closes over the executor), with an arm built from the drive
+above: overlap 1 after the adapter is dropped. Scheduled as its own small commit after the `B437` release.
+
+### B463 — `ALPACA_WRITE_CALLS` IS A HAND-KEPT NAME LIST: a future write routed through `_call` under a name nobody added would be UNSHIELDED silently
+
+**Found by review, reading `e7d7c81`. The manager confirmed it by introspecting alpaca-py 0.44.0.**
+
+```
+alpaca.py:509   ALPACA_WRITE_CALLS = {submit_order, close_position, close_all_positions, cancel_order_by_id,
+                                      cancel_orders, replace_order_by_id}
+alpaca.py:1205  write = name in ALPACA_WRITE_CALLS          <- anything else is treated as a READ
+TradingClient members issuing post/delete/patch/put: 13; listed: 6; listed but not writes: 0
+unlisted writes: add_asset_to_watchlist_by_id, create_watchlist, delete_watchlist_by_id, exercise_options_position,
+                 remove_asset_from_watchlist_by_id, set_account_configurations, update_watchlist_by_id
+_call sites at e7d7c81: 19, none of them an unlisted write
+```
+
+LATENT: no unlisted write is called today. The trap is the next one: a read is not shielded and is withdrawn when
+queued, so a write misclassified as a read could be withdrawn, or abandoned while running, with nothing logged.
+**Fix:** an arm that derives the SDK's writing members from `TradingClient`'s sources, and asserts that every
+`_call` name used in the adapter is classified by that derivation, not by the list. Or `_call` refuses a name that is
+in neither class. Goes with `B462`'s commit.
+
