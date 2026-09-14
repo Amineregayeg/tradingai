@@ -29897,3 +29897,18 @@ is very likely this test too (inferred, not measured).
 **Fix, in (2c):** ETH's close resolution waits on an event the test sets only AFTER the second POST returns, so 409
 is the only possible answer. The "each position closed exactly once" assertion stays. Then `R-a`/`R-b` are re-run, and
 E1 is run 10 times under the same contention.
+
+**AMENDMENT, 2026-09-14 — THE RACE SHAPE IS IN SEVEN MORE ARMS, and one held event HUNG a kill run (execute, during B437).**
+Contended runs found the same timing race in `test_b442_kill_switch_at_send.py` K2-6, K2-6b, K2-12 and in
+`test_b445_b446_kill_switch_report.py` C1, C2, C3, C5. **Those arms are in commits that already passed review**
+(`56a1294`, `32a7610`), so any kill row that died ONLY on one of them, under load, is untrustworthy too.
+
+Separately, execute's arms held a sweep on an event and then awaited a trigger. Under a mutant the arm never reached
+its own `set()`, its 10s timeout cancelled the await, and `B446`'s shielded sweep then waited on the hold for ever. **The
+run hung instead of the arm failing, and the guard's kills would have read as SURVIVORS.** Fix: every hold is an event
+that releases itself after a bound (6s). Controlled: the in-progress-guard-removed and mark-ends-with-caller mutants
+now fail by name, in 34s and 4s.
+
+**Rule for any arm that holds a concurrent operation open:** the hold must release itself on a bound, and must be set
+from a point the arm is guaranteed to reach. Otherwise the shield that makes production safe makes the test hang.
+
