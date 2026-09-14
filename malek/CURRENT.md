@@ -1,6 +1,6 @@
 # Malek — current state
 
-_Last updated: 2026-09-14 08:50 WAT, by Malek's manager session. Updated about every 2 hours._
+_Last updated: 2026-09-14 12:55 WAT, by Malek's manager session. Updated about every 2 hours._
 
 ## Goal right now
 
@@ -37,17 +37,21 @@ defect found goes into `KNOWN_ISSUES.md` with a B-number. A commit is only "done
 
 ## In progress
 
-- **Item 3 is DONE:** the kill-switch release `ab64c03` is deployed (`B442`, `B445`, `B446`, and the follow-ups).
-- **A defect found in it, `B453`:** a cancelled kill switch whose closing step then errors loses its audit record. It is
-  latent while the engine is held. The fix, (2f), landed as `c1589e2` and is waiting for review.
-- **Test-only fixes (2e)** for timing races in kill-switch tests landed as `45161a6`; in review.
-- **Item 4, `B437`** (Alpaca calls blocking the app): built; its full test record (about 5 hours) is running.
-- **Item 5, `B428b`:** the brief is at revision 4 after three review attacks and two more probe rounds on the paper
-  account (rounds 4 and 5). New blockers found and designed around:
-  - every deploy would close the whole account (`B454`)
-  - a restart abandons live positions (`B455`)
-  - every BTC position shares one venue id (`B456`)
-  Building starts after `B437`.
+- **Item 3 is done** (release `ab64c03`). The `B453` fix (2f, `c1589e2`) is in review, and (2e) passed.
+- **Item 4, `B437`:** all 42 of its own checks passed. Its final parallel test run is being redone after an interruption
+  (below). Then it commits, goes to review, and deploys with (2f).
+- **Item 5, `B428b`:** the DESIGN is approved (`agents/tasks/T-0144/DESIGN.md`), and building commit (i) has started:
+  - position identity
+  - pair spelling
+  - prices
+  - the minimum
+  - quantities
+  - migration 0017
+  Probe round 6 confirmed that a cancelled resting order frees the position at once. New issues folded in: `B457`–`B461`.
+- **Interruption:** both working sessions stopped on an API connection error (a certificate problem) from about 11:00
+  to 12:50 WAT, and were resumed.
+- **Process change (Malek: "too slow"):** test runs are now parallel, re-runs are limited to what a change can affect,
+  and only review re-runs earlier checks.
 
 ## Next tasks, in order (Malek's list, 2026-09-14)
 
