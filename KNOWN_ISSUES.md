@@ -29538,6 +29538,17 @@ SDK over loopback, armed sends 0 POSTs while closes still go out. Concurrent tri
   answers "position does not exist", and the report counts a FAILED close for a position that closed. There is no
   second sell, but the count is wrong.
 
+**FOLLOW-UP (2c) at `4a74eab` PASSED review (2026-09-14):**
+- the callers no longer arm separately
+- sweep (b) reads venue listing lag (404 + code 40410000) as the close it was
+- the three review notes are fixed and killed by name
+- `B452`'s E1 is deterministic, and the route rows are confirmed on it; K12, M04, T03 and T06 re-measured 10/10 clean,
+  10/10 mutated
+
+Survivors: C04 (the 404 status check; a 403 carrying 40410000 has never been measured, stated) and C07 (equivalent).
+**The release deploys `56a1294` + `32a7610` + `4a74eab` + (2d) `ab64c03` together**, after (2d)'s review, with review's
+full suite run pinned at the deploy sha.
+
 ---
 
 ### B443 — THE KILL SWITCH REQUEST CAN OUTLAST THE API PROXY'S 120-SECOND TIMEOUT. The operator gets a 504 while the closes carry on unseen, and pulling the switch again races the first pull
