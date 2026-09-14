@@ -30568,6 +30568,18 @@ Registered: iR7, iR8, iM6b and iQ6c each die over the full population.
   - iR8b: `at` stamped with the call time, not the read time. Killed only by an equality on `reference_at`.
   - iR8s: the stale bound widened from 60 s to 600 s at the loop.
   - iM6c: the live set keyed by the book's pairs instead of its decision ids.
+- **Two more from (i)'s extra rows, both registered kills with no arm at `f3250ad`** (the manager confirmed both lines are
+  correct at `8fa3ef1`):
+  - **iD5b:** the REAL `_write_submitting` swallowing its own commit failure would still send. Its only arm
+    monkeypatches the writer with a raiser. At `8fa3ef1` it has no handler around `await db.commit()` (crypto_loop.py
+    ~:1413), and the flag is set after the commit.
+  - **iD7a2:** `REFUSAL_STATUSES` gaining `"NOT_SENT"` is invisible. The vocabulary arms read the sets from the module,
+    and the NOT_SENT branch hides it behaviourally.
+  - (i)t's arms:
+    - the real writer with the DB failing inside it, through the real `execute` → zero `place_order`, NOT_SENT and no
+      row; must-miss: a healthy DB sends once, with the row present at the send
+    - `classify_order_status(STATUS_NOT_SENT) == ORDER_UNRESOLVED`, and `STATUS_NOT_SENT` in none of the classifier's
+      sets, by imported names
 - **Release gate for the deploy sha `(i)t`:** the FULL suite at `(i)t`, run twice, with the new file collected FIRST and
   then LAST. The collected count must equal 8fa3ef1's plus the new file's, and every pre-existing id must pass in both
   runs. A state leak from an added file into existing arms is how an additions-only commit weakens them.
