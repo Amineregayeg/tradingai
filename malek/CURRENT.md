@@ -1,6 +1,6 @@
 # Malek — current state
 
-_Last updated: 2026-09-14 07:50 WAT, by Malek's manager session. Updated about every 2 hours._
+_Last updated: 2026-09-14 08:50 WAT, by Malek's manager session. Updated about every 2 hours._
 
 ## Goal right now
 
@@ -39,9 +39,9 @@ defect found goes into `KNOWN_ISSUES.md` with a B-number. A commit is only "done
 
 - **Item 3 is DONE:** the kill-switch release `ab64c03` is deployed (`B442`, `B445`, `B446`, and the follow-ups).
 - **A defect found in it, `B453`:** a cancelled kill switch whose closing step then errors loses its audit record. It is
-  latent while the engine is held. The fix, (2f), is being measured.
+  latent while the engine is held. The fix, (2f), landed as `c1589e2` and is waiting for review.
 - **Test-only fixes (2e)** for timing races in kill-switch tests landed as `45161a6`; in review.
-- **Item 4, `B437`** (Alpaca calls blocking the app): built; its test record runs after (2f).
+- **Item 4, `B437`** (Alpaca calls blocking the app): built; its full test record (about 5 hours) is running.
 - **Item 5, `B428b`:** the brief is at revision 4 after three review attacks and two more probe rounds on the paper
   account (rounds 4 and 5). New blockers found and designed around:
   - every deploy would close the whole account (`B454`)
