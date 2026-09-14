@@ -237,10 +237,16 @@ def _alpaca(book, gated: set | None = None, gate: asyncio.Event | None = None):
     adapter = AlpacaAdapter(book, paper=True)
     clock = _Clock()
     adapter._clock = clock
+    #: The gated tasks that have REACHED the gate — parked mid-resolution, holding the account lock. `B437`: with every
+    #: call on a worker thread, "the venue has seen submit_order" no longer means the entry's task has moved on to its
+    #: sleep, so an arm waits for THIS before acting.
+    adapter.parked = set()
 
     async def _sleep(seconds):
         if gate is not None and gated is not None and asyncio.current_task() in gated:
+            adapter.parked.add(asyncio.current_task())
             await gate.wait()
+            adapter.parked.discard(asyncio.current_task())
         await asyncio.sleep(0)
         clock.now += seconds
 
@@ -248,12 +254,16 @@ def _alpaca(book, gated: set | None = None, gate: asyncio.Event | None = None):
     return adapter, clock
 
 
-async def _until(predicate, what="the condition"):
-    for _ in range(10_000):
+async def _until(predicate, what="the condition", timeout_s: float = 5.0):
+    """Bounded by TIME, not iterations (`B437`: a call on a worker thread takes wall time that 10,000 zero-sleeps may
+    not cover)."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout_s
+    while loop.time() < deadline:
         if predicate():
             return
-        await asyncio.sleep(0)
-    raise AssertionError(f"never reached: {what}")
+        await asyncio.sleep(0.001)
+    raise AssertionError(f"never reached within {timeout_s}s: {what}")
 
 
 def _capture_logs():
@@ -389,13 +399,13 @@ async def test_A5_an_entry_WAITING_for_the_lock_reads_the_switch_AFTER_it_gets_t
     from app.core.exceptions import KillSwitchArmed
 
     book = _Book()
-    gate = asyncio.Event()
+    gate = _bounded_event()
     gated: set = set()
     adapter, _clock = _alpaca(book, gated, gate)
     async with asyncio.timeout(10):
         first = asyncio.create_task(adapter.place_order(_entry_req(client_order_id="sig-b442-first")))
         gated.add(first)
-        await _until(lambda: len(book.called("submit_order")) == 1, "entry 1 submitted")
+        await _until(lambda: first in adapter.parked, "entry 1 parked mid-resolution, holding the lock")
         second = asyncio.create_task(adapter.place_order(_entry_req(client_order_id="sig-b442-second")))
         await _until(lambda: len(book.called("get_asset")) == 2, "entry 2 read its asset and queued on the lock")
         for _ in range(5):
@@ -510,13 +520,13 @@ async def test_K2_9_the_switch_never_refuses_its_OWN_closes(switch, no_network):
 @pytest.mark.asyncio
 async def test_L1_an_entry_RESOLVING_when_the_switch_is_pulled_is_CLOSED_by_sweep_b(switch):
     book = _Book()
-    gate = asyncio.Event()
+    gate = _bounded_event()
     gated: set = set()
     adapter, _clock = _alpaca(book, gated, gate)
     async with asyncio.timeout(10):
         entry = asyncio.create_task(adapter.place_order(_entry_req()))
         gated.add(entry)
-        await _until(lambda: book.called("submit_order"), "the entry submitted")
+        await _until(lambda: entry in adapter.parked, "the entry parked mid-resolution, holding the lock")
         switch.arm(reason="L1")
         closing = asyncio.create_task(adapter.close_all_positions())
         await _until(lambda: book.enumerations >= 1, "sweep (a) enumerated")
@@ -545,7 +555,7 @@ async def test_L2_on_EXPIRY_the_row_names_the_in_flight_entry_and_says_it_may_ex
     monkeypatch.setattr(alpaca, "ORDER_RESOLUTION_BUDGET_S", 0.5)
     book = _Book()
     book._retry, book._retry_wait = 0, 0
-    gate = asyncio.Event()
+    gate = _bounded_event()
     gated: set = set()
     adapter, _clock = _alpaca(book, gated, gate)
     derived = alpaca.entry_lock_normal_hold_bound_s(book)
@@ -556,7 +566,7 @@ async def test_L2_on_EXPIRY_the_row_names_the_in_flight_entry_and_says_it_may_ex
         async with asyncio.timeout(10):
             entry = asyncio.create_task(adapter.place_order(_entry_req()))
             gated.add(entry)
-            await _until(lambda: book.called("submit_order"), "the entry submitted")
+            await _until(lambda: entry in adapter.parked, "the entry parked mid-resolution, holding the lock")
             report = await adapter.close_all_positions()
             gate.set()
             await entry
@@ -582,7 +592,7 @@ async def test_L2b_the_DEADLINE_is_measured_from_close_all_START_not_from_sweep_
     import app.services.broker.alpaca as alpaca
 
     book = _Book()
-    gate = asyncio.Event()
+    gate = _bounded_event()
     gated: set = set()
     adapter, clock = _alpaca(book, gated, gate)
     derived = alpaca.entry_lock_normal_hold_bound_s(book)
@@ -596,7 +606,7 @@ async def test_L2b_the_DEADLINE_is_measured_from_close_all_START_not_from_sweep_
     async with asyncio.timeout(5):
         entry = asyncio.create_task(adapter.place_order(_entry_req()))
         gated.add(entry)
-        await _until(lambda: book.called("submit_order"), "the entry submitted")
+        await _until(lambda: entry in adapter.parked, "the entry parked mid-resolution, holding the lock")
         report = await adapter.close_all_positions()
         gate.set()
         await entry
@@ -615,7 +625,7 @@ async def test_K2_13_the_lock_is_RELEASED_on_every_exit_from_place_order(monkeyp
     import app.services.broker.alpaca as alpaca
 
     book = _Book()
-    gate = asyncio.Event()
+    gate = _bounded_event()
     gated: set = set()
     adapter, _clock = _alpaca(book, gated, gate)
     async with asyncio.timeout(10):
@@ -627,7 +637,7 @@ async def test_K2_13_the_lock_is_RELEASED_on_every_exit_from_place_order(monkeyp
         elif how == "cancelled_mid_resolution":
             task = asyncio.create_task(adapter.place_order(_entry_req()))
             gated.add(task)
-            await _until(lambda: book.called("submit_order"), "the entry submitted")
+            await _until(lambda: task in adapter.parked, "the entry parked mid-resolution, holding the lock")
             task.cancel()
             with pytest.raises(asyncio.CancelledError):
                 await task
@@ -756,7 +766,7 @@ async def test_L4_ONE_lock_per_ACCOUNT_across_adapters_and_the_key_is_never_logg
         entry_book, same_book, other_book = _Book(api_key=secret), _Book(api_key=secret), _Book()
         for b in (entry_book, same_book, other_book):
             b._retry, b._retry_wait = 0, 0
-        gate = asyncio.Event()
+        gate = _bounded_event()
         gated: set = set()
         entry_adapter, _ = _alpaca(entry_book, gated, gate)
         same_adapter, _ = _alpaca(same_book)
@@ -764,7 +774,7 @@ async def test_L4_ONE_lock_per_ACCOUNT_across_adapters_and_the_key_is_never_logg
         async with asyncio.timeout(10):
             entry = asyncio.create_task(entry_adapter.place_order(_entry_req()))
             gated.add(entry)
-            await _until(lambda: entry_book.called("submit_order"), "the entry submitted")
+            await _until(lambda: entry in entry_adapter.parked, "the entry parked mid-resolution, holding the lock")
             same = await same_adapter.close_all_positions()
             other = await other_adapter.close_all_positions()
             gate.set()
@@ -924,7 +934,7 @@ async def test_G2_a_second_ROUTE_request_during_a_running_trigger_leaves_the_FIR
     profile_id = created.json()["id"]
     book = _book_with_two_positions()
     adapter, _clock = _alpaca(book)
-    gate = asyncio.Event()
+    gate = _bounded_event()
 
     async def _held(_seconds):
         await gate.wait()
@@ -1024,6 +1034,31 @@ def _effective_api_read_timeout_s(conf: str) -> float:
 # K2-6, K2-10, K2-11, K2-12 — THE TRIGGER
 # ---------------------------------------------------------------------------------------------------
 
+def _bounded_event(release_after_s: float = 6.0) -> asyncio.Event:
+    """An event an arm HOLDS something on, which RELEASES ITSELF after `release_after_s`.
+
+    Found by B437's kill run of record: under a mutant, an arm that held a sweep and then awaited a trigger could never
+    reach its own `set()`. Its 10s timeout cancelled the await, and B446's shielded sweep kept waiting on the hold, so
+    the RUN hung (two rows, killed by the guard) instead of the ARM failing by name. The watchdog is shorter than every
+    arm's timeout, so a mutant now fails the arm."""
+    event = asyncio.Event()
+    asyncio.get_running_loop().call_later(release_after_s, event.set)
+    return event
+
+
+def _hold_sweep(adapter) -> asyncio.Event:
+    """Hold the adapter's close RESOLUTION until the returned event is set (`B452`'s lesson, found again under B437's
+    contention runs). An arm that acts "while a trigger runs" must not race the trigger: waiting only until a close is
+    SENT left a ~0.01s window that load and worker-thread hops closed, and the trigger finished first."""
+    held = _bounded_event()
+
+    async def _sleep(_seconds):
+        await held.wait()
+
+    adapter._sleep = _sleep
+    return held
+
+
 def _book_with_two_positions():
     from tests.unit.test_t0136_alpaca_adapter import _Position
 
@@ -1039,11 +1074,13 @@ async def test_K2_6_a_SECOND_trigger_while_one_runs_CLOSES_NOTHING(monkeypatch, 
 
     book = _book_with_two_positions()
     adapter, _clock = _alpaca(book)
+    held = _hold_sweep(adapter)
     monkeypatch.setattr(broker_manager, "_adapters", {"alpaca": adapter})
     async with asyncio.timeout(10):
         first_task = asyncio.create_task(KillSwitch().trigger(_Db(), "user-1", reason="first"))
         await _until(lambda: book.called("close_position"), "the first trigger sent its first close")
         second = await KillSwitch().trigger(_Db(), "user-2", reason="second")
+        held.set()
         first = await first_task
 
     assert sorted(c[1] for c in book.called("close_position")) == ["BTC/USD", "ETH/USD"], (
@@ -1070,11 +1107,13 @@ async def test_K2_6b_the_in_progress_answer_carries_FINISHED_adapters_rows_AND_t
     opened = await paper.place_order(_entry_req(client_order_id="sig-k26b"))
     book = _book_with_two_positions()
     adapter, _clock = _alpaca(book)
+    held = _hold_sweep(adapter)
     monkeypatch.setattr(broker_manager, "_adapters", {"paper": paper, "alpaca": adapter})
     async with asyncio.timeout(10):
         first_task = asyncio.create_task(KillSwitch().trigger(_Db(), "user-1", reason="first"))
         await _until(lambda: book.called("close_position"), "the Alpaca sweep started, after paper finished")
         second = await KillSwitch().trigger(_Db(), "user-2", reason="second")
+        held.set()
         await first_task
 
     ids = [r.get("position_id") for r in second["details"]]
@@ -1097,7 +1136,7 @@ async def test_K2_10_a_trigger_that_RAISES_or_is_CANCELLED_never_leaves_the_swit
     monkeypatch.setattr(broker_manager, "_adapters", {"alpaca": adapter})
     real_run = KillSwitch._run_trigger
     stuck = asyncio.Event()
-    release = asyncio.Event()
+    release = _bounded_event()
 
     async def _broken(self, db, user_id, reason=None):
         if how == "raises":
@@ -1173,6 +1212,7 @@ async def test_K2_12_disarm_DURING_a_sweep_is_REFUSED_and_the_switch_stays_armed
 
     book = _book_with_two_positions()
     adapter, _clock = _alpaca(book)
+    held = _hold_sweep(adapter)
     monkeypatch.setattr(broker_manager, "_adapters", {"alpaca": adapter})
     async with asyncio.timeout(10):
         task = asyncio.create_task(KillSwitch().trigger(_Db(), "user-1", reason="K2-12"))
@@ -1180,6 +1220,7 @@ async def test_K2_12_disarm_DURING_a_sweep_is_REFUSED_and_the_switch_stays_armed
         with pytest.raises(ComplianceError, match="still closing positions"):
             switch.disarm()
         assert switch.is_armed
+        held.set()
         await task
     switch.disarm()
     assert not switch.is_armed

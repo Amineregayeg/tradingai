@@ -23,7 +23,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.services.broker.base import BrokerAdapter
-from tests.unit.test_b442_kill_switch_at_send import _Book, _Db, _alpaca, _capture_logs, _until
+from tests.unit.test_b442_kill_switch_at_send import _Book, _Db, _alpaca, _bounded_event, _capture_logs, _hold_sweep, _until
 from tests.unit.test_t0136_alpaca_adapter import _Position
 
 
@@ -189,13 +189,6 @@ async def test_M4_the_FIRST_adapter_exits_abnormally_and_BOTH_adapters_rows_are_
 # B446 — a cancelled trigger finishes, reports, and re-raises
 # ---------------------------------------------------------------------------------------------------
 
-def _slow(adapter):
-    async def _sleep(_seconds):
-        await asyncio.sleep(0.01)
-
-    adapter._sleep = _sleep
-
-
 @pytest.mark.asyncio
 async def test_C1_a_CANCELLED_trigger_closes_EVERYTHING_logs_every_row_COMMITS_its_audit_and_RE_RAISES(
         manager, quiet, engine, monkeypatch):
@@ -212,7 +205,7 @@ async def test_C1_a_CANCELLED_trigger_closes_EVERYTHING_logs_every_row_COMMITS_i
     second.positions = [_Position(symbol="ETH/USD")]
     a1, _ = _alpaca(first)
     a2, _ = _alpaca(second)
-    _slow(a1)
+    held = _hold_sweep(a1)      # `B452`'s shape: the cancel must land while the sweep is provably still running
     manager({"conn-1": a1, "conn-2": a2})
 
     lines, stop = _capture_logs()
@@ -221,6 +214,10 @@ async def test_C1_a_CANCELLED_trigger_closes_EVERYTHING_logs_every_row_COMMITS_i
             task = asyncio.create_task(KillSwitch().trigger(_Db(), "user-1", reason="C1"))
             await _until(lambda: first.called("close_position"), "the first adapter's close was sent")
             task.cancel()
+            for _ in range(3):
+                await asyncio.sleep(0)
+            assert not task.done(), "the cancelled trigger stopped waiting for its sweep"
+            held.set()
             with pytest.raises(asyncio.CancelledError):
                 await task
     finally:
@@ -245,7 +242,7 @@ async def test_C2_a_second_trigger_WHILE_the_cancelled_one_finishes_is_ALREADY_I
     book = _Book()
     book.positions = [_Position(symbol="BTC/USD"), _Position(symbol="ETH/USD")]
     adapter, _ = _alpaca(book)
-    _slow(adapter)
+    held = _hold_sweep(adapter)
     manager({"conn-1": adapter})
 
     async with asyncio.timeout(10):
@@ -255,6 +252,7 @@ async def test_C2_a_second_trigger_WHILE_the_cancelled_one_finishes_is_ALREADY_I
         await asyncio.sleep(0)
         assert not task.done() and KILL_SWITCH_STATE.trigger_started is not None, "the mark ended with the caller"
         second = await KillSwitch().trigger(_Db(), "user-2", reason="second")
+        held.set()
         with pytest.raises(asyncio.CancelledError):
             await task
 
@@ -277,7 +275,7 @@ async def test_C3_the_SWEEP_ITSELF_cancelled_reaches_the_caller_as_CancelledErro
     book = _Book(close_status={"BTC/USD": "accepted"})
     book.positions = [_Position(symbol="BTC/USD")]
     adapter, _ = _alpaca(book)
-    _slow(adapter)
+    held = _hold_sweep(adapter)    # the sweep is cancelled while it is PROVABLY still resolving
     manager({"conn-paper": paper, "conn-alpaca": adapter})
 
     lines, stop = _capture_logs()
@@ -290,6 +288,7 @@ async def test_C3_the_SWEEP_ITSELF_cancelled_reaches_the_caller_as_CancelledErro
             sweeps[0].cancel()
             with pytest.raises(asyncio.CancelledError):
                 await task
+            held.set()
     finally:
         stop()
 
@@ -378,7 +377,7 @@ async def test_E1_a_second_trigger_through_the_ROUTE_is_409_with_the_rows_so_far
     # `B452`: DETERMINISTIC. This arm waited only for ETH's close to be SENT, and ETH resolved ~10-20ms later; under
     # load the whole route missed that window, the first trigger finished, and the "second" request ran a full
     # trigger (200). ETH's resolution now waits on an event set only AFTER the POST returns, so 409 is the only answer.
-    held = asyncio.Event()
+    held = _bounded_event()
 
     async def _held_until_the_post_returns(_seconds):
         await held.wait()
@@ -420,7 +419,7 @@ async def test_C5_an_audit_write_that_FAILS_on_the_cancelled_path_never_stops_th
     book = _Book()
     book.positions = [_Position(symbol="BTC/USD")]
     adapter, _ = _alpaca(book)
-    _slow(adapter)
+    held = _hold_sweep(adapter)
     manager({"conn-1": adapter})
     lines, stop = _capture_logs()
     try:
@@ -428,6 +427,9 @@ async def test_C5_an_audit_write_that_FAILS_on_the_cancelled_path_never_stops_th
             task = asyncio.create_task(KillSwitch().trigger(_Db(), "user-1", reason="C5"))
             await _until(lambda: book.called("close_position"), "the close was sent")
             task.cancel()
+            for _ in range(3):
+                await asyncio.sleep(0)
+            held.set()
             with pytest.raises(asyncio.CancelledError):
                 await task
     finally:
