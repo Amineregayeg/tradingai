@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-14 (newest entry B463; B437 fixed at e7d7c81, passed review and DEPLOYED with B453 at 12:52Z)
+Last updated: 2026-09-14 (newest entry B463; B430 amended — flipping BROKER_MODE as the repo stands would take the API down at boot, since production has no Alpaca env credentials, and two credential sources would defeat the account-keyed locks)
 
 ---
 
@@ -28756,6 +28756,34 @@ runtime one, which is the wrong direction for the single switch that turns on re
 **BOUND ON THE CLAIM:** this says the *engine loop* cannot select Alpaca. It says nothing about the
 first-order probe ladder, which calls `AlpacaAdapter` directly and never enters the loop — that path
 is reachable today and is exactly how the ladder places a real order.
+
+#### AMENDMENT (review's attack on T-0145, manager verified, 2026-09-14) — THE ONE-TOKEN FLIP WOULD TAKE THE API DOWN AT BOOT
+
+**Found by review, reading `56a730f` and measuring construction; the manager verified the production side.**
+- `main.py:235` builds `LiveCryptoLoop()` unguarded in lifespan.
+- With the mode set to Alpaca, `_build_broker` raises `BrokerError` when `ALPACA_API_KEY`/`ALPACA_API_SECRET` are unset
+  (review measured the raise).
+- **The production api container has no environment variable whose NAME contains "alpaca"**, and neither the compose
+  file nor `.env` mentions one (names counted; no value read).
+- The broker manager, the kill switch and every probe round use the SAVED, encrypted DB connection instead.
+
+```
+flip BROKER_MODE -> "alpaca", deploy   ->  LiveCryptoLoop() raises in lifespan  ->  no API, no kill-switch route, no dashboard
+```
+
+**Two more consequences:**
+- **Two credential sources on one account defeat the account-keyed exclusions.** B442's lock, B437's executor and R9's
+  dedupe are keyed by a hash of the API KEY. An env key and a saved key for the same account share none of them.
+- **A later selection change can strand venue positions.** A Start that binds a simulator while Alpaca records are
+  OPEN reconciles only the bound venue, so real paper positions run with no stop while the dashboard says RUNNING.
+
+**Ruled in T-0145 PLAN revision 2:**
+- construction never fails boot (a refusing placeholder, `broker_unavailable`)
+- ONE credential source, the saved connection, with no env read
+- ONE `_start_refusals()` including `open_records_on_other_venue` and `unknown_broker_mode`
+- the deploy's 8-point verify-by-content
+
+Latent: `BROKER_MODE` is still `"sim"` in production.
 
 ---
 
