@@ -29549,6 +29549,8 @@ Survivors: C04 (the 404 status check; a 403 carrying 40410000 has never been mea
 **The release deploys `56a1294` + `32a7610` + `4a74eab` + (2d) `ab64c03` together**, after (2d)'s review, with review's
 full suite run pinned at the deploy sha.
 
+**DEPLOYED 2026-09-14 04:05Z in release `ab64c03`** (database `0016`), verified by content; engine held.
+
 ---
 
 ### B443 — THE KILL SWITCH REQUEST CAN OUTLAST THE API PROXY'S 120-SECOND TIMEOUT. The operator gets a 504 while the closes carry on unseen, and pulling the switch again races the first pull
@@ -29682,6 +29684,8 @@ abnormal exit mid-loop kept BTC CLOSED / ETH SENT-never-observed / SOL NOT_ATTEM
 Review killed every behaviour row on a named arm. No kill set was pre-registered for this commit; review designed the
 rows at review time.
 
+**DEPLOYED 2026-09-14 04:05Z in release `ab64c03`** (database `0016`), verified by content; engine held.
+
 ---
 
 ### B446 — A CANCELLED KILL-SWITCH TRIGGER IS SWALLOWED. The adapter turns `CancelledError` into `BrokerError`, the manager catches it, `trigger` returns normally, and the next adapter's closes still go out
@@ -29739,6 +29743,8 @@ recorded as asked:** review predicted the depth-bound mutant would SURVIVE a 200
 last line, `assert "TRUNCATED" in resp.text`, because the bound (32) is below 200. The prediction came from the arm's
 name and its first lines, not its last line. (The manager's suggestion of a plant past the recursion limit rested on
 that prediction, so it is not needed for killability; it still exercises the encoder shield.)
+
+**DEPLOYED 2026-09-14 04:05Z in release `ab64c03`** (database `0016`), verified by content; engine held.
 
 ---
 
