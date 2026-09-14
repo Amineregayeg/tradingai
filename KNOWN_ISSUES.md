@@ -30625,6 +30625,16 @@ Registered: iR7, iR8, iM6b and iQ6c each die over the full population.
   then LAST. The collected count must equal 8fa3ef1's plus the new file's, and every pre-existing id must pass in both
   runs. A state leak from an added file into existing arms is how an additions-only commit weakens them.
 
+#### FIXED at `a087b59` (test-only), PASSED REVIEW 2026-09-14. NOT YET DEPLOYED
+
+- **Review (`_runs/b428b_itr/REVIEW.md`):** 11 of 11 registered rows die by id on `test_b470_i_unpinned`'s arms. DC-1..4 are
+  met; DC-3 was measured on an outermost recording guard with a seen control.
+- **Release gate:** the full suite at `a087b59` in 20 chunks, with the new file at the head of every chunk and then at the
+  tail. In both runs, 3,108 of 3,108 pre-existing ids passed and the new file's 14 passed in every chunk. The verifier was
+  controlled on a planted failure. No suspend.
+- **Deploys** inside `a087b59` once B437b's review passes.
+
+
 ### B471 — THE KILL SWITCH'S SWEEP (b) LABELS WHATEVER HOLDS THE ACCOUNT LOCK AS AN ENTRY, AND SINCE B428b (ii) A CLOSE HOLDS IT
 
 **Found by execute while building B428b (ii) at `58f73b9`; the manager confirmed the label site.**
