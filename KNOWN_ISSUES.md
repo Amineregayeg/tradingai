@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-14 (newest entry B466 — dashboard polling queues account reads on the account worker; B465 — feedback corrections target knobs the live engine does not read, from default current values)
+Last updated: 2026-09-14 (newest entry B467 — the mutation harnesses drop or truncate dead test ids containing a space, so death-set comparisons were blind to 23 parametrized tests)
 
 ---
 
@@ -30445,4 +30445,30 @@ Under 429 retries, one call is up to 61 s.
 - Arms: N requests within the TTL cause 1 venue read, and a spy on the tick path counts 0 cache reads.
 
 Scheduled after Part E.
+
+### B467 — THE MUTATION HARNESSES READ A DEAD TEST'S ID WITH `\S+`, SO A PARAMETRIZED ID CONTAINING A SPACE IS DROPPED OR TRUNCATED FROM THE DEATH SET
+
+**Found by review during B428b (i)'s review. Review compared each row's pytest summary count with its parsed death
+list. The manager found the same class in the shared tool.**
+
+```
+review's harnesses since 2er   ^(?:FAILED|ERROR) (\S+?)(?: - |$)     id with a space -> no match -> DROPPED
+agents/tools/mutation_harness.py:83   ^FAILED \S+::(\S+)            id with a space -> TRUNCATED at the space
+(i)'s population: 23 of 1,329 test ids contain a space, e.g. conversion_table[zero units], arm5_arm6[engine paused],
+                  K1[reset-MAY HAVE REACHED the venue]
+count vs parsed-list mismatches: 437r E07a E07b E17 X03a X03c; 2fr F10 K10 X03a X03c; 2er/b452r K10 X03a X03c
+```
+
+**What it did not do:** no record has a count above zero with an EMPTY death list, so no must-miss row and no "0 deaths"
+verdict was faked. A row that lost its only kill would still show as a survivor.
+
+**What it did:** every death-set COMPARISON ("identical death sets", "0 lost") was blind to those 23 tests. A kill lost on
+one of them read as SAME.
+
+**Fix:**
+- Every parser reads the node id up to `" - "` or the end of the line. None of the 23 ids contains `" - "`.
+- A row whose summary count differs from its parsed list is REFUSED, not recorded.
+- An arm feeds the parser a planted summary with a space-containing id.
+- Rows with a mismatch in the current reviews (B428b (i), B437b) are re-run with the corrected parser before
+  attribution. Review states in REVIEW.md how far the defect reaches.
 
