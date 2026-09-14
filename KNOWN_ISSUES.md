@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-14 (newest entry B470 — B428b (i) left four production lines unpinned: the loop's Binance-first wiring, the book exclusion in abandonment, and the non-list positions read)
+Last updated: 2026-09-14 (newest entry B470; B428b commit (i) passed review conditionally, deploying inside a087b59; B468 amended with pre-existing survivor K2-8a)
 
 ---
 
@@ -28580,6 +28580,22 @@ written and tested against a path that dies two lines before the code they chang
 
 ---
 
+#### PROGRESS (manager, 2026-09-14) — B428b COMMIT (i) PASSED REVIEW, CONDITIONALLY. NOT FIXED, NOT DEPLOYED
+
+- **What `f3250ad` (T-0144 commit (i)) covers:** position identity, pre-send SUBMITTING records, the Binance-first
+  reference price, the canonical pair, the $11 minimum, opened units measured from the venue position, and migration 0017.
+- **Review's verdict (`_runs/b428b_ir/REVIEW.md`):**
+  - 304 own and prior rows, 20 extra rows, and execute's 231 prior rows replayed (`B468`)
+  - serial re-runs, a one-core race check, and a network check
+- **Its survivors were lost guards, not live defects.** They are routed to `B469` (fixed in `B437b` `8fa3ef1`) and `B470`
+  (fixed by the test-only `a087b59`).
+- **Conditions:**
+  - (i)t's rows die at `a087b59`, and its release gate passes (the full suite twice, the new file first then last)
+  - B437b passes review
+  - (i) deploys only inside `a087b59`
+- The tick path still cannot trade Alpaca until commits (ii)–(iv) and `B430`.
+
+
 ### B429 — A LIVE ALPACA POSITION WOULD HAVE NO STOP, at the venue OR in process. It is the ONLY adapter that drops `sl`/`tp`, and `B428` is why nobody has noticed
 
 **Found by execute, controlled sweep, verified independently by manager. `B428` and this one must be
@@ -30518,6 +30534,17 @@ it, so a later change that made it survive would have gone unseen. Rows that no 
   proposal was rejected on meaning, and review's K08 stands.
 - From now on, every review's prior-row set is the union of BOTH seats' row files, and it is enumerated by a loader that
   refuses a file it cannot load.
+
+#### AMENDMENT (review's (i) verdict, 2026-09-14) — WHAT THE FIRST REPLAY FOUND ALREADY LOST BEFORE (i)
+
+Attributed at (i)'s parent `ae16eac`, so none of it is caused by (i):
+- **b442s K2-8a SURVIVES at `ae16eac` and at `f3250ad`.** It removes the lock-site kill-switch check. It has been unkilled
+  since B437 moved the send onto the account worker, which re-checks the switch at the send. The two checks are redundant
+  for "nothing sent", so no live defect. Registered as KS-1 in B437b's review, which must rule it an equivalent
+  (redundant) row or pin the lock-site check.
+- **Arms already lost at the parent, while the rows still die elsewhere:** b427s B2b and B11, FS-1, b442s X-2/X-3, and b445s
+  S-i.
+
 
 ### B469 — B428b (i) MADE B437'S E10, E10p AND E11 PASS FOR A REASON UNRELATED TO THEIR PROPERTY: nothing now pins that a cancelled queued submit is withdrawn, or that the kill switch is read at the send
 
