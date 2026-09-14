@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-14 (newest entry B461 — B449's spelling mismatch is also in the broker reconcilers: on Alpaca a venue-spelled position would not match its database trade and could be marked CLOSED; latent because reconcile_all skips simulations.)
+Last updated: 2026-09-14 (newest entry B461; B432 amended: the Binance fetch in _tick_symbol failed 16 tests in B437's record-2 suite run during a TLS-interception window, and the socket-blocking fixture is scheduled for the test-only commit after B437)
 
 ---
 
@@ -28934,6 +28934,19 @@ a list someone has to maintain.
 
 Not a production defect; a test-reliability defect that can hide one, and at 29 tests it is the
 larger half of the suite's claim to be offline. Still unfixed.
+
+#### AMENDMENT (manager, 2026-09-14) — IT FIRED IN A RELEASE GATE
+
+The first run of the suite for B437's record 2 failed 16 tests in two chunks (`test_t0141_partial_fill`,
+`test_shadow_sees_blocked_bars`, one `test_t0143` test) between 09:55 and 10:03 UTC. In the same window the seats'
+own API connections failed on a TLS "self-signed certificate" error, so outbound HTTPS was being intercepted and
+`_ticker_price` returned None. Re-run serially afterwards, the same tests passed 51/51, and both whole chunks passed
+(106 and 144). The failed logs are kept in `agents/tasks/_runs/b437f/r2/suite/failed_network_0955_1003utc`.
+
+**The re-run is not the fix.** A failure surfaced this time only because these arms assert that something HAPPENED.
+In the same window, an arm asserting ABSENCE would have passed. **Scheduled:** the socket-blocking autouse fixture goes in
+the test-only commit that follows B437. The 29 known tests opt out by name, citing B432, until each is patched. Until
+then, a network-shaped failure in a record run is re-run with its failed log kept and B432 named.
 
 ---
 
