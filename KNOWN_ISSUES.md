@@ -30091,6 +30091,17 @@ set: `_runs/2f/KILL_SET.md`, F-1..F-10.
 - Routed as a test-only commit right after `B437` lands, because `test_b453` is in B437's running record, together with
   review's N1/N2 on `test_b442`.
 
+**FIXED at `c1589e2` ((2f)), PASSED review (2026-09-14). Not yet deployed; it ships with the B437 release.**
+- The one helper `_leave_cancelled_record` serves all three cancelled paths.
+- Its audit write is shielded, with a deadline fixed at the write's start.
+- The sweep's exception is kept as `__cause__`, and the in-progress mark clears on every exit.
+
+Review: the 13 prior `kill_switch.py` rows lost nothing. Every F row was killed as registered, including F14 as true
+shape B and F13 shape A by name. A one-core race check passed 10/10. F15 is the known arm gap already recorded above,
+with its fix queued as a test-only commit after `B437`. Manager's drives on `git archive c1589e2`: in-loop exit,
+post-loop exit (review's shape), a second cancel during a slow audit commit, and the no-cancellation must-miss, all as
+ruled.
+
 
 ### B454 — ON A VENUE BROKER, EVERY DEPLOY WOULD CLOSE THE WHOLE ACCOUNT AT MARKET. The app's shutdown stops the loop, and the loop's `stop()` closes every position, which on Alpaca means every position in the account, with no trade rows and no time to finish
 
