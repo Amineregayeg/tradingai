@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-14 (newest entry B447 — on Alpaca the engine can never enter from flat: AlpacaAdapter.reference_price reads an open position's current_price, so it returns None when flat and ExecutionService rejects every market entry as NO_REFERENCE_PRICE. Found writing the first-order probes against the deployed fb3dab6.)
+Last updated: 2026-09-14 (newest entry B451 — the first real orders on the Alpaca paper account, run at fb3dab6: Alpaca refuses bracket and OTO stop protection on crypto (B448), and a separate stop locks the position against every close; positions are spelled BTCUSD against orders' BTC/USD, so the engine's one-position gate is blind (B449); the fee is taken in kind (B450); the real minimum is a $10 cost basis (B451). B447 measured, B444 item 3 answered, B427 validated on the venue.)
 
 ---
 
@@ -28533,6 +28533,13 @@ the client_order_id lookup. Measured on the probe that found it: 3s reads -> 2 r
 1.0s budget -> 1.21s). **With `a451ec1`'s PASS on every other row, B427, B438 and B439 are FIXED as of `fb3dab6`.**
 Not deployed: production is `6ae6aca`.
 
+**MEASURED ON THE REAL VENUE (2026-09-13, a plain market buy through `place_order` at `fb3dab6`):** acknowledged
+`pending_new` with filled 0, resolved on the FIRST re-read to `filled` (1 read, 0.095s): FILLED at 76808.48 for
+0.000195236. The parsers read it as intended: `_position_units` 0.000195236, `classify_order_status` filled. **B427's
+premise held on the real venue, and its fix resolved the fill.** A close resolved the same way (`pending_new`, then
+filled after 1 read in 0.095s, `close_confirmed` True). Evidence for `ORDER_RESOLUTION_BUDGET_S`: 0.1s against a 5s
+budget, on one quiet-market sample.
+
 ---
 
 ### B428 — THE ALPACA TICK PATH CANNOT RUN AT ALL. Every tick raises before any signal is evaluated, the loop swallows it as a WARNING, and the engine reports HEALTHY forever
@@ -29594,6 +29601,11 @@ simulators use; partial exits keyed and addressed the way the venue identifies p
 answered by a probe before it is designed around; and what the loop does at start-up when the venue already holds
 a position it has no plan for. Plus `B437`'s two-clients note (D5).
 
+**ITEM 3 ANSWERED BY MEASUREMENT (2026-09-13, `B448`):** there are no bracket legs on crypto, because Alpaca refuses
+bracket and OTO orders. A SEPARATE resting stop-limit, however, reserves the entire quantity (`qty_available` 0), and
+while it rests Alpaca refuses a 70% partial close AND a full close with 403 "insufficient balance for BTC ... available:
+0". The close only succeeded after the stop was cancelled.
+
 ---
 
 ### B445 — `B366`'s FIX IS UNREACHABLE. `broker_manager.close_all_positions` catches each adapter's exception and flattens it to one error row, so the kill switch never sees the `partial_report` it was changed to read — and a confirmed CLOSED position is reported as a failure
@@ -29683,3 +29695,115 @@ from their own feed.
 **Fix direction (part of `B428b`):** price from a source that exists when flat — the venue's latest crypto
 quote or trade, or the Binance ticker the loop already marks with (`_ticker_price`) — never from a position.
 The source is named in the result, because the sizing price and the fill come from different feeds (`B278`).
+
+**MEASURED (probe 0, 2026-09-13):** from flat, `adapter.reference_price("BTC/USD")` returned None, and the SDK's
+`get_open_position("BTC/USD")` raised `APIError` 404 "Not Found". **It is WORSE than written above: with a position OPEN
+it also returned None**, because the position is spelled `BTCUSD` and the slash form 404s (`B449`). On Alpaca this
+method never returns a price.
+
+---
+
+### B448 — ALPACA REFUSES STOP PROTECTION ATTACHED TO A CRYPTO ORDER, so `B429`'s design cannot work on this venue: every protected entry is refused. And a SEPARATE stop, the one form it accepts, locks the whole position so that no close can go through while it rests
+
+**Measured on the Alpaca PAPER account, 2026-09-13 23:55–23:58Z, by the manager's first-order probes run inside the production api container at `fb3dab6`.** Raw records: `agents/tasks/_runs/probes_20260914/` (not in git).
+
+```
+place_order with sl + tp  (bracket, "otoco")   422  code 42210000  "crypto orders not allowed for advanced order_class: otoco"
+place_order with sl only  (OTO)                422  code 42210000  "crypto orders not allowed for advanced order_class: oto"
+plain market buy, then a SEPARATE
+  StopLimitOrderRequest sell, full qty          accepted: status new, order_class simple, position_intent sell_to_close
+  position after                                qty 0.000194747, qty_available "0"
+  close_position("BTCUSD", 70%)                 403  code 40310000  "insufficient balance for BTC (requested: 0.000136322, available: 0)"
+  close_position("BTCUSD")  (full)              403  same, requested 0.000194747
+  cancel the stop, then close_position          FILLED, close_confirmed True
+```
+
+**What this means for the order path built so far:**
+- **Every entry the engine would send is refused.** The loop attaches `sl` to every signal (tp is None on the live path,
+  so it sends OTO). Alpaca answers 422. `classify_submission_failure` files 422 as ANSWERED, the lookup finds
+  nothing (404), and the original error is re-raised as a `BrokerError`, which `ExecutionService` files REJECTED
+  `VENUE_TRANSPORT`: a permanent refusal that reads as a transient blip (`B375`'s shape). With `B447`, that is two
+  independent reasons an Alpaca entry can never happen today.
+- **`B429`'s whole mechanism has no venue to run on.** Its verification, remediation and flat observation assume a
+  bracket that lands. On crypto, protection can only be a separate order after the fill, or a stop the engine
+  enforces itself.
+- **A resting venue stop blocks EVERY close.** That includes the kill switch's closes, the 70% partial, and a manual
+  close. Any close must cancel the stop first, and put it back if the close does not fill. Otherwise the kill switch
+  reports FAILED "insufficient balance" for every protected position.
+
+**Design needed (in `B428b`), with the costs measured here:**
+- (A) A venue stop-limit placed after the fill. It protects while the engine is down. But it locks the whole
+  quantity, so every close must cancel, close, then re-place. And a stop-LIMIT may not fill in a gap.
+- (B) A stop enforced in-process, as the simulators do in `on_tick`. Nothing is reserved, but there is no protection
+  while the engine or its connection is down.
+- (C) Both: in-process first, plus a wider venue stop-limit as a disaster stop.
+
+---
+
+### B449 — ALPACA SPELLS A CRYPTO POSITION `BTCUSD` AND ITS ORDERS `BTC/USD`. The engine's "already in a position" gate compares the two, so it never sees an Alpaca position and could stack entries; the price lookup and a close by pair both 404
+
+**Measured on the Alpaca PAPER account, 2026-09-13 23:55–23:58Z, by the manager's first-order probes run inside the production api container at `fb3dab6`.** Raw records: `agents/tasks/_runs/probes_20260914/` (not in git).
+
+```
+order / asset symbol                     "BTC/USD"
+get_all_positions()[0].symbol            "BTCUSD"
+AlpacaAdapter.get_positions() -> pair    "BTCUSD"      (Position.pair = raw.symbol)
+crypto_loop._has_position(pair)          any(p.pair == pair ...)   "BTCUSD" == "BTC/USD"  -> False, ALWAYS
+close_position("BTC/USD")                404 "Not Found"      close_position("BTCUSD") works
+get_open_position("BTC/USD")             404, even with the position open   (B447's price)
+```
+
+**`_entry_block_reason`'s "already in a position" is the engine's one-position-per-pair rule. On Alpaca it is
+blind:** a second signal on BTC would pass the gate and add to the open position. `_take_partials` and anything else
+that matches a position to the loop's pair has the same blindness. `B429`'s remediation already compared canonical
+forms (strip "/", uppercase, equality, R-8) — **the one place that expected this.**
+
+**Fix direction (in `B428b`):** one canonical-pair function used by every comparison between the loop's pair and a
+venue position, with EQUALITY on canonical forms, never substring (`BTC/USD` vs `BTC/USDT`, T-0139's D2). Every
+venue call that addresses a position uses the venue's own spelling, as returned by the venue.
+
+---
+
+### B450 — ALPACA TAKES ITS CRYPTO FEE IN KIND: the position holds 0.25% less than the order filled, so every quantity the engine records overstates what it owns
+
+**Measured on the Alpaca PAPER account, 2026-09-13 23:55–23:58Z, by the manager's first-order probes run inside the production api container at `fb3dab6`.** Raw records: `agents/tasks/_runs/probes_20260914/` (not in git).
+
+```
+order filled_qty    0.000195236   (what place_order returned as filled_units, and what the loop records as opened units)
+position qty        0.000194747   difference 0.000000489 BTC = 0.2505% of the fill
+```
+
+**`ALPACA_PROGRAMME.md` said spot crypto "charges no swap", and that is true — but it charges a trading fee, taken
+from the asset received.** Consequences:
+- A close or a partial sized from the recorded `filled_units` asks to sell more than the account holds: "insufficient
+  balance".
+- EXIT-001's 70% is 70% of a number the venue never held.
+- Realised P&L computed from fill prices and filled quantities omits the fee on both legs.
+The sizing risk is also slightly off: the stop's loss applies to the smaller quantity, while fees add a certain cost.
+
+**Fix direction (in `B428b`):** record the quantity the VENUE's position holds after the fill, not the order's
+`filled_qty`. Keep the fee, measured as the difference, beside the fill. Size every close from the venue position at
+the moment of closing.
+
+---
+
+### B451 — ALPACA'S REAL ORDER MINIMUM IS $10 OF COST BASIS, while the adapter's MIN_SIZE check uses the asset's `min_order_size` (about $1). An order between $1 and $10 passes our check, is refused by the venue, and is filed as a transient `VENUE_TRANSPORT`
+
+**Measured on the Alpaca PAPER account, 2026-09-13 23:55–23:58Z, by the manager's first-order probes run inside the production api container at `fb3dab6`.** Raw records: `agents/tasks/_runs/probes_20260914/` (not in git).
+
+```
+asset BTC/USD min_order_size    1.2941e-05   (≈ $1 at 76,800)
+probe 1: buy 0.00000647 (≈ $0.50)   403  code 40310000  "cost basis must be >= minimal amount of order 10"
+```
+
+**T-0139 measured the asset field and `B409` built MIN_SIZE on it. The binding floor is a different, order-level
+rule that no asset field exposes.** Probe 1 was below both floors, so it does not show which one binds between $1 and
+$10. The message names 10, and a $4 bracket in the first round was refused for its order class before size was
+checked.
+- **Unlikely at the engine's normal size** (1% risk of $100k equity is thousands of dollars).
+- **Likely on small partial closes and runners:** a 30% runner of a small position can fall below $10.
+- 403 is correctly NOT_CREATED, but the refusal code is `VENUE_TRANSPORT` ("try again") for a floor that refuses the
+  same order every time.
+
+**Fix direction:** the adapter refuses below the $10 cost basis as `MIN_SIZE` before sending, stating the source (the
+venue's message, measured). Measure how a close below $10 behaves before designing the runner's last exit.
