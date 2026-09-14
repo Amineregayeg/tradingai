@@ -1,6 +1,6 @@
 # Malek — current state
 
-_Last updated: 2026-09-14 02:50 WAT, by Malek's manager session. Updated about every 2 hours._
+_Last updated: 2026-09-14 04:50 WAT, by Malek's manager session. Updated about every 2 hours._
 
 ## Goal right now
 
@@ -37,15 +37,15 @@ defect found goes into `KNOWN_ISSUES.md` with a B-number. A commit is only "done
 
 ## In progress
 
-- **Item 3, kill-switch safety, is almost ready to deploy:**
-  - `B442` (the kill switch vs an order under way) — passed review.
-  - `B445` + `B446` (the kill switch's report losing rows; a cancelled kill switch swallowed) — `32a7610`, in review.
-  - Follow-up (2c) — `4a74eab`, in review. It covers:
-    - callers no longer arm the switch separately
-    - Alpaca's lag in removing a closed position is not counted as a failure
-    - a racy test fixed (`B452`)
-  - Its database migration (0016) passed the scratch-copy test. It deploys once both reviews pass.
-- **Item 4, `B437`** (Alpaca calls blocking the app): being built.
+- **Item 3, the kill-switch safety release, is commit `ab64c03`.** It bundles `B442`, `B445`/`B446`, follow-up (2c) and
+  (2d).
+  - All have passed review except (2d), which is in review now. (2d) hides secrets at any depth in the kill switch's
+    "already in progress" answer.
+  - Migration 0016 already passed the scratch-copy test.
+  - It deploys once (2d) passes and a full test run pinned to `ab64c03` is green.
+- **Test-only fixes (2e)** for seven kill-switch tests with a timing race (`B452`) are being built. Review confirmed the
+  checks those tests carried still hold.
+- **Item 4, `B437`** (Alpaca calls blocking the app): built, and its test record is being redone on top of (2d) and (2e).
 
 ## Next tasks, in order (Malek's list, 2026-09-14)
 
@@ -57,7 +57,7 @@ defect found goes into `KNOWN_ISSUES.md` with a B-number. A commit is only "done
    - The fee is 0.25% per leg (`B450`).
    - The minimum is $10 to open (`B451`).
    - The order-confirmation fix works on the real venue (`B427`).
-3. `B442` + `B445`/`B446` + (2c) — reviews finishing; then deploy together (migration 0016 already tested).
+3. The kill-switch release `ab64c03` — waiting on (2d)'s review and a pinned full test run; then deploy.
 4. `B437` — Alpaca calls stop blocking the app (one worker per account).
 5. `B428b` — manage and record positions on Alpaca: stops enforced by the engine, prices from Alpaca's quote,
    one pair spelling, quantities from the venue position, trade rows from Alpaca's fill history, and start-up
