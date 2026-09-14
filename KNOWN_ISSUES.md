@@ -29519,6 +29519,25 @@ that check through the verdict; `close_all_positions` takes it before enumeratin
 by the entry, and an entry already in progress is seen by the switch. The switch's wait for the lock needs a bound:
 on expiry it enumerates anyway and says so in its report.
 
+**FIXED at `56a1294`, PASSED review (2026-09-14). Not yet deployed.**
+- Kill-switch state lives in `app/core` and is read at the SEND by paper, cft_sim and Alpaca.
+- `KILL_SWITCH_ARMED` is added, with migration 0016.
+- Alpaca holds a per-ACCOUNT lock from the check through the verdict.
+- The kill switch sweeps twice, with the second sweep's wait capped by a 100s response deadline tied to nginx's `/api/`
+  timeout.
+- A second trigger while one runs closes nothing.
+
+Every K2 row died on a named arm, with no prior row lost. Manager's drives: the switch armed inside the signal broadcast
+and inside the service's own `get_account` await were both REJECTED `KILL_SWITCH_ARMED` with 0 positions. Through the real
+SDK over loopback, armed sends 0 POSTs while closes still go out. Concurrent triggers close each position once.
+
+**Non-blocking, queued into (2c):**
+- an unreleased lock is caught only by a 420s hang, not a named failure
+- a zero wait on a FREE lock is unarmed
+- the double now drops filled positions, so a venue LISTING LAG is unmodelled: under lag, sweep (b) re-closes, the venue
+  answers "position does not exist", and the report counts a FAILED close for a position that closed. There is no
+  second sell, but the count is wrong.
+
 ---
 
 ### B443 — THE KILL SWITCH REQUEST CAN OUTLAST THE API PROXY'S 120-SECOND TIMEOUT. The operator gets a 504 while the closes carry on unseen, and pulling the switch again races the first pull
