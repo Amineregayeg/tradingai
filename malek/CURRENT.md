@@ -1,6 +1,6 @@
 # Malek — current state
 
-_Last updated: 2026-09-14 04:50 WAT, by Malek's manager session. Updated about every 2 hours._
+_Last updated: 2026-09-14 07:50 WAT, by Malek's manager session. Updated about every 2 hours._
 
 ## Goal right now
 
@@ -12,7 +12,7 @@ The plan is `ALPACA_PROGRAMME.md` on `main`.
 ## State
 
 - **The trading engine is held (stopped on purpose) and has been since 2026-09-01.** Do not start it.
-- **Production runs commit `fb3dab6`** (deployed 2026-09-14, database migration 0015). `main` is ahead of it. Production is
+- **Production runs commit `ab64c03`** (the kill-switch release, deployed 2026-09-14 ~05:05 WAT, database migration 0016). `main` is ahead of it. Production is
   pinned to a reviewed commit with a compose override file; never deploy with a plain `docker compose up`.
 - **The first real orders were placed on the Alpaca PAPER account on 2026-09-14** (three probe rounds, about $15 each,
   ending flat). They showed the order path as built cannot trade Alpaca crypto yet: see `B447`–`B451` in `KNOWN_ISSUES.md`.
@@ -37,15 +37,17 @@ defect found goes into `KNOWN_ISSUES.md` with a B-number. A commit is only "done
 
 ## In progress
 
-- **Item 3, the kill-switch safety release, is commit `ab64c03`.** It bundles `B442`, `B445`/`B446`, follow-up (2c) and
-  (2d).
-  - All have passed review except (2d), which is in review now. (2d) hides secrets at any depth in the kill switch's
-    "already in progress" answer.
-  - Migration 0016 already passed the scratch-copy test.
-  - It deploys once (2d) passes and a full test run pinned to `ab64c03` is green.
-- **Test-only fixes (2e)** for seven kill-switch tests with a timing race (`B452`) are being built. Review confirmed the
-  checks those tests carried still hold.
-- **Item 4, `B437`** (Alpaca calls blocking the app): built, and its test record is being redone on top of (2d) and (2e).
+- **Item 3 is DONE:** the kill-switch release `ab64c03` is deployed (`B442`, `B445`, `B446`, and the follow-ups).
+- **A defect found in it, `B453`:** a cancelled kill switch whose closing step then errors loses its audit record. It is
+  latent while the engine is held. The fix, (2f), is being measured.
+- **Test-only fixes (2e)** for timing races in kill-switch tests landed as `45161a6`; in review.
+- **Item 4, `B437`** (Alpaca calls blocking the app): built; its test record runs after (2f).
+- **Item 5, `B428b`:** the brief is at revision 4 after three review attacks and two more probe rounds on the paper
+  account (rounds 4 and 5). New blockers found and designed around:
+  - every deploy would close the whole account (`B454`)
+  - a restart abandons live positions (`B455`)
+  - every BTC position shares one venue id (`B456`)
+  Building starts after `B437`.
 
 ## Next tasks, in order (Malek's list, 2026-09-14)
 
@@ -57,7 +59,7 @@ defect found goes into `KNOWN_ISSUES.md` with a B-number. A commit is only "done
    - The fee is 0.25% per leg (`B450`).
    - The minimum is $10 to open (`B451`).
    - The order-confirmation fix works on the real venue (`B427`).
-3. The kill-switch release `ab64c03` — waiting on (2d)'s review and a pinned full test run; then deploy.
+3. ~~The kill-switch release~~ — done: `ab64c03`. Follow-up fix (2f) for `B453` goes out with the next release.
 4. `B437` — Alpaca calls stop blocking the app (one worker per account).
 5. `B428b` — manage and record positions on Alpaca: stops enforced by the engine, prices from Alpaca's quote,
    one pair spelling, quantities from the venue position, trade rows from Alpaca's fill history, and start-up
@@ -66,6 +68,10 @@ defect found goes into `KNOWN_ISSUES.md` with a B-number. A commit is only "done
 7. Part E — the feedback analysis refuses to mix long-only runs with older two-direction runs.
 
 ## Open decisions (Malek's)
+
+- **What the engine may do by itself when the app restarts** with Alpaca positions open: stops only (the provisional
+  choice), stops plus the 70% take-profit, or nothing until someone presses Start. It reverses the rule, since
+  2026-08-08, that the engine never starts itself.
 
 - Stops on Alpaca are enforced by the engine for now (no protection while it is down); a venue backup stop can be added later.
 - The wait before an order counts as unresolved (default 5 seconds).
