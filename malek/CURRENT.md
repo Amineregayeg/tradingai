@@ -37,7 +37,7 @@ defect found goes into `KNOWN_ISSUES.md` with a B-number. A commit is only "done
 
 ## In progress
 
-- **Item 3 is done** (release `ab64c03`). The `B453` fix (2f, `c1589e2`) is in review, and (2e) passed.
+- **Item 3 is done** (release `ab64c03`). The `B453` fix (2f, `c1589e2`) passed review and ships with `B437`; (2e) passed.
 - **Item 4, `B437`:** all 42 of its own checks passed. Its final parallel test run is being redone after an interruption
   (below). Then it commits, goes to review, and deploys with (2f).
 - **Item 5, `B428b`:** the DESIGN is approved (`agents/tasks/T-0144/DESIGN.md`), and building commit (i) has started:
