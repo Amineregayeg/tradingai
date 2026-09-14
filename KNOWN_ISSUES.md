@@ -29856,6 +29856,16 @@ plain market buy, then a SEPARATE
   while the engine or its connection is down.
 - (C) Both: in-process first, plus a wider venue stop-limit as a disaster stop.
 
+**THE LOCK RELEASES AS SOON AS THE CANCEL RETURNS, MEASURED (probe round 6, 2026-09-14 09:40Z, paper, `ab64c03`, ended
+flat, scan clean).** Three repetitions:
+- a ~$30 buy, then a resting limit sell for the whole position: `qty_available` 0
+- `cancel_order_by_id`, then immediately a 70% market sell with a `client_order_id`
+- the sell was ACCEPTED on the first attempt every time, sent 0.198–0.201s after the cancel call began, which is its round
+  trip
+
+So B428b's close sequence (cancel resting orders, then sell) needs no wait between the two, on the paper venue. A retry
+on the next pass stays as the safety net for a live venue.
+
 ---
 
 ### B449 — ALPACA SPELLS A CRYPTO POSITION `BTCUSD` AND ITS ORDERS `BTC/USD`. The engine's "already in a position" gate compares the two, so it never sees an Alpaca position and could stack entries; the price lookup and a close by pair both 404
