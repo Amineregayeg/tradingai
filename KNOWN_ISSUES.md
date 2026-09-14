@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-14 (newest entry B456. Probe round 4 amended B447: Alpaca's paper quote is often stale (BTC up to 29s, ETH minutes) and fills track it only loosely; B444: no listing lag, and closes as ordinary sell orders with a client_order_id are accepted, filled and findable, even below $10; there is no fee record anywhere; B451: the floor binds opening orders only.)
+Last updated: 2026-09-14 (newest entry B456. Probe round 5 amended B450: the fee is 0.25% on both legs, pinned with a $1,000 round trip (in kind on the buy, in cash on the sell); and B440: a client_order_id refused with 403 is reusable. B447's sells-under-bid line corrected: not established.)
 
 ---
 
@@ -29453,6 +29453,13 @@ qty compared as strings survives (venue "0.010" for a sent "0.01" must be adopte
 (venue "BTC/USDT" for a sent "BTC/USD" must NOT be adopted — T-0139's D2 trap); reading `.code` survives (a non-JSON
 403 or 429 must be NOT_CREATED).
 
+**A `client_order_id` IS REUSABLE AFTER A REFUSAL, MEASURED (probe round 5, 2026-09-14 05:25Z, paper account at `ab64c03`; `probe_copy5/`; ended flat, secret scan clean):**
+- A buy refused with 403 "cost basis must be >= minimal amount of order 10" left no order: the lookup by its client id
+  answered 404.
+- A valid order sent with the SAME client id was then accepted and filled.
+- So a refused submission does not burn its id, and a retry with the same id is not rejected as a duplicate.
+- A duplicate id after an ACCEPTED order is the 422 case, not measured here.
+
 ---
 
 ### B441 — ALPACA SDK REQUESTS CARRY NO HTTP TIMEOUT. A hung connection blocks the event loop forever today, and would strand a thread under any threaded dispatch
@@ -29804,7 +29811,8 @@ trade); flat, it answers 404 "position does not exist".
 - **Fills against the references:**
   - Both BTC buys filled at 77608.52, the exact mid of a quote then 35–46s old.
   - The ETH buy filled +1.58 over a 30s-old ask.
-  - Sells filled 7–44 below the pre-order bid.
+  - Sells filled 7–44 below the pre-order bid. **Correction (review, H5):** not established; the four BTC sells
+    were compared with ONE bid/Binance read taken before the first of them.
   - Round 3's buy had filled +35.6 over Alpaca's ask.
   - **So the paper fill tracks Alpaca's own quote more closely than Binance, but not exactly, and that quote can be minutes stale.**
 
@@ -29901,6 +29909,13 @@ bought, the position holds 0.000194707, so the fee (0.25%) is taken in BTC. Sell
 76783.6 ($4.4852): cash +$4.47. **Round trip on $15: −$0.10 of cash**, i.e. fees on both legs plus the price moved
 against the entry. The position's `avg_entry_price` is the fill price and `cost_basis` is qty × that price, so
 neither carries the fee. **Realised P&L must come from cash deltas or fills plus fees, not from position fields.**
+
+**THE FEE PINNED WITH A ~$1,000 ROUND TRIP (probe round 5, 2026-09-14 05:25Z, paper account at `ab64c03`; `probe_copy5/`; ended flat, secret scan clean):**
+- Buy: 0.012900465 BTC at 77505.1. Cash −999.85, exactly the notional, so there is no cash fee on the buy.
+- The position held 0.012868213, a fee in kind of **0.2500%**.
+- Sell: 0.012868213 at 77449.462, notional $996.64. Cash +994.14, a fee of **0.2505%** (cents truncation).
+- **Both legs: 0.25% at this account's tier.** Alpaca's fee is volume-tiered, so the constant states its source and its
+  tier, and a change in tier is not detected by anything.
 
 ---
 
