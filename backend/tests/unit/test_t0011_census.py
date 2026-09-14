@@ -482,7 +482,7 @@ def test_non_census_records_are_ignored_and_not_counted():
 # ---------------------------------------------------------------------------
 # The record the census counts — criterion 4a
 # ---------------------------------------------------------------------------
-def test_both_facts_are_recorded_on_every_evaluation(declared):
+def test_both_facts_are_recorded_on_every_evaluation(declared, monkeypatch):
     """4a. `engine_policy` and `rule_verdict`, never one-of-two.
 
     "The rules were not consulted" and "the rules were consulted and permitted" are
@@ -491,6 +491,11 @@ def test_both_facts_are_recorded_on_every_evaluation(declared):
     the day someone reorders those two calls back; a two-field record does not.
     """
     import pandas as pd
+
+    from app.services.market_data.sources.binance_perp import BinancePerpetualSource
+
+    # B432: fapi.binance.com is unreachable from the suite; `_get` answers an unreachable host with an EMPTY list
+    monkeypatch.setattr(BinancePerpetualSource, "_get", lambda self, params: [])
 
     idx = pd.date_range("2026-08-14 10:00", periods=40, freq="5min", tz="UTC")
     df = pd.DataFrame({

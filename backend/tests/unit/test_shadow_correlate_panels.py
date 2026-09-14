@@ -181,6 +181,7 @@ def test_dropping_usdt_d_is_noticed_and_named():
         _ramp(), signal_tf=TF,
         panel_source=_FakeDominance(available=("TOTAL",)),  # USDT.D withdrawn
         extra_panels=perps,
+        perp_source=_FakePerp(empty=True),   # B432: without it the layout fetched fapi.binance.com
     )
     assert _verdicts(evaluations)["GATE-008"] == "FAIL"
     assert _values(evaluations, "GATE-008")["panels_missing"] == ["USDT.D"]

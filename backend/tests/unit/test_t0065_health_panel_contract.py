@@ -268,6 +268,10 @@ async def test_every_component_emits_its_own_summary_sentence(monkeypatch):
     computed where its fields are known. The five share no vocabulary, so no generic row
     could format them — derive the row and the hardcoded list merely moves into a formatter."""
     from app.services.monitoring import data_health as dh
+    from app.services.market_data.sources.binance_perp import BinancePerpetualSource
+
+    # B432: fapi.binance.com is unreachable from the suite; `_get` answers an unreachable host with an EMPTY list
+    monkeypatch.setattr(BinancePerpetualSource, "_get", lambda self, params: [])
 
     result = await dh.data_health()
     for name, component in result["components"].items():

@@ -570,7 +570,7 @@ async def test_E9_a_shielded_write_that_RAISES_after_the_cancel_is_logged_re_rai
 
 
 @pytest.mark.asyncio
-async def test_E10_a_write_cancelled_while_still_QUEUED_is_WITHDRAWN_and_NOTHING_is_sent():
+async def test_E10_a_write_cancelled_while_still_QUEUED_is_WITHDRAWN_and_NOTHING_is_sent(monkeypatch):
     from tests.unit.test_t0140_order_body import BTC_MIN, _asset
 
     book = _Traced()
@@ -580,34 +580,63 @@ async def test_E10_a_write_cancelled_while_still_QUEUED_is_WITHDRAWN_and_NOTHING
         return _asset("BTC/USD", min_order_size=BTC_MIN)
 
     adapter._fetch_asset = _asset_read
-    gate = threading.Event()
+    names = _queued_job_names(monkeypatch)
+    first, second = threading.Event(), threading.Event()
     try:
         async with asyncio.timeout(10):
-            held = asyncio.create_task(_hold_worker(adapter, gate))
-            await asyncio.sleep(0.05)
-            task = asyncio.create_task(adapter.place_order(_entry_req(client_order_id="sig-e10")))
-            await _until(lambda: _lock_holder_is_entry(adapter), "the submit is queued")
+            task, held = await _queue_the_submit_behind_a_hold(
+                adapter, names, lambda: asyncio.create_task(adapter.place_order(_entry_req(client_order_id="sig-e10"))),
+                first, second)
             task.cancel()
             with pytest.raises(asyncio.CancelledError):
                 await task
-            gate.set()
-            await held
+            second.set()
+            await asyncio.gather(*held)
             await asyncio.sleep(0.1)
     finally:
-        gate.set()
+        first.set()
+        second.set()
     assert not book.called("submit_order"), "a write cancelled while QUEUED was sent anyway"
     assert not book.called("get_order_by_client_id")
 
 
-def _lock_holder_is_entry(adapter):
-    import app.services.broker.alpaca as alpaca
+def _queued_job_names(monkeypatch) -> list[str]:
+    """`B469`: the NAME (`call`) of every job put on an account worker, in order, AS IT IS QUEUED — `AccountExecutor.run`
+    submits the job to the pool before its first await, so a name is here once its job is on the queue. (These arms used
+    to wait for the entry to HOLD the account lock. Since T-0144 R5' the first job under that lock is the BEFORE read,
+    `get_all_positions`, not the submit, so they withdrew a READ and armed the switch before any submit existed.)"""
+    from app.services.broker.alpaca import AccountExecutor
 
-    entry = alpaca._ACCOUNT_LOCKS.get(adapter._account_key)
-    return bool(entry and entry.holder and entry.holder.get("what") == "place_order")
+    names: list[str] = []
+    original = AccountExecutor.run
+
+    async def _run(self, fn, args=(), kwargs=None, **kw):
+        names.append(kw.get("call", ""))
+        return await original(self, fn, args, kwargs, **kw)
+
+    monkeypatch.setattr(AccountExecutor, "run", _run)
+    return names
+
+
+async def _queue_the_submit_behind_a_hold(adapter, names: list[str], start_entry, first: threading.Event,
+                                          second: threading.Event):
+    """Hold the worker, start the entry, and once its BEFORE read is queued, queue a SECOND hold behind that read; then
+    release the first. The read runs, and the SUBMIT is QUEUED behind the second hold — found there by name. Returns the
+    entry's task and the two hold tasks."""
+    held = [asyncio.create_task(_hold_worker(adapter, first))]
+    await _until(lambda: names.count("held_read") == 1, "the first hold is queued")
+    task = start_entry()
+    await _until(lambda: "get_all_positions" in names, "the entry's BEFORE read is queued behind the first hold")
+    held.append(asyncio.create_task(_hold_worker(adapter, second, what="the second hold")))
+    await _until(lambda: names.count("held_read") == 2, "the second hold is queued behind the BEFORE read")
+    first.set()
+    await _until(lambda: "submit_order" in names, "the submit is QUEUED on the account worker, behind the second hold")
+    assert not second.is_set() and names.count("submit_order") == 1, names
+    return task, held
 
 
 @pytest.mark.asyncio
-async def test_E10p_on_the_REAL_SDK_a_queued_submit_cancelled_sends_ZERO_POSTs_and_looks_nothing_up(venue):
+async def test_E10p_on_the_REAL_SDK_a_queued_submit_cancelled_sends_ZERO_POSTs_and_looks_nothing_up(venue, monkeypatch):
     adapter, _ = _real_adapter(venue.url, f"PK-B437-{uuid.uuid4().hex}")
 
     async def _asset_read(_pair):
@@ -615,21 +644,22 @@ async def test_E10p_on_the_REAL_SDK_a_queued_submit_cancelled_sends_ZERO_POSTs_a
         return _asset("BTC/USD", min_order_size=BTC_MIN)
 
     adapter._fetch_asset = _asset_read
-    gate = threading.Event()
+    names = _queued_job_names(monkeypatch)
+    first, second = threading.Event(), threading.Event()
     try:
         async with asyncio.timeout(10):
-            held = asyncio.create_task(_hold_worker(adapter, gate))
-            await asyncio.sleep(0.05)
-            task = asyncio.create_task(adapter.place_order(_entry_req(client_order_id="sig-e10p")))
-            await _until(lambda: _lock_holder_is_entry(adapter), "the submit is queued")
+            task, held = await _queue_the_submit_behind_a_hold(
+                adapter, names, lambda: asyncio.create_task(adapter.place_order(_entry_req(client_order_id="sig-e10p"))),
+                first, second)
             task.cancel()
             with pytest.raises(asyncio.CancelledError):
                 await task
-            gate.set()
-            await held
+            second.set()
+            await asyncio.gather(*held)
             await asyncio.sleep(0.2)
     finally:
-        gate.set()
+        first.set()
+        second.set()
     assert venue.hits.get("POST /v2/orders", 0) == 0, f"an order went out after the cancel: {venue.hits}"
     assert venue.hits.get("GET by_client_order_id", 0) == 0, venue.hits
 
@@ -663,19 +693,20 @@ async def test_E11_a_switch_armed_while_the_submit_is_QUEUED_is_REJECTED_KILL_SW
     adapter._fetch_asset, adapter.get_account, adapter.reference_price = _asset_read, _account, _mark
     sig = Signal(symbol="BTC/USD", direction=DirectionType.LONG, entry=159.0, sl=150.0, tp=None,
                  order_type=OrderType.MARKET, approved=True, client_order_id="sig-e11")
-    gate = threading.Event()
+    names = _queued_job_names(monkeypatch)
+    first, second = threading.Event(), threading.Event()
     try:
         async with asyncio.timeout(10):
-            held = asyncio.create_task(_hold_worker(adapter, gate))
-            await asyncio.sleep(0.05)
-            task = asyncio.create_task(ExecutionService(adapter, ExecMode.PAPER).execute(sig))
-            await _until(lambda: _lock_holder_is_entry(adapter), "the submit is queued behind the held read")
+            task, held = await _queue_the_submit_behind_a_hold(
+                adapter, names, lambda: asyncio.create_task(ExecutionService(adapter, ExecMode.PAPER).execute(sig)),
+                first, second)
             switch_off.arm(reason="E-11: pulled while the submit waited on the worker")
-            gate.set()
-            await held
+            second.set()
+            await asyncio.gather(*held)
             res = await task
     finally:
-        gate.set()
+        first.set()
+        second.set()
     assert venue.hits.get("POST /v2/orders", 0) == 0, f"the submit went out after the switch was armed: {venue.hits}"
     assert venue.hits.get("GET by_client_order_id", 0) == 0, "a refusal was looked up as an order"
     assert (res.get("status"), res.get("rejection_code")) == ("REJECTED", REJECTION_KILL_SWITCH_ARMED), res

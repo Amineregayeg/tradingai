@@ -358,6 +358,10 @@ def _scenario(monkeypatch, path: str, *, commit_mode: str, gate: threading.Event
         started = _time.monotonic()
         ended: dict = {}
         box["task"].add_done_callback(lambda _t: ended.setdefault("at", _time.monotonic()))
+        # `B453` amendment (F11/F15's gap): what the record says AT THE MOMENT THE TASK ENDS. The scenario reads `record` again
+        # only after its 0.4 s sleep, by which time a write left running in the background has landed — so a helper that
+        # RETURNED on a second cancel passed. In a real shutdown the loop closes at the task's end and that write is lost.
+        box["task"].add_done_callback(lambda _t: ended.setdefault("committed_at_end", record.get("committed", 0)))
         for _ in range(extra_cancels):
             box["task"].cancel()
             if cancel_interval_s:
@@ -381,6 +385,7 @@ def _scenario(monkeypatch, path: str, *, commit_mode: str, gate: threading.Event
         gc.collect()
         await asyncio.sleep(0.05)
         return {"outcome": outcome, "elapsed": elapsed, "finished_after": finished_after, "record": dict(record),
+                "committed_at_end": ended.get("committed_at_end"),
                 "handler_calls": handler_calls}
     return _run
 
@@ -392,6 +397,7 @@ def test_F11_a_SECOND_cancel_during_the_audit_write_does_not_abandon_it(monkeypa
     got = _in_thread(run, f"F-11 [{path}]")
     assert got["outcome"] == "cancelled", got
     assert got["record"].get("added") == 1 and got["record"].get("committed") == 1, got["record"]
+    assert got["committed_at_end"] == 1, f"the task ENDED before its audit committed (the write was left to the background): {got}"
 
 
 @pytest.mark.parametrize("path", PATHS)
@@ -428,6 +434,7 @@ def test_F15_N_cancels_during_the_write_still_end_CANCELLED_never_a_normal_retur
     got = _in_thread(_scenario(monkeypatch, path, commit_mode="gate", gate=gate, extra_cancels=3,
                                release_gate_after_s=0.1), f"F-15 [{path}]")
     assert got["outcome"] == "cancelled" and got["record"].get("committed") == 1, got
+    assert got["committed_at_end"] == 1, f"the task ENDED before its audit committed (the write was left to the background): {got}"
 
 
 @pytest.mark.parametrize("path", PATHS)

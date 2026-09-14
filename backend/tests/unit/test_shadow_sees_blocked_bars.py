@@ -20,6 +20,7 @@ from datetime import datetime, timedelta, timezone
 import pandas as pd
 import pytest
 
+from app.services.live import crypto_loop as mod
 from app.services.live.crypto_loop import LiveCryptoLoop
 
 T0 = datetime(2026, 8, 14, tzinfo=timezone.utc)
@@ -70,6 +71,7 @@ def loop_with_a_blocked_entry(monkeypatch):
     monkeypatch.setattr(loop, "_has_position", _holding)
     monkeypatch.setattr(loop, "_shadow_evaluate", _shadow)
     monkeypatch.setattr(loop, "_act", _act)
+    monkeypatch.setattr(mod, "_ticker_price", lambda _bsym: 100.0)   # B432: the tick's ticker fetch, which this arm used to take from the live network
     return loop, seen, acted
 
 
@@ -123,6 +125,7 @@ async def test_the_shadow_runs_before_the_gate_not_merely_somewhere(monkeypatch)
     monkeypatch.setattr(loop, "_entry_block_reason", _blocked)
     monkeypatch.setattr(loop, "_shadow_evaluate", _shadow)
     monkeypatch.setattr(loop, "_act", lambda *a, **k: _noop())
+    monkeypatch.setattr(mod, "_ticker_price", lambda _bsym: 100.0)   # B432: the tick's ticker fetch, which this arm used to take from the live network
 
     await loop._tick_symbol("BTC/USD", "BTCUSDT")
     assert order == ["gate", "shadow", "gate"], (

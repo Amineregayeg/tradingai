@@ -142,9 +142,13 @@ async def test_a_below_ruled_timeframe_is_flagged_and_a_ruled_one_is_not():
     assert "flags" not in evaluate(tf="5M") or not evaluate(tf="5M").get("flags")
 
 
-async def test_an_analysis_timeframe_is_not_softened_into_a_flag():
+async def test_an_analysis_timeframe_is_not_softened_into_a_flag(monkeypatch):
     """1H is a HARD_GATE violation under HG-12, not a deviation. Pre-labelling it
     as an acceptable flag would hide it from the assertion meant to catch it."""
+    from app.services.market_data.sources.binance_perp import BinancePerpetualSource
+
+    # B432: fapi.binance.com is unreachable from the suite; `_get` answers an unreachable host with an EMPTY list
+    monkeypatch.setattr(BinancePerpetualSource, "_get", lambda self, params: [])
     assert not evaluate(tf="1H").get("flags")
 
 
@@ -175,9 +179,13 @@ async def test_a_rule_that_raises_does_not_escape():
         prim2.ImbalanceInventory.detect = original
 
 
-async def test_a_dead_database_does_not_stop_the_engine_ticking():
+async def test_a_dead_database_does_not_stop_the_engine_ticking(monkeypatch):
     """`_shadow_evaluate` is called from the tick. If a telemetry write could
     raise, one unreachable database would stop the engine trading."""
+    from app.services.market_data.sources.binance_perp import BinancePerpetualSource
+
+    # B432: fapi.binance.com is unreachable from the suite; `_get` answers an unreachable host with an EMPTY list
+    monkeypatch.setattr(BinancePerpetualSource, "_get", lambda self, params: [])
     loop = LiveCryptoLoop()
     loop.run_id = None
     await loop._shadow_evaluate("BTC/USD", frame())   # no DB bound in this test

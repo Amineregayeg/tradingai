@@ -411,6 +411,7 @@ async def test_the_HALT_SITE_sets_the_alarm_even_if_the_WRITER_never_runs(monkey
     monkeypatch.setattr(loop, "_open_count", lambda *a, **k: _zero())
     monkeypatch.setattr(loop, "_record_unsized_fill", _writer_never_runs)
     monkeypatch.setattr(loop.execution, "execute", _exec)
+    monkeypatch.setattr(mod, "_ticker_price", lambda _bsym: 100.0)   # B432: the tick's ticker fetch, which this arm used to take from the live network
 
     await loop._tick_symbol("BTC/USD", "BTCUSDT")
 

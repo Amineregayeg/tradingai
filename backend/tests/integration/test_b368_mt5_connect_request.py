@@ -30,6 +30,20 @@ from app.services.broker.mt5 import MetaTrader5Adapter
 pytestmark = pytest.mark.asyncio
 
 
+def _venue_unreachable(monkeypatch, *adapter_classes) -> list[str]:
+    """`B432`: no venue is reachable from the suite. The arms below already EXPECT the connect to fail; this makes that
+    failure the suite's own rather than a lookup of a real host, and records that the connect was REACHED."""
+    reached: list[str] = []
+
+    async def _connect(self):
+        reached.append(type(self).__name__)
+        raise BrokerConnectionError("venue unreachable from the test suite (B432)", broker="test")
+
+    for cls in adapter_classes:
+        monkeypatch.setattr(cls, "connect", _connect)
+    return reached
+
+
 def _request(**over) -> BrokerConnectRequest:
     base = dict(broker="mt5", token="tok-abc", mt5_account_id="acct-123",
                 environment="demo", label="MT5 demo")
@@ -37,13 +51,14 @@ def _request(**over) -> BrokerConnectRequest:
     return BrokerConnectRequest(**base)
 
 
-async def test_connect_broker_STORES_the_token_and_account_id_the_factory_reads(db_session):
+async def test_connect_broker_STORES_the_token_and_account_id_the_factory_reads(db_session, monkeypatch):
     """The blob the API writes must be one `_make_adapter` can build an adapter from.
 
     **This is the join B368 is about**, and it is asserted end to end: the request goes through
     `connect_broker`, the row is read back, decrypted through the same `decrypt_credentials` route
     every other blob uses, and handed to the factory unmodified.
     """
+    reached = _venue_unreachable(monkeypatch, MetaTrader5Adapter)
     manager = BrokerManager()
     try:
         await manager.connect_broker(db_session, user_id="u1", request=_request())
@@ -51,6 +66,7 @@ async def test_connect_broker_STORES_the_token_and_account_id_the_factory_reads(
         # Connecting reaches the venue and cannot succeed here. The row is what this asserts, and
         # it is written before the adapter is built.
         pass
+    assert reached == ["MetaTrader5Adapter"], f"connect_broker never reached the adapter's connect: {reached}"
 
     from sqlalchemy import select
     from app.models.broker_connection import BrokerConnection
@@ -105,11 +121,15 @@ async def test_a_missing_account_id_REFUSES_BEFORE_a_row_is_written(db_session):
     assert rows == [], "a row was persisted for a request that was refused"
 
 
-async def test_a_NON_mt5_broker_is_UNAFFECTED_by_the_new_boundary_check(db_session):
+async def test_a_NON_mt5_broker_is_UNAFFECTED_by_the_new_boundary_check(db_session, monkeypatch):
     """The must-MISS. A guard added for one broker is one edit from refusing the others.
 
     `cft` supplies neither `token` nor `mt5_account_id` and must still be accepted here.
     """
+    from app.services.broker.cft_bridge_adapter import CFTBridgeAdapter
+    from app.services.broker.cryptofundtrader import CryptoFundTraderAdapter
+
+    reached = _venue_unreachable(monkeypatch, CryptoFundTraderAdapter, CFTBridgeAdapter)
     manager = BrokerManager()
     try:
         await manager.connect_broker(
@@ -122,3 +142,4 @@ async def test_a_NON_mt5_broker_is_UNAFFECTED_by_the_new_boundary_check(db_sessi
         assert "MetaApi" not in str(exc), (
             f"the MT5 boundary check rejected a non-MT5 broker: {exc}"
         )
+    assert len(reached) == 1, f"the request never reached the adapter's connect, so the boundary check refused it: {reached}"

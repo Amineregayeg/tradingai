@@ -418,6 +418,7 @@ def _driven_loop(monkeypatch, result: dict) -> tuple[LiveCryptoLoop, _Recorded]:
     monkeypatch.setattr(loop, "_has_position", lambda *a, **k: _false())
     monkeypatch.setattr(loop, "_open_count", lambda *a, **k: _zero())
     monkeypatch.setattr(loop.execution, "execute", _exec)
+    monkeypatch.setattr(mod, "_ticker_price", lambda _bsym: 100.0)   # B432: the tick's ticker fetch, which this arm used to take from the live network
     return loop, seen
 
 
@@ -463,6 +464,9 @@ async def test_a_PARTIAL_FILL_NO_LONGER_WRITES_A_REJECTION_ROW(monkeypatch):
 
     await loop._tick_symbol("BTC/USD", "BTCUSDT")
 
+    assert len(seen.decisions) == 1, (
+        f"the fill branch never ran ({seen.acts}), so 'no rejection row' below would prove nothing: B432 found this "
+        f"arm passing while its tick returned early on an unreachable ticker")
     assert seen.rejections == [], (
         f"the partial was ALSO recorded as a refusal: {seen.rejections}. One event, two "
         f"contradictory rows, and the rejection one is false"

@@ -298,7 +298,7 @@ async def test_a_just_started_run_is_not_due_rather_than_broken(bound):
 # CRITERION 9 — the payload states what it does NOT attest
 # ---------------------------------------------------------------------------
 
-async def test_the_payload_says_it_attests_liveness_only(bound):
+async def test_the_payload_says_it_attests_liveness_only(bound, monkeypatch):
     """A field, not a comment.
 
     A shadow can be alive, writing on every cycle, and grading a still-forming bar —
@@ -307,6 +307,10 @@ async def test_the_payload_says_it_attests_liveness_only(bound):
     payload, the first green reading is what gets cited when someone asks whether the
     correlate layer can be trusted.
     """
+    from app.services.market_data.sources.binance_perp import BinancePerpetualSource
+
+    # B432: fapi.binance.com is unreachable from the suite; `_get` answers an unreachable host with an EMPTY list
+    monkeypatch.setattr(BinancePerpetualSource, "_get", lambda self, params: [])
     await _run(bound)
     await _record(bound, minutes_ago=1)
 
@@ -319,8 +323,12 @@ async def test_the_payload_says_it_attests_liveness_only(bound):
     assert composed["shadow"]["attests"] == "liveness_only"
 
 
-async def test_an_unhealthy_shadow_makes_the_whole_endpoint_not_ok(bound):
+async def test_an_unhealthy_shadow_makes_the_whole_endpoint_not_ok(bound, monkeypatch):
     """Otherwise the section is decoration: present, correct, and read by nobody."""
+    from app.services.market_data.sources.binance_perp import BinancePerpetualSource
+
+    # B432: fapi.binance.com is unreachable from the suite; `_get` answers an unreachable host with an EMPTY list
+    monkeypatch.setattr(BinancePerpetualSource, "_get", lambda self, params: [])
     await _run(bound)
     await _record(bound, minutes_ago=90)
 

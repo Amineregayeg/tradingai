@@ -262,7 +262,11 @@ def _alpaca(book, gated: set | None = None, gate: asyncio.Event | None = None):
 
 async def _until(predicate, what="the condition", timeout_s: float = 5.0):
     """Bounded by TIME, not iterations (`B437`: a call on a worker thread takes wall time that 10,000 zero-sleeps may
-    not cover)."""
+    not cover).
+
+    **Polls every 1 ms, which suits a MONOTONIC predicate only** — one that, once true, stays true (a count reached, a task
+    parked, an event set). A predicate that is true only for a transient window can be missed between two polls; wait on an
+    event set inside that window instead (review's N2)."""
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout_s
     while loop.time() < deadline:
@@ -595,7 +599,9 @@ async def test_L2_on_EXPIRY_the_row_names_the_in_flight_entry_and_says_it_may_ex
 @pytest.mark.asyncio
 async def test_L2b_the_DEADLINE_is_measured_from_close_all_START_not_from_sweep_b(monkeypatch):
     """Sweep (a)'s enumeration takes all but 50ms of the deadline (an injected clock). Measured from sweep (b)'s
-    start, the wait would be min(3C + B, 100s) and this arm times out."""
+    start, the wait would be min(the derived estimate, 100s) and this arm times out — BY NAME: its 10 s bound is longer
+    than `_bounded_event`'s 6 s self-release, so under the cap mutant the hold releases first and the arm fails on its
+    assertion rather than on the timeout (review's N1; the bound used to be 5 s, under the release)."""
     from app.core.kill_switch_state import KILL_SWITCH_RESPONSE_DEADLINE_S
     import app.services.broker.alpaca as alpaca
 
@@ -615,7 +621,7 @@ async def test_L2b_the_DEADLINE_is_measured_from_close_all_START_not_from_sweep_
             clock.now += KILL_SWITCH_RESPONSE_DEADLINE_S - 0.05
 
     book.on_enumerate = _slow_sweep_a
-    async with asyncio.timeout(5):
+    async with asyncio.timeout(10):
         entry = asyncio.create_task(adapter.place_order(_entry_req()))
         gated.add(entry)
         await _until(lambda: entry in adapter.parked, "the entry parked mid-resolution, holding the lock")

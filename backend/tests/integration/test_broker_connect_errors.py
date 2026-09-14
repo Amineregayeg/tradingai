@@ -91,7 +91,7 @@ async def test_alpaca_IS_supported_now_and_a_missing_credential_is_a_400(client)
     )
 
 
-async def test_valid_config_is_not_rejected_as_invalid(client):
+async def test_valid_config_is_not_rejected_as_invalid(client, monkeypatch):
     """Guard against over-correction.
 
     A well-formed request must NOT come back 400. It will still fail — there are
@@ -99,7 +99,21 @@ async def test_valid_config_is_not_rejected_as_invalid(client):
     connection/upstream failure (502), which is a different class of problem and
     must stay distinguishable from "you configured this wrong".
     """
+    from app.core.exceptions import BrokerConnectionError
+    from app.services.broker.cft_bridge_adapter import CFTBridgeAdapter
+    from app.services.broker.cryptofundtrader import CryptoFundTraderAdapter
+
+    reached: list[str] = []
+
+    async def _unreachable(self):
+        # B432: the venue is not reachable from the suite; the connect fails as this arm expects, and says it was reached
+        reached.append(type(self).__name__)
+        raise BrokerConnectionError("venue unreachable from the test suite (B432)", broker="cryptofundtrader")
+
+    monkeypatch.setattr(CryptoFundTraderAdapter, "connect", _unreachable)
+    monkeypatch.setattr(CFTBridgeAdapter, "connect", _unreachable)
     status, detail = await _connect(client)
+    assert len(reached) == 1, f"the request never reached the adapter's connect: status {status}, {detail!r}"
 
     assert status != 400, (
         f"a valid configuration was rejected as invalid: {detail!r}"

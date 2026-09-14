@@ -559,16 +559,70 @@ async def _holding_with_bounded_wait(lock: asyncio.Lock, wait_s: float):
 #     order's ids, and re-raises. A cancelled READ is abandoned at once; nothing changed at the venue.
 #
 # Keyed by `account_key_of` (a hash, never logged). The registry holds executors WEAKLY: an adapter holds its executor,
-# so the thread lives as long as some adapter on the account does, and exits when the last one is gone. B428b's quote
-# client authenticates with the same key and must go through the SAME executor: `account_executor(key).run(...)` takes
-# any callable, not only a TradingClient method. B441's timeouts bound every call, which is what keeps one hung call
-# from stalling the account for ever.
+# so the thread lives as long as some adapter on the account does, and exits when the last one is gone (and a queued or
+# running job holds it too, `B462`). B428b's market-data QUOTE client does NOT use this worker: by T-0144 R3' it is its
+# own data client with its own timeout mount and its own single worker (`data:<key>`, `AlpacaAdapter._quote_worker`), so
+# a held trading call never delays a quote and a quote never queues a trading call. `account_executor(key).run(...)`
+# still takes any callable, not only a TradingClient method. B441's timeouts bound every call, which is what keeps one
+# hung call from stalling the account for ever.
 
-#: SDK members that CHANGE something at the venue. Their calls are shielded from cancellation.
-ALPACA_WRITE_CALLS: frozenset[str] = frozenset({
-    "submit_order", "close_position", "close_all_positions", "cancel_order_by_id", "cancel_orders",
-    "replace_order_by_id",
-})
+#: `B463`. **Which SDK calls CHANGE something at the venue is DERIVED, never listed.** A hand-kept list of six names left
+#: seven of alpaca-py 0.44.0's thirteen writing members out, and a write under a name nobody added would have run as a READ:
+#: unshielded, withdrawable while queued, abandoned while running, with nothing logged. The class of a call is read from the
+#: member's SOURCE: it calls `self.post` / `self.delete` / `self.patch` / `self.put` -> WRITE; it calls only `self.get` -> READ;
+#: anything else — no request verb, or a source that cannot be read — is NEITHER, and `_call` REFUSES it rather than guess.
+CALL_WRITE, CALL_READ = "write", "read"
+_WRITE_VERBS = frozenset({"post", "delete", "patch", "put"})
+_CALL_CLASSES: dict[tuple[type, str], str | None] = {}
+_CALL_CLASSES_GUARD = threading.Lock()
+
+
+def _sdk_trading_client_class() -> type:
+    from alpaca.trading.client import TradingClient   # `B328`: this module stays importable without the SDK
+
+    return TradingClient
+
+
+def classify_call(client: Any, name: str) -> str | None:
+    """`CALL_WRITE`, `CALL_READ`, or `None` (refuse) for `client.<name>`.
+
+    The member is read from the client's own class when the client IS a `TradingClient` (a subclass may add or override
+    a member), and from `TradingClient` otherwise — a test double's members are stand-ins for the SDK's, so they are
+    classified by the SDK member they stand in for. **Introspection failure RAISES** (`BrokerError`): an unreadable source
+    would otherwise yield no verbs, and "no verbs" silently becomes "not a write" (review's W-4)."""
+    import ast
+    import inspect
+    import textwrap
+
+    sdk = _sdk_trading_client_class()
+    owner = type(client) if isinstance(client, sdk) else sdk
+    key = (owner, name)
+    with _CALL_CLASSES_GUARD:
+        if key in _CALL_CLASSES:
+            return _CALL_CLASSES[key]
+    member = inspect.getattr_static(owner, name, None)
+    function = getattr(member, "__func__", member)
+    if not inspect.isfunction(function):
+        verdict = None
+    else:
+        try:
+            tree = ast.parse(textwrap.dedent(inspect.getsource(function)))
+        except (OSError, TypeError, SyntaxError) as exc:
+            raise BrokerError(
+                f"cannot classify Alpaca call {name!r}: its source on {owner.__name__} is unreadable "
+                f"({type(exc).__name__}: {exc}), so whether it writes cannot be decided. Nothing was sent.",
+                broker="alpaca",
+            ) from exc
+        verbs = {
+            node.func.attr for node in ast.walk(tree)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name) and node.func.value.id == "self"
+            and node.func.attr in _WRITE_VERBS | {"get"}
+        }
+        verdict = CALL_WRITE if verbs & _WRITE_VERBS else CALL_READ if verbs == {"get"} else None
+    with _CALL_CLASSES_GUARD:
+        _CALL_CLASSES[key] = verdict
+    return verdict
 
 
 class AccountExecutor:
@@ -596,7 +650,11 @@ class AccountExecutor:
             reached the venue is logged (`describe(result)` supplies the order's ids), and `CancelledError` is re-raised.
             It never returns normally after a cancellation.
         A READ is not shielded (S-2): a cancelled read is abandoned at once, and a queued one never runs."""
-        def _job():
+        def _job(_holds_its_executor=self):
+            # `B462`. **THE QUEUED JOB HOLDS ITS `AccountExecutor` UNTIL IT ENDS** (a default argument keeps a strong reference on
+            # the function object, which the pool's work item holds until the call returns). The registry is WEAK: without
+            # this, an abandoned READ whose caller and adapter were dropped left its executor collectable while its thread
+            # still ran, and the next adapter on the account got a SECOND worker — two calls on one account at once.
             if guard is not None:
                 declined = guard()
                 if declined is not None:
@@ -1263,9 +1321,17 @@ class AlpacaAdapter(BrokerAdapter):
                 f"the Alpaca client has no {name!r}. Every member this adapter calls is on "
                 f"TradingClient — see {SHAPES}.", broker=self.broker_name,
             )
+        # `B463`: the call's class from the SDK member's source. NEITHER is refused here, before anything is queued.
+        kind = classify_call(self._client, name)
+        if kind is None:
+            raise BrokerError(
+                f"refusing Alpaca call {name!r}: its SDK source issues no request this adapter can classify as a write "
+                f"(post/delete/patch/put) or a read (get only), so it would run unshielded by guess. Nothing was sent.",
+                broker=self.broker_name,
+            )
         try:
             # `B437`: on this ACCOUNT's worker thread, never inline on the event loop. Writes are shielded.
-            write = name in ALPACA_WRITE_CALLS
+            write = kind == CALL_WRITE
             result = await self._account_worker().run(
                 method, args, kwargs, write=write, call=name,
                 describe=_describe_write(name, args, kwargs) if write else None,

@@ -30,6 +30,51 @@ from app.db.session import get_session
 from app.main import create_app
 
 # ---------------------------------------------------------------------------
+# `B432`: the suite cannot reach the network, and says so
+# ---------------------------------------------------------------------------
+
+from tests._network_guard import GUARD as _NETWORK_GUARD  # noqa: E402
+
+#: Tests that GENUINELY need the network, BY TEST ID (no parameter suffix), each citing `B432` and why. A whole-file entry
+#: and an entry whose file is collected but whose test is not (stale) are refused at collection. Empty is the goal.
+B432_NETWORK_OPT_OUTS: dict[str, str] = {
+}
+
+_NETWORK_GUARD.install()
+
+
+def _b432_opt_outs() -> dict[str, str]:
+    import json
+
+    extra = os.environ.get("B432_TEST_EXTRA_OPT_OUTS")   # used ONLY by the guard's own arms, to plant a bad entry
+    return {**B432_NETWORK_OPT_OUTS, **(json.loads(extra) if extra else {})}
+
+
+def pytest_collection_modifyitems(session, config, items):
+    collected = {item.nodeid.split("[", 1)[0] for item in items}
+    files = {nodeid.split("::", 1)[0] for nodeid in collected}
+    for test_id, reason in _b432_opt_outs().items():
+        if "::" not in test_id:
+            raise pytest.UsageError(f"B432: opt-out {test_id!r} names a FILE; opt a test out by its id")
+        if "B432" not in str(reason):
+            raise pytest.UsageError(f"B432: opt-out {test_id!r} must cite B432 and say why it needs the network")
+        if test_id.split("::", 1)[0] in files and test_id not in collected:
+            raise pytest.UsageError(f"B432: STALE opt-out {test_id!r}: its file is collected and the test is not")
+
+
+@pytest.fixture(autouse=True)
+def _b432_no_network(request):
+    """Every refused attempt fails the test HERE, at teardown — whatever the code under test did with the exception."""
+    opted_out = request.node.nodeid.split("[", 1)[0] in _b432_opt_outs()
+    _NETWORK_GUARD.begin(allow=opted_out)
+    yield
+    attempts = _NETWORK_GUARD.end()
+    if attempts and not opted_out:
+        pytest.fail(f"B432: this test attempted outbound network access, which the suite blocks: {attempts}. Patch the "
+                    f"call, or opt the test out by id in tests/conftest.py citing B432.", pytrace=False)
+
+
+# ---------------------------------------------------------------------------
 # `B442`: the kill switch is ONE per process — isolate it per test
 # ---------------------------------------------------------------------------
 
