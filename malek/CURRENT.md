@@ -12,7 +12,7 @@ The plan is `ALPACA_PROGRAMME.md` on `main`.
 ## State
 
 - **The trading engine is held (stopped on purpose) and has been since 2026-09-01.** Do not start it.
-- **Production runs commit `ab64c03`** (the kill-switch release, deployed 2026-09-14 ~05:05 WAT, database migration 0016). `main` is ahead of it. Production is
+- **Production runs commit `e7d7c81`** (`B437` + `B453`, deployed 2026-09-14 13:52 WAT, database still at migration 0016). `main` is ahead of it. Production is
   pinned to a reviewed commit with a compose override file; never deploy with a plain `docker compose up`.
 - **The first real orders were placed on the Alpaca PAPER account on 2026-09-14** (three probe rounds, about $15 each,
   ending flat). They showed the order path as built cannot trade Alpaca crypto yet: see `B447`–`B451` in `KNOWN_ISSUES.md`.
@@ -37,9 +37,9 @@ defect found goes into `KNOWN_ISSUES.md` with a B-number. A commit is only "done
 
 ## In progress
 
-- **Item 3 is done** (release `ab64c03`). The `B453` fix (2f, `c1589e2`) passed review and ships with `B437`; (2e) passed.
-- **Item 4, `B437`:** all 42 of its own checks passed. Its final parallel test run is being redone after an interruption
-  (below). Then it commits, goes to review, and deploys with (2f).
+- **Items 3 and 4 are done.** `B437` (one worker thread per Alpaca account) passed review and was DEPLOYED with the `B453`
+  fix as release `e7d7c81`, 13:52 WAT, checked by content. Two small follow-ups are filed (`B462`, `B463`) and go in
+  commit `B437b`, right after `B428b` commit (i).
 - **Item 5, `B428b`:** the DESIGN is approved (`agents/tasks/T-0144/DESIGN.md`), and building commit (i) has started:
   - position identity
   - pair spelling
@@ -47,6 +47,9 @@ defect found goes into `KNOWN_ISSUES.md` with a B-number. A commit is only "done
   - the minimum
   - quantities
   - migration 0017
+  Commit (i) is BUILT, and its mutation record run is in progress. Migration 0017 passed a scratch-copy run on a real
+  Postgres copy of production: rows unchanged, and a refused downgrade rolls back completely. Review's gaps are ruled in
+  `T-0144/PLAN.md` revision 5.
   Probe round 6 confirmed that a cancelled resting order frees the position at once. New issues folded in: `B457`–`B461`.
 - **Interruption:** both working sessions stopped on an API connection error (a certificate problem) from about 11:00
   to 12:50 WAT, and were resumed.
@@ -63,8 +66,8 @@ defect found goes into `KNOWN_ISSUES.md` with a B-number. A commit is only "done
    - The fee is 0.25% per leg (`B450`).
    - The minimum is $10 to open (`B451`).
    - The order-confirmation fix works on the real venue (`B427`).
-3. ~~The kill-switch release~~ — done: `ab64c03`. Follow-up fix (2f) for `B453` goes out with the next release.
-4. `B437` — Alpaca calls stop blocking the app (one worker per account).
+3. ~~The kill-switch release~~ — done: `ab64c03`.
+4. ~~`B437`~~ — done: deployed `e7d7c81` with (2f). Follow-up `B437b` (`B462`, `B463`, the `B432` socket-blocking fixture) comes after (i).
 5. `B428b` — manage and record positions on Alpaca: stops enforced by the engine, prices from Alpaca's quote,
    one pair spelling, quantities from the venue position, trade rows from Alpaca's fill history, and start-up
    reconciliation.
