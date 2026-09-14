@@ -1,6 +1,6 @@
 # Malek — current state
 
-_Last updated: 2026-09-14 12:55 WAT, by Malek's manager session. Updated about every 2 hours._
+_Last updated: 2026-09-14 14:50 WAT, by Malek's manager session. Updated about every 2 hours._
 
 ## Goal right now
 
@@ -14,8 +14,9 @@ The plan is `ALPACA_PROGRAMME.md` on `main`.
 - **The trading engine is held (stopped on purpose) and has been since 2026-09-01.** Do not start it.
 - **Production runs commit `e7d7c81`** (`B437` + `B453`, deployed 2026-09-14 13:52 WAT, database still at migration 0016). `main` is ahead of it. Production is
   pinned to a reviewed commit with a compose override file; never deploy with a plain `docker compose up`.
-- **The first real orders were placed on the Alpaca PAPER account on 2026-09-14** (three probe rounds, about $15 each,
-  ending flat). They showed the order path as built cannot trade Alpaca crypto yet: see `B447`–`B451` in `KNOWN_ISSUES.md`.
+- **Real orders have been placed only by probes, on the Alpaca PAPER account** (seven rounds on 2026-09-14, $10–30 each,
+  every round ending flat). The engine itself has placed none. The probes showed the order path as built cannot trade
+  Alpaca crypto yet: see `B447`–`B451` in `KNOWN_ISSUES.md`.
 - **The engine cannot select Alpaca today.** A hard-coded setting (`BROKER_MODE = "sim"`, register `B430`) keeps it
   on the simulator. That is a safety lock, and it is switched last, deliberately.
 
@@ -51,8 +52,20 @@ defect found goes into `KNOWN_ISSUES.md` with a B-number. A commit is only "done
   Postgres copy of production: rows unchanged, and a refused downgrade rolls back completely. Review's gaps are ruled in
   `T-0144/PLAN.md` revision 5.
   Probe round 6 confirmed that a cancelled resting order frees the position at once. New issues folded in: `B457`–`B461`.
-- **Interruption:** both working sessions stopped on an API connection error (a certificate problem) from about 11:00
-  to 12:50 WAT, and were resumed.
+- **Commits (ii), (iii) and (iv) already have their mutation checks registered in advance** by review (in
+  `agents/tasks/_runs/b428b_ii`, `_iii` and `_iv`), with review's design gaps ruled in `T-0144/PLAN.md` revisions 6 and 7.
+  Two decisions taken there:
+  - trade rows gain the closing order's id (migration 0018, in (ii)), so a partial close is known by identity
+  - the engine never sells or counts units on a symbol that it did not open itself
+- **Item 6, `B430`, is being prepared in parallel.** Review attacked its brief and found the switch as written would
+  take the API down at boot, because production has no Alpaca credentials in its environment. It would also create a
+  second credential source. Both are now ruled in `T-0145/PLAN.md` revisions 2 and 3: the engine uses the saved broker
+  connection, building a broker never fails boot, and there is one list of reasons Start refuses. `B430` is amended in the
+  register. Probe round 7 (14:44 WAT, paper, ended flat) measured three facts:
+  - a reused order id is refused
+  - 36- and 40-character ids work
+  - fill-history pagination is complete, and its `after` filter is exclusive
+- **Next for review:** attacking Part E's brief (`T-0146`).
 - **Process change (Malek: "too slow"):** test runs are now parallel, re-runs are limited to what a change can affect,
   and only review re-runs earlier checks.
 
@@ -80,6 +93,7 @@ defect found goes into `KNOWN_ISSUES.md` with a B-number. A commit is only "done
   choice), stops plus the 70% take-profit, or nothing until someone presses Start. It reverses the rule, since
   2026-08-08, that the engine never starts itself.
 
+- Part of the same decision: under "stops only", may the engine also close at a take-profit level? Provisionally no.
 - Stops on Alpaca are enforced by the engine for now (no protection while it is down); a venue backup stop can be added later.
 - The wait before an order counts as unresolved (default 5 seconds).
 - Whether to cancel the unfilled rest of a partially filled order.
@@ -88,11 +102,14 @@ defect found goes into `KNOWN_ISSUES.md` with a B-number. A commit is only "done
 
 ## Do not touch
 
-- `backend/app/services/broker/`, `execution/service.py`, `compliance/kill_switch.py`, `models/decision_record.py`,
-  and new migrations: `B442` is being edited there now.
+- `backend/app/services/broker/`, `execution/`, `live/crypto_loop.py`, `evaluation/feedback.py`,
+  `monitoring/data_health.py`, `models/decision_record.py`, `models/trade.py`, and new migrations: `B428b` commit (i) is
+  uncommitted in the shared tree (26 files), and `B437b` is being built on top of it.
 - Production, the engine, and `BROKER_MODE`.
 
 ## For the other side
 
 - Welcome. The newest entries at the bottom of `KNOWN_ISSUES.md` are the best map of where the risks are.
 - New findings: list them under "For the register" in `amine/CURRENT.md` and this side will file them with an ID.
+- Newly filed today: `B462`, `B463` (B437 follow-ups) and `B464` (the broker manager defaults a blank connection
+  environment two different ways). `B430` and `B457` were amended with measurements.
