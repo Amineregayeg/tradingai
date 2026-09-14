@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-14 (newest entry B453 — deployed in ab64c03: a cancelled kill switch whose sweep then raises escapes as that exception instead of CancelledError, so B446's per-row log and fresh-session audit on the cancelled path never run; the same hole B437's new shield had. Fix routed as (2f).)
+Last updated: 2026-09-14 (newest entry B456 — three B428b blockers from review's attack on the brief, confirmed by reading ab64c03: on a venue broker every deploy would close the whole account at shutdown (B454); start() abandons the records a restart should adopt (B455); every Alpaca BTC position shares one Position.id, so a P&L sum by it adds every BTC trade (B456). Latent until B430; engine held.)
 
 ---
 
@@ -30009,3 +30009,73 @@ a second cancel, with a time bound (5s), so repeated cancellations during shutdo
 bound expires or the write fails, the rows are logged at ERROR, and `CancelledError` is still re-raised. Review's kill
 set: `_runs/2f/KILL_SET.md`, F-1..F-10.
 
+---
+
+### B454 — ON A VENUE BROKER, EVERY DEPLOY WOULD CLOSE THE WHOLE ACCOUNT AT MARKET. The app's shutdown stops the loop, and the loop's `stop()` closes every position, which on Alpaca means every position in the account, with no trade rows and no time to finish
+
+**Found by review attacking the `B428b` brief (`agents/tasks/_runs/t0144_attack/FINDINGS.md`), read at `ab64c03`; the manager confirmed the code by reading. Latent: `B430` keeps the engine off Alpaca, and the engine is held.**
+
+```
+main.py (shutdown)          await app.state.live_loop.stop()
+LiveCryptoLoop.stop()       if was_running: closed = await self.paper.close_all_positions()
+                            docstring: "OPEN POSITIONS ARE CLOSED, not abandoned" — right for the in-memory simulators
+AlpacaAdapter.close_all_positions   every position in the ACCOUNT (not only the engine's), at market, two sweeps up to the 100s cap
+deploy/                     no stop_grace_period anywhere, so Docker's default 10s SIGKILLs the shutdown mid-sweep
+```
+
+On the simulators, closing at stop is correct: their positions live in memory and die with the process (`A11`). **On
+Alpaca, the positions outlive the process, so the same rule turns every api restart — every deploy — into a
+liquidation of the account.**
+- the engine's own positions and any manual ones
+- nothing writes a trade row, because Alpaca's close-all emits no settle event
+- a SIGKILL can land in the middle of the sweep
+- the restart then finds nothing to adopt (`B455`)
+
+**Fix direction (in `B428b`), ruled by the manager:** on a venue broker, `stop()` does NOT close positions. It logs
+them and leaves them for start-up reconciliation to adopt. Closing everything is the kill switch's job, done
+deliberately. Stated residual: no stop is enforced while the engine is down (T-0144 R1).
+
+---
+
+### B455 — `start()` ABANDONS WHAT RECONCILIATION WOULD ADOPT. It marks every OPEN decision not held in memory ABANDONED, and in a fresh process that is every one, so an Alpaca position that survived a restart loses its record before anything can adopt it
+
+**Found by review attacking the `B428b` brief (`agents/tasks/_runs/t0144_attack/FINDINGS.md`), read at `ab64c03`; the manager confirmed the code by reading. Latent: `B430` keeps the engine off Alpaca, and the engine is held.**
+
+```
+LiveCryptoLoop.start()                   await self.reconcile_abandoned_decisions()   before reset_run
+reconcile_abandoned_decisions            marks ABANDONED every OPEN DecisionRecord whose id is not in self._open_decision
+self._open_decision                      empty in a fresh process
+pinned by tests/integration/test_abandoned_decisions.py::test_a_record_left_open_by_a_dead_process_is_resolved
+```
+
+`ABANDONED` is true for a simulator position, which died with the process (`A11`). **It is false for a venue position,
+which is still open at Alpaca.** T-0144's R8 (adopt a position that has an OPEN record) would find no OPEN record, and
+would halt on every position the engine itself opened.
+
+**Fix direction (in `B428b`):** on a venue broker, reconciliation replaces abandonment. A record whose position still
+exists is adopted: its stop, its tranche plan, and whether its partial was already taken (review's F8). A record whose
+position is gone is settled from the account's FILL activities, never marked ABANDONED. The existing arm stays
+correct for the simulators, scoped to them.
+
+---
+
+### B456 — EVERY ALPACA BTC POSITION HAS THE SAME `Position.id`, because the adapter uses the asset id. A realised-P&L sum keyed by that id would add up every BTC trade ever
+
+**Found by review attacking the `B428b` brief (`agents/tasks/_runs/t0144_attack/FINDINGS.md`), read at `ab64c03`; the manager confirmed the code by reading. Latent: `B430` keeps the engine off Alpaca, and the engine is held.** The id equality is MEASURED on the paper account.
+
+```
+AlpacaAdapter._to_position     Position(id=str(raw.asset_id), ...)
+probe round 2 position         asset_id 64bbff51-59d6-4b3c-9351-13ad85e3c752
+probe round 3 position         asset_id 64bbff51-59d6-4b3c-9351-13ad85e3c752    (a different position, the same id)
+_persist_live_close            Trade.broker_id = ev["position_id"]
+_realised_pnl_for_position     SUM(Trade.pnl_dollars) WHERE broker_id == position_id   no run or time filter
+```
+
+**On the simulators each position has its own id. On Alpaca the "position id" names the ASSET.** If `B428b`'s settle
+events carry it, as the simulators' do, every closed decision's `realized_r` absorbs the P&L of every earlier BTC trade.
+It would also break the tranche plans (`B444` keyed them by order id, which fails differently) and anything else that
+assumes one id per position.
+
+**Fix direction (in `B428b`):** one per-position identity that the engine assigns: the entry order id, or the
+decision id. Tranche plans, trade rows, the P&L sum and reconciliation all use it. The venue's symbol is kept only for
+addressing the venue.
