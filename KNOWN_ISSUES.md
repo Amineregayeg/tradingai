@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-14 (newest entry B456. Probe round 5 amended B450: the fee is 0.25% on both legs, pinned with a $1,000 round trip (in kind on the buy, in cash on the sell); and B440: a client_order_id refused with 403 is reusable. B447's sells-under-bid line corrected: not established.)
+Last updated: 2026-09-14 (newest entry B460 — from execute's B428b design scans: an Alpaca partial close sends str(float) quantities in scientific notation (B457); quantity columns at 6dp lose up to 0.7% of BTC sizes (B458); the broker-capability guard misses getattr reads and aliases (B459); stop() leaves settle writes unawaited at shutdown (B460).)
 
 ---
 
@@ -30150,3 +30150,64 @@ assumes one id per position.
 **Fix direction (in `B428b`):** one per-position identity that the engine assigns: the entry order id, or the
 decision id. Tranche plans, trade rows, the P&L sum and reconciliation all use it. The venue's symbol is kept only for
 addressing the venue.
+
+---
+
+### B457 — AN ALPACA PARTIAL CLOSE SENDS ITS QUANTITY AS `str(float)`, which serialises small crypto quantities in scientific notation
+
+**Found by execute's B428b design scans at `c1589e2`, each grepped in the register first; confirmed by the manager as noted. Latent: the engine does not trade Alpaca (`B430`).** Manager checked in Python: `str(round(0.0001*0.7, 8))` is `'7e-05'`, and **`str(float('0.000058413'))` is `'5.8413e-05'`**. That
+is the exact remainder measured in probe round 3.
+
+```
+AlpacaAdapter.close_position   options = ClosePositionRequest(qty=str(lot_size))     lot_size is a float
+```
+
+Whether Alpaca accepts `5.8413e-05` as a quantity is unmeasured. Either way, the string sent is not the decimal the engine
+computed. The same file already avoids this on entries (`qty=str(quantity)` from a `Decimal`). **Fix (in `B428b`, R7' makes
+every close an ordinary order):** every venue quantity is formatted from a `Decimal`, quantised to the asset increment,
+with fixed-point formatting. An arm plants a quantity below 1e-4 and asserts no `e` in the request.
+
+---
+
+### B458 — `DecisionRecord.sized_units` AND `fill_price` ARE `Numeric(18,6)`, like `Trade.lot_size`: at BTC quantities, 6 decimal places lose up to 0.7% of a position size
+
+**Found by execute's B428b design scans at `c1589e2`, each grepped in the register first; confirmed by the manager as noted. Latent: the engine does not trade Alpaca (`B430`).** Manager confirmed the three column types at `c1589e2`.
+
+```
+decision_record.py   sized_units  Numeric(18, 6)      fill_price  Numeric(18, 6)
+trade.py             lot_size     Numeric(18, 6)
+probe round 3        a runner of 0.000058413 BTC is stored as 0.000058    (−0.71%)
+```
+
+T-0144's R13 widened only `Trade.lot_size`. **Fix:** migration 0017 widens every quantity column the engine writes from
+a venue fill to 9 decimal places, and review gets a derived scan of `Numeric(18, 6)` columns fed from venue quantities.
+A price column at 6 decimal places is fine for USD prices, so `fill_price` is checked and stated, not assumed.
+
+---
+
+### B459 — `test_b428_broker_capabilities`'s derived scan of `self.paper.X` MISSES `getattr` string reads and aliases, so a new broker requirement written through `getattr` escapes the guard `B428a` built
+
+**Found by execute's B428b design scans at `c1589e2`, each grepped in the register first; confirmed by the manager as noted. Latent: the engine does not trade Alpaca (`B430`).**
+
+```
+direct self.paper.X uses found by the scan    23
+getattr(self.paper, "...") reads not found    10
+alias (crypto_loop:1449) not followed         1
+```
+
+The guard's promise is that "a missing method is a category, not one incident". A member reached by `getattr` or through
+an alias is the same category, invisible to the scan. **Fix (with `B428b`, whose on_tick work adds members):** the
+scan follows `getattr` calls with a constant string, and assignments of `self.paper` to a local. Each shape gets a plant.
+
+---
+
+### B460 — `LiveCryptoLoop.stop()` SCHEDULES SETTLE-PERSISTENCE TASKS WITHOUT AWAITING THEM, and nothing gives shutdown a grace period, so trade rows written at stop can be lost
+
+**Found by execute's B428b design scans at `c1589e2`, each grepped in the register first; confirmed by the manager as noted. Latent: the engine does not trade Alpaca (`B430`).** **By reading, not measured.**
+
+When `stop()` closes the simulators' positions, each settle event schedules `_persist_and_resolve` as a task that nothing
+awaits. A process shutdown can end before those tasks write. With no `stop_grace_period`, Docker sends SIGKILL at 10s.
+The trade row and the decision's resolution would then be missing for a position that did close. That is `A11`'s "0 trades
+when it took one", arriving by another path. **Fix (with `B428b`'s shutdown work, R12'/M7):** `stop()` awaits the
+persistence tasks it caused, with a bound, and logs any it could not finish. The release override's grace period (M7)
+covers the wait. An arm makes a settle write slow and asserts `stop()` does not return before it lands, or reports it.
