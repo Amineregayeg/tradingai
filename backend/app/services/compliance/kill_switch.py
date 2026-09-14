@@ -135,6 +135,15 @@ class KillSwitch:
                         "re-raising the cancellation",
                         user_id=user_id, reason=reason,
                     )
+            except BaseException:
+                # `B453`. THE SWEEP RAISED. With no cancellation that is the trigger's own failure and it propagates, as
+                # before, the same object (F-4). AFTER one it must NOT escape from this await: the caller was cancelled
+                # and must see `CancelledError`, with the failure logged and audited below. Measured at ab64c03
+                # (deployed): it escaped as the sweep's RuntimeError, and the row log and fresh-session audit never ran.
+                # A BaseException that is not an Exception (KeyboardInterrupt, SystemExit) still escapes as itself from
+                # `sweep.result()` below (S-F2).
+                if not caller_cancelled:
+                    raise
 
         if sweep.cancelled():
             self._log_rows("the kill switch's SWEEP was itself CANCELLED; rows reported before it stopped",
@@ -145,12 +154,64 @@ class KillSwitch:
         try:
             result = sweep.result()
         except Exception as exc:  # noqa: BLE001 - the caller was cancelled; that is what it must see
-            logger.error("Kill switch: the CANCELLED trigger's sweep raised", error=f"{type(exc).__name__}: {exc}")
-            raise asyncio.CancelledError("the kill switch trigger was cancelled") from exc
-        self._log_rows("the kill switch trigger was CANCELLED; the sweep FINISHED with this row",
-                       result.get("details"))
-        await self._audit_in_fresh_session(user_id, result)
+            # `B453`. BOTH EXITS land here (review's F-5): a sweep that raised THROUGH the shield after the cancel (caught
+            # in the loop above), and a sweep already done with an exception when the cancel landed — which at ab64c03
+            # re-raised correctly and still left no audit and no rows. There is no result dict, so the rows are the
+            # exception's `partial_report` if it carries one, else what the manager had reported so far; NO COUNTS are
+            # invented (F-6, B366).
+            from app.services.broker.manager import broker_manager
+
+            failure = f"{type(exc).__name__}: {exc}"
+            partial = getattr(exc, "partial_report", None)
+            rows = list(partial) if isinstance(partial, list) else broker_manager.close_all_rows_so_far()
+            logger.error("Kill switch: the CANCELLED trigger's sweep RAISED; rows reported before it failed follow",
+                         error=failure, rows_so_far=len(rows))
+            await self._leave_cancelled_record(
+                user_id, rows, "the kill switch trigger was CANCELLED and its sweep RAISED; row reported before it failed",
+                {"reason": reason or self._reason, "positions_closed": None, "positions_failed_to_close": None,
+                 "details": rows, "sweep_failure": failure},
+            )
+            raise asyncio.CancelledError("the kill switch trigger was cancelled; its sweep raised") from exc
+        await self._leave_cancelled_record(
+            user_id, result.get("details"), "the kill switch trigger was CANCELLED; the sweep FINISHED with this row", result)
         raise asyncio.CancelledError("the kill switch trigger was cancelled after its sweep finished")
+
+    #: How long a cancelled trigger's audit write may take, SHIELDED from further cancellations (manager's ruling S-F1).
+    #: Read LIVE on every write.
+    CANCELLED_AUDIT_BOUND_S = 5.0
+
+    async def _leave_cancelled_record(self, user_id: str, rows, context: str, audit: dict) -> None:
+        """**The record a CANCELLED trigger leaves, on EVERY cancelled path** (`B446`, `B453`; ruling F-17): the sweep
+        finished, the sweep raised through the shield, or the sweep had already raised when the cancel landed. Every row
+        at ERROR — or, with none, that the state of every position is UNKNOWN — then the audit row in a FRESH session.
+
+        THE WRITE IS SHIELDED AND BOUNDED (manager's ruling S-F1, review's measurements on 3.12.3): repeated shutdown
+        cancellations must not erase the record. ONE deadline is fixed when the write starts; each further cancellation
+        is noted and the write is awaited again for what REMAINS of that deadline — never a bound restarted per cancel
+        (shape B), never a loop swallowing cancels inside `asyncio.timeout`, which swallows the timeout's own cancel and
+        hangs (shape A). On expiry the rows are already at ERROR, the expiry is said, and the write is LEFT RUNNING — it
+        may still commit — with a callback that retrieves its outcome, so nothing reaches the loop's exception handler
+        (F-16). Never raises; every caller re-raises `CancelledError` after it."""
+        self._log_rows(context, rows if rows else None)
+        write = asyncio.ensure_future(self._audit_in_fresh_session(user_id, audit))
+        loop = asyncio.get_running_loop()
+        bound = self.CANCELLED_AUDIT_BOUND_S
+        deadline = loop.time() + bound
+        while not write.done():
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                write.add_done_callback(lambda task: task.cancelled() or task.exception())
+                logger.error("Kill switch: the CANCELLED trigger's audit write did not finish within its bound; the rows "
+                             "above are the record, and the write is left running", bound_s=bound)
+                return
+            try:
+                await asyncio.wait_for(asyncio.shield(write), remaining)
+            except asyncio.CancelledError:
+                continue          # a further cancellation: noted by the caller's re-raise; the write goes on
+            except TimeoutError:
+                continue          # the deadline check above says so
+            except Exception:  # noqa: BLE001 - _audit_in_fresh_session guards itself; belt and braces
+                return
 
     async def _sweep(self, db: AsyncSession, user_id: str, reason: str | None, outcome: dict) -> dict:
         """The trigger's body as its own task. Clears the in-progress mark when the SWEEP ends, however it ends."""
@@ -209,6 +270,8 @@ class KillSwitch:
                 "reason": result.get("reason"),
                 "positions_closed": result.get("positions_closed"),
                 "positions_failed": result.get("positions_failed_to_close"),
+                # `B453`: present only when the sweep of a CANCELLED trigger raised — the audit names the failure
+                **({"sweep_failure": result["sweep_failure"]} if result.get("sweep_failure") else {}),
             },
             metadata_json={"details": details[:20]},  # cap details length
             result="HALTED",
