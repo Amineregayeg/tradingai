@@ -29925,3 +29925,10 @@ trustworthy only if the racy arms pass 10 of 10 on clean code and fail 10 of 10 
 under load. Review is measuring that now, and (2e)'s review repeats it. **The kill-switch release does not deploy until
 they are confirmed.**
 
+**CONFIRMED, 2026-09-14 (review, `_runs/racecheck/results.json`):** all seven of those kills hold. Each row's racy arms
+were run 10× on clean code and 10× on the mutant, in worktrees pinned at `56a1294` / `32a7610`: 10/10 PASS clean and
+10/10 FAIL mutated, every time. K06 and K12 at `56a1294`; K06, K12, M04, T03 and T06 at `32a7610`. **Bound:** the
+load was a concurrent harness (load average ~2), below execute's 16-loop contention. So this proves the mutants die
+deterministically at that load, not that the arms are race-free under heavy load; (2e) establishes that. The (2) and
+(2b) verdicts stand without the caveat, except R01/R02, which are re-verified inside (2c)'s review.
+
