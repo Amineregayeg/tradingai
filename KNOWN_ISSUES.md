@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-14 (newest entry B469 — B428b (i) made B437's E10/E10p/E11 pass for an unrelated reason; B468 — reviews never replayed execute's kill rows)
+Last updated: 2026-09-14 (newest entry B470 — B428b (i) left four production lines unpinned: the loop's Binance-first wiring, the book exclusion in abandonment, and the non-list positions read)
 
 ---
 
@@ -30526,4 +30526,34 @@ send is unchanged by (i). The test code is unchanged too; only its premise moved
 by the job's name, not by the lock holder. Registered rows: the E10 row and the E11s row must die again over the full
 population. The lock-holder proxy is used nowhere else; the `parked` waits in b442 and b437 come after the submit and are
 unaffected. (i) deploys only together with B437b.
+
+### B470 — B428b (i) LEFT FOUR PRODUCTION LINES UNPINNED: the loop's Binance-first wiring (two lines), this session's book in abandonment, and a non-list positions read
+
+**Found by review: 4 of its registered (i) rows SURVIVE the full population at `f3250ad` (summary count 0, no suspend).
+The manager confirmed that the production code at `8fa3ef1` is correct on each line, so these are lost guards, not live
+defects.**
+
+```
+iR7   crypto_loop.py:1742  ExecutionService(self.paper, ..., binance_mark=self._binance_mark)   dropped -> survives
+iR8   crypto_loop.py:2754  self._mark_at[pair] = now                                            dropped -> survives
+iM6b  crypto_loop.py:3307  live = {...open_decision...} | set(self._book)                       "| set(self._book)" dropped -> survives
+iQ6c  alpaca.py:1807       non-list get_all_positions -> raise BrokerError                      returns Decimal(0) -> survives
+```
+
+**What each mutant would do if it shipped:**
+- **iR7/iR8:** every live entry prices the $11 minimum and the drift check off Alpaca's quote, and refuses
+  `NO_REFERENCE_PRICE` whenever the quote read fails, while a fresh Binance mark sits unused. Every existing arm builds
+  its own `ExecutionService(binance_mark=…)`, and none drives the loop's.
+- **iM6b:** a Stop then Start in one process marks a pending session row ABANDONED while the book still holds it. The
+  G-6 retry's compare-and-set then fails.
+- **iQ6c:** an unknown read counts as flat, overstating the opened units by the whole existing position.
+
+**Fix (test-only, before (i) deploys, by B469's rule):** commit `(i)t` on top of `8fa3ef1` adds a NEW test file only:
+- the real loop's `_tick_symbol` reaches an entry whose `reference_source == "binance_mark"`, at the tick's mark and time,
+  with a stale-mark fallback pair
+- a record_pending book entry on a SUBMITTING row survives `reconcile_abandoned_decisions`, with the must-miss that a
+  SUBMITTING row NOT in the book is abandoned
+- `get_all_positions` returning None, and a dict, on the before-read → BrokerError and zero submits
+
+Registered: iR7, iR8, iM6b and iQ6c each die over the full population.
 
