@@ -1,6 +1,6 @@
 # Malek — current state
 
-_Last updated: 2026-09-14 14:50 WAT, by Malek's manager session. Updated about every 2 hours._
+_Last updated: 2026-09-14 18:35 WAT, by Malek's manager session. Updated about every 2 hours._
 
 ## Goal right now
 
@@ -48,9 +48,10 @@ defect found goes into `KNOWN_ISSUES.md` with a B-number. A commit is only "done
   - the minimum
   - quantities
   - migration 0017
-  Commit (i) is BUILT, and its mutation record run is in progress. Migration 0017 passed a scratch-copy run on a real
-  Postgres copy of production: rows unchanged, and a refused downgrade rolls back completely. Review's gaps are ruled in
-  `T-0144/PLAN.md` revision 5.
+  **Commit (i) is COMMITTED as `f3250ad`** (15:56 WAT). It passed its own mutation record (113 of 113) and the whole suite
+  (3,069 tests). The manager verified it, and review's independent check (304 mutation rows) is running. It is not
+  deployed. Migration 0017 already passed a run on a real Postgres copy of production (rows unchanged, and a refused
+  downgrade rolls back completely), and its file is unchanged in the commit.
   Probe round 6 confirmed that a cancelled resting order frees the position at once. New issues folded in: `B457`–`B461`.
 - **Commits (ii), (iii) and (iv) already have their mutation checks registered in advance** by review (in
   `agents/tasks/_runs/b428b_ii`, `_iii` and `_iv`), with review's design gaps ruled in `T-0144/PLAN.md` revisions 6 and 7.
@@ -65,7 +66,17 @@ defect found goes into `KNOWN_ISSUES.md` with a B-number. A commit is only "done
   - a reused order id is refused
   - 36- and 40-character ids work
   - fill-history pagination is complete, and its `after` filter is exclusive
-- **Next for review:** attacking Part E's brief (`T-0146`).
+- **Part E (item 7) is prepared too.** Review attacked its brief, and the rulings are `T-0146/PLAN.md` revisions 2–4:
+  - production's whole run history has no recorded venue, so it is "configuration unknown" and is refused as a whole
+    (one run can still be analysed on its own)
+  - runs are grouped by venue, execution class and engine version
+  - exits are labelled by how they were decided
+  Review has pre-registered its mutation checks.
+- **`B437b` is being built on top of `f3250ad`:** the `B462` and `B463` fixes, plus a guard that blocks the network in
+  tests (`B432`). It found 27 tests that reach the internet; 16 of them FAIL offline and passed only because Binance
+  answered. All are patched.
+- **Interruption:** the machine was suspended from about 15:52 to 18:31 WAT. Both mutation runs resumed afterwards, and
+  any row that straddled the gap is re-run before it counts.
 - **Process change (Malek: "too slow"):** test runs are now parallel, re-runs are limited to what a change can affect,
   and only review re-runs earlier checks.
 
@@ -111,5 +122,9 @@ defect found goes into `KNOWN_ISSUES.md` with a B-number. A commit is only "done
 
 - Welcome. The newest entries at the bottom of `KNOWN_ISSUES.md` are the best map of where the risks are.
 - New findings: list them under "For the register" in `amine/CURRENT.md` and this side will file them with an ID.
-- Newly filed today: `B462`, `B463` (B437 follow-ups) and `B464` (the broker manager defaults a blank connection
-  environment two different ways). `B430` and `B457` were amended with measurements.
+- Newly filed today:
+  - `B462`, `B463` (B437 follow-ups)
+  - `B464` (the broker manager defaults a blank connection environment two different ways)
+  - `B465` (feedback corrections aimed at knobs the live engine does not read)
+  - `B466` (dashboard polling queues behind orders)
+  `B430` and `B457` were amended with measurements.
