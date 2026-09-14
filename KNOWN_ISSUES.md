@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-14 (newest entry B467 — the mutation harnesses drop or truncate dead test ids containing a space, so death-set comparisons were blind to 23 parametrized tests)
+Last updated: 2026-09-14 (newest entry B469 — B428b (i) made B437's E10/E10p/E11 pass for an unrelated reason; B468 — reviews never replayed execute's kill rows)
 
 ---
 
@@ -30479,4 +30479,51 @@ by argument. That reasoning is wrong for must-miss rows. The conclusion holds on
 - An arm feeds the parser a planted summary with a space-containing id.
 - Rows with a mismatch in the current reviews (B428b (i), B437b) are re-run with the corrected parser before
   attribution. Review states in REVIEW.md how far the defect reaches.
+
+### B468 — REVIEWS HAVE REPLAYED ONLY REVIEW'S OWN KILL ROWS: EXECUTE'S KILL FILES WERE NEVER LOADED, AND SOME OF THEIR ROWS HAVE ROTTED UNRUN
+
+**Found by review during B428b (i)'s review, prompted by execute's reanchor precheck; the manager confirmed the scope.**
+
+```
+review's prior-row sets (b452rA, 2er, 2fr, 437r, b428b_ir)   built from REVIEW's row records only
+execute's kill files (b*s/kills/kills.py, b437f kills_e.py, ...)   never loaded by any review since 2er
+enumerated with a stub KillSet (nothing run): 366 rows; 268 on files (i) changed
+  at f3250ad: 241 anchor x1, 24 x0 (most rotted BEFORE (i): b429f2 A-2/A-3/Q-1/Q-3, b440s K1-K3,
+  t0130s QB/QN/QE/QT-1, b437s E-a), 3 x2; not loadable by the stub: t0130s loop group, b442s cftsim group,
+  b437f kills_e.py, b437b supp files, b433s2 kills_sn3
+```
+
+An execute row with no review equivalent ran only once, in execute's own record at its commit. No later commit replayed
+it, so a later change that made it survive would have gone unseen. Rows that no longer anchor did not run at all
+(`prior kill rows rot when code moves`).
+
+**Fix (ruled 2026-09-14):**
+- B428b (i)'s review replays execute's x1 rows on (i)'s changed files.
+- The unloadable groups are loaded, or each is listed with its reason.
+- Execute re-anchors its x0/x2 rows with the same meaning, and review checks each meaning before running it. K2-8b's
+  proposal was rejected on meaning, and review's K08 stands.
+- From now on, every review's prior-row set is the union of BOTH seats' row files, and it is enumerated by a loader that
+  refuses a file it cannot load.
+
+### B469 — B428b (i) MADE B437'S E10, E10p AND E11 PASS FOR A REASON UNRELATED TO THEIR PROPERTY: nothing now pins that a cancelled queued submit is withdrawn, or that the kill switch is read at the send
+
+**Found by review during B428b (i)'s review, and probed on a clean `f3250ad` tree
+(`_runs/b428b_ir/e10probe/probe.json`). The manager read the probe cells.**
+
+```
+test_b437_account_executor.py:589/624/672   await _until(_lock_holder_is_entry(adapter), "the submit is queued")
+e7d7c81: next job on the held worker after the lock = submit_order     <- the arms' premise
+f3250ad: next job = the BEFORE read (get_all_positions, T-0144 R5')     <- E10/E10p withdraw a READ; E11 arms before the submit is queued
+probe cells (3 tests):  clean pass | stub alone pass | E10 row pass | E10 row + stub: E10, E10p DIE
+                        E11s row pass | E11s row + stub: E11 DIES
+full population (1,329 tests): the E10 row and the E11s row both SURVIVE
+```
+
+**A lost guard, not a live defect.** The production code for queued-write withdrawal and for the switch re-check at the
+send is unchanged by (i). The test code is unchanged too; only its premise moved.
+
+**Fix (test-only, in B437b):** the three arms wait until a `submit_order` job is QUEUED on the account worker, identified
+by the job's name, not by the lock holder. Registered rows: the E10 row and the E11s row must die again over the full
+population. The lock-holder proxy is used nowhere else; the `parked` waits in b442 and b437 come after the submit and are
+unaffected. (i) deploys only together with B437b.
 
