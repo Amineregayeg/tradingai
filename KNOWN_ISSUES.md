@@ -29912,3 +29912,16 @@ now fail by name, in 34s and 4s.
 **Rule for any arm that holds a concurrent operation open:** the hold must release itself on a bound, and must be set
 from a point the arm is guaranteed to reach. Otherwise the shield that makes production safe makes the test hang.
 
+**REVIEW'S RE-CHECK, 2026-09-14:** nine recorded kills rested ONLY on the racy arms:
+- `56a1294` (b442rB): K06 (the in-progress guard removed), K12 (the disarm refusal removed)
+- `32a7610` (b445rB): K06, K12, M04 (the manager steps past a cancellation), T03 (the fresh audit removed), T06 (the
+  cancelled path's rows not logged)
+- R01/R02 (already flagged, on E1)
+
+In those same runs, three and twelve more rows had a racy death beside a solid one, so they stand. `4a74eab`'s b452r
+has none so far. Review's harness records a timeout as a death, so the hang-reads-as-survivor failure did not occur in
+its runs. **Until each is re-measured, the (2) and (2b) PASS verdicts hold with these kills UNCONFIRMED.** A kill is
+trustworthy only if the racy arms pass 10 of 10 on clean code and fail 10 of 10 on the mutant, pinned at each sha,
+under load. Review is measuring that now, and (2e)'s review repeats it. **The kill-switch release does not deploy until
+they are confirmed.**
+
