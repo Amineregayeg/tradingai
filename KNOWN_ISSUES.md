@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-14 (newest entry B460 — from execute's B428b design scans: an Alpaca partial close sends str(float) quantities in scientific notation (B457); quantity columns at 6dp lose up to 0.7% of BTC sizes (B458); the broker-capability guard misses getattr reads and aliases (B459); stop() leaves settle writes unawaited at shutdown (B460).)
+Last updated: 2026-09-14 (newest entry B461 — B449's spelling mismatch is also in the broker reconcilers: on Alpaca a venue-spelled position would not match its database trade and could be marked CLOSED; latent because reconcile_all skips simulations.)
 
 ---
 
@@ -30211,3 +30211,21 @@ The trade row and the decision's resolution would then be missing for a position
 when it took one", arriving by another path. **Fix (with `B428b`'s shutdown work, R12'/M7):** `stop()` awaits the
 persistence tasks it caused, with a bound, and logs any it could not finish. The release override's grace period (M7)
 covers the wait. An arm makes a settle write slow and asserts `stop()` does not return before it lands, or reports it.
+
+---
+
+### B461 — `B449`'s SPELLING MISMATCH IS ALSO IN THE BROKER RECONCILERS: they compare a venue position's spelling with the database pair, so on Alpaca a miss would mark an OPEN trade CLOSED or raise a false CRITICAL
+
+**Found by execute's B428b design scan (`agents/tasks/T-0144/DESIGN.md` §11, F-h); the manager confirmed the `reconciler.py`
+comparisons by reading `735ac66`. LATENT: `reconcile_all` skips simulations, and the Alpaca paper adapter reports
+`is_simulation` True.**
+
+```
+broker/reconciler.py       pos.pair not in {t.pair for t in open_db_trades}    ...  trade.pair in live_pairs
+broker/reconciliation.py   the same shape at :180 and :210
+Alpaca position pair       "BTCUSD"      database pair   "BTC/USD"          (B449, measured)
+```
+
+`B225` covers the reconciler's blindness to paper ids, not this. **Fix (in `B428b` commit (i)):** these sites join the
+canonical-pair population (R4/R15). Each gets a plant, so a venue-spelled position matches its database trade. The
+day a non-simulation venue is reconciled, a spelling difference must never read as "closed".
