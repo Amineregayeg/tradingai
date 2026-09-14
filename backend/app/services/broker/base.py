@@ -1,11 +1,12 @@
 """Abstract broker adapter base class."""
+import asyncio
 import math
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Callable
 
-from app.core.exceptions import DirectionNotSupported
+from app.core.exceptions import BrokerError, DirectionNotSupported
 from app.db.enums import DirectionType, OrderType
 from app.schemas.broker import Position
 
@@ -185,6 +186,32 @@ class BrokerAdapter(ABC):
     #: the ruled property and a caller reading the record should not have to know which venue it
     #: is talking to.
     last_close_all_report: dict[str, dict] | None = None
+
+    def _abnormal_exit(self, exc: BaseException, report: dict[str, dict], venue: str,
+                       broker: str | None = None) -> BaseException:
+        """**What a close-all that ENDED ABNORMALLY raises, for every adapter** (`B446`; one rule, `B184`).
+
+        The report — one row per enumerated position, published before the loop — is attached as
+        `partial_report` whichever way the loop ended. A **cancellation is returned AS ITSELF**: this used to
+        be converted into a `BrokerError`, which `broker_manager` caught as an ordinary failure, so a
+        cancelled kill switch carried on to the next adapter and returned normally, and nothing awaiting it
+        ever saw the cancellation. Anything else becomes the `BrokerError` it always was.
+
+        The caller raises what this returns: `raise` when it is `exc` itself, `raise failure from exc`
+        otherwise.
+        """
+        rows = list(report.values())
+        if isinstance(exc, asyncio.CancelledError):
+            exc.partial_report = rows  # type: ignore[attr-defined]
+            return exc
+        failure = BrokerError(
+            f"{venue} close_all_positions ended abnormally after "
+            f"{sum(1 for r in rows if r.get('disposition') != self.NOT_ATTEMPTED)} of "
+            f"{len(rows)} position(s): {type(exc).__name__}: {exc}",
+            broker=broker if broker is not None else self.broker_name,
+        )
+        failure.partial_report = rows  # type: ignore[attr-defined]
+        return failure
 
     # Instruments this broker should stream by default. Empty ⇒ use the caller's
     # requested list. Lets a crypto broker (CFT) stream crypto while a forex

@@ -687,7 +687,6 @@ def test_K3_a_CANCELLATION_while_a_close_resolves_still_reaches_the_ABNORMAL_EXI
     """**X-16.** The inner per-position handler catches `Exception`, NOT `BaseException`: a cancellation during
     `_close_outcome` must end the kill switch's loop with its partial report, the in-flight row saying SENT."""
     import app.services.broker.alpaca as alpaca
-    from app.core.exceptions import BrokerError
     from tests.unit.test_t0136_alpaca_adapter import _Position, _adapter as t0136_adapter
 
     monkeypatch.setattr(alpaca, "ORDER_RESOLUTION_BUDGET_S", 1.0)
@@ -699,7 +698,9 @@ def test_K3_a_CANCELLATION_while_a_close_resolves_still_reaches_the_ABNORMAL_EXI
         task = asyncio.create_task(adapter.close_all_positions())
         await asyncio.sleep(0.4)
         task.cancel()
-        with pytest.raises(BrokerError) as exc:
+        # `B446` (manager's ruling): the cancellation now leaves close_all_positions AS ITSELF, carrying the report —
+        # it used to be converted into a BrokerError, which broker_manager stepped past.
+        with pytest.raises(asyncio.CancelledError) as exc:
             await task
         return exc.value
 

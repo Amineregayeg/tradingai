@@ -561,7 +561,10 @@ def test_the_report_survives_an_ABNORMAL_EXIT_and_names_the_in_flight_row():
         positions=[_Position(symbol=s) for s in ("BTC/USD", "ETH/USD", "LTC/USD")],
         close_error={"ETH/USD": asyncio.CancelledError()},
     )
-    with pytest.raises(BrokerError) as exc:
+    # `B446` (manager's ruling): a CANCELLATION leaves close_all_positions AS ITSELF, carrying the report. It was
+    # converted into a BrokerError, which the manager stepped past; the non-cancellation path is armed in
+    # test_b445_b446_kill_switch_report.py.
+    with pytest.raises(asyncio.CancelledError) as exc:
         asyncio.run(adapter.close_all_positions())
     rows = {r["pair"]: r for r in exc.value.partial_report}
     assert rows["ETH/USD"]["disposition"] == "FAILED"

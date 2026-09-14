@@ -114,7 +114,10 @@ def test_an_ABNORMAL_EXIT_still_reports_every_position_and_names_the_in_flight_o
         [_position(f"p{i}") for i in range(1, 5)],
         close_errors={"p2": asyncio.CancelledError()},
     )
-    with pytest.raises(BrokerError) as exc:
+    # `B446` (manager's ruling): a CANCELLATION leaves close_all_positions AS ITSELF, carrying the report. It was
+    # converted into a BrokerError, which the manager stepped past; the non-cancellation path is armed in
+    # test_b445_b446_kill_switch_report.py.
+    with pytest.raises(asyncio.CancelledError) as exc:
         asyncio.run(adapter.close_all_positions())
 
     rows = {r["position_id"]: r for r in exc.value.partial_report}

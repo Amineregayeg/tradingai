@@ -1,6 +1,7 @@
 """Kill switch — emergency position closure for prop firm compliance."""
 from __future__ import annotations
 
+import asyncio
 import time
 from datetime import datetime, timezone
 
@@ -87,20 +88,131 @@ class KillSwitch:
         that only triggered would sweep while sends were still open. Idempotent: an armed switch keeps the
         reason it was armed with.
 
-        Returns: {positions_closed, positions_failed_to_close, positions_not_attempted, details, message}
+        **A CANCELLED TRIGGER FINISHES THE SWEEP, AND THEN SAYS IT WAS CANCELLED** (`B446`, manager's ruling). A panic
+        stop left half done is the worst state, so the sweep runs as its own task, awaited through
+        `asyncio.shield`. It used to be the other way round and silent about it: the adapter turned the
+        cancellation into a `BrokerError`, `broker_manager` stepped past it, and this returned normally, so nothing
+        awaiting it ever learned it had been cancelled. Now, once the sweep is done, every row is logged, the audit
+        row is written in a FRESH session (the caller's will not commit on a cancellation), and `CancelledError`
+        is re-raised. **It never returns normally after a cancellation.**
+
+        **STATED COST (manager's ruling 5):** a shutdown waits for the sweep, bounded per adapter by the sweep's own
+        bounds — including `B443`'s 100s response deadline for Alpaca's second sweep — and a repeated cancel cannot
+        cut it short.
+
+        **THE IN-PROGRESS MARK LIVES AS LONG AS THE SWEEP** (ruling 3), and is cleared in the sweep task's own
+        `finally`: a cancelled caller must not let a second trigger start closing while the first still is.
+
+        Returns: {positions_closed, positions_failed_to_close, positions_not_attempted, details, message}, or,
+        while another trigger is running, the already-in-progress answer (no counters).
         """
         state = self._state
         if state.trigger_started is not None:
             return self._already_in_progress(user_id, reason)
         state.trigger_started = time.monotonic()
         state.trigger_started_at = datetime.now(timezone.utc).isoformat()
+        outcome: dict = {}
         try:
             if not state.armed:
                 self.arm(reason=reason or "Manual kill switch trigger")
-            return await self._run_trigger(db, user_id, reason)
-        finally:
+            sweep = asyncio.ensure_future(self._sweep(db, user_id, reason, outcome))
+        except BaseException:
             state.trigger_started = None
             state.trigger_started_at = None
+            raise
+
+        caller_cancelled = False
+        while not sweep.done():
+            try:
+                await asyncio.shield(sweep)
+            except asyncio.CancelledError:
+                if sweep.cancelled():
+                    break                      # the SWEEP ITSELF was cancelled (a loop shutdown cancels every task)
+                if not caller_cancelled:
+                    caller_cancelled = True
+                    logger.error(
+                        "Kill switch trigger CANCELLED while closing positions: FINISHING the sweep, then "
+                        "re-raising the cancellation",
+                        user_id=user_id, reason=reason,
+                    )
+
+        if sweep.cancelled():
+            self._log_rows("the kill switch's SWEEP was itself CANCELLED; rows reported before it stopped",
+                           outcome.get("partial_report"))
+            raise asyncio.CancelledError("the kill switch's sweep was cancelled")
+        if not caller_cancelled:
+            return sweep.result()
+        try:
+            result = sweep.result()
+        except Exception as exc:  # noqa: BLE001 - the caller was cancelled; that is what it must see
+            logger.error("Kill switch: the CANCELLED trigger's sweep raised", error=f"{type(exc).__name__}: {exc}")
+            raise asyncio.CancelledError("the kill switch trigger was cancelled") from exc
+        self._log_rows("the kill switch trigger was CANCELLED; the sweep FINISHED with this row",
+                       result.get("details"))
+        await self._audit_in_fresh_session(user_id, result)
+        raise asyncio.CancelledError("the kill switch trigger was cancelled after its sweep finished")
+
+    async def _sweep(self, db: AsyncSession, user_id: str, reason: str | None, outcome: dict) -> dict:
+        """The trigger's body as its own task. Clears the in-progress mark when the SWEEP ends, however it ends."""
+        try:
+            return await self._run_trigger(db, user_id, reason)
+        except asyncio.CancelledError as exc:
+            outcome["partial_report"] = getattr(exc, "partial_report", None)
+            raise
+        finally:
+            self._state.trigger_started = None
+            self._state.trigger_started_at = None
+
+    @staticmethod
+    def _log_rows(what: str, rows) -> None:
+        """One ERROR line per row, with the row's facts as FIELDS (loguru formats the message; a venue reason carries
+        braces). Absent rows are said, not skipped."""
+        if not isinstance(rows, list):
+            logger.error("Kill switch: NO rows were reported; the state of every open position is UNKNOWN", context=what)
+            return
+        for row in rows:
+            logger.error(
+                "Kill switch row", context=what, pair=row.get("pair"), position_id=row.get("position_id"),
+                disposition=row.get("disposition"), status=row.get("status"), reason=row.get("reason"),
+                error=row.get("error"), broker=row.get("broker"), connection_id=row.get("connection_id"),
+            )
+
+    async def _audit_in_fresh_session(self, user_id: str, result: dict) -> None:
+        """The audit row for a CANCELLED trigger (manager's ruling 2). The caller's session rolls back on
+        `CancelledError` (`get_session` commits only after a normal exit), so the row written during the sweep is
+        lost; this writes it again in its own session and commits. A failure is logged and never stops the
+        cancellation being re-raised."""
+        try:
+            from app.db import session as dbsession
+
+            async with dbsession.async_session_maker() as fresh:
+                fresh.add(self._audit_entry(user_id, result))
+                await fresh.commit()
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Kill switch: the CANCELLED trigger's audit row could NOT be written",
+                         error=f"{type(exc).__name__}: {exc}")
+
+    @staticmethod
+    def _audit_entry(user_id: str, result: dict):
+        from app.db.enums import ActorType
+        from app.models.audit_log import AuditLog
+
+        details = result.get("details") or []
+        return AuditLog(
+            user_id=user_id,
+            event_type="KILL_SWITCH_TRIGGERED",
+            entity_type="system",
+            entity_id=None,
+            actor=ActorType.SYSTEM,
+            old_value=None,
+            new_value={
+                "reason": result.get("reason"),
+                "positions_closed": result.get("positions_closed"),
+                "positions_failed": result.get("positions_failed_to_close"),
+            },
+            metadata_json={"details": details[:20]},  # cap details length
+            result="HALTED",
+        )
 
     def _already_in_progress(self, user_id: str, reason: str | None) -> dict:
         from app.services.broker.manager import broker_manager
@@ -113,10 +225,9 @@ class KillSwitch:
             user_id=user_id, reason=reason, in_progress_for_s=round(elapsed, 1),
             started_at=self._state.trigger_started_at, rows_so_far=len(rows),
         )
+        # NO COUNTERS (manager's ruling on (e)). A `positions_closed: 0` here became the route's trigger response —
+        # `B366`'s "0 closed" at the moment an operator is most likely to misread it. The route answers 409.
         return {
-            "positions_closed": 0,
-            "positions_failed_to_close": 0,
-            "positions_not_attempted": 0,
             "already_in_progress": True,
             "in_progress_for_s": round(elapsed, 1),
             "details": rows,
@@ -224,6 +335,7 @@ class KillSwitch:
             "positions_closed": positions_closed,
             "positions_failed_to_close": positions_failed,
             "positions_not_attempted": positions_not_attempted,
+            "reason": effective_reason,
             "details": close_results,
             "message": (
                 f"Kill switch triggered: {positions_closed} position(s) closed, "
@@ -233,25 +345,7 @@ class KillSwitch:
 
         # Persist audit log entry
         try:
-            from app.db.enums import ActorType
-            from app.models.audit_log import AuditLog
-
-            audit_entry = AuditLog(
-                user_id=user_id,
-                event_type="KILL_SWITCH_TRIGGERED",
-                entity_type="system",
-                entity_id=None,
-                actor=ActorType.SYSTEM,
-                old_value=None,
-                new_value={
-                    "reason": effective_reason,
-                    "positions_closed": positions_closed,
-                    "positions_failed": positions_failed,
-                },
-                metadata_json={"details": close_results[:20]},  # cap details length
-                result="HALTED",
-            )
-            db.add(audit_entry)
+            db.add(self._audit_entry(user_id, result))
             await db.flush()
         except Exception as exc:
             logger.error("Kill switch: failed to write audit log", error=str(exc))

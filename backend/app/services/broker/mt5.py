@@ -1202,13 +1202,10 @@ class MetaTrader5Adapter(BrokerAdapter):
                         f"({exc}). The position may or may not be closed and MUST be checked at "
                         f"the venue."
                     )
-            failure = BrokerError(
-                f"MT5 close_all_positions ended abnormally after "
-                f"{sum(1 for r in report.values() if r['disposition'] != self.NOT_ATTEMPTED)} of "
-                f"{len(report)} position(s): {type(exc).__name__}: {exc}",
-                broker="mt5",
-            )
-            failure.partial_report = list(report.values())  # type: ignore[attr-defined]
+            # `B446`: a CANCELLATION is re-raised as itself, carrying the report; anything else is the BrokerError it was.
+            failure = self._abnormal_exit(exc, report, "MT5", "mt5")
+            if failure is exc:
+                raise
             raise failure from exc
         for row in report.values():
             row.pop("_in_flight", None)      # internal bookkeeping never reaches a caller

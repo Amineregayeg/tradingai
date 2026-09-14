@@ -216,6 +216,35 @@ async def trigger_kill_switch(
         reason=payload.reason,
     )
 
+    if result_data.get("already_in_progress"):
+        # `B443` item 6, as corrected by the manager: a second trigger closed NOTHING, and a trigger response would
+        # say `positions_closed: 0` — `B366`'s "0 closed" at the moment an operator is most likely to misread it.
+        # 409, with what the running trigger has reported so far and no counters.
+        #
+        # RETURNED, not raised: the app's HTTPException handler renders `str(detail)`, so a dict of rows would reach
+        # the operator as a Python repr. The body is the same problem+json the handler builds, with the rows as JSON
+        # and every string in them passed through the response redactor (`B404`) — a row's reason carries venue text.
+        from fastapi.encoders import jsonable_encoder
+        from fastapi.responses import JSONResponse
+
+        from app.core.exceptions import problem_response
+        from app.core.logging import redact_for_response
+
+        rows = [
+            {k: (redact_for_response(v) if isinstance(v, str) else v) for k, v in row.items()}
+            for row in result_data.get("details", [])
+        ]
+        return JSONResponse(  # type: ignore[return-value]
+            status_code=409,
+            media_type="application/problem+json",
+            content=jsonable_encoder(problem_response(
+                title="Kill switch already in progress",
+                status=409,
+                detail=result_data.get("message"),
+                extensions={"in_progress_for_s": result_data.get("in_progress_for_s"), "rows_so_far": rows},
+            )),
+        )
+
     positions_closed = result_data.get("positions_closed", 0)
 
     return KillSwitchTriggerResponse(

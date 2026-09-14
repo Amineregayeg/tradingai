@@ -2228,13 +2228,10 @@ class AlpacaAdapter(BrokerAdapter):
                         f"and the outcome was NEVER OBSERVED — the loop did not survive to record it "
                         f"({exc}). It MUST be checked at the venue."
                     )
-            failure = BrokerError(
-                f"Alpaca close_all_positions ended abnormally after "
-                f"{sum(1 for r in report.values() if r['disposition'] != self.NOT_ATTEMPTED)} of "
-                f"{len(report)} position(s): {type(exc).__name__}: {exc}",
-                broker=self.broker_name,
-            )
-            failure.partial_report = list(report.values())  # type: ignore[attr-defined]
+            # `B446`: a CANCELLATION is re-raised as itself, carrying the report; anything else is the BrokerError it was.
+            failure = self._abnormal_exit(exc, report, "Alpaca", self.broker_name)
+            if failure is exc:
+                raise
             raise failure from exc
 
         for row in report.values():

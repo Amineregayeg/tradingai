@@ -810,13 +810,10 @@ class CryptoFundTraderAdapter(BrokerAdapter):
                         f"({exc}). The position may or may not be closed and MUST be checked at "
                         f"the venue."
                     )
-            failure = BrokerError(
-                f"CFT close_all_positions ended abnormally after "
-                f"{sum(1 for r in report.values() if r['disposition'] != self.NOT_ATTEMPTED)} of "
-                f"{len(report)} position(s): {type(exc).__name__}: {exc}",
-                broker=self.broker_name,
-            )
-            failure.partial_report = list(report.values())  # type: ignore[attr-defined]
+            # `B446`: a CANCELLATION is re-raised as itself, carrying the report; anything else is the BrokerError it was.
+            failure = self._abnormal_exit(exc, report, "CFT", self.broker_name)
+            if failure is exc:
+                raise
             raise failure from exc
 
         for row in report.values():

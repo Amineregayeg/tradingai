@@ -906,7 +906,10 @@ async def test_K2_6_a_SECOND_trigger_while_one_runs_CLOSES_NOTHING(monkeypatch, 
     assert sorted(c[1] for c in book.called("close_position")) == ["BTC/USD", "ETH/USD"], (
         f"a position was closed TWICE: {book.called('close_position')}")
     assert second["already_in_progress"] is True and "ALREADY IN PROGRESS" in second["message"], second
-    assert second["positions_closed"] == 0 and second["details"], second
+    # Manager's ruling on (e), landed with `B446`: the in-progress answer carries NO counters — a `positions_closed: 0`
+    # became the route's "0 closed" at the moment an operator is most likely to misread it.
+    assert second["details"] and not {"positions_closed", "positions_failed_to_close",
+                                      "positions_not_attempted"} & set(second), second
     assert second["in_progress_for_s"] >= 0
     assert first["positions_closed"] == 2 and not first.get("already_in_progress"), first
 
@@ -951,12 +954,15 @@ async def test_K2_10_a_trigger_that_RAISES_or_is_CANCELLED_never_leaves_the_swit
     monkeypatch.setattr(broker_manager, "_adapters", {"alpaca": adapter})
     real_run = KillSwitch._run_trigger
     stuck = asyncio.Event()
+    release = asyncio.Event()
 
     async def _broken(self, db, user_id, reason=None):
         if how == "raises":
             raise RuntimeError("audit store down")
         stuck.set()
-        await asyncio.Event().wait()
+        await release.wait()
+        return {"positions_closed": 0, "positions_failed_to_close": 0, "positions_not_attempted": 0,
+                "reason": reason, "details": [], "message": "stub sweep"}
 
     monkeypatch.setattr(KillSwitch, "_run_trigger", _broken)
     async with asyncio.timeout(10):
@@ -964,9 +970,16 @@ async def test_K2_10_a_trigger_that_RAISES_or_is_CANCELLED_never_leaves_the_swit
             with pytest.raises(RuntimeError):
                 await KillSwitch().trigger(_Db(), "user-1", reason="breaks")
         else:
+            # `B446` (manager's ruling): a cancelled trigger FINISHES its sweep, and the mark lives as long as the
+            # sweep — then the cancellation is re-raised and the mark is gone.
             task = asyncio.create_task(KillSwitch().trigger(_Db(), "user-1", reason="cancelled"))
             await stuck.wait()
             task.cancel()
+            for _ in range(20):
+                await asyncio.sleep(0)
+            assert not task.done(), "the cancelled trigger stopped waiting for its sweep"
+            assert KILL_SWITCH_STATE.trigger_started is not None, "the mark was cleared while the sweep still ran"
+            release.set()
             with pytest.raises(asyncio.CancelledError):
                 await task
         assert KILL_SWITCH_STATE.trigger_started is None, "the in-progress mark survived the failed trigger"

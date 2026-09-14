@@ -795,7 +795,10 @@ def test_an_ABNORMAL_EXIT_still_reports_every_position_and_names_the_untouched_o
         positions=[_position(f"p{i}") for i in range(1, 5)],
         close_errors={"p2": asyncio.CancelledError()},
     )
-    with pytest.raises(BrokerError) as exc:
+    # `B446` (manager's ruling): a CANCELLATION leaves close_all_positions AS ITSELF, carrying the report. It was
+    # converted into a BrokerError, which the manager stepped past; the non-cancellation path is armed in
+    # test_b445_b446_kill_switch_report.py.
+    with pytest.raises(asyncio.CancelledError) as exc:
         asyncio.run(adapter.close_all_positions())
 
     report = {r["position_id"]: r for r in exc.value.partial_report}
@@ -819,7 +822,10 @@ def test_a_NOT_ATTEMPTED_row_is_never_counted_as_CLOSED_by_the_kill_switch():
         positions=[_position(f"p{i}") for i in range(1, 5)],
         close_errors={"p2": asyncio.CancelledError()},
     )
-    with pytest.raises(BrokerError) as exc:
+    # `B446` (manager's ruling): a CANCELLATION leaves close_all_positions AS ITSELF, carrying the report. It was
+    # converted into a BrokerError, which the manager stepped past; the non-cancellation path is armed in
+    # test_b445_b446_kill_switch_report.py.
+    with pytest.raises(asyncio.CancelledError) as exc:
         asyncio.run(adapter.close_all_positions())
 
     for row in exc.value.partial_report:
@@ -1216,7 +1222,10 @@ def test_the_position_whose_close_WAS_SENT_is_not_reported_as_NOT_ATTEMPTED():
         positions=[_position(f"p{i}") for i in range(1, 5)],
         close_errors={"p2": asyncio.CancelledError()},
     )
-    with pytest.raises(BrokerError) as exc:
+    # `B446` (manager's ruling): a CANCELLATION leaves close_all_positions AS ITSELF, carrying the report. It was
+    # converted into a BrokerError, which the manager stepped past; the non-cancellation path is armed in
+    # test_b445_b446_kill_switch_report.py.
+    with pytest.raises(asyncio.CancelledError) as exc:
         asyncio.run(adapter.close_all_positions())
 
     rows = {r["position_id"]: r for r in exc.value.partial_report}

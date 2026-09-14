@@ -256,6 +256,13 @@ def _looks_like_uuid(key: str) -> bool:
         return False
 
 
+def _tagged(rows: list[dict], adapter: BrokerAdapter, connection_id: str) -> list[dict]:
+    """COPIES of an adapter's close-all rows, each naming the broker and connection that produced it (`B445`, every
+    path). A row that already names its broker keeps that name."""
+    return [{**row, "broker": row.get("broker") or adapter.broker_name, "connection_id": connection_id}
+            for row in rows]
+
+
 class BrokerManager:
     """Singleton manager that holds live broker adapter instances."""
 
@@ -819,22 +826,44 @@ class BrokerManager:
                 self._close_all_current = adapter
                 try:
                     adapter_results = await adapter.close_all_positions()
-                    results.extend(adapter_results)
+                    results.extend(_tagged(adapter_results, adapter, connection_id))
+                except asyncio.CancelledError as exc:
+                    # `B446`: a cancellation is NOT an adapter failure to note and step past. It propagates, carrying
+                    # EVERY row reported so far across adapters, so the kill switch can still say what was done.
+                    partial = getattr(exc, "partial_report", None)
+                    if isinstance(partial, list):
+                        results.extend(_tagged(partial, adapter, connection_id))
+                    exc.partial_report = list(results)  # type: ignore[attr-defined]
+                    raise
                 except Exception as exc:
+                    # `B445`. **THE ADAPTER'S REPORT IS ON THE EXCEPTION, AND THIS USED TO DROP IT.** `B366` taught
+                    # the kill switch to read `partial_report`, but only from an exception THIS method raises — and it
+                    # never raises. So an abnormal exit reached the operator as one "error" row: measured, a
+                    # confirmed CLOSED position and a close SENT-and-never-observed became "0 closed, 1 failed".
+                    #
+                    # `None` and `[]` are different answers. No report means the adapter could not enumerate, so the
+                    # state of every position is unknown: the error row stays. A report — even an empty one — has a
+                    # row for every position it enumerated (each adapter publishes them before its loop; an arm holds
+                    # every adapter to that), so it needs no error row on top.
+                    partial = getattr(exc, "partial_report", None)
                     logger.error(
                         "Kill switch: error closing positions",
                         connection_id=connection_id,
                         broker=adapter.broker_name,
                         error=str(exc),
+                        partial_rows=len(partial) if isinstance(partial, list) else None,
                     )
-                    results.append(
-                        {
-                            "broker": adapter.broker_name,
-                            "connection_id": connection_id,
-                            "status": "error",
-                            "error": str(exc),
-                        }
-                    )
+                    if isinstance(partial, list):
+                        results.extend(_tagged(partial, adapter, connection_id))
+                    else:
+                        results.append(
+                            {
+                                "broker": adapter.broker_name,
+                                "connection_id": connection_id,
+                                "status": "error",
+                                "error": str(exc),
+                            }
+                        )
         finally:
             self._close_all_current = None
         return results
