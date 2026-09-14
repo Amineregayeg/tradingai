@@ -6,7 +6,7 @@ what it could break.
 
 Ordered by what would hurt most, not by how hard it is to fix.
 
-Last updated: 2026-09-14 (newest entry B463; B430 amended — flipping BROKER_MODE as the repo stands would take the API down at boot, since production has no Alpaca env credentials, and two credential sources would defeat the account-keyed locks)
+Last updated: 2026-09-14 (newest entry B464 — the broker manager defaults a NULL connection environment to practice at load but to live at reconnect, masked only by ALLOW_LIVE_TRADING)
 
 ---
 
@@ -30383,4 +30383,26 @@ queued, so a write misclassified as a read could be withdrawn, or abandoned whil
 **Fix:** an arm that derives the SDK's writing members from `TradingClient`'s sources, and asserts that every
 `_call` name used in the adapter is classified by that derivation, not by the list. Or `_call` refuses a name that is
 in neither class. Goes with `B462`'s commit.
+
+### B464 — THE BROKER MANAGER DEFAULTS A NULL CONNECTION ENVIRONMENT TWO WAYS: `practice` when it loads or connects, `live` when it reconnects
+
+**Found by review during the T-0145 kill set (T-2); the manager confirmed it at `9bfddb2` and counted production's connections.**
+
+```
+manager.py:304  load_from_db             environment=conn.environment or "practice"
+manager.py:545  connect path             environment=conn.environment or "practice"
+manager.py:699  reconcile_connections    environment=conn.environment or "live"
+manager.py:100  paper = not environment.startswith("live") or observe_only
+models/broker_connection.py:23   environment  String, nullable=True
+production:  alpaca|practice|connected, cryptofundtrader|live|connected    (no NULL today)
+```
+
+The same connection declares a different environment depending on which path built its adapter. For Alpaca the
+difference is currently masked, because `ALLOW_LIVE_TRADING` false forces `observe_only`, which keeps `paper` True.
+That is one flag away from a reconnect building a LIVE-endpoint client for a connection that loaded as practice.
+LATENT: no connection has a NULL environment.
+
+**Fix:** one derivation. A NULL or unknown environment is refused at every path (never defaulted), with an arm driving
+all three paths against a NULL environment. T-0145 (B430) already refuses to select such a connection (revision 3,
+T-2).
 
